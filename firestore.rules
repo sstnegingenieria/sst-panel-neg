@@ -1,0 +1,132 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // HELPERS
+    //
+    // Lee el rol desde Firestore (sin custom claims).
+    // Compatible con campo 'rol' (panel web) y 'role' (app Flutter heredada).
+    // Usa map.get(campo, default) para no fallar si el campo no existe.
+    // ──────────────────────────────────────────────────────────────────────────
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAuthed() {
+      return request.auth != null;
+    }
+
+    function isSST() {
+      return isAuthed() && (
+        userData().get('rol',  '') in ['sst', 'admin'] ||
+        userData().get('role', '') in ['sst', 'admin']
+      );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // COLECCIÓN: users
+    //
+    // - Técnico:   lee y edita su propio documento (sin poder cambiar rol/estado)
+    // - SST/Admin: lectura y escritura completa (aprobar, desactivar, asignar)
+    // ──────────────────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Lectura: propio documento O SST/admin
+      allow read: if isAuthed() && (request.auth.uid == userId || isSST());
+
+      // Técnico actualiza su perfil, pero NO puede tocar campos críticos
+      allow update: if isAuthed()
+                    && request.auth.uid == userId
+                    && !request.resource.data.diff(resource.data)
+                        .affectedKeys()
+                        .hasAny(['rol', 'role', 'estado', 'aprobado', 'obras_asignadas']);
+
+      // Técnico puede crear su propio documento al registrarse (NO puede auto-asignarse rol SST/admin)
+      allow create: if isAuthed()
+                    && request.auth.uid == userId
+                    && !(request.resource.data.get('rol',  '') in ['sst', 'admin'])
+                    && !(request.resource.data.get('role', '') in ['sst', 'admin']);
+
+      // SST/Admin gestiona todos los usuarios (crear, editar, eliminar)
+      allow create, update, delete: if isSST();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // COLECCIÓN: obras
+    //
+    // - Lectura:   cualquier usuario autenticado (técnicos necesitan ver las obras)
+    // - Escritura: solo SST/Admin
+    // ──────────────────────────────────────────────────────────────────────────
+    match /obras/{obraId} {
+      allow read:                    if isAuthed();
+      allow create, update, delete:  if isSST();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // COLECCIÓN: contratistas
+    //
+    // - Lectura:   pública (necesario para el formulario de registro antes de auth)
+    // - Escritura: solo SST/Admin
+    // ──────────────────────────────────────────────────────────────────────────
+    match /contratistas/{contratistaId} {
+      allow read:                    if true;
+      allow create, update, delete:  if isSST();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // COLECCIÓN: registros — INMUTABLE (auditoría a prueba de manipulación)
+    //
+    // - Cualquier técnico autenticado puede CREAR un registro.
+    // - SST/Admin lee TODOS los registros.
+    // - Técnico lee SOLO sus propios registros.
+    // - NUNCA se permite editar ni borrar: la evidencia es permanente.
+    // ──────────────────────────────────────────────────────────────────────────
+    match /registros/{registroId} {
+      allow read: if isAuthed() && (
+        isSST() ||
+        resource.data.get('tecnicoId', '') == request.auth.uid
+      );
+
+      allow create: if isAuthed();
+
+      // 🔒 INMUTABLE: prohibido editar o borrar registros de auditoría
+      allow update, delete: if false;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // COLECCIÓN: formularios (ATS, Preoperacional, Charla de 5 min)
+    //
+    // - Técnico crea y actualiza sus propios formularios (firma, borradores)
+    // - SST/Admin lee y actualiza todos los formularios
+    // - NADIE puede eliminar formularios (auditoría permanente)
+    // ──────────────────────────────────────────────────────────────────────────
+    match /formularios/{formularioId} {
+      // Lectura: propio formulario O SST/Admin
+      allow read: if isAuthed() && (
+        isSST() ||
+        resource.data.get('user_id', '') == request.auth.uid
+      );
+
+      // Técnico crea formularios con su propio user_id
+      allow create: if isAuthed() &&
+        request.resource.data.get('user_id', '') == request.auth.uid;
+
+      // Técnico actualiza sus propios formularios (firma, selfie, colaboradores)
+      // SST/Admin puede actualizar cualquiera
+      allow update: if isAuthed() && (
+        isSST() ||
+        resource.data.get('user_id', '') == request.auth.uid
+      );
+
+      // 🔒 INMUTABLE: prohibido eliminar formularios de auditoría
+      allow delete: if false;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // CATCH-ALL: denegar todo lo no especificado explícitamente
+    // ──────────────────────────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
