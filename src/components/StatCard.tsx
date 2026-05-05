@@ -3,19 +3,21 @@ interface StatCardProps {
   value: number | string
   loading?: boolean
   icon: React.ReactNode
-  color: 'blue' | 'green' | 'orange'
+  color: 'blue' | 'green' | 'orange' | 'purple'
 }
 
 const colorMap = {
-  blue: 'bg-blue-50 text-blue-700 border-blue-100',
-  green: 'bg-green-50 text-green-700 border-green-100',
+  blue:   'bg-blue-50 text-blue-700 border-blue-100',
+  green:  'bg-green-50 text-green-700 border-green-100',
   orange: 'bg-orange-50 text-orange-700 border-orange-100',
+  purple: 'bg-purple-50 text-purple-700 border-purple-100',
 }
 
 const iconBg = {
-  blue: 'bg-blue-100 text-blue-600',
-  green: 'bg-green-100 text-green-600',
+  blue:   'bg-blue-100 text-blue-600',
+  green:  'bg-green-100 text-green-600',
   orange: 'bg-orange-100 text-orange-600',
+  purple: 'bg-purple-100 text-purple-600',
 }
 
 export default function StatCard({ title, value, loading, icon, color }: StatCardProps) {
