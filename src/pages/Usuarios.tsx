@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { collection, getDocs, query, where, deleteDoc, doc, updateDoc, Timestamp } from 'firebase/firestore'
+import { collection, getDocs, deleteDoc, doc, updateDoc, Timestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { Tecnico } from '../components/UsuariosPendientes'
 import UsuariosPendientes from '../components/UsuariosPendientes'
 import UsuariosActivos from '../components/UsuariosActivos'
+import UsuariosPanel from '../components/UsuariosPanel'
 import AsignarObrasModal from '../components/AsignarObrasModal'
 import TecnicoPerfilModal from '../components/TecnicoPerfilModal'
 import { Obra } from '../components/ObrasTable'
@@ -14,6 +15,7 @@ import { toast } from '../components/shared/Toast'
 export default function Usuarios() {
   const [pendientes, setPendientes] = useState<Tecnico[]>([])
   const [activos, setActivos] = useState<Tecnico[]>([])
+  const [panelUsers, setPanelUsers] = useState<Tecnico[]>([])
   const [obras, setObras] = useState<Obra[]>([])
   const [loading, setLoading] = useState(true)
   const [asignarTarget, setAsignarTarget] = useState<Tecnico | null>(null)
@@ -29,13 +31,13 @@ export default function Usuarios() {
       const obrasData = await getAllOrdered('obras', 'nombre_sitio', 'asc')
       setObras(obrasData as Obra[])
 
-      // Cargar todos los técnicos (rol = tecnico)
-      const qTecnicos = query(collection(db, 'users'), where('rol', '==', 'tecnico'))
-      const snap = await getDocs(qTecnicos)
+      // Cargar todos los usuarios
+      const snap = await getDocs(collection(db, 'users'))
       const todos = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Tecnico[]
 
       setPendientes(todos.filter(t => t.estado === 'pendiente'))
-      setActivos(todos.filter(t => t.estado === 'activo' || t.estado === 'inactivo'))
+      setActivos(todos.filter(t => t.rol === 'tecnico' && t.estado !== 'pendiente'))
+      setPanelUsers(todos.filter(t => (t.rol === 'sst' || t.rol === 'admin') && t.estado !== 'pendiente'))
     } catch (err) {
       console.error(err)
       toast('Error al cargar usuarios', 'error')
@@ -98,6 +100,17 @@ export default function Usuarios() {
     }
   }
 
+  // ── Cambiar rol ────────────────────────────────────────────────────────────
+  const handleCambiarRol = async (t: Tecnico, nuevoRol: 'tecnico' | 'sst' | 'admin') => {
+    try {
+      await updateDoc(doc(db, 'users', t.id), { rol: nuevoRol })
+      toast(`Rol de ${t.nombre} actualizado a ${nuevoRol}`)
+      await load()
+    } catch {
+      toast('Error al cambiar el rol', 'error')
+    }
+  }
+
   // ── Asignar obras ──────────────────────────────────────────────────────────
   const openAsignar = (t: Tecnico) => { setAsignarTarget(t); modalAsignar.open() }
 
@@ -116,8 +129,8 @@ export default function Usuarios() {
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Page title */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-800">Técnicos</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Aprobación y gestión de acceso</p>
+        <h1 className="text-2xl font-bold text-gray-800">Usuarios</h1>
+        <p className="text-sm text-gray-500 mt-0.5">Aprobación, roles y gestión de acceso</p>
       </div>
 
       {/* Sección pendientes */}
@@ -138,6 +151,16 @@ export default function Usuarios() {
         onDesactivar={handleDesactivar}
         onActivar={handleActivar}
         onVerPerfil={openPerfil}
+        onCambiarRol={handleCambiarRol}
+      />
+
+      {/* Sección personal de panel (SST / Admin) */}
+      <UsuariosPanel
+        usuarios={panelUsers}
+        loading={loading}
+        onCambiarRol={handleCambiarRol}
+        onDesactivar={handleDesactivar}
+        onActivar={handleActivar}
       />
 
       {/* Modal asignar obras */}

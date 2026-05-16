@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Tecnico } from './UsuariosPendientes'
 import { Obra } from './ObrasTable'
 
@@ -9,6 +10,39 @@ interface UsuariosActivosProps {
   onDesactivar: (t: Tecnico) => void
   onActivar: (t: Tecnico) => void
   onVerPerfil: (t: Tecnico) => void
+  onCambiarRol: (t: Tecnico, nuevoRol: 'tecnico' | 'sst' | 'admin') => void
+}
+
+function RolSelector({ tecnico, onCambiarRol }: { tecnico: Tecnico; onCambiarRol: UsuariosActivosProps['onCambiarRol'] }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="relative inline-block">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="text-xs px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50 transition font-medium"
+      >
+        ⇄ Rol
+      </button>
+      {open && (
+        <select
+          autoFocus
+          size={3}
+          className="absolute right-0 mt-1 z-10 bg-white border border-gray-200 rounded-lg shadow-lg text-xs text-gray-700 cursor-pointer"
+          onChange={e => {
+            const val = e.target.value as 'tecnico' | 'sst' | 'admin'
+            onCambiarRol(tecnico, val)
+            setOpen(false)
+          }}
+          onBlur={() => setOpen(false)}
+        >
+          <option value="tecnico">Técnico</option>
+          <option value="sst">SST</option>
+          <option value="admin">Admin</option>
+        </select>
+      )}
+    </div>
+  )
 }
 
 const estadoBadge = {
@@ -18,7 +52,7 @@ const estadoBadge = {
 }
 
 export default function UsuariosActivos({
-  tecnicos, obras, loading, onAsignarObras, onDesactivar, onActivar, onVerPerfil,
+  tecnicos, obras, loading, onAsignarObras, onDesactivar, onActivar, onVerPerfil, onCambiarRol,
 }: UsuariosActivosProps) {
   const obraMap = Object.fromEntries(obras.map(o => [o.id, o.nombre_sitio]))
 
@@ -127,6 +161,7 @@ export default function UsuariosActivos({
                       >
                         🔗 Obras
                       </button>
+                      <RolSelector tecnico={t} onCambiarRol={onCambiarRol} />
                       {t.estado === 'activo' ? (
                         <button
                           onClick={() => onDesactivar(t)}
