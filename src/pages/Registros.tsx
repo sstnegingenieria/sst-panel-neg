@@ -72,6 +72,22 @@ export default function Registros() {
 
   const hayFiltros = Object.values(filters).some(v => v !== '')
 
+  // ── Marcar PDF como descargado ────────────────────────────────────────────
+
+  const handlePdfDescargado = useCallback(async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'formularios', id), {
+        descargado_sst: true,
+        fecha_descarga: new Date().toISOString(),
+      })
+      setFormularios(prev =>
+        prev.map(f => f.id === id ? { ...f, descargado_sst: true } : f)
+      )
+    } catch {
+      // No crítico — no interrumpir al usuario si falla
+    }
+  }, [])
+
   // ── Visto bueno ────────────────────────────────────────────────────────────
 
   const handleVistobueno = async (
@@ -241,6 +257,7 @@ export default function Registros() {
           formulario={selected}
           onClose={() => setSelected(null)}
           onVistobueno={handleVistobueno}
+          onPdfDescargado={handlePdfDescargado}
         />
       )}
     </div>

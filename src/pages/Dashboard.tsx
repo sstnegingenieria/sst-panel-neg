@@ -107,7 +107,7 @@ export default function Dashboard() {
     })
 
     const recientes = [...formularios]
-      .sort((a, b) => b.timestamp_creacion.localeCompare(a.timestamp_creacion))
+      .sort((a, b) => (b.timestamp_creacion ?? '').localeCompare(a.timestamp_creacion ?? ''))
       .slice(0, 10)
 
     return { totalHoy: hoy, totalMes: mes, recientes }

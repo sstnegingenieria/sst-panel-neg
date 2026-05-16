@@ -28,6 +28,8 @@ export interface Formulario {
   pdf_url?: string
   estado_sync?: string
   revision_sst?: RevisionSST
+  descargado_sst?: boolean
+  fecha_descarga?: string
 }
 
 // ── Labels y colores por tipo ────────────────────────────────────────────────

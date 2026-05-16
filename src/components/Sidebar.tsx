@@ -58,7 +58,6 @@ const navItems = [
   {
     to: '/reportes',
     label: 'Reportes',
-    soon: true,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -108,11 +107,6 @@ export default function Sidebar({ collapsed }: SidebarProps) {
             {!collapsed && (
               <span className="flex items-center gap-2 flex-1">
                 {item.label}
-                {item.soon && (
-                  <span className="text-[10px] bg-blue-800 text-blue-300 px-1.5 py-0.5 rounded-full">
-                    Pronto
-                  </span>
-                )}
               </span>
             )}
           </NavLink>

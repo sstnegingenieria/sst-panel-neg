@@ -12,6 +12,7 @@ interface Props {
     observacion: string,
     revisadoPor: string,
   ) => Promise<void>
+  onPdfDescargado?: (id: string) => void
 }
 
 // ── Helpers para renderizar campos_dinamicos ─────────────────────────────────
@@ -44,7 +45,7 @@ function formatDate(iso: string) {
 
 // ── Componente ───────────────────────────────────────────────────────────────
 
-export default function RegistroDetalleModal({ formulario: f, onClose, onVistobueno }: Props) {
+export default function RegistroDetalleModal({ formulario: f, onClose, onVistobueno, onPdfDescargado }: Props) {
   const { user } = useAuth()
   const [revEstado, setRevEstado] = useState<'aprobado' | 'rechazado'>(
     f.revision_sst?.estado === 'rechazado' ? 'rechazado' : 'aprobado'
@@ -165,7 +166,12 @@ export default function RegistroDetalleModal({ formulario: f, onClose, onVistobu
           )}
 
           {/* PDF */}
-          {f.pdf_url && <PdfViewer url={f.pdf_url} />}
+          {f.pdf_url && (
+            <PdfViewer
+              url={f.pdf_url}
+              onAbrir={() => onPdfDescargado?.(f.id)}
+            />
+          )}
 
           {/* ── Revisión SST / Visto bueno ──────────────────────────────────── */}
           <section className="border border-gray-200 rounded-xl p-5 space-y-4">
@@ -273,7 +279,7 @@ export default function RegistroDetalleModal({ formulario: f, onClose, onVistobu
 
 // ── Subcomponentes ────────────────────────────────────────────────────────────
 
-function PdfViewer({ url }: { url: string }) {
+function PdfViewer({ url, onAbrir }: { url: string; onAbrir?: () => void }) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -293,6 +299,7 @@ function PdfViewer({ url }: { url: string }) {
             href={url}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => onAbrir?.()}
             className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 hover:underline"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -6,6 +6,7 @@ import Obras from './pages/Obras'
 import Contratistas from './pages/Contratistas'
 import Usuarios from './pages/Usuarios'
 import Registros from './pages/Registros'
+import Reportes from './pages/Reportes'
 import Layout from './components/Layout'
 import { ToastContainer } from './components/shared/Toast'
 
@@ -60,24 +61,13 @@ function ProtectedRoutes() {
         <Route path="/contratistas" element={<Contratistas />} />
         <Route path="/usuarios" element={<Usuarios />} />
         <Route path="/registros" element={<Registros />} />
-        <Route path="/reportes" element={<ComingSoon title="Reportes" />} />
+        <Route path="/reportes" element={<Reportes />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   )
 }
 
-function ComingSoon({ title }: { title: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-3">
-      <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-          d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-      </svg>
-      <p className="text-lg font-medium">{title} — En construcción</p>
-    </div>
-  )
-}
 
 export default function App() {
   return (
