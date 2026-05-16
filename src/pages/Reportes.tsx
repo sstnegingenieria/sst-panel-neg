@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { toast } from '../components/shared/Toast'
-import { Formulario, TIPO_LABELS } from '../components/RegistrosTable'
+import { Formulario, TIPO_LABELS, normalizarDoc } from '../components/RegistrosTable'
 import * as XLSX from 'xlsx'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -120,8 +120,10 @@ export default function Reportes() {
     setLoading(true)
     try {
       const snap = await getDocs(collection(db, 'formularios'))
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Formulario[]
-      // Ordenar client-side descendente por fecha
+      const data = snap.docs.map(d =>
+        normalizarDoc(d.id, d.data() as Record<string, unknown>)
+      )
+      // Ordenar client-side descendente por fecha normalizada
       data.sort((a, b) => (b.timestamp_creacion ?? '').localeCompare(a.timestamp_creacion ?? ''))
       setFormularios(data)
     } catch (err) {

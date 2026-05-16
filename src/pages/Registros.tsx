@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { collection, getDocs, query, orderBy, doc, updateDoc, Timestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { toast } from '../components/shared/Toast'
-import RegistrosTable, { Formulario, TIPO_LABELS } from '../components/RegistrosTable'
+import RegistrosTable, { Formulario, TIPO_LABELS, normalizarDoc } from '../components/RegistrosTable'
 import RegistroDetalleModal from '../components/RegistroDetalleModal'
 
 // ── Página principal ─────────────────────────────────────────────────────────
@@ -27,10 +27,12 @@ export default function Registros() {
     try {
       const q = query(
         collection(db, 'formularios'),
-        orderBy('timestamp_creacion', 'desc'),
+        orderBy('fecha_creacion', 'desc'),
       )
       const snap = await getDocs(q)
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Formulario[]
+      const data = snap.docs.map(d =>
+        normalizarDoc(d.id, d.data() as Record<string, unknown>)
+      )
       setFormularios(data)
     } catch {
       toast('Error al cargar registros', 'error')

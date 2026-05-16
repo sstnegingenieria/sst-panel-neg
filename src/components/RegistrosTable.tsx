@@ -13,16 +13,16 @@ export interface Formulario {
   id: string
   tipo: string
   uid_creador: string
-  proyecto: string
+  proyecto: string        // normalizado desde obra_nombre
   fecha: string
-  responsable: string
+  responsable: string    // normalizado desde data.responsable o user_nombre
   ciudad?: string
   direccion?: string
-  codigo_formato: string
+  codigo_formato: string // normalizado desde data.numero_formulario
   version?: string
   fecha_modificacion?: string
-  timestamp_creacion: string
-  campos_dinamicos: Record<string, unknown>
+  timestamp_creacion: string  // normalizado desde fecha_creacion (Timestamp)
+  campos_dinamicos: Record<string, unknown>  // normalizado desde data
   fotos_urls?: string[]
   firmas_urls?: Record<string, string>
   pdf_url?: string
@@ -30,6 +30,47 @@ export interface Formulario {
   revision_sst?: RevisionSST
   descargado_sst?: boolean
   fecha_descarga?: string
+}
+
+// ── Normalizador: mapea el documento Firestore real al tipo Formulario ────────
+// La app Flutter guarda campos con nombres distintos a los que espera el panel.
+
+type FirestoreTimestamp = { toDate: () => Date }
+
+export function normalizarDoc(id: string, raw: Record<string, unknown>): Formulario {
+  // fecha_creacion viene como Firestore Timestamp o string ISO
+  const fechaRaw = raw.fecha_creacion as FirestoreTimestamp | string | null | undefined
+  const timestamp_creacion: string = fechaRaw
+    ? (typeof fechaRaw === 'string'
+        ? fechaRaw
+        : (fechaRaw.toDate?.()?.toISOString() ?? ''))
+    : ''
+
+  // data es el mapa de campos dinámicos del formulario
+  const data = (raw.data as Record<string, unknown>) ?? {}
+
+  return {
+    id,
+    tipo:               (raw.tipo              as string) ?? '',
+    uid_creador:        (raw.user_id           as string) ?? '',
+    proyecto:           (raw.obra_nombre       as string) ?? '',
+    fecha:              timestamp_creacion,
+    responsable:        (data.responsable      as string) ?? (raw.user_nombre as string) ?? '',
+    ciudad:             (data.ciudad           as string) ?? '',
+    direccion:          (data.direccion        as string) ?? '',
+    codigo_formato:     (data.numero_formulario as string) ?? '',
+    version:            '',
+    fecha_modificacion: '',
+    timestamp_creacion,
+    campos_dinamicos:   data,
+    fotos_urls:         [],
+    firmas_urls:        {},
+    pdf_url:            (raw.pdf_url           as string) ?? undefined,
+    estado_sync:        '',
+    revision_sst:       raw.revision_sst       as RevisionSST | undefined,
+    descargado_sst:     (raw.descargado_sst    as boolean)  ?? false,
+    fecha_descarga:     (raw.fecha_descarga    as string)   ?? undefined,
+  }
 }
 
 // ── Labels y colores por tipo ────────────────────────────────────────────────
