@@ -2,7 +2,7 @@ import { useState, FormEvent } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Login() {
-  const { login } = useAuth()
+  const { login, accessDenied } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -65,7 +65,14 @@ export default function Login() {
             />
           </div>
 
-          {error && (
+          {accessDenied && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
+              <p className="font-semibold">Acceso denegado</p>
+              <p className="mt-0.5 text-red-600">Tu cuenta ha sido desactivada. Contacta al administrador.</p>
+            </div>
+          )}
+
+          {error && !accessDenied && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
               {error}
             </div>

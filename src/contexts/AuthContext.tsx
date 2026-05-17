@@ -13,6 +13,7 @@ interface UserProfile {
 interface AuthContextType {
   user: UserProfile | null
   loading: boolean
+  accessDenied: boolean   // true cuando la cuenta existe pero está inactiva
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
 }
@@ -22,6 +23,7 @@ const AuthContext = createContext<AuthContextType | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [accessDenied, setAccessDenied] = useState(false)
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: User | null) => {
@@ -30,6 +32,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const docSnap = await getDoc(docRef)
         if (docSnap.exists()) {
           const data = docSnap.data()
+
+          // Bloquear acceso si el usuario está inactivo
+          if (data.estado === 'inactivo') {
+            await signOut(auth)
+            setUser(null)
+            setAccessDenied(true)
+            setLoading(false)
+            return
+          }
+
+          setAccessDenied(false)
           setUser({
             uid: firebaseUser.uid,
             email: firebaseUser.email,
@@ -37,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             rol: data.rol ?? '',
           })
         } else {
+          setAccessDenied(false)
           setUser({
             uid: firebaseUser.uid,
             email: firebaseUser.email,
@@ -53,15 +67,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = async (email: string, password: string) => {
+    setAccessDenied(false)
     await signInWithEmailAndPassword(auth, email, password)
+    // El onAuthStateChanged se encarga de verificar el estado después del login
   }
 
   const logout = async () => {
+    setAccessDenied(false)
     await signOut(auth)
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, accessDenied, login, logout }}>
       {children}
     </AuthContext.Provider>
   )
