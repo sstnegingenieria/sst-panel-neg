@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useNotificaciones } from '../contexts/NotificacionesContext'
 
 interface SidebarProps {
   collapsed: boolean
@@ -72,6 +73,7 @@ const navItems = [
 
 export default function Sidebar({ collapsed }: SidebarProps) {
   const { user } = useAuth()
+  const { pendientesRegistros, pendientesTecnicos } = useNotificaciones()
   const visibleItems = navItems.filter(item => !item.adminOnly || user?.rol === 'admin')
 
   return (
@@ -109,10 +111,33 @@ export default function Sidebar({ collapsed }: SidebarProps) {
               }`
             }
           >
-            <span className="flex-shrink-0">{item.icon}</span>
+            <span className="flex-shrink-0 relative">
+              {item.icon}
+              {/* Badge compacto cuando el sidebar está colapsado */}
+              {collapsed && item.to === '/registros' && pendientesRegistros > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center">
+                  {pendientesRegistros > 9 ? '9+' : pendientesRegistros}
+                </span>
+              )}
+              {collapsed && item.to === '/usuarios' && pendientesTecnicos > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 rounded-full text-[10px] font-bold flex items-center justify-center">
+                  {pendientesTecnicos > 9 ? '9+' : pendientesTecnicos}
+                </span>
+              )}
+            </span>
             {!collapsed && (
-              <span className="flex items-center gap-2 flex-1">
-                {item.label}
+              <span className="flex items-center justify-between flex-1">
+                <span>{item.label}</span>
+                {item.to === '/registros' && pendientesRegistros > 0 && (
+                  <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                    {pendientesRegistros > 99 ? '99+' : pendientesRegistros}
+                  </span>
+                )}
+                {item.to === '/usuarios' && pendientesTecnicos > 0 && (
+                  <span className="ml-auto bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                    {pendientesTecnicos > 99 ? '99+' : pendientesTecnicos}
+                  </span>
+                )}
               </span>
             )}
           </NavLink>

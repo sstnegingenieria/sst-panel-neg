@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { NotificacionesProvider } from './contexts/NotificacionesContext'
 import React from 'react'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -80,8 +81,10 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <ProtectedRoutes />
-        <ToastContainer />
+        <NotificacionesProvider>
+          <ProtectedRoutes />
+          <ToastContainer />
+        </NotificacionesProvider>
       </AuthProvider>
     </BrowserRouter>
   )
