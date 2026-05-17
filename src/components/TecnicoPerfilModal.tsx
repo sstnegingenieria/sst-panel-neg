@@ -131,6 +131,43 @@ export default function TecnicoPerfilModal({ isOpen, onClose, tecnico, obras }: 
             </div>
           </section>
 
+          {/* Documentos adjuntos */}
+          <section>
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">
+              Documentos adjuntos
+            </h3>
+            <div className="bg-gray-50 rounded-xl px-4 py-3 space-y-2">
+              {[
+                { label: 'Cédula de ciudadanía', url: tecnico.cedula_url, icon: '🪪' },
+                { label: 'Seguridad social (EPS / ARL)', url: tecnico.seguridad_social_url, icon: '📋' },
+                { label: 'Certificado trabajo en alturas', url: tecnico.curso_alturas_url, icon: '🪜' },
+              ].map(({ label, url, icon }) => (
+                <div key={label} className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-base">{icon}</span>
+                    <span className="text-sm text-gray-700 truncate">{label}</span>
+                  </div>
+                  {url ? (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                      Ver
+                    </a>
+                  ) : (
+                    <span className="shrink-0 text-xs text-gray-300 italic">No adjuntado</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+
           {/* Empresa / Obras */}
           <section>
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">

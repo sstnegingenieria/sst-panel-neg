@@ -15,6 +15,10 @@ export interface Tecnico {
   obras_asignadas: string[]
   estado: 'pendiente' | 'activo' | 'inactivo'
   rol: string
+  // Documentos adjuntos subidos desde la app móvil
+  cedula_url?: string
+  seguridad_social_url?: string
+  curso_alturas_url?: string
 }
 
 interface UsuariosPendientesProps {
