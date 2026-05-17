@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { collection, getDocs, deleteDoc, doc, updateDoc, Timestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
+import { useAuth } from '../contexts/AuthContext'
 import { Tecnico } from '../components/UsuariosPendientes'
 import UsuariosPendientes from '../components/UsuariosPendientes'
 import UsuariosActivos from '../components/UsuariosActivos'
@@ -13,6 +14,8 @@ import { useFirestore } from '../hooks/useFirestore'
 import { toast } from '../components/shared/Toast'
 
 export default function Usuarios() {
+  const { user: currentUser } = useAuth()
+  const isAdmin = currentUser?.rol === 'admin'
   const [pendientes, setPendientes] = useState<Tecnico[]>([])
   const [activos, setActivos] = useState<Tecnico[]>([])
   const [panelUsers, setPanelUsers] = useState<Tecnico[]>([])
@@ -135,6 +138,7 @@ export default function Usuarios() {
 
       {/* Sección pendientes */}
       <UsuariosPendientes
+        isAdmin={isAdmin}
         tecnicos={pendientes}
         loading={loading}
         onAprobar={handleAprobar}
@@ -144,6 +148,7 @@ export default function Usuarios() {
 
       {/* Sección activos/inactivos */}
       <UsuariosActivos
+        isAdmin={isAdmin}
         tecnicos={activos}
         obras={obras}
         loading={loading}
@@ -156,6 +161,7 @@ export default function Usuarios() {
 
       {/* Sección personal de panel (SST / Admin) */}
       <UsuariosPanel
+        isAdmin={isAdmin}
         usuarios={panelUsers}
         loading={loading}
         onCambiarRol={handleCambiarRol}

@@ -3,6 +3,7 @@ import { Tecnico } from './UsuariosPendientes'
 import { Obra } from './ObrasTable'
 
 interface UsuariosActivosProps {
+  isAdmin: boolean
   tecnicos: Tecnico[]
   obras: Obra[]
   loading: boolean
@@ -52,7 +53,7 @@ const estadoBadge = {
 }
 
 export default function UsuariosActivos({
-  tecnicos, obras, loading, onAsignarObras, onDesactivar, onActivar, onVerPerfil, onCambiarRol,
+  isAdmin, tecnicos, obras, loading, onAsignarObras, onDesactivar, onActivar, onVerPerfil, onCambiarRol,
 }: UsuariosActivosProps) {
   const obraMap = Object.fromEntries(obras.map(o => [o.id, o.nombre_sitio]))
 
@@ -154,28 +155,32 @@ export default function UsuariosActivos({
                       >
                         👤 Ver
                       </button>
-                      <button
-                        onClick={() => onAsignarObras(t)}
-                        title="Asignar obras"
-                        className="text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition font-medium"
-                      >
-                        🔗 Obras
-                      </button>
-                      <RolSelector tecnico={t} onCambiarRol={onCambiarRol} />
-                      {t.estado === 'activo' ? (
-                        <button
-                          onClick={() => onDesactivar(t)}
-                          className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition font-medium"
-                        >
-                          Desactivar
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => onActivar(t)}
-                          className="text-xs px-2.5 py-1.5 rounded-lg border border-green-200 text-green-700 hover:bg-green-50 transition font-medium"
-                        >
-                          Activar
-                        </button>
+                      {isAdmin && (
+                        <>
+                          <button
+                            onClick={() => onAsignarObras(t)}
+                            title="Asignar obras"
+                            className="text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition font-medium"
+                          >
+                            🔗 Obras
+                          </button>
+                          <RolSelector tecnico={t} onCambiarRol={onCambiarRol} />
+                          {t.estado === 'activo' ? (
+                            <button
+                              onClick={() => onDesactivar(t)}
+                              className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition font-medium"
+                            >
+                              Desactivar
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => onActivar(t)}
+                              className="text-xs px-2.5 py-1.5 rounded-lg border border-green-200 text-green-700 hover:bg-green-50 transition font-medium"
+                            >
+                              Activar
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </td>

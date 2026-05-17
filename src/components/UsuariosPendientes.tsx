@@ -15,6 +15,7 @@ export interface Tecnico {
 }
 
 interface UsuariosPendientesProps {
+  isAdmin: boolean
   tecnicos: Tecnico[]
   loading: boolean
   onAprobar: (t: Tecnico) => void
@@ -22,7 +23,7 @@ interface UsuariosPendientesProps {
   onVerPerfil: (t: Tecnico) => void
 }
 
-export default function UsuariosPendientes({ tecnicos, loading, onAprobar, onRechazar, onVerPerfil }: UsuariosPendientesProps) {
+export default function UsuariosPendientes({ isAdmin, tecnicos, loading, onAprobar, onRechazar, onVerPerfil }: UsuariosPendientesProps) {
   return (
     <div className="bg-white rounded-xl border border-amber-200 shadow-sm">
       <div className="px-6 py-4 border-b border-amber-100 bg-amber-50 rounded-t-xl flex items-center gap-2">
@@ -88,24 +89,28 @@ export default function UsuariosPendientes({ tecnicos, loading, onAprobar, onRec
                       >
                         👤 Ver
                       </button>
-                      <button
-                        onClick={() => onAprobar(t)}
-                        className="text-xs px-3 py-1.5 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 transition font-medium flex items-center gap-1"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        Aprobar
-                      </button>
-                      <button
-                        onClick={() => onRechazar(t)}
-                        className="text-xs px-3 py-1.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 transition font-medium flex items-center gap-1"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                        Rechazar
-                      </button>
+                      {isAdmin && (
+                        <>
+                          <button
+                            onClick={() => onAprobar(t)}
+                            className="text-xs px-3 py-1.5 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 transition font-medium flex items-center gap-1"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Aprobar
+                          </button>
+                          <button
+                            onClick={() => onRechazar(t)}
+                            className="text-xs px-3 py-1.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 transition font-medium flex items-center gap-1"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                            Rechazar
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>

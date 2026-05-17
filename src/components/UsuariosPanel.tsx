@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Tecnico } from './UsuariosPendientes'
 
 interface Props {
+  isAdmin: boolean
   usuarios: Tecnico[]
   loading: boolean
   onCambiarRol: (t: Tecnico, nuevoRol: 'tecnico' | 'sst' | 'admin') => void
@@ -59,7 +60,7 @@ function RolSelector({ tecnico, onCambiarRol }: { tecnico: Tecnico; onCambiarRol
   )
 }
 
-export default function UsuariosPanel({ usuarios, loading, onCambiarRol, onDesactivar, onActivar }: Props) {
+export default function UsuariosPanel({ isAdmin, usuarios, loading, onCambiarRol, onDesactivar, onActivar }: Props) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
       <div className="px-6 py-4 border-b border-gray-100 bg-blue-50 rounded-t-xl">
@@ -120,21 +121,27 @@ export default function UsuariosPanel({ usuarios, loading, onCambiarRol, onDesac
                   </td>
                   <td className="py-3 px-4 text-right">
                     <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                      <RolSelector tecnico={u} onCambiarRol={onCambiarRol} />
-                      {u.estado === 'activo' ? (
-                        <button
-                          onClick={() => onDesactivar(u)}
-                          className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition font-medium"
-                        >
-                          Desactivar
-                        </button>
+                      {isAdmin ? (
+                        <>
+                          <RolSelector tecnico={u} onCambiarRol={onCambiarRol} />
+                          {u.estado === 'activo' ? (
+                            <button
+                              onClick={() => onDesactivar(u)}
+                              className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition font-medium"
+                            >
+                              Desactivar
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => onActivar(u)}
+                              className="text-xs px-2.5 py-1.5 rounded-lg border border-green-200 text-green-700 hover:bg-green-50 transition font-medium"
+                            >
+                              Activar
+                            </button>
+                          )}
+                        </>
                       ) : (
-                        <button
-                          onClick={() => onActivar(u)}
-                          className="text-xs px-2.5 py-1.5 rounded-lg border border-green-200 text-green-700 hover:bg-green-50 transition font-medium"
-                        >
-                          Activar
-                        </button>
+                        <span className="text-xs text-gray-400 italic">Solo lectura</span>
                       )}
                     </div>
                   </td>

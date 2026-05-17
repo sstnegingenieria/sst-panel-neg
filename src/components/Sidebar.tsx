@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 interface SidebarProps {
   collapsed: boolean
@@ -18,6 +19,7 @@ const navItems = [
   {
     to: '/obras',
     label: 'Obras',
+    adminOnly: true,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -28,6 +30,7 @@ const navItems = [
   {
     to: '/contratistas',
     label: 'Contratistas',
+    adminOnly: true,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -68,6 +71,9 @@ const navItems = [
 ]
 
 export default function Sidebar({ collapsed }: SidebarProps) {
+  const { user } = useAuth()
+  const visibleItems = navItems.filter(item => !item.adminOnly || user?.rol === 'admin')
+
   return (
     <aside
       className={`h-screen bg-blue-900 text-white flex flex-col transition-all duration-300 ${
@@ -90,7 +96,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
 
       {/* Nav */}
       <nav className="flex-1 py-4 space-y-1 px-2 overflow-y-auto">
-        {navItems.map(item => (
+        {visibleItems.map(item => (
           <NavLink
             key={item.to}
             to={item.to}
