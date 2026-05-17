@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Tecnico } from './UsuariosPendientes'
 import { Obra } from './ObrasTable'
+import { getSaludDocumental, estadoClasses, estadoLabel } from '../utils/vencimiento'
 
 interface UsuariosActivosProps {
   isAdmin: boolean
@@ -12,6 +13,7 @@ interface UsuariosActivosProps {
   onActivar: (t: Tecnico) => void
   onVerPerfil: (t: Tecnico) => void
   onCambiarRol: (t: Tecnico, nuevoRol: 'tecnico' | 'sst' | 'admin') => void
+  onEditarDocs: (t: Tecnico) => void
 }
 
 function RolSelector({ tecnico, onCambiarRol }: { tecnico: Tecnico; onCambiarRol: UsuariosActivosProps['onCambiarRol'] }) {
@@ -53,7 +55,7 @@ const estadoBadge = {
 }
 
 export default function UsuariosActivos({
-  isAdmin, tecnicos, obras, loading, onAsignarObras, onDesactivar, onActivar, onVerPerfil, onCambiarRol,
+  isAdmin, tecnicos, obras, loading, onAsignarObras, onDesactivar, onActivar, onVerPerfil, onCambiarRol, onEditarDocs,
 }: UsuariosActivosProps) {
   const obraMap = Object.fromEntries(obras.map(o => [o.id, o.nombre_sitio]))
 
@@ -75,6 +77,7 @@ export default function UsuariosActivos({
               <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Nombre</th>
               <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Cédula</th>
               <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">EPS / ARL</th>
+              <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Documentos</th>
               <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Contratista</th>
               <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Obras asignadas</th>
               <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Estado</th>
@@ -85,7 +88,7 @@ export default function UsuariosActivos({
             {loading &&
               Array.from({ length: 3 }).map((_, i) => (
                 <tr key={i} className="border-b border-gray-100">
-                  {Array.from({ length: 7 }).map((__, j) => (
+                  {Array.from({ length: 8 }).map((__, j) => (
                     <td key={j} className="py-3 px-4">
                       <div className="h-4 bg-gray-200 rounded animate-pulse w-24" />
                     </td>
@@ -95,7 +98,7 @@ export default function UsuariosActivos({
 
             {!loading && tecnicos.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-gray-400">
+                <td colSpan={8} className="py-12 text-center text-gray-400">
                   No hay técnicos registrados.
                 </td>
               </tr>
@@ -124,6 +127,17 @@ export default function UsuariosActivos({
                         : null
                       }
                     </div>
+                  </td>
+                  <td className="py-3 px-4">
+                    {(() => {
+                      const salud = getSaludDocumental(t)
+                      return (
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${estadoClasses[salud]}`}>
+                          {salud === 'vencido' ? '🔴' : salud === 'proximo' ? '⚠️' : salud === 'ok' ? '✅' : '—'}
+                          {estadoLabel(salud)}
+                        </span>
+                      )
+                    })()}
                   </td>
                   <td className="py-3 px-4 text-gray-600">{t.contratista_nombre ?? '—'}</td>
                   <td className="py-3 px-4">
@@ -154,6 +168,13 @@ export default function UsuariosActivos({
                         className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition font-medium"
                       >
                         👤 Ver
+                      </button>
+                      <button
+                        onClick={() => onEditarDocs(t)}
+                        title="Editar documentos"
+                        className="text-xs px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50 transition font-medium"
+                      >
+                        📋 Docs
                       </button>
                       {isAdmin && (
                         <>

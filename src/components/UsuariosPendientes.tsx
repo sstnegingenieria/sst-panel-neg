@@ -7,6 +7,9 @@ export interface Tecnico {
   eps?: string
   arl?: string
   fondo_pension?: string
+  eps_vencimiento?: string
+  arl_vencimiento?: string
+  pension_vencimiento?: string
   contratista_nombre?: string
   contratista_id?: string
   obras_asignadas: string[]

@@ -9,6 +9,7 @@ import UsuariosPanel from '../components/UsuariosPanel'
 import AsignarObrasModal from '../components/AsignarObrasModal'
 import TecnicoPerfilModal from '../components/TecnicoPerfilModal'
 import InvitarUsuarioModal from '../components/InvitarUsuarioModal'
+import EditarDocumentosModal from '../components/EditarDocumentosModal'
 import { Obra } from '../components/ObrasTable'
 import { useModal } from '../hooks/useModal'
 import { useFirestore } from '../hooks/useFirestore'
@@ -24,9 +25,11 @@ export default function Usuarios() {
   const [loading, setLoading] = useState(true)
   const [asignarTarget, setAsignarTarget] = useState<Tecnico | null>(null)
   const [perfilTarget, setPerfilTarget] = useState<Tecnico | null>(null)
+  const [docsTarget, setDocsTarget] = useState<Tecnico | null>(null)
   const modalAsignar  = useModal()
   const modalPerfil   = useModal()
   const modalInvitar  = useModal()
+  const modalDocs     = useModal()
   const { getAllOrdered } = useFirestore()
 
   const load = useCallback(async () => {
@@ -55,6 +58,9 @@ export default function Usuarios() {
 
   // ── Perfil ─────────────────────────────────────────────────────────────────
   const openPerfil = (t: Tecnico) => { setPerfilTarget(t); modalPerfil.open() }
+
+  // ── Documentos ─────────────────────────────────────────────────────────────
+  const openDocs = (t: Tecnico) => { setDocsTarget(t); modalDocs.open() }
 
   // ── Aprobar técnico pendiente ──────────────────────────────────────────────
   const handleAprobar = async (t: Tecnico) => {
@@ -172,6 +178,7 @@ export default function Usuarios() {
         onActivar={handleActivar}
         onVerPerfil={openPerfil}
         onCambiarRol={handleCambiarRol}
+        onEditarDocs={openDocs}
       />
 
       {/* Sección personal de panel (SST / Admin) */}
@@ -206,6 +213,14 @@ export default function Usuarios() {
         isOpen={modalInvitar.isOpen}
         onClose={modalInvitar.close}
         onCreado={() => { toast('Usuario creado. Se envió el correo de acceso.'); load() }}
+      />
+
+      {/* Modal editar documentos */}
+      <EditarDocumentosModal
+        isOpen={modalDocs.isOpen}
+        onClose={modalDocs.close}
+        tecnico={docsTarget}
+        onGuardado={() => { toast('Documentos actualizados'); load() }}
       />
     </div>
   )

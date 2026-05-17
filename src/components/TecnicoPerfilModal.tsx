@@ -1,5 +1,6 @@
 import { Tecnico } from './UsuariosPendientes'
 import { Obra } from './ObrasTable'
+import { getDocEstado, getSaludDocumental, estadoLabel, estadoClasses, formatFechaVenc } from '../utils/vencimiento'
 
 interface Props {
   isOpen: boolean
@@ -15,6 +16,28 @@ function InfoFila({ label, value }: { label: string; value?: string | null }) {
       <span className="text-sm text-gray-800 break-all">
         {value ?? <span className="text-gray-300 italic">No registrado</span>}
       </span>
+    </div>
+  )
+}
+
+function DocFila({ label, entidad, vencimiento }: { label: string; entidad?: string; vencimiento?: string }) {
+  const estado = getDocEstado(vencimiento)
+  return (
+    <div className="py-2.5 border-b border-gray-100 last:border-0">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{label}</span>
+        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${estadoClasses[estado]}`}>
+          {estadoLabel(estado)}
+        </span>
+      </div>
+      <div className="mt-1 flex items-center justify-between">
+        <span className="text-sm text-gray-800">
+          {entidad ?? <span className="text-gray-300 italic">No registrado</span>}
+        </span>
+        {vencimiento && (
+          <span className="text-xs text-gray-500">Vence: {formatFechaVenc(vencimiento)}</span>
+        )}
+      </div>
     </div>
   )
 }
@@ -66,6 +89,25 @@ export default function TecnicoPerfilModal({ isOpen, onClose, tecnico, obras }: 
         {/* Body */}
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
 
+          {/* Alert banner — document health */}
+          {(() => {
+            const saludDocs = getSaludDocumental(tecnico)
+            return (saludDocs === 'vencido' || saludDocs === 'proximo') ? (
+              <div className={`rounded-xl px-4 py-3 text-sm font-medium flex items-center gap-2 ${
+                saludDocs === 'vencido'
+                  ? 'bg-red-50 border border-red-200 text-red-800'
+                  : 'bg-amber-50 border border-amber-200 text-amber-800'
+              }`}>
+                <span>{saludDocs === 'vencido' ? '🔴' : '⚠️'}</span>
+                <span>
+                  {saludDocs === 'vencido'
+                    ? 'Hay documentos vencidos. Requiere actualización urgente.'
+                    : 'Hay documentos próximos a vencer (≤ 30 días).'}
+                </span>
+              </div>
+            ) : null
+          })()}
+
           {/* Identificación */}
           <section>
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">
@@ -83,9 +125,9 @@ export default function TecnicoPerfilModal({ isOpen, onClose, tecnico, obras }: 
               Seguridad Social
             </h3>
             <div className="bg-gray-50 rounded-xl px-4 py-1">
-              <InfoFila label="EPS" value={tecnico.eps} />
-              <InfoFila label="ARL" value={tecnico.arl} />
-              <InfoFila label="Fondo de pensión" value={tecnico.fondo_pension} />
+              <DocFila label="EPS" entidad={tecnico.eps} vencimiento={tecnico.eps_vencimiento} />
+              <DocFila label="ARL" entidad={tecnico.arl} vencimiento={tecnico.arl_vencimiento} />
+              <DocFila label="Fondo de pensión" entidad={tecnico.fondo_pension} vencimiento={tecnico.pension_vencimiento} />
             </div>
           </section>
 
