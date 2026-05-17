@@ -1,6 +1,20 @@
+import { useState } from 'react'
 import { Tecnico } from './UsuariosPendientes'
 import { Obra } from './ObrasTable'
 import { getDocEstado, getSaludDocumental, estadoLabel, estadoClasses, formatFechaVenc } from '../utils/vencimiento'
+
+async function descargarArchivo(url: string, nombreArchivo: string) {
+  const resp = await fetch(url)
+  const blob = await resp.blob()
+  const blobUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = blobUrl
+  link.download = nombreArchivo
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(blobUrl)
+}
 
 interface Props {
   isOpen: boolean
@@ -49,6 +63,21 @@ const estadoBadge: Record<string, string> = {
 }
 
 export default function TecnicoPerfilModal({ isOpen, onClose, tecnico, obras }: Props) {
+  const [descargando, setDescargando] = useState<string | null>(null)
+
+  const handleDescargar = async (url: string, label: string, nombre: string) => {
+    setDescargando(label)
+    try {
+      // Infiere extensión desde la URL o tipo MIME
+      const ext = url.includes('.pdf') ? 'pdf' : url.includes('.png') ? 'png' : url.includes('.jpg') || url.includes('.jpeg') ? 'jpg' : 'pdf'
+      await descargarArchivo(url, `${nombre}_${label.replace(/\s+/g, '_')}.${ext}`)
+    } catch {
+      window.open(url, '_blank')
+    } finally {
+      setDescargando(null)
+    }
+  }
+
   if (!isOpen || !tecnico) return null
 
   const obraMap = Object.fromEntries(obras.map(o => [o.id, o.nombre_sitio]))
@@ -148,18 +177,40 @@ export default function TecnicoPerfilModal({ isOpen, onClose, tecnico, obras }: 
                     <span className="text-sm text-gray-700 truncate">{label}</span>
                   </div>
                   {url ? (
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                      </svg>
-                      Ver
-                    </a>
+                    <div className="shrink-0 flex items-center gap-1.5">
+                      {/* Ver */}
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 text-xs font-medium transition-colors"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                        Ver
+                      </a>
+                      {/* Descargar */}
+                      <button
+                        onClick={() => handleDescargar(url, label, tecnico.nombre)}
+                        disabled={descargando === label}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold transition-colors"
+                      >
+                        {descargando === label ? (
+                          <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                          </svg>
+                        ) : (
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                          </svg>
+                        )}
+                        {descargando === label ? 'Descargando…' : 'Descargar'}
+                      </button>
+                    </div>
                   ) : (
                     <span className="shrink-0 text-xs text-gray-300 italic">No adjuntado</span>
                   )}
