@@ -87,6 +87,7 @@ export const TIPO_LABELS: Record<string, string> = {
   inspeccion_arnes:        'Insp. Arnés',
   inspeccion_tieoff:       'Insp. Tie-Off',
   inspeccion_instalaciones:'Insp. Instalaciones',
+  inspeccion_hseq:         'Insp. HSEQ',
   reporte_actos:           'Reporte Actos',
   emergencia:              'Emergencia',
 }
@@ -103,6 +104,7 @@ const TIPO_COLOR: Record<string, string> = {
   inspeccion_arnes:        'bg-indigo-100 text-indigo-800',
   inspeccion_tieoff:       'bg-blue-100 text-blue-800',
   inspeccion_instalaciones:'bg-emerald-100 text-emerald-800',
+  inspeccion_hseq:         'bg-lime-100 text-lime-800',
   reporte_actos:           'bg-amber-100 text-amber-800',
   emergencia:              'bg-rose-100 text-rose-800',
 }

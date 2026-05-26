@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { collection, getDocs, query, orderBy, doc, updateDoc, Timestamp } from 'firebase/firestore'
+import { collection, getDocs, query, orderBy, doc, updateDoc, addDoc, Timestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { toast } from '../components/shared/Toast'
 import RegistrosTable, { Formulario, TIPO_LABELS, normalizarDoc } from '../components/RegistrosTable'
@@ -108,6 +108,24 @@ export default function Registros() {
       revision_sst: revision,
       fecha_actualizacion: Timestamp.now(),
     })
+
+    // Escribir notificación para el técnico
+    const formulario = formularios.find(f => f.id === id)
+    if (formulario?.uid_creador) {
+      const tipoLabel = TIPO_LABELS[formulario.tipo] ?? formulario.tipo
+      await addDoc(collection(db, 'notificaciones'), {
+        user_id:        formulario.uid_creador,
+        formulario_id:  id,
+        formulario_tipo: formulario.tipo,
+        tipo:           estado,   // 'aprobado' | 'rechazado'
+        titulo:         estado === 'aprobado' ? '✅ Formulario aprobado' : '❌ Formulario rechazado',
+        mensaje:        estado === 'aprobado'
+          ? `Tu ${tipoLabel} fue aprobado por ${revisadoPor}.`
+          : `Tu ${tipoLabel} fue rechazado por ${revisadoPor}.${observacion ? ` Motivo: ${observacion}` : ''}`,
+        leido:          false,
+        fecha:          Timestamp.now(),
+      })
+    }
     // Actualiza local sin recargar todo
     setFormularios(prev =>
       prev.map(f => f.id === id ? { ...f, revision_sst: revision } : f)

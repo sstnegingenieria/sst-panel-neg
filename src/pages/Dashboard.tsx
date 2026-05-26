@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { collection, getDocs } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import StatCard from '../components/StatCard'
-import RegistrosTable, { Formulario, TIPO_LABELS } from '../components/RegistrosTable'
+import RegistrosTable, { Formulario, TIPO_LABELS, normalizarDoc } from '../components/RegistrosTable'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
@@ -81,7 +81,9 @@ export default function Dashboard() {
     async function fetchData() {
       try {
         const snap = await getDocs(collection(db, 'formularios'))
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Formulario[]
+        const data = snap.docs.map(d =>
+          normalizarDoc(d.id, d.data() as Record<string, unknown>)
+        )
         setFormularios(data)
       } catch (err) {
         console.error('Error loading dashboard:', err)
