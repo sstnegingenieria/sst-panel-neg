@@ -7,7 +7,7 @@ import Dashboard from './pages/Dashboard'
 import Obras from './pages/Obras'
 import Contratistas from './pages/Contratistas'
 import Usuarios from './pages/Usuarios'
-import Registros from './pages/Registros'
+import ObrasHub from './pages/ObrasHub'
 import Reportes from './pages/Reportes'
 import Layout from './components/Layout'
 import { ToastContainer } from './components/shared/Toast'
@@ -68,7 +68,7 @@ function ProtectedRoutes() {
         <Route path="/obras" element={<AdminRoute><Obras /></AdminRoute>} />
         <Route path="/contratistas" element={<AdminRoute><Contratistas /></AdminRoute>} />
         <Route path="/usuarios" element={<Usuarios />} />
-        <Route path="/registros" element={<Registros />} />
+        <Route path="/registros" element={<ObrasHub />} />
         <Route path="/reportes" element={<Reportes />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
