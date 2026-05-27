@@ -66,26 +66,35 @@ export default function ObraRegistros() {
       revisado_por: revisadoPor,
       fecha_revision: new Date().toISOString(),
     }
+
+    // ── Paso crítico: actualizar el registro. Si esto falla, sí mostramos error. ──
     await updateDoc(doc(db, 'formularios', id), {
       revision_sst: revision,
       fecha_actualizacion: Timestamp.now(),
     })
 
+    // ── Paso opcional: notificar al técnico. Si falla (p.ej. Firestore Rules
+    // restringen escritura en `notificaciones`), NO rompemos la aprobación. ──
     const formulario = formularios.find(f => f.id === id)
     if (formulario?.uid_creador) {
-      const tipoLabel = TIPO_LABELS[formulario.tipo] ?? formulario.tipo
-      await addDoc(collection(db, 'notificaciones'), {
-        user_id:        formulario.uid_creador,
-        formulario_id:  id,
-        formulario_tipo: formulario.tipo,
-        tipo:           estado,
-        titulo:         estado === 'aprobado' ? '✅ Formulario aprobado' : '❌ Formulario rechazado',
-        mensaje:        estado === 'aprobado'
-          ? `Tu ${tipoLabel} fue aprobado por ${revisadoPor}.`
-          : `Tu ${tipoLabel} fue rechazado por ${revisadoPor}.${observacion ? ` Motivo: ${observacion}` : ''}`,
-        leido:          false,
-        fecha:          Timestamp.now(),
-      })
+      try {
+        const tipoLabel = TIPO_LABELS[formulario.tipo] ?? formulario.tipo
+        await addDoc(collection(db, 'notificaciones'), {
+          user_id:        formulario.uid_creador,
+          formulario_id:  id,
+          formulario_tipo: formulario.tipo,
+          tipo:           estado,
+          titulo:         estado === 'aprobado' ? '✅ Formulario aprobado' : '❌ Formulario rechazado',
+          mensaje:        estado === 'aprobado'
+            ? `Tu ${tipoLabel} fue aprobado por ${revisadoPor}.`
+            : `Tu ${tipoLabel} fue rechazado por ${revisadoPor}.${observacion ? ` Motivo: ${observacion}` : ''}`,
+          leido:          false,
+          fecha:          Timestamp.now(),
+        })
+      } catch (e) {
+        // Notificación es nice-to-have. Logueamos pero NO bloqueamos la aprobación.
+        console.warn('[ObraRegistros] No se pudo crear notificación:', e)
+      }
     }
 
     setSelected(prev => prev?.id === id ? { ...prev, revision_sst: revision } : prev)
