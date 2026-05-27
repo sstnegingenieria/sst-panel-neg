@@ -1,131 +1,25 @@
 import { useState } from 'react'
 
-// ── Tipos compartidos ────────────────────────────────────────────────────────
+// ── Re-exports para mantener compatibilidad con código que aún importa desde
+//    este archivo (Reportes, Dashboard, etc.). La fuente única de verdad para
+//    los tipos del formulario vive ahora en src/types/formulario.ts.
+export {
+  TIPO_LABELS,
+  TIPO_COLOR,
+  REVISION_BADGE,
+  normalizarDoc,
+  formatDate,
+} from '../types/formulario'
+export type { RevisionSST, Formulario } from '../types/formulario'
 
-export interface RevisionSST {
-  estado: 'pendiente' | 'aprobado' | 'rechazado'
-  observacion?: string
-  revisado_por?: string
-  fecha_revision?: string
-}
-
-export interface Formulario {
-  id: string
-  tipo: string
-  uid_creador: string
-  proyecto: string        // normalizado desde obra_nombre
-  fecha: string
-  responsable: string    // normalizado desde data.responsable o user_nombre
-  ciudad?: string
-  direccion?: string
-  codigo_formato: string // normalizado desde data.numero_formulario
-  version?: string
-  fecha_modificacion?: string
-  timestamp_creacion: string  // normalizado desde fecha_creacion (Timestamp)
-  campos_dinamicos: Record<string, unknown>  // normalizado desde data
-  fotos_urls?: string[]
-  firmas_urls?: Record<string, string>
-  pdf_url?: string
-  estado_sync?: string
-  revision_sst?: RevisionSST
-  descargado_sst?: boolean
-  fecha_descarga?: string
-}
-
-// ── Normalizador: mapea el documento Firestore real al tipo Formulario ────────
-// La app Flutter guarda campos con nombres distintos a los que espera el panel.
-
-type FirestoreTimestamp = { toDate: () => Date }
-
-export function normalizarDoc(id: string, raw: Record<string, unknown>): Formulario {
-  // fecha_creacion viene como Firestore Timestamp o string ISO
-  const fechaRaw = raw.fecha_creacion as FirestoreTimestamp | string | null | undefined
-  const timestamp_creacion: string = fechaRaw
-    ? (typeof fechaRaw === 'string'
-        ? fechaRaw
-        : (fechaRaw.toDate?.()?.toISOString() ?? ''))
-    : ''
-
-  // data es el mapa de campos dinámicos del formulario
-  const data = (raw.data as Record<string, unknown>) ?? {}
-
-  return {
-    id,
-    tipo:               (raw.tipo              as string) ?? '',
-    uid_creador:        (raw.user_id           as string) ?? '',
-    proyecto:           (raw.obra_nombre       as string) ?? '',
-    fecha:              timestamp_creacion,
-    responsable:        (data.responsable      as string) ?? (raw.user_nombre as string) ?? '',
-    ciudad:             (data.ciudad           as string) ?? '',
-    direccion:          (data.direccion        as string) ?? '',
-    codigo_formato:     (data.numero_formulario as string) ?? '',
-    version:            '',
-    fecha_modificacion: '',
-    timestamp_creacion,
-    campos_dinamicos:   data,
-    fotos_urls:         [],
-    firmas_urls:        {},
-    pdf_url:            (raw.pdf_url           as string) ?? undefined,
-    estado_sync:        '',
-    revision_sst:       raw.revision_sst       as RevisionSST | undefined,
-    descargado_sst:     (raw.descargado_sst    as boolean)  ?? false,
-    fecha_descarga:     (raw.fecha_descarga    as string)   ?? undefined,
-  }
-}
-
-// ── Labels y colores por tipo ────────────────────────────────────────────────
-
-export const TIPO_LABELS: Record<string, string> = {
-  preoperacional:          'Preoperacional',
-  ats:                     'ATS',
-  charla:                  'Charla 5 min',
-  permiso_alturas:         'Permiso Alturas',
-  permiso_caliente:        'Permiso Caliente',
-  inspeccion_herramientas: 'Insp. Herramientas',
-  inspeccion_epp:          'Insp. EPP',
-  inspeccion_escaleras:    'Insp. Escaleras',
-  inspeccion_arnes:        'Insp. Arnés',
-  inspeccion_tieoff:       'Insp. Tie-Off',
-  inspeccion_instalaciones:'Insp. Instalaciones',
-  inspeccion_hseq:         'Insp. HSEQ',
-  reporte_actos:           'Reporte Actos',
-  emergencia:              'Emergencia',
-}
-
-const TIPO_COLOR: Record<string, string> = {
-  preoperacional:          'bg-blue-100 text-blue-800',
-  ats:                     'bg-violet-100 text-violet-800',
-  charla:                  'bg-purple-100 text-purple-800',
-  permiso_alturas:         'bg-orange-100 text-orange-800',
-  permiso_caliente:        'bg-red-100 text-red-800',
-  inspeccion_herramientas: 'bg-cyan-100 text-cyan-800',
-  inspeccion_epp:          'bg-teal-100 text-teal-800',
-  inspeccion_escaleras:    'bg-sky-100 text-sky-800',
-  inspeccion_arnes:        'bg-indigo-100 text-indigo-800',
-  inspeccion_tieoff:       'bg-blue-100 text-blue-800',
-  inspeccion_instalaciones:'bg-emerald-100 text-emerald-800',
-  inspeccion_hseq:         'bg-lime-100 text-lime-800',
-  reporte_actos:           'bg-amber-100 text-amber-800',
-  emergencia:              'bg-rose-100 text-rose-800',
-}
-
-const REVISION_BADGE: Record<string, string> = {
-  pendiente: 'bg-yellow-100 text-yellow-800',
-  aprobado:  'bg-green-100 text-green-800',
-  rechazado: 'bg-red-100 text-red-800',
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatDate(iso: string) {
-  try {
-    return new Date(iso).toLocaleDateString('es-CO', {
-      day: '2-digit', month: '2-digit', year: 'numeric',
-    })
-  } catch {
-    return iso
-  }
-}
+// Imports locales para uso dentro de este archivo
+import {
+  TIPO_LABELS,
+  TIPO_COLOR,
+  REVISION_BADGE,
+  formatDate,
+  type Formulario,
+} from '../types/formulario'
 
 // ── Paginación ────────────────────────────────────────────────────────────────
 
