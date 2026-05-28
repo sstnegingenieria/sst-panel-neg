@@ -63,8 +63,8 @@ function PieTooltip({ active, payload }: {
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
-      <h3 className="text-sm font-semibold text-gray-700 mb-4">{title}</h3>
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm px-6 py-5">
+      <h3 className="text-[13px] font-bold text-gray-800 mb-4">{title}</h3>
       {children}
     </div>
   )
@@ -96,24 +96,41 @@ export default function Dashboard() {
 
   // ── Stats ────────────────────────────────────────────────────────────────
 
-  const { totalHoy, totalMes, recientes } = useMemo(() => {
+  const { totalHoy, totalAyer, totalMes, totalMesAnterior, recientes } = useMemo(() => {
     const ahora      = new Date()
     const inicioHoy  = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate()).toISOString()
+    const inicioAyer = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 1).toISOString()
     const inicioMes  = new Date(ahora.getFullYear(), ahora.getMonth(), 1).toISOString()
+    const inicioMesAnterior = new Date(ahora.getFullYear(), ahora.getMonth() - 1, 1).toISOString()
 
-    let hoy = 0, mes = 0
+    let hoy = 0, ayer = 0, mes = 0, mesAnterior = 0
     formularios.forEach(f => {
       const ts = f.timestamp_creacion ?? ''
       if (ts >= inicioHoy) hoy++
+      else if (ts >= inicioAyer) ayer++
       if (ts >= inicioMes) mes++
+      else if (ts >= inicioMesAnterior) mesAnterior++
     })
 
     const recientes = [...formularios]
       .sort((a, b) => (b.timestamp_creacion ?? '').localeCompare(a.timestamp_creacion ?? ''))
       .slice(0, 10)
 
-    return { totalHoy: hoy, totalMes: mes, recientes }
+    return { totalHoy: hoy, totalAyer: ayer, totalMes: mes, totalMesAnterior: mesAnterior, recientes }
   }, [formularios])
+
+  // ── Deltas (variación con datos reales) ──────────────────────────────────
+  const deltaHoy = useMemo(() => {
+    if (totalHoy + totalAyer === 0) return undefined
+    const diff = totalHoy - totalAyer
+    return { label: `${diff >= 0 ? '+' : ''}${diff} vs ayer`, positive: diff >= 0 }
+  }, [totalHoy, totalAyer])
+
+  const deltaMes = useMemo(() => {
+    if (totalMesAnterior === 0) return undefined
+    const pct = Math.round(((totalMes - totalMesAnterior) / totalMesAnterior) * 100)
+    return { label: `${pct >= 0 ? '+' : ''}${pct}% vs mes ant.`, positive: pct >= 0 }
+  }, [totalMes, totalMesAnterior])
 
   // ── Datos para gráficos ──────────────────────────────────────────────────
 
@@ -135,7 +152,7 @@ export default function Dashboard() {
 
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Resumen Operativo SST</h1>
         <p className="text-sm text-gray-500 capitalize mt-0.5">{today}</p>
       </div>
 
@@ -146,6 +163,7 @@ export default function Dashboard() {
           value={totalHoy}
           loading={loading}
           color="blue"
+          delta={deltaHoy}
           icon={
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -158,6 +176,7 @@ export default function Dashboard() {
           value={totalMes}
           loading={loading}
           color="green"
+          delta={deltaMes}
           icon={
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -166,8 +185,8 @@ export default function Dashboard() {
           }
         />
         <StatCard
-          title="Total formularios"
-          value={formularios.length}
+          title="Total histórico"
+          value={formularios.length.toLocaleString('es-CO')}
           loading={loading}
           color="purple"
           icon={
@@ -264,9 +283,9 @@ export default function Dashboard() {
       )}
 
       {/* Últimos registros */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="font-semibold text-gray-800">Últimos 10 formularios</h2>
+          <h2 className="font-bold text-gray-800">Últimos 10 formularios</h2>
           <button
             onClick={() => navigate('/registros')}
             className="text-sm text-blue-600 hover:text-blue-800 font-medium transition"
