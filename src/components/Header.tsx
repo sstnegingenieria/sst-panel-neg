@@ -5,6 +5,18 @@ interface HeaderProps {
   sidebarCollapsed: boolean
 }
 
+function initials(name?: string): string {
+  if (!name) return '?'
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(s => s[0]?.toUpperCase() ?? '')
+      .join('') || '?'
+  )
+}
+
 export default function Header({ onToggleSidebar }: HeaderProps) {
   const { user, logout } = useAuth()
 
@@ -13,7 +25,7 @@ export default function Header({ onToggleSidebar }: HeaderProps) {
       {/* Toggle sidebar */}
       <button
         onClick={onToggleSidebar}
-        className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition"
+        className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition"
         aria-label="Toggle sidebar"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -23,12 +35,23 @@ export default function Header({ onToggleSidebar }: HeaderProps) {
 
       {/* Right side */}
       <div className="flex items-center gap-3">
-        <span className="text-sm text-gray-600 hidden sm:block">
-          {user?.nombre}
-        </span>
-        <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-medium uppercase">
-          {user?.rol}
-        </span>
+        {/* User chip */}
+        <div className="flex items-center gap-2.5 pl-1">
+          <div className="text-right hidden sm:block leading-tight">
+            <div className="text-sm font-semibold text-gray-800">{user?.nombre}</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+              {user?.rol}
+            </div>
+          </div>
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-600 to-blue-800 text-white text-xs font-bold flex items-center justify-center flex-shrink-0 ring-2 ring-blue-50">
+            {initials(user?.nombre)}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <span className="h-6 w-px bg-gray-200" aria-hidden />
+
+        {/* Logout */}
         <button
           onClick={logout}
           className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-red-600 transition px-2 py-1.5 rounded-lg hover:bg-red-50"

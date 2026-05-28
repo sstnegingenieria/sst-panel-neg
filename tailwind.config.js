@@ -3,6 +3,15 @@ export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
+      fontFamily: {
+        sans: [
+          'Inter', 'ui-sans-serif', 'system-ui', '-apple-system',
+          'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif',
+        ],
+        display: [
+          '"Hanken Grotesk"', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif',
+        ],
+      },
       colors: {
         brand: {
           50: '#eff6ff',

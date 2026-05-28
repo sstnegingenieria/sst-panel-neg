@@ -83,15 +83,17 @@ export default function Sidebar({ collapsed }: SidebarProps) {
       }`}
     >
       {/* Brand */}
-      <div className="flex items-center gap-3 px-4 py-5 border-b border-blue-800">
-        <div className="flex-shrink-0 w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-sm">
+      <div className="flex items-center gap-3 px-4 py-5 border-b border-blue-800/70">
+        <div className="flex-shrink-0 w-9 h-9 bg-white text-blue-900 rounded-lg flex items-center justify-center font-display font-extrabold text-base shadow-sm">
           N
         </div>
         {!collapsed && (
-          <span className="font-semibold text-sm leading-tight">
+          <span className="font-display font-bold text-[15px] leading-tight tracking-tight">
             NEG Ingeniería
             <br />
-            <span className="text-blue-300 font-normal text-xs">Panel SST</span>
+            <span className="text-blue-300 font-sans font-medium text-[11px] uppercase tracking-wider">
+              Panel de Gestión SST
+            </span>
           </span>
         )}
       </div>
