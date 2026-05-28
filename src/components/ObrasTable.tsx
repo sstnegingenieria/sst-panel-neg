@@ -15,8 +15,8 @@ interface ObrasTableProps {
 }
 
 const estadoBadge = {
-  activa: 'bg-green-100 text-green-800',
-  inactiva: 'bg-red-100 text-red-800',
+  activa: 'bg-emerald-50 text-emerald-700',
+  inactiva: 'bg-amber-50 text-amber-700',
 }
 
 export default function ObrasTable({ obras, loading, onEdit, onToggleEstado }: ObrasTableProps) {
