@@ -40,7 +40,7 @@ export default function RegistroCard({ formulario: f, onClick }: Props) {
   return (
     <div
       onClick={onClick}
-      className="grid grid-cols-[80px_1fr_140px_90px] gap-3 items-center bg-white border border-gray-200 rounded-lg px-3 py-2.5 cursor-pointer hover:border-gray-900 transition-colors"
+      className="grid grid-cols-[80px_1fr_140px_90px] gap-3 items-center bg-white border border-gray-200 rounded-lg px-3 py-2.5 cursor-pointer hover:border-blue-700 hover:shadow-sm transition-all"
     >
       {/* Tipo + código */}
       <div className="text-center">

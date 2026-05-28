@@ -14,50 +14,68 @@ export default function ObraCard({ obra }: Props) {
   return (
     <Link
       to={`/registros/${obra.id}`}
-      className={`group block bg-white border rounded-lg p-3 transition-all relative ${
+      className={`group flex flex-col bg-white border rounded-lg p-4 transition-all ${
         inactiva
-          ? 'border-gray-200 opacity-50 hover:opacity-75'
-          : 'border-gray-200 hover:border-blue-700 hover:-translate-y-px hover:shadow-md'
+          ? 'border-gray-200 opacity-60 hover:opacity-90'
+          : 'border-gray-200 hover:border-blue-700 hover:shadow-md hover:-translate-y-0.5'
       }`}
     >
-      {/* Indicador de pendientes (esquina superior derecha) */}
-      {tienePendientes && (
+      {/* Título + estado */}
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <h3 className="text-sm font-bold text-gray-900 truncate" title={obra.nombre_sitio}>
+          {obra.nombre_sitio}
+        </h3>
         <span
-          className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-amber-500"
-          style={{ boxShadow: '0 0 0 4px rgba(245,158,11,0.18)' }}
-          aria-label={`${obra.pendientes} pendientes`}
-        />
-      )}
-
-      {/* Título + código */}
-      <div className="text-sm font-semibold text-gray-900 truncate" title={obra.nombre_sitio}>
-        {obra.nombre_sitio}
+          className={`flex-shrink-0 text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+            inactiva ? 'bg-gray-100 text-gray-500' : 'bg-emerald-50 text-emerald-700'
+          }`}
+        >
+          {inactiva ? 'Inactiva' : 'Obra activa'}
+        </span>
       </div>
-      <div className="font-mono text-[10px] text-gray-400 mb-2 truncate">
+
+      {/* Código + cliente */}
+      <div className="font-mono text-[10px] text-gray-400 truncate mb-3">
         {obra.codigo}
         {obra.cliente && <span className="text-gray-500"> · {obra.cliente}</span>}
       </div>
 
-      {/* Stats grandes */}
-      <div className="flex items-baseline gap-2 mb-1.5">
-        <span className="text-xl font-bold text-gray-900 leading-none">
-          {obra.totalRegistros}
-        </span>
-        <span className="text-[9px] uppercase tracking-wide text-gray-400">
-          {obra.totalRegistros === 1 ? 'registro' : 'registros'}
-        </span>
-        {tienePendientes && (
-          <span className="ml-auto bg-amber-100 text-amber-800 rounded text-[9px] font-bold px-1.5 py-0.5">
-            {obra.pendientes} pend
-          </span>
-        )}
+      {/* Stats: registros + pendientes */}
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <div>
+          <div className="text-[9px] uppercase tracking-wider font-semibold text-gray-400">
+            Registros
+          </div>
+          <div className="text-xl font-bold text-gray-900 leading-none mt-1">
+            {obra.totalRegistros}
+          </div>
+        </div>
+        <div>
+          <div className="text-[9px] uppercase tracking-wider font-semibold text-gray-400">
+            Pendientes SST
+          </div>
+          <div
+            className={`text-xl font-bold leading-none mt-1 inline-flex items-center gap-1 ${
+              tienePendientes ? 'text-amber-600' : 'text-gray-900'
+            }`}
+          >
+            {obra.pendientes}
+            {tienePendientes && <span className="text-amber-500 text-base leading-none">!</span>}
+          </div>
+        </div>
       </div>
 
-      {/* Última actividad */}
-      <div className="text-[9px] text-gray-400 border-t border-gray-100 pt-1">
-        {obra.ultimoTimestamp
-          ? `${formatRelativeDate(obra.ultimoTimestamp)} · ${obra.ultimoResponsable || '—'}`
-          : 'Sin actividad'}
+      {/* Footer: última actividad + CTA */}
+      <div className="mt-auto flex items-center justify-between border-t border-gray-100 pt-2">
+        <span className="text-[9px] text-gray-400 truncate">
+          {obra.ultimoTimestamp
+            ? `${formatRelativeDate(obra.ultimoTimestamp)} · ${obra.ultimoResponsable || '—'}`
+            : 'Sin actividad'}
+        </span>
+        <span className="text-[11px] font-semibold text-blue-700 group-hover:text-blue-800 flex-shrink-0 ml-2 inline-flex items-center gap-0.5">
+          Gestionar
+          <span className="transition-transform group-hover:translate-x-0.5">→</span>
+        </span>
       </div>
     </Link>
   )

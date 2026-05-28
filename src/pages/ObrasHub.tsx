@@ -77,7 +77,7 @@ export default function ObrasHub() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Registros por Obra</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Hub de Registros por Obra</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {loading
               ? 'Cargando…'
@@ -161,9 +161,9 @@ export default function ObrasHub() {
 
       {/* Loading skeleton */}
       {loading && (
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="h-28 bg-gray-100 rounded-lg animate-pulse" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-44 bg-gray-100 rounded-lg animate-pulse" />
           ))}
         </div>
       )}
@@ -188,7 +188,7 @@ export default function ObrasHub() {
               Actividad reciente · esta semana
             </span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {recientes.map(o => <ObraCard key={o.id} obra={o} />)}
           </div>
         </section>
@@ -205,7 +205,7 @@ export default function ObrasHub() {
                 : `Obras (${otras.length})`}
             </span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {otras.map(o => <ObraCard key={o.id} obra={o} />)}
           </div>
         </section>

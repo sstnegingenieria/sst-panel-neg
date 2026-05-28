@@ -142,7 +142,7 @@ export default function ObraRegistros() {
       {/* Banner de obra */}
       {obra && (
         <div className="rounded-lg p-4 text-white flex flex-wrap items-center justify-between gap-3"
-             style={{ background: 'linear-gradient(to right, #0f172a, #1e293b)' }}>
+             style={{ background: 'linear-gradient(to right, #1e3a8a, #1d4ed8)' }}>
           <div>
             <h2 className="text-lg font-bold leading-tight">{obra.nombre_sitio}</h2>
             <div className="font-mono text-[11px] opacity-70 mt-0.5">
