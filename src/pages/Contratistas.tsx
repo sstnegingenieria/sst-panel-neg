@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import ContratistasTable, { Contratista } from '../components/ContratistasTable'
 import ContratistasForm, { ContratistaFormData } from '../components/ContratistasForm'
+import StatCard from '../components/StatCard'
 import { useModal } from '../hooks/useModal'
 import { useFirestore } from '../hooks/useFirestore'
 import { toast } from '../components/shared/Toast'
@@ -45,6 +46,17 @@ export default function Contratistas() {
     }
   }
 
+  const stats = useMemo(() => {
+    const activos = contratistas.filter(c => c.estado === 'activo').length
+    const juridicas = contratistas.filter(c => c.tipo === 'juridica').length
+    return {
+      activos,
+      inactivos: contratistas.length - activos,
+      juridicas,
+      naturales: contratistas.length - juridicas,
+    }
+  }, [contratistas])
+
   const handleToggle = async (c: Contratista) => {
     const nuevoEstado = c.estado === 'activo' ? 'inactivo' : 'activo'
     const accion = nuevoEstado === 'inactivo' ? 'desactivar' : 'activar'
@@ -76,10 +88,58 @@ export default function Contratistas() {
         </button>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="Activos"
+          value={loading ? '…' : stats.activos}
+          loading={loading}
+          color="green"
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Inactivos"
+          value={loading ? '…' : stats.inactivos}
+          loading={loading}
+          color="orange"
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Personas jurídicas"
+          value={loading ? '…' : stats.juridicas}
+          loading={loading}
+          color="purple"
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Personas naturales"
+          value={loading ? '…' : stats.naturales}
+          loading={loading}
+          color="blue"
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+          }
+        />
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
         <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="font-semibold text-gray-800">
-            Todos los contratistas
+          <h2 className="font-bold text-gray-800">
+            Listado de contratistas
             {!loading && (
               <span className="ml-2 text-xs font-normal text-gray-400">({contratistas.length})</span>
             )}

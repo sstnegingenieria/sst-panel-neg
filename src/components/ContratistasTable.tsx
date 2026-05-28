@@ -15,13 +15,24 @@ interface ContratistasTableProps {
 }
 
 const tipoBadge = {
-  juridica: 'bg-purple-100 text-purple-800',
-  natural: 'bg-blue-100 text-blue-800',
+  juridica: 'bg-violet-50 text-violet-700',
+  natural: 'bg-blue-50 text-blue-700',
 }
 
 const estadoBadge = {
-  activo: 'bg-green-100 text-green-800',
-  inactivo: 'bg-red-100 text-red-800',
+  activo: 'bg-emerald-50 text-emerald-700',
+  inactivo: 'bg-gray-100 text-gray-500',
+}
+
+function initials(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(s => s[0]?.toUpperCase() ?? '')
+      .join('') || '?'
+  )
 }
 
 export default function ContratistasTable({ contratistas, loading, onEdit, onToggleEstado }: ContratistasTableProps) {
@@ -59,7 +70,14 @@ export default function ContratistasTable({ contratistas, loading, onEdit, onTog
           {!loading &&
             contratistas.map(c => (
               <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                <td className="py-3 px-4 font-medium text-gray-800">{c.nombre}</td>
+                <td className="py-3 px-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                      {initials(c.nombre)}
+                    </div>
+                    <span className="font-medium text-gray-800">{c.nombre}</span>
+                  </div>
+                </td>
                 <td className="py-3 px-4">
                   <div className="flex items-center gap-2">
                     <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${tipoBadge[c.tipo]}`}>
