@@ -122,7 +122,7 @@ export default function ObraRegistros() {
         <p className="text-gray-500 text-sm mt-2">El ID no coincide con ninguna obra.</p>
         <button
           onClick={() => navigate('/registros')}
-          className="mt-6 text-sm text-blue-700 hover:underline"
+          className="mt-6 text-sm text-brand-700 hover:underline"
         >
           ← Volver al hub
         </button>
@@ -135,14 +135,14 @@ export default function ObraRegistros() {
 
       {/* Breadcrumb */}
       <div className="text-xs text-gray-500">
-        <Link to="/registros" className="text-blue-700 hover:underline">← Registros</Link>
+        <Link to="/registros" className="text-brand-700 hover:underline">← Registros</Link>
         {obra && <span className="text-gray-400"> / {obra.nombre_sitio}</span>}
       </div>
 
       {/* Banner de obra */}
       {obra && (
         <div className="rounded-lg p-4 text-white flex flex-wrap items-center justify-between gap-3"
-             style={{ background: 'linear-gradient(to right, #1e3a8a, #1d4ed8)' }}>
+             style={{ background: 'linear-gradient(to right, #3f5a28, #628e3a)' }}>
           <div>
             <h2 className="text-lg font-bold leading-tight">{obra.nombre_sitio}</h2>
             <div className="font-mono text-[11px] opacity-70 mt-0.5">
@@ -175,7 +175,7 @@ export default function ObraRegistros() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Buscar técnico, código…"
-            className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-transparent rounded-lg focus:bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-transparent rounded-lg focus:bg-white focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
 

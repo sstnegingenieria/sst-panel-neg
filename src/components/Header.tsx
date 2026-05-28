@@ -43,7 +43,7 @@ export default function Header({ onToggleSidebar }: HeaderProps) {
               {user?.rol}
             </div>
           </div>
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-600 to-blue-800 text-white text-xs font-bold flex items-center justify-center flex-shrink-0 ring-2 ring-blue-50">
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-brand-600 to-brand-800 text-white text-xs font-bold flex items-center justify-center flex-shrink-0 ring-2 ring-brand-50">
             {initials(user?.nombre)}
           </div>
         </div>

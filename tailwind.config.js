@@ -4,23 +4,36 @@ export default {
   theme: {
     extend: {
       fontFamily: {
+        // Marca NEG: Montserrat para títulos y cuerpo, Lato para el slogan.
         sans: [
-          'Inter', 'ui-sans-serif', 'system-ui', '-apple-system',
+          'Montserrat', 'ui-sans-serif', 'system-ui', '-apple-system',
           'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif',
         ],
         display: [
-          '"Hanken Grotesk"', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif',
+          'Montserrat', 'ui-sans-serif', 'system-ui', 'sans-serif',
+        ],
+        slogan: [
+          'Lato', 'ui-sans-serif', 'system-ui', 'sans-serif',
         ],
       },
       colors: {
+        // Verde corporativo NEG (manual de marca). 600 = #628E3A primario.
         brand: {
-          50: '#eff6ff',
-          100: '#dbeafe',
-          500: '#3b82f6',
-          600: '#2563eb',
-          700: '#1d4ed8',
-          800: '#1e40af',
-          900: '#1e3a8a',
+          50:  '#f4f8ee',
+          100: '#e5efd5',
+          200: '#cce0ad',
+          300: '#aacd7e',
+          400: '#8bb957',
+          500: '#73a142',
+          600: '#628e3a',
+          700: '#4f7330',
+          800: '#3f5a28',
+          900: '#354b22',
+        },
+        // Acento lima del manual (#D7DA33). Usar con moderación.
+        accent: {
+          DEFAULT: '#d7da33',
+          dark: '#8f920f',
         },
       },
     },

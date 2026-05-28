@@ -9,7 +9,7 @@ interface StatCardProps {
 }
 
 const iconBg = {
-  blue:   'bg-blue-50 text-blue-700',
+  blue:   'bg-brand-50 text-brand-700',
   green:  'bg-emerald-50 text-emerald-700',
   orange: 'bg-amber-50 text-amber-700',
   purple: 'bg-violet-50 text-violet-700',

@@ -11,9 +11,9 @@ import {
 
 // ── Paleta ───────────────────────────────────────────────────────────────────
 
-const BAR_COLOR  = '#1d4ed8'
+const BAR_COLOR  = '#628e3a'
 const PIE_COLORS = [
-  '#1d4ed8', '#7c3aed', '#0891b2', '#059669', '#d97706',
+  '#628e3a', '#7c3aed', '#0891b2', '#059669', '#d97706',
   '#dc2626', '#db2777', '#65a30d', '#0284c7', '#9333ea',
   '#f59e0b', '#10b981', '#ef4444',
 ]
@@ -42,7 +42,7 @@ function CustomTooltip({ active, payload, label }: {
   return (
     <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 shadow text-sm">
       <p className="font-medium text-gray-700 mb-0.5">{label}</p>
-      <p className="text-blue-700 font-semibold">{payload[0].value} formularios</p>
+      <p className="text-brand-700 font-semibold">{payload[0].value} formularios</p>
     </div>
   )
 }
@@ -54,7 +54,7 @@ function PieTooltip({ active, payload }: {
   return (
     <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 shadow text-sm">
       <p className="font-medium text-gray-700 mb-0.5">{payload[0].name}</p>
-      <p className="text-blue-700 font-semibold">{payload[0].value} formularios</p>
+      <p className="text-brand-700 font-semibold">{payload[0].value} formularios</p>
     </div>
   )
 }
@@ -288,7 +288,7 @@ export default function Dashboard() {
           <h2 className="font-bold text-gray-800">Últimos 10 formularios</h2>
           <button
             onClick={() => navigate('/registros')}
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium transition"
+            className="text-sm text-brand-600 hover:text-brand-800 font-medium transition"
           >
             Ver todos →
           </button>

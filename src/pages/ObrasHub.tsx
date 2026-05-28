@@ -86,7 +86,7 @@ export default function ObrasHub() {
         </div>
         <button
           onClick={reload}
-          className="flex items-center gap-2 text-sm text-blue-700 hover:text-blue-800 font-medium px-3 py-2 rounded-lg hover:bg-blue-50 transition"
+          className="flex items-center gap-2 text-sm text-brand-700 hover:text-brand-800 font-medium px-3 py-2 rounded-lg hover:bg-brand-50 transition"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -109,7 +109,7 @@ export default function ObrasHub() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Buscar por nombre, código o cliente…"
-            className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-transparent rounded-lg focus:bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-transparent rounded-lg focus:bg-white focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
 
@@ -117,7 +117,7 @@ export default function ObrasHub() {
         <select
           value={sortBy}
           onChange={e => setSortBy(e.target.value as SortBy)}
-          className="text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
         >
           <option value="recientes">↓ Más recientes</option>
           <option value="pendientes">↓ Con más pendientes</option>

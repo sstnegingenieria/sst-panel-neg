@@ -195,7 +195,7 @@ export default function TecnicoPerfilModal({ isOpen, onClose, tecnico, obras }: 
                       <button
                         onClick={() => handleDescargar(url, label, tecnico.nombre)}
                         disabled={descargando === label}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold transition-colors"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 text-white text-xs font-semibold transition-colors"
                       >
                         {descargando === label ? (
                           <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -234,7 +234,7 @@ export default function TecnicoPerfilModal({ isOpen, onClose, tecnico, obras }: 
                     : obrasNombres.map((nombre, i) => (
                         <span
                           key={i}
-                          className="inline-flex px-2.5 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs border border-blue-100"
+                          className="inline-flex px-2.5 py-0.5 rounded-md bg-brand-50 text-brand-700 text-xs border border-brand-100"
                         >
                           {nombre}
                         </span>

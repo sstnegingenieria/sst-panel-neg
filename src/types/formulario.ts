@@ -92,7 +92,7 @@ export const TIPO_LABELS: Record<string, string> = {
 }
 
 export const TIPO_COLOR: Record<string, string> = {
-  preoperacional:          'bg-blue-100 text-blue-800',
+  preoperacional:          'bg-brand-100 text-brand-800',
   ats:                     'bg-violet-100 text-violet-800',
   charla:                  'bg-purple-100 text-purple-800',
   permiso_alturas:         'bg-orange-100 text-orange-800',
@@ -101,7 +101,7 @@ export const TIPO_COLOR: Record<string, string> = {
   inspeccion_epp:          'bg-teal-100 text-teal-800',
   inspeccion_escaleras:    'bg-sky-100 text-sky-800',
   inspeccion_arnes:        'bg-indigo-100 text-indigo-800',
-  inspeccion_tieoff:       'bg-blue-100 text-blue-800',
+  inspeccion_tieoff:       'bg-brand-100 text-brand-800',
   inspeccion_instalaciones:'bg-emerald-100 text-emerald-800',
   inspeccion_hseq:         'bg-lime-100 text-lime-800',
   reporte_actos:           'bg-amber-100 text-amber-800',

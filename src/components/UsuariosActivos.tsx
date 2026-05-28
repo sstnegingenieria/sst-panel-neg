@@ -166,7 +166,7 @@ export default function UsuariosActivos({
                       {(t.obras_asignadas ?? []).map(id => (
                         <span
                           key={id}
-                          className="inline-flex px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs border border-blue-100"
+                          className="inline-flex px-2 py-0.5 rounded-md bg-brand-50 text-brand-700 text-xs border border-brand-100"
                         >
                           {obraMap[id] ?? id}
                         </span>
@@ -199,7 +199,7 @@ export default function UsuariosActivos({
                           <button
                             onClick={() => onAsignarObras(t)}
                             title="Asignar obras"
-                            className="text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition font-medium"
+                            className="text-xs px-2.5 py-1.5 rounded-lg border border-brand-200 text-brand-600 hover:bg-brand-50 transition font-medium"
                           >
                             🔗 Obras
                           </button>

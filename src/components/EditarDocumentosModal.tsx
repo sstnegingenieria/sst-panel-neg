@@ -80,7 +80,7 @@ export default function EditarDocumentosModal({ isOpen, onClose, tecnico, onGuar
             type="date"
             value={epsVenc}
             onChange={e => setEpsVenc(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
           />
           {epsVenc && (
             <div className="flex items-center gap-2">
@@ -104,7 +104,7 @@ export default function EditarDocumentosModal({ isOpen, onClose, tecnico, onGuar
             type="date"
             value={arlVenc}
             onChange={e => setArlVenc(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
           />
           {arlVenc && (
             <div className="flex items-center gap-2">
@@ -128,7 +128,7 @@ export default function EditarDocumentosModal({ isOpen, onClose, tecnico, onGuar
             type="date"
             value={pensionVenc}
             onChange={e => setPensionVenc(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
           />
           {pensionVenc && (
             <div className="flex items-center gap-2">

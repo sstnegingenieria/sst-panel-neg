@@ -11,7 +11,7 @@ interface Props {
 }
 
 const rolBadge: Record<string, string> = {
-  sst: 'bg-blue-100 text-blue-800',
+  sst: 'bg-brand-100 text-brand-800',
   admin: 'bg-purple-100 text-purple-800',
   tecnico: 'bg-gray-100 text-gray-700',
 }
@@ -63,14 +63,14 @@ function RolSelector({ tecnico, onCambiarRol }: { tecnico: Tecnico; onCambiarRol
 export default function UsuariosPanel({ isAdmin, usuarios, loading, onCambiarRol, onDesactivar, onActivar }: Props) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-      <div className="px-6 py-4 border-b border-gray-100 bg-blue-50 rounded-t-lg">
-        <h2 className="font-bold text-blue-800">
+      <div className="px-6 py-4 border-b border-gray-100 bg-brand-50 rounded-t-lg">
+        <h2 className="font-bold text-brand-800">
           Personal de panel (SST / Admin)
           {!loading && (
-            <span className="ml-2 text-xs font-normal text-blue-500">({usuarios.length})</span>
+            <span className="ml-2 text-xs font-normal text-brand-500">({usuarios.length})</span>
           )}
         </h2>
-        <p className="text-xs text-blue-600 mt-0.5">Usuarios con acceso al panel web</p>
+        <p className="text-xs text-brand-600 mt-0.5">Usuarios con acceso al panel web</p>
       </div>
 
       <div className="overflow-x-auto">

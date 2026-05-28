@@ -128,7 +128,7 @@ export default function ContratistasForm({
                 set('tipoDoc', e.target.value as 'nit' | 'cedula')
                 set('numero', '')   // limpiar número al cambiar tipo
               }}
-              className="w-28 flex-shrink-0 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-28 flex-shrink-0 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               <option value="nit">NIT</option>
               <option value="cedula">Cédula</option>
@@ -141,7 +141,7 @@ export default function ContratistasForm({
               value={form.numero}
               onChange={e => set('numero', e.target.value)}
               placeholder={form.tipoDoc === 'nit' ? '900.123.456-8' : '1020345678'}
-              className={`flex-1 rounded-lg border px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+              className={`flex-1 rounded-lg border px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 ${
                 errors.numero ? 'border-red-400' : 'border-gray-300'
               }`}
             />

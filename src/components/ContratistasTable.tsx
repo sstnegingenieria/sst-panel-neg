@@ -16,7 +16,7 @@ interface ContratistasTableProps {
 
 const tipoBadge = {
   juridica: 'bg-violet-50 text-violet-700',
-  natural: 'bg-blue-50 text-blue-700',
+  natural: 'bg-brand-50 text-brand-700',
 }
 
 const estadoBadge = {

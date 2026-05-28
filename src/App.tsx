@@ -28,7 +28,7 @@ function ProtectedRoutes() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <div className="w-10 h-10 border-4 border-brand-600 border-t-transparent rounded-full animate-spin" />
           <p className="text-sm text-gray-500">Cargando...</p>
         </div>
       </div>
@@ -53,7 +53,7 @@ function ProtectedRoutes() {
           </p>
           <button
             onClick={() => { import('./firebase/config').then(({ auth }) => auth.signOut()) }}
-            className="mt-6 text-sm text-blue-600 hover:underline"
+            className="mt-6 text-sm text-brand-600 hover:underline"
           >
             Cerrar sesión
           </button>

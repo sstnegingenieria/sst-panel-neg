@@ -17,7 +17,7 @@ export default function ObraCard({ obra }: Props) {
       className={`group flex flex-col bg-white border rounded-lg p-4 transition-all ${
         inactiva
           ? 'border-gray-200 opacity-60 hover:opacity-90'
-          : 'border-gray-200 hover:border-blue-700 hover:shadow-md hover:-translate-y-0.5'
+          : 'border-gray-200 hover:border-brand-700 hover:shadow-md hover:-translate-y-0.5'
       }`}
     >
       {/* Título + estado */}
@@ -72,7 +72,7 @@ export default function ObraCard({ obra }: Props) {
             ? `${formatRelativeDate(obra.ultimoTimestamp)} · ${obra.ultimoResponsable || '—'}`
             : 'Sin actividad'}
         </span>
-        <span className="text-[11px] font-semibold text-blue-700 group-hover:text-blue-800 flex-shrink-0 ml-2 inline-flex items-center gap-0.5">
+        <span className="text-[11px] font-semibold text-brand-700 group-hover:text-brand-800 flex-shrink-0 ml-2 inline-flex items-center gap-0.5">
           Gestionar
           <span className="transition-transform group-hover:translate-x-0.5">→</span>
         </span>

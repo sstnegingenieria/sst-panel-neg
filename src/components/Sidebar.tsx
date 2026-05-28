@@ -78,20 +78,20 @@ export default function Sidebar({ collapsed }: SidebarProps) {
 
   return (
     <aside
-      className={`h-screen bg-blue-900 text-white flex flex-col transition-all duration-300 ${
+      className={`h-screen bg-white border-r border-gray-200 text-gray-700 flex flex-col transition-all duration-300 ${
         collapsed ? 'w-16' : 'w-60'
       }`}
     >
       {/* Brand */}
-      <div className="flex items-center gap-3 px-4 py-5 border-b border-blue-800/70">
-        <div className="flex-shrink-0 w-9 h-9 bg-white text-blue-900 rounded-lg flex items-center justify-center font-display font-extrabold text-base shadow-sm">
+      <div className="flex items-center gap-3 px-4 py-5 border-b border-gray-100">
+        <div className="flex-shrink-0 w-9 h-9 bg-brand-600 text-white rounded-lg flex items-center justify-center font-display font-extrabold text-base shadow-sm">
           N
         </div>
         {!collapsed && (
-          <span className="font-display font-bold text-[15px] leading-tight tracking-tight">
+          <span className="font-display font-bold text-[15px] leading-tight tracking-tight text-gray-900">
             NEG Ingeniería
             <br />
-            <span className="text-blue-300 font-sans font-medium text-[11px] uppercase tracking-wider">
+            <span className="text-gray-400 font-sans font-medium text-[11px] uppercase tracking-wider">
               Panel de Gestión SST
             </span>
           </span>
@@ -108,8 +108,8 @@ export default function Sidebar({ collapsed }: SidebarProps) {
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                 isActive
-                  ? 'bg-blue-700 text-white font-medium'
-                  : 'text-blue-200 hover:bg-blue-800 hover:text-white'
+                  ? 'bg-brand-50 text-brand-700 font-semibold'
+                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
               }`
             }
           >
@@ -117,12 +117,12 @@ export default function Sidebar({ collapsed }: SidebarProps) {
               {item.icon}
               {/* Badge compacto cuando el sidebar está colapsado */}
               {collapsed && item.to === '/registros' && pendientesRegistros > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full text-[10px] font-bold flex items-center justify-center">
                   {pendientesRegistros > 9 ? '9+' : pendientesRegistros}
                 </span>
               )}
               {collapsed && item.to === '/usuarios' && pendientesTecnicos > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 rounded-full text-[10px] font-bold flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-white rounded-full text-[10px] font-bold flex items-center justify-center">
                   {pendientesTecnicos > 9 ? '9+' : pendientesTecnicos}
                 </span>
               )}
@@ -148,8 +148,11 @@ export default function Sidebar({ collapsed }: SidebarProps) {
 
       {/* Footer */}
       {!collapsed && (
-        <div className="px-4 py-3 border-t border-blue-800 text-xs text-blue-400">
-          NEG Ingeniería SST · v2
+        <div className="px-4 py-3 border-t border-gray-100">
+          <p className="font-slogan italic text-[11px] text-brand-700 leading-tight">
+            Ingeniería que cambia el mundo
+          </p>
+          <p className="text-[10px] text-gray-400 mt-1">NEG Ingeniería SST · v2</p>
         </div>
       )}
     </aside>

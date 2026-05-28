@@ -230,7 +230,7 @@ export default function Reportes() {
           <button
             onClick={load}
             title="Actualizar datos"
-            className="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-700 font-medium px-3 py-2 rounded-lg hover:bg-gray-100 transition"
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-brand-700 font-medium px-3 py-2 rounded-lg hover:bg-gray-100 transition"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -323,7 +323,7 @@ export default function Reportes() {
           <select
             value={filters.tipo}
             onChange={e => setFilters(f => ({ ...f, tipo: e.target.value }))}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
           >
             <option value="">Todos los tipos</option>
             {Object.entries(TIPO_LABELS).map(([val, label]) => (
@@ -334,7 +334,7 @@ export default function Reportes() {
           <select
             value={filters.proyecto}
             onChange={e => setFilters(f => ({ ...f, proyecto: e.target.value }))}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
           >
             <option value="">Todas las obras</option>
             {obrasUnicas.map(o => <option key={o} value={o}>{o}</option>)}
@@ -345,7 +345,7 @@ export default function Reportes() {
             placeholder="Buscar técnico…"
             value={filters.tecnico}
             onChange={e => setFilters(f => ({ ...f, tecnico: e.target.value }))}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
 
           <div className="relative">
@@ -354,7 +354,7 @@ export default function Reportes() {
               type="date"
               value={filters.fechaDesde}
               onChange={e => setFilters(f => ({ ...f, fechaDesde: e.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 pt-6 pb-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg border border-gray-300 px-3 pt-6 pb-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
 
@@ -364,14 +364,14 @@ export default function Reportes() {
               type="date"
               value={filters.fechaHasta}
               onChange={e => setFilters(f => ({ ...f, fechaHasta: e.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 pt-6 pb-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg border border-gray-300 px-3 pt-6 pb-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
 
           <select
             value={filters.revision}
             onChange={e => setFilters(f => ({ ...f, revision: e.target.value }))}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
           >
             <option value="">Todas las revisiones</option>
             <option value="pendiente">⏳ Pendientes</option>
@@ -466,7 +466,7 @@ export default function Reportes() {
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={() => handlePdfDescargado(f.id)}
-                              className="text-blue-600 hover:text-blue-800 text-xs underline"
+                              className="text-brand-600 hover:text-brand-800 text-xs underline"
                             >
                               Ver PDF
                             </a>
@@ -530,7 +530,7 @@ function PageBtn({
       disabled={disabled}
       className={`w-8 h-8 rounded text-sm font-medium transition
         ${active
-          ? 'bg-blue-600 text-white'
+          ? 'bg-brand-600 text-white'
           : 'text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed'}
       `}
     >

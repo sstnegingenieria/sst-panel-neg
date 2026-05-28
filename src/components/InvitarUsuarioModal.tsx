@@ -86,7 +86,7 @@ export default function InvitarUsuarioModal({ isOpen, onClose, onCreado }: Props
             value={nombre}
             onChange={e => setNombre(e.target.value)}
             placeholder="Ej: Giovanny Montes"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
 
@@ -101,7 +101,7 @@ export default function InvitarUsuarioModal({ isOpen, onClose, onCreado }: Props
             value={email}
             onChange={e => setEmail(e.target.value)}
             placeholder="usuario@neg-ingenieria.com"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
 
@@ -118,7 +118,7 @@ export default function InvitarUsuarioModal({ isOpen, onClose, onCreado }: Props
                   rol === r
                     ? r === 'admin'
                       ? 'border-purple-500 bg-purple-50 text-purple-800'
-                      : 'border-blue-500 bg-blue-50 text-blue-800'
+                      : 'border-brand-500 bg-brand-50 text-brand-800'
                     : 'border-gray-200 text-gray-600 hover:border-gray-300'
                 }`}
               >
@@ -132,7 +132,7 @@ export default function InvitarUsuarioModal({ isOpen, onClose, onCreado }: Props
         </div>
 
         {/* Info */}
-        <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 text-xs text-blue-700">
+        <div className="bg-brand-50 border border-brand-100 rounded-lg px-4 py-3 text-xs text-brand-700">
           Se enviará un correo a <strong>{email || 'la dirección indicada'}</strong> para que el usuario
           establezca su contraseña y pueda ingresar al panel.
         </div>
@@ -157,7 +157,7 @@ export default function InvitarUsuarioModal({ isOpen, onClose, onCreado }: Props
           <button
             type="submit"
             disabled={loading || !nombre.trim() || !email.trim()}
-            className="px-5 py-2 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-300 text-white text-sm font-semibold rounded-lg transition"
+            className="px-5 py-2 bg-brand-700 hover:bg-brand-800 disabled:bg-brand-300 text-white text-sm font-semibold rounded-lg transition"
           >
             {loading ? 'Creando cuenta…' : 'Invitar usuario'}
           </button>

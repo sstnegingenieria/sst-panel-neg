@@ -18,7 +18,7 @@ interface ModalProps {
 
 const sizeClass = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg' }
 const btnClass = {
-  primary: 'bg-blue-700 hover:bg-blue-800 text-white',
+  primary: 'bg-brand-700 hover:bg-brand-800 text-white',
   danger: 'bg-red-600 hover:bg-red-700 text-white',
   secondary: 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300',
 }

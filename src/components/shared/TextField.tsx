@@ -22,7 +22,7 @@ export default function TextField({ label, value, onChange, error, hint, require
         className={`px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 transition ${
           error
             ? 'border-red-400 focus:ring-red-300'
-            : 'border-gray-300 focus:ring-blue-300 focus:border-blue-400'
+            : 'border-gray-300 focus:ring-brand-300 focus:border-brand-400'
         }`}
         {...rest}
       />
