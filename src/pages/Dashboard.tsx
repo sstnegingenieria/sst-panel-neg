@@ -162,7 +162,7 @@ export default function Dashboard() {
           title="Formularios hoy"
           value={totalHoy}
           loading={loading}
-          color="blue"
+          color="brand"
           delta={deltaHoy}
           icon={
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -84,9 +84,11 @@ export default function Sidebar({ collapsed }: SidebarProps) {
     >
       {/* Brand */}
       <div className="flex items-center gap-3 px-4 py-5 border-b border-gray-100">
-        <div className="flex-shrink-0 w-9 h-9 bg-brand-600 text-white rounded-lg flex items-center justify-center font-display font-extrabold text-base shadow-sm">
-          N
-        </div>
+        <img
+          src="/logo-neg.png"
+          alt="NEG Ingeniería"
+          className="flex-shrink-0 w-9 h-9 object-contain"
+        />
         {!collapsed && (
           <span className="font-display font-bold text-[15px] leading-tight tracking-tight text-gray-900">
             NEG Ingeniería
