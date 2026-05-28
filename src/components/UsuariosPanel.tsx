@@ -62,9 +62,9 @@ function RolSelector({ tecnico, onCambiarRol }: { tecnico: Tecnico; onCambiarRol
 
 export default function UsuariosPanel({ isAdmin, usuarios, loading, onCambiarRol, onDesactivar, onActivar }: Props) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-      <div className="px-6 py-4 border-b border-gray-100 bg-blue-50 rounded-t-xl">
-        <h2 className="font-semibold text-blue-800">
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+      <div className="px-6 py-4 border-b border-gray-100 bg-blue-50 rounded-t-lg">
+        <h2 className="font-bold text-blue-800">
           Personal de panel (SST / Admin)
           {!loading && (
             <span className="ml-2 text-xs font-normal text-blue-500">({usuarios.length})</span>

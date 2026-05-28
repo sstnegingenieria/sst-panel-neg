@@ -49,9 +49,20 @@ function RolSelector({ tecnico, onCambiarRol }: { tecnico: Tecnico; onCambiarRol
 }
 
 const estadoBadge = {
-  activo: 'bg-green-100 text-green-800',
-  inactivo: 'bg-red-100 text-red-800',
-  pendiente: 'bg-amber-100 text-amber-800',
+  activo: 'bg-emerald-50 text-emerald-700',
+  inactivo: 'bg-gray-100 text-gray-500',
+  pendiente: 'bg-amber-50 text-amber-700',
+}
+
+function initials(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(s => s[0]?.toUpperCase() ?? '')
+      .join('') || '?'
+  )
 }
 
 export default function UsuariosActivos({
@@ -60,10 +71,10 @@ export default function UsuariosActivos({
   const obraMap = Object.fromEntries(obras.map(o => [o.id, o.nombre_sitio]))
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
       <div className="px-6 py-4 border-b border-gray-100">
-        <h2 className="font-semibold text-gray-800">
-          Técnicos registrados
+        <h2 className="font-bold text-gray-800">
+          Base de datos de técnicos
           {!loading && (
             <span className="ml-2 text-xs font-normal text-gray-400">({tecnicos.length})</span>
           )}
@@ -108,8 +119,15 @@ export default function UsuariosActivos({
               tecnicos.map(t => (
                 <tr key={t.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                   <td className="py-3 px-4">
-                    <div className="font-medium text-gray-800">{t.nombre}</div>
-                    <div className="text-xs text-gray-400">{t.email}</div>
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                        {initials(t.nombre)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-800 truncate">{t.nombre}</div>
+                        <div className="text-xs text-gray-400 truncate">{t.email}</div>
+                      </div>
+                    </div>
                   </td>
                   <td className="py-3 px-4 text-gray-700 font-mono text-xs">
                     {t.cedula ?? <span className="text-gray-300 font-sans">—</span>}
