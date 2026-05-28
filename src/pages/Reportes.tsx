@@ -3,6 +3,7 @@ import { collection, getDocs, doc, updateDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { toast } from '../components/shared/Toast'
 import { Formulario, TIPO_LABELS, normalizarDoc } from '../components/RegistrosTable'
+import StatCard from '../components/StatCard'
 import * as XLSX from 'xlsx'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -218,26 +219,105 @@ export default function Reportes() {
     <div className="max-w-7xl mx-auto space-y-6">
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Reportes</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Exportar formularios SST a Excel o CSV</p>
+          <h1 className="text-2xl font-bold text-gray-900">Módulo de Reportes</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Auditorías, inspecciones y registros SST · exportá a Excel o CSV
+          </p>
         </div>
-        <button
-          onClick={load}
-          className="flex items-center gap-2 text-sm text-blue-700 hover:text-blue-800 font-medium px-3 py-2 rounded-lg hover:bg-blue-50 transition"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Actualizar
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={load}
+            title="Actualizar datos"
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-700 font-medium px-3 py-2 rounded-lg hover:bg-gray-100 transition"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span className="hidden sm:block">Actualizar</span>
+          </button>
+          <button
+            onClick={handleCSV}
+            disabled={loading || !filtered.length}
+            className="flex items-center gap-2 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg border border-gray-300 transition"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            CSV
+          </button>
+          <button
+            onClick={handleExcel}
+            disabled={loading || !filtered.length}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm transition"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Excel (.xlsx)
+          </button>
+        </div>
+      </div>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="Seleccionados"
+          value={loading ? '…' : stats.total}
+          loading={loading}
+          color="blue"
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Pendientes"
+          value={loading ? '…' : stats.pendiente}
+          loading={loading}
+          color="orange"
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Aprobados"
+          value={loading ? '…' : stats.aprobado}
+          loading={loading}
+          color="green"
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Rechazados"
+          value={loading ? '…' : stats.rechazado}
+          loading={loading}
+          color="red"
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
       </div>
 
       {/* Filtros */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-4">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Filtros</p>
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm px-6 py-4">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Filtros de búsqueda</p>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
 
           <select
@@ -310,52 +390,11 @@ export default function Reportes() {
         )}
       </div>
 
-      {/* Stats + botones export */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatMini label="Seleccionados" value={loading ? '…' : stats.total}    color="blue"   />
-        <StatMini label="Pendientes"    value={loading ? '…' : stats.pendiente} color="yellow" />
-        <StatMini label="Aprobados"     value={loading ? '…' : stats.aprobado}  color="green"  />
-        <StatMini label="Rechazados"    value={loading ? '…' : stats.rechazado} color="red"    />
-      </div>
-
-      {/* Botones exportar */}
-      <div className="flex flex-wrap gap-3">
-        <button
-          onClick={handleExcel}
-          disabled={loading || !filtered.length}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow-sm transition"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          Exportar Excel (.xlsx)
-        </button>
-
-        <button
-          onClick={handleCSV}
-          disabled={loading || !filtered.length}
-          className="flex items-center gap-2 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed text-gray-700 text-sm font-semibold px-5 py-2.5 rounded-lg shadow-sm border border-gray-300 transition"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          Exportar CSV
-        </button>
-
-        {!loading && filtered.length > 0 && (
-          <span className="self-center text-xs text-gray-400">
-            {filtered.length} registro{filtered.length !== 1 ? 's' : ''} se exportarán
-          </span>
-        )}
-      </div>
-
       {/* Tabla preview */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="font-semibold text-gray-800">
-            Vista previa
+          <h2 className="font-bold text-gray-800">
+            Vista previa de reportes
             {!loading && (
               <span className="ml-2 text-xs font-normal text-gray-400">
                 ({filtered.length} registros
@@ -479,22 +518,6 @@ export default function Reportes() {
 }
 
 // ── Sub-componentes ───────────────────────────────────────────────────────────
-
-const STAT_COLORS: Record<string, string> = {
-  blue:   'bg-blue-50   text-blue-700   border-blue-100',
-  yellow: 'bg-yellow-50 text-yellow-700 border-yellow-100',
-  green:  'bg-green-50  text-green-700  border-green-100',
-  red:    'bg-red-50    text-red-700    border-red-100',
-}
-
-function StatMini({ label, value, color }: { label: string; value: number | string; color: string }) {
-  return (
-    <div className={`rounded-xl border px-5 py-4 ${STAT_COLORS[color] ?? STAT_COLORS.blue}`}>
-      <p className="text-xs font-semibold uppercase tracking-wide opacity-70">{label}</p>
-      <p className="text-3xl font-bold mt-1">{value}</p>
-    </div>
-  )
-}
 
 function PageBtn({
   label, onClick, disabled, active,

@@ -3,7 +3,7 @@ interface StatCardProps {
   value: number | string
   loading?: boolean
   icon: React.ReactNode
-  color: 'blue' | 'green' | 'orange' | 'purple'
+  color: 'blue' | 'green' | 'orange' | 'purple' | 'red'
   /** Chip de variación opcional (p. ej. "+12% vs mes ant."). */
   delta?: { label: string; positive?: boolean }
 }
@@ -13,6 +13,7 @@ const iconBg = {
   green:  'bg-emerald-50 text-emerald-700',
   orange: 'bg-amber-50 text-amber-700',
   purple: 'bg-violet-50 text-violet-700',
+  red:    'bg-red-50 text-red-600',
 }
 
 export default function StatCard({ title, value, loading, icon, color, delta }: StatCardProps) {
