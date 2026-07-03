@@ -2,8 +2,14 @@
 
 Hooks específicos del SIGP. Se van agregando fase a fase.
 
-Previstos:
-- useConsecutivo (F0) - genera consecutivos vía Cloud Function
+## Implementados
+
+- **useConsecutivo (F0)** — genera consecutivos transaccionales vía la
+  Cloud Function `generarConsecutivo`. Prefijos: SOL, OFR, PRY, ACT, LIQ,
+  FAC, NC. Ver `functions/consecutivos.js`.
+
+## Previstos
+
 - useClientes, useLpu (F1)
 - useCotizacion, useSolicitud (F1)
 - useProyecto (F2)
