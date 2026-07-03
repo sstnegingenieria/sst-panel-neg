@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { NotificacionesProvider } from './contexts/NotificacionesContext'
-import React from 'react'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Obras from './pages/Obras'
@@ -12,14 +11,9 @@ import ObraRegistros from './pages/ObraRegistros'
 import Reportes from './pages/Reportes'
 import Layout from './components/Layout'
 import { ToastContainer } from './components/shared/Toast'
+import { ProtectedRoute } from './components/ProtectedRoute'
 
 const ALLOWED_ROLES = ['sst', 'admin']
-
-function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth()
-  if (user?.rol !== 'admin') return <Navigate to="/registros" replace />
-  return <>{children}</>
-}
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth()
@@ -66,8 +60,8 @@ function ProtectedRoutes() {
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/obras" element={<AdminRoute><Obras /></AdminRoute>} />
-        <Route path="/contratistas" element={<AdminRoute><Contratistas /></AdminRoute>} />
+        <Route path="/obras" element={<ProtectedRoute rolesPermitidos={['admin']}><Obras /></ProtectedRoute>} />
+        <Route path="/contratistas" element={<ProtectedRoute rolesPermitidos={['admin']}><Contratistas /></ProtectedRoute>} />
         <Route path="/usuarios" element={<Usuarios />} />
         <Route path="/registros" element={<ObrasHub />} />
         <Route path="/registros/:obraId" element={<ObraRegistros />} />
