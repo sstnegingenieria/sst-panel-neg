@@ -152,3 +152,6 @@ exports.refreshCustomClaims = functions.https.onRequest(async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+const { generarConsecutivo } = require('./consecutivos');
+exports.generarConsecutivo = generarConsecutivo;
