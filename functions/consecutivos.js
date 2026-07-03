@@ -22,6 +22,7 @@
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
+const { FieldValue } = require('firebase-admin/firestore');
 
 // Nota: admin.initializeApp() ya se llama en index.js — no re-inicializar
 
@@ -71,7 +72,7 @@ const generarConsecutivo = onCall(
           ultimo: siguiente,
           prefijo: prefijo,
           año: año,
-          actualizado: admin.firestore.FieldValue.serverTimestamp(),
+          actualizado: FieldValue.serverTimestamp(),
           actualizado_por: request.auth.uid,
         }, { merge: true });
 

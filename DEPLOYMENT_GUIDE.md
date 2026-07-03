@@ -60,6 +60,32 @@ El panel se conecta **automáticamente a la Firebase Emulator Suite cuando corre
 
 > ⚠️ `storage.rules` en la raíz es un **placeholder solo para el emulador** (`allow read, write: if request.auth != null`). **No** son reglas de producción y **no se despliegan**.
 
+### Ejecutar tests contra emuladores (SIGP) (Iteración 0.3.c)
+
+Hay **dos comandos de test** con propósitos distintos:
+
+| Comando | Qué corre | Dependencias |
+|---|---|---|
+| `npm test` | Tests rápidos de UI/lógica (smoke). **Default de CI y desarrollo.** | Ninguna externa |
+| `npm run test:emulator` | Tests funcionales contra Cloud Functions + Firestore. | **Java (JDK 11+)** + Firebase Emulator Suite |
+
+Los tests que dependen de Cloud Functions y Firestore (p. ej. `useConsecutivo`) corren contra el Firebase Emulator Suite y viven en `src/hooks/sigp/__tests__/`. Están **excluidos del `npm test` por defecto** (ver `vitest.config.ts`) para que un desarrollador nuevo no se tope con un test que exige Java sin avisar.
+
+```bash
+# Requiere Java en el PATH. Levanta emuladores, corre los tests y los apaga solo.
+npm run test:emulator
+```
+
+Internamente:
+```
+firebase emulators:exec --project demo-neg --only functions,firestore,auth \
+  "vitest run --config vitest.emulator.config.ts"
+```
+
+- Usa el proyecto **`demo-neg`** (solo-emulador; nunca contacta servicios reales).
+- Credenciales dummy vía `.env.test`; `firebase/config.ts` conecta a `127.0.0.1` en modo test.
+- La verificación del estado de `consecutivos` se hace por la API REST del emulador con `Authorization: Bearer owner` (bypass de reglas), porque `consecutivos` es una colección **solo-función** y las reglas deniegan la lectura desde el cliente.
+
 ---
 
 ## 🚀 Pasos de Deployment

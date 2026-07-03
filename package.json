@@ -8,7 +8,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:ui": "vitest --ui",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:emulator": "firebase emulators:exec --project demo-neg --only functions,firestore,auth \"vitest run --config vitest.emulator.config.ts\""
   },
   "dependencies": {
     "firebase": "^10.12.2",
