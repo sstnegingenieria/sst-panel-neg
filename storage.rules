@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// ⚠️ Reglas PLACEHOLDER — solo para el Firebase Storage Emulator en desarrollo local.
+// NO son reglas de producción y NO deben desplegarse. Las reglas reales de Storage
+// se diseñan cuando F1 lo requiera y se despliegan aparte con OK explícito del usuario.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      // Solo usuarios autenticados. Placeholder para pruebas locales.
+      allow read, write: if request.auth != null;
+    }
+  }
+}

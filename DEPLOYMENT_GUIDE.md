@@ -27,6 +27,41 @@
 
 ---
 
+## 🧩 SIGP — Fase 0: Dependencias del panel
+
+### `pdf-lib` disponible para generación de PDFs (Iteración 0.1.1)
+
+A partir de F0, el panel web incluye **`pdf-lib` (`^1.17.1`)** como dependencia de producción. Habilita la **generación de PDFs desde el panel** (cotizaciones, actas, informes) sin depender de la app Flutter.
+
+- **Contexto**: hasta ahora los PDFs del panel provenían de la app Flutter (`pdf_url`); el panel solo los mostraba. `pdf-lib` prepara el terreno para que el SIGP genere sus propios documentos (ver Tarea 1.4.5 del plan F1).
+- **Impacto en el bundle**: **ninguno todavía.** Como aún no se importa en ningún archivo, el tree-shaking de Vite la excluye del bundle. Verificado con `npm run build`: el bundle JS quedó idéntico antes y después de instalarla (`1,412.49 kB` / gzip `398.03 kB`, mismo hash de chunk). El peso solo se sumará cuando algún módulo del SIGP la importe.
+- **Sin acción de deployment requerida**: es una dependencia npm estándar; Vercel la instala en el build. No toca Firebase, reglas ni Cloud Functions.
+
+### Desarrollo local con emuladores (Iteración 0.1.3 / 0.1.4)
+
+El panel se conecta **automáticamente a la Firebase Emulator Suite cuando corre en modo dev** (`import.meta.env.DEV`). En producción (`npm run build`) ese bloque se elimina del bundle, así que **no afecta a los usuarios ni a `auth`/`db`/`storage`/`functions` reales**.
+
+`firebase-tools` está instalado como devDependency, así que se invoca con `npx firebase`. Requiere **Java (JDK 11+)** en el PATH para los emuladores de Firestore y Storage.
+
+**Flujo de trabajo local (dos terminales):**
+
+1. **Terminal 1 — levantar los emuladores:**
+   ```bash
+   npx firebase emulators:start
+   ```
+   Levanta Auth (9099), Firestore (8080), Storage (9199), Functions (5001) y la UI (http://127.0.0.1:4000). El primer arranque descarga los binarios de los emuladores (es normal).
+
+2. **Terminal 2 — levantar el panel:**
+   ```bash
+   npm run dev
+   ```
+
+3. El panel en dev **conecta solo a los emuladores** (`127.0.0.1`); no toca datos de producción. Puertos definidos en `firebase.json` → sección `emulators`.
+
+> ⚠️ `storage.rules` en la raíz es un **placeholder solo para el emulador** (`allow read, write: if request.auth != null`). **No** son reglas de producción y **no se despliegan**.
+
+---
+
 ## 🚀 Pasos de Deployment
 
 ### Paso 1: Instalar Firebase CLI (si aún no está)
