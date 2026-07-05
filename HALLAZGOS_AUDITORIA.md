@@ -234,6 +234,24 @@ Estas habilitaciones son estándar y no incurren en cargo por sí mismas (solo e
 
 ---
 
+## Nota de configuración · Política de limpieza de Artifact Registry
+
+El 05-jul-2026, tras el deploy inicial de `generarConsecutivo`, el CLI configuró una política de retención de 1 día para las imágenes de contenedor en `us-central1/gcf-artifacts` (default de firebase-tools en primer deploy). Se ajustó posteriormente a 7 días como colchón razonable para permitir rollback rápido en caso de detectar un bug tras un redeploy.
+
+---
+
+## Validación funcional de `generarConsecutivo` en producción
+
+El 05-jul-2026 se validó manualmente la función `generarConsecutivo` desplegada en `neg-sst-app` invocándola contra producción real desde Google Cloud Shell, autenticando con un usuario del panel (rol `admin`).
+
+Resultado: la función respondió con `OFR-2026-001` en la primera invocación. Se creó el documento `consecutivos/OFR_2026` en Firestore de producción con los campos esperados (`actualizado`, `actualizado_por`, `año`, `prefijo`, `ultimo: 1`).
+
+El documento de prueba se eliminó manualmente después de la validación para dejar producción en estado limpio: cuando F1 emita la primera cotización real, el consecutivo será `OFR-2026-001` como corresponde.
+
+Esta validación confirma end-to-end: autenticación con Firebase Auth, invocación del callable de 2ª gen, transacción atómica en Firestore, y respuesta correcta al cliente.
+
+---
+
 ## Bitácora de resolución
 
 | Hallazgo | Fecha detección | Estado | Fecha resolución | Commit / referencia |
