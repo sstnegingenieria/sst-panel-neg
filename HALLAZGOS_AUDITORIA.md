@@ -161,7 +161,7 @@ Actualizar `DEPLOYMENT_GUIDE.md` para reflejar que el rol se lee de Firestore di
 ## H-004 · Runtime Node 18 y `firebase-functions` v5 desactualizados
 
 **Severidad**: Baja
-**Estado**: Abierto — abordar como tarea de mantenimiento post-F0
+**Estado**: Parcialmente resuelto — 05-jul-2026 (Node 22 en 0.3.d; `firebase-functions` v6 pendiente)
 
 ### Descripción
 
@@ -182,6 +182,8 @@ Tarea de mantenimiento independiente, agendada para después de cerrar F0 (o ant
 3. Revisar que `generarConsecutivo` (v2) siga compilando sin cambios (v6 mantiene v2 estable).
 4. Re-correr los tests contra emulador.
 5. Deploy con OK explícito.
+
+**Actualización parcial (05-jul-2026)**: `engines.node` subido de 18 a 22 durante la Iteración 0.3.d de F0 (bloqueaba el deploy de `generarConsecutivo` porque Node 18 fue retirado por Google el 30-oct-2025). El bump de `firebase-functions` v5 → v6 queda pendiente y se abordará cuando el SIGP sume su segunda Cloud Function (probablemente en F1 con el envío de correos de cotización).
 
 ### Vinculación ISO
 
@@ -221,6 +223,17 @@ Requiere configurar credenciales de service account de Firebase en GitHub Secret
 
 ---
 
+## Nota de configuración · APIs habilitadas en `neg-sst-app`
+
+El 05-jul-2026, durante el pre-flight del deploy de `generarConsecutivo`, el CLI de Firebase habilitó automáticamente dos APIs de Google Cloud necesarias para Cloud Functions 2ª gen:
+
+- `artifactregistry.googleapis.com`
+- `cloudbuild.googleapis.com`
+
+Estas habilitaciones son estándar y no incurren en cargo por sí mismas (solo el uso lo hace). Se documentan aquí como registro del cambio de configuración de producción, no como hallazgo.
+
+---
+
 ## Bitácora de resolución
 
 | Hallazgo | Fecha detección | Estado | Fecha resolución | Commit / referencia |
@@ -228,7 +241,7 @@ Requiere configurar credenciales de service account de Firebase en GitHub Secret
 | H-001 | 05-jul-2026 | Abierto | — | — |
 | H-002 | 05-jul-2026 | Abierto (mantenimiento cosmético post-F0) | — | — |
 | H-003 | 05-jul-2026 | Resuelto | 05-jul-2026 | commit F0 0.3.c-bis |
-| H-004 | 05-jul-2026 | Abierto (mantenimiento post-F0) | — | — |
+| H-004 | 05-jul-2026 | Parcialmente resuelto — 05-jul-2026 (Node 22 en 0.3.d, `firebase-functions` v6 pendiente) | 05-jul-2026 (parcial) | commit F0 0.3.d.2-bis |
 | H-005 | 05-jul-2026 | Abierto (agendar en F1) | — | — |
 
 Cuando cada hallazgo se resuelva, actualizar esta bitácora con la fecha y el commit/PR que lo cerró.
