@@ -2,13 +2,15 @@
 
 ## 📋 Resumen de Cambios Implementados
 
-### 1. Custom Claims en JWT (50% reducción de costos)
-- **Problema anterior**: Cada operación hacía 2 consultas a Firestore para verificar el rol
-- **Solución**: El rol se incluye directamente en el token JWT como custom claim
-- **Cloud Functions**:
-  - `setCustomClaimsOnUserCreate`: Asigna rol al crear usuario
-  - `updateCustomClaimsOnRoleChange`: Actualiza rol cuando cambia
-  - `removeCustomClaimsOnUserDelete`: Limpia claims al eliminar usuario
+### 1. Cloud Functions activas
+
+**Cloud Functions activas**: `generarConsecutivo` (SIGP · consecutivos transaccionales, 2ª gen). No hay otras Cloud Functions desplegadas.
+
+Nota histórica: en julio 2026 se limpiaron 5 funciones legacy que estaban en el código pero nunca operaron en producción. Ver commit correspondiente a la Iteración 0.3.c-bis.
+
+El rol del usuario se lee directamente de `users/{uid}.rol` en Firestore en cada verificación (patrón "role-in-Firestore"). No se usan Firebase Auth custom claims.
+
+> ⚠️ El resto de esta guía conserva secciones del plan original de *custom claims* (Migración de Usuarios, Test 1, Troubleshooting, etc.) que describen ese sistema nunca desplegado. Son referencia histórica; el mecanismo real es el role-in-Firestore descrito arriba.
 
 ### 2. Acceso a Contratistas Restringido
 - **Antes**: Lectura pública (cualquier autenticado)

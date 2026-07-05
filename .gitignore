@@ -5,5 +5,14 @@ dist/
 .vercel/
 *.log
 
+# Credenciales / service accounts — NUNCA subir al repo
+*firebase-adminsdk*.json
+*serviceAccount*.json
+*service-account*.json
+*.key.json
+
+# Salidas de scripts de auditoría
+functions/audit-*.csv
+
 # Brainstorming companion (visual mockups)
 .superpowers/
