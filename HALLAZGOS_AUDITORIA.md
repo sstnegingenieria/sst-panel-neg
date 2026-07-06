@@ -223,6 +223,67 @@ Requiere configurar credenciales de service account de Firebase en GitHub Secret
 
 ---
 
+## H-006 · Gatekeeper global de App.tsx no actualizado durante refactor de roles
+
+**Severidad**: Alta (funcional) / Baja (impacto)
+**Estado**: Resuelto — 05-jul-2026 (commit F0 0.5.d)
+
+### Descripción
+
+Durante las Iteraciones 0.4, 0.5.a y 0.5.b, se introdujeron los 8 roles nuevos del SIGP (`gerencia_general`, `gerencia_administrativa`, `operacion_comercial`, `director_proyectos`, `residente_sst`, `gestion_integral`, `contratista`, `cliente_final`) y se crearon los helpers `accesoSST()` y `accesoSIGP()` para determinar acceso.
+
+Sin embargo, el gatekeeper global inline `ProtectedRoutes()` en `src/App.tsx` no fue actualizado. Mantenía una constante local:
+
+```typescript
+const ALLOWED_ROLES = ['sst', 'admin']
+```
+
+Este gatekeeper es el primer filtro que evalúa todo usuario autenticado. Los roles no listados son rechazados con "Acceso no autorizado", sin importar si las rutas internas los aceptarían.
+
+### Detección
+
+El bug fue detectado en la validación funcional del sub-bloque 0.5.c (05-jul-2026), cuando Pedro Rodríguez intentó el primer login con rol `gerencia_general` recién asignado. La autenticación contra Firebase Auth fue exitosa, pero el panel mostró "Acceso no autorizado" al llegar al gatekeeper.
+
+### Impacto real
+
+Hasta que se aplicó el fix, 4 usuarios en producción no podían entrar al panel:
+- Pedro Rodríguez (gerencia_general)
+- Marcela Montoya (gerencia_administrativa)
+- Karen Cartagena (operacion_comercial)
+- Paula Moreno (director_proyectos — cambió desde admin en la misma iteración)
+
+Los otros 4 usuarios de panel (Giovanny, Ingrid, Juan Carlos, Mabel) no fueron afectados porque mantuvieron roles `admin` o `sst`, ambos listados en `ALLOWED_ROLES`.
+
+### Causa raíz
+
+Refactor incompleto. Cuando se centralizaron los criterios de acceso en los helpers `accesoSST()` / `accesoSIGP()` (Iteración 0.5.a), no se propagó ese cambio a todos los puntos de decisión. El gatekeeper global `ProtectedRoutes()` en App.tsx quedó como isla con su propia lista hardcodeada.
+
+### Solución aplicada
+
+Reemplazar la constante local `ALLOWED_ROLES` por una llamada a los helpers ya centralizados en `types/sigp/roles.ts`:
+
+```typescript
+if (!accesoSST(user.rol as Rol) && !accesoSIGP(user.rol as Rol)) {
+  // pantalla "Acceso no autorizado" (JSX inline existente)
+}
+```
+
+Ahora los **8 roles** con acceso al panel web —la unión `accesoSST` ∪ `accesoSIGP`: `sst`, `admin`, `gerencia_general`, `gestion_integral`, `residente_sst`, `gerencia_administrativa`, `operacion_comercial`, `director_proyectos`— pasan el gatekeeper. Los roles solo-móvil (`tecnico`, `contratista`) siguen siendo rechazados correctamente.
+
+**Sobre `cliente_final`**: queda **excluido del gatekeeper por diseño arquitectónico, no por bug**. `cliente_final` es un rol futuro (F5+) pensado para un **portal de cliente separado** (ver informes y actas de sus proyectos, aprobar entregas), no para el panel administrativo SST/SIGP. Por eso no está en `accesoSST` ni en `accesoSIGP`. Cuando se implemente ese portal tendrá su propio punto de acceso; no se agrega al gatekeeper del panel actual.
+
+### Lecciones para futuras iteraciones
+
+- Cuando se introduzcan cambios de roles, revisar TODOS los puntos de decisión de acceso (no solo las rutas), incluyendo gatekeepers globales, filtros de sidebar, y cualquier condicional que dependa de rol.
+- Considerar un test automatizado que verifique que cada rol declarado en `types/sigp/roles.ts` tenga comportamiento esperado en el gatekeeper (F1+).
+
+### Vinculación ISO
+
+- ISO 9001 cláusula 8.5.1 (control de la producción y la provisión del servicio): el proceso de refactor debe garantizar consistencia en todos los puntos afectados.
+- El hecho de que este bug se cazó en la validación funcional pre-uso operacional (no en producción operativa con usuarios reales trabajando) es un éxito del proceso de sub-bloques con OK explícito.
+
+---
+
 ## Nota de configuración · APIs habilitadas en `neg-sst-app`
 
 El 05-jul-2026, durante el pre-flight del deploy de `generarConsecutivo`, el CLI de Firebase habilitó automáticamente dos APIs de Google Cloud necesarias para Cloud Functions 2ª gen:
@@ -286,5 +347,6 @@ Ejecutada como parte del sub-bloque 0.5.c de F0.
 | H-003 | 05-jul-2026 | Resuelto | 05-jul-2026 | commit F0 0.3.c-bis |
 | H-004 | 05-jul-2026 | Parcialmente resuelto — 05-jul-2026 (Node 22 en 0.3.d, `firebase-functions` v6 pendiente) | 05-jul-2026 (parcial) | commit F0 0.3.d.2-bis |
 | H-005 | 05-jul-2026 | Abierto (agendar en F1) | — | — |
+| H-006 | 05-jul-2026 | Resuelto | 05-jul-2026 | commit F0 0.5.d |
 
 Cuando cada hallazgo se resuelva, actualizar esta bitácora con la fecha y el commit/PR que lo cerró.

@@ -16,9 +16,7 @@ import PanelSigp from './pages/sigp/PanelSigp'
 import ClientesSigp from './pages/sigp/ClientesSigp'
 import SolicitudesSigp from './pages/sigp/SolicitudesSigp'
 import CotizacionesSigp from './pages/sigp/CotizacionesSigp'
-import { ROLES_CON_ACCESO_SIGP } from './types/sigp/roles'
-
-const ALLOWED_ROLES = ['sst', 'admin']
+import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, type Rol } from './types/sigp/roles'
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth()
@@ -36,7 +34,7 @@ function ProtectedRoutes() {
 
   if (!user) return <Login />
 
-  if (!ALLOWED_ROLES.includes(user.rol)) {
+  if (!accesoSST(user.rol as Rol) && !accesoSIGP(user.rol as Rol)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
         <div className="text-center">
