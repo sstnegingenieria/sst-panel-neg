@@ -2,7 +2,16 @@
 
 Un archivo por entidad principal del ERD del SIGP.
 
-Archivos previstos:
+## Implementados
+
+- `roles.ts` — tipos de roles del sistema: `RolSST` (heredados del panel SST),
+  `RolSIGP` (los 8 nuevos del SIGP), su unión `Rol`, y el helper
+  `ROLES_PANEL_WEB` (roles con acceso al panel web). Se agregó en F0 (Iteración 0.4).
+
+## Previstos
+
+Un archivo por entidad principal del ERD:
+
 - Cliente.ts, LpuCliente.ts
 - Solicitud.ts, VisitaTecnica.ts
 - Cotizacion.ts (con ItemCotizacion)

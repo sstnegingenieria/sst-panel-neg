@@ -12,6 +12,10 @@ import Reportes from './pages/Reportes'
 import Layout from './components/Layout'
 import { ToastContainer } from './components/shared/Toast'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import PanelSigp from './pages/sigp/PanelSigp'
+import ClientesSigp from './pages/sigp/ClientesSigp'
+import SolicitudesSigp from './pages/sigp/SolicitudesSigp'
+import CotizacionesSigp from './pages/sigp/CotizacionesSigp'
 
 const ALLOWED_ROLES = ['sst', 'admin']
 
@@ -66,6 +70,16 @@ function ProtectedRoutes() {
         <Route path="/registros" element={<ObrasHub />} />
         <Route path="/registros/:obraId" element={<ObraRegistros />} />
         <Route path="/reportes" element={<Reportes />} />
+
+        {/* Rutas SIGP (placeholders F0). Protegidas por rol con ProtectedRoute
+            ('admin' siempre incluido como fallback). La sección del Sidebar se
+            oculta con SIGP_ENABLED; estas rutas responden por URL directa si el
+            rol del usuario lo permite. */}
+        <Route path="/sigp/panel" element={<ProtectedRoute rolesPermitidos={['admin', 'gerencia_general', 'gerencia_comercial', 'gerencia_administrativa', 'director_proyectos', 'residente_sst', 'gestion_integral']}><PanelSigp /></ProtectedRoute>} />
+        <Route path="/sigp/clientes" element={<ProtectedRoute rolesPermitidos={['admin', 'gerencia_comercial', 'gerencia_general']}><ClientesSigp /></ProtectedRoute>} />
+        <Route path="/sigp/solicitudes" element={<ProtectedRoute rolesPermitidos={['admin', 'gerencia_comercial', 'director_proyectos']}><SolicitudesSigp /></ProtectedRoute>} />
+        <Route path="/sigp/cotizaciones" element={<ProtectedRoute rolesPermitidos={['admin', 'gerencia_comercial', 'director_proyectos', 'gerencia_general']}><CotizacionesSigp /></ProtectedRoute>} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

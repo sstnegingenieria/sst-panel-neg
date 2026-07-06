@@ -88,6 +88,17 @@ firebase emulators:exec --project demo-neg --only functions,firestore,auth \
 - Credenciales dummy vía `.env.test`; `firebase/config.ts` conecta a `127.0.0.1` en modo test.
 - La verificación del estado de `consecutivos` se hace por la API REST del emulador con `Authorization: Bearer owner` (bypass de reglas), porque `consecutivos` es una colección **solo-función** y las reglas deniegan la lectura desde el cliente.
 
+### Feature flag temporal `SIGP_ENABLED` (Iteración 0.4)
+
+La visibilidad del módulo SIGP en el panel se controla con un flag **temporal hardcodeado** en `src/config/featureFlags.ts`:
+
+```ts
+export const SIGP_ENABLED = false as const
+```
+
+- Con `false` (default), la sección SIGP del Sidebar no se renderiza y **se elimina del bundle de producción por tree-shaking** (gracias a `as const`). Las rutas `/sigp/*` siguen existiendo (protegidas por rol con `ProtectedRoute`), pero no hay entrada visible en el menú.
+- En la **Iteración 0.5 de F0** este flag se reemplaza por un hook `useFeatureFlag('sigp_f1_enabled')` que lee de **Firebase Remote Config**, permitiendo activar el SIGP en producción **sin redeploy** (a cambio de perder el tree-shaking, ya que pasa a ser runtime).
+
 ---
 
 ## 🚀 Pasos de Deployment
