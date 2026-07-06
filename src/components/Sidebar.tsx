@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useNotificaciones } from '../contexts/NotificacionesContext'
 import { SIGP_ENABLED } from '../config/featureFlags'
-import type { Rol } from '../types/sigp/roles'
+import { accesoSIGP, type Rol } from '../types/sigp/roles'
 
 interface SidebarProps {
   collapsed: boolean
@@ -73,19 +73,17 @@ const navItems = [
   },
 ]
 
-// Ítems de navegación del SIGP. Se muestran solo si SIGP_ENABLED, y cada ítem
-// solo si el rol del usuario está en rolesPermitidos (los mismos roles que
-// protegen cada ruta en App.tsx).
+// Ítems de navegación del SIGP. Se muestran TODOS si SIGP_ENABLED y el usuario
+// tiene acceso SIGP (ver accesoSIGP). La granularidad fina por vista se maneja
+// dentro de cada página, no en el sidebar.
 const sigpNavItems: {
   to: string
   label: string
-  rolesPermitidos: Rol[]
   icon: JSX.Element
 }[] = [
   {
     to: '/sigp/panel',
     label: 'Panel',
-    rolesPermitidos: ['admin', 'gerencia_general', 'gerencia_comercial', 'gerencia_administrativa', 'director_proyectos', 'residente_sst', 'gestion_integral'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -96,7 +94,6 @@ const sigpNavItems: {
   {
     to: '/sigp/clientes',
     label: 'Clientes',
-    rolesPermitidos: ['admin', 'gerencia_comercial', 'gerencia_general'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -107,7 +104,6 @@ const sigpNavItems: {
   {
     to: '/sigp/solicitudes',
     label: 'Solicitudes',
-    rolesPermitidos: ['admin', 'gerencia_comercial', 'director_proyectos'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -118,7 +114,6 @@ const sigpNavItems: {
   {
     to: '/sigp/cotizaciones',
     label: 'Cotizaciones',
-    rolesPermitidos: ['admin', 'gerencia_comercial', 'director_proyectos', 'gerencia_general'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -204,14 +199,13 @@ export default function Sidebar({ collapsed }: SidebarProps) {
           </NavLink>
         ))}
 
-        {/* Sección SIGP — solo con el feature flag encendido y filtrada por rol.
-            Con SIGP_ENABLED=false (default) no se renderiza nada, y el bloque
-            entero (incl. sigpNavItems) se elimina del bundle por tree-shaking. */}
+        {/* Sección SIGP — solo con el feature flag encendido y si el usuario tiene
+            acceso SIGP (accesoSIGP). Si lo tiene, ve TODOS los ítems SIGP; la
+            granularidad fina por vista se maneja dentro de cada página, no aquí.
+            Con SIGP_ENABLED=false (default) todo el bloque se elimina del bundle
+            por tree-shaking. */}
         {SIGP_ENABLED && (() => {
-          const visibles = sigpNavItems.filter(
-            item => !!user?.rol && item.rolesPermitidos.includes(user.rol as Rol),
-          )
-          if (visibles.length === 0) return null
+          if (!user?.rol || !accesoSIGP(user.rol as Rol)) return null
           return (
             <div className="mt-4 pt-4 border-t border-gray-100">
               {!collapsed && (
@@ -219,7 +213,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
                   SIGP
                 </p>
               )}
-              {visibles.map(item => (
+              {sigpNavItems.map(item => (
                 <NavLink
                   key={item.to}
                   to={item.to}

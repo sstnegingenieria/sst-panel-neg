@@ -14,7 +14,7 @@ interface ProtectedRouteProps {
  * Reemplaza la función inline `AdminRoute` que vivía en `App.tsx`: en lugar de
  * exigir siempre el rol `admin`, acepta cualquier combinación de roles vía
  * `rolesPermitidos`. Esto lo hace reutilizable para los nuevos roles del SIGP
- * (p. ej. `gerencia_comercial`, `director_proyectos`, `residente_sst`) cuando
+ * (p. ej. `operacion_comercial`, `director_proyectos`, `residente_sst`) cuando
  * se agreguen las rutas `/sigp/*`.
  *
  * Se usa DENTRO del gatekeeper global `ProtectedRoutes` de `App.tsx`, que ya

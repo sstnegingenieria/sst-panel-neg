@@ -324,7 +324,7 @@ En `src/components/Sidebar.tsx`, agregar una sección SIGP con los ítems princi
   <div className="mt-6">
     <h3 className="text-xs font-semibold uppercase text-gray-500 px-3 mb-2">SIGP</h3>
     <NavItem to="/sigp/dashboard" icon={...} label="Panel SIGP" />
-    <NavItem to="/sigp/clientes" icon={...} label="Clientes" rolesRequeridos={['admin', 'gerencia_comercial']} />
+    <NavItem to="/sigp/clientes" icon={...} label="Clientes" rolesRequeridos={['admin', 'operacion_comercial']} />
     <NavItem to="/sigp/solicitudes" icon={...} label="Solicitudes" />
     <NavItem to="/sigp/cotizaciones" icon={...} label="Cotizaciones" />
     {/* Más ítems irán apareciendo con cada fase */}
@@ -341,7 +341,7 @@ En `App.tsx`, agregar rutas placeholder para el SIGP:
 ```typescript
 <Route path="/sigp/dashboard" element={
   <ProtectedRoute rolesPermitidos={[
-    'admin', 'gerencia_general', 'gerencia_comercial', 'director_proyectos',
+    'admin', 'gerencia_general', 'operacion_comercial', 'director_proyectos',
     'gerencia_administrativa', 'residente_sst', 'gestion_integral'
   ]}>
     <SigpDashboardPlaceholder />

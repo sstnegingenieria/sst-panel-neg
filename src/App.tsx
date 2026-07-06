@@ -16,6 +16,7 @@ import PanelSigp from './pages/sigp/PanelSigp'
 import ClientesSigp from './pages/sigp/ClientesSigp'
 import SolicitudesSigp from './pages/sigp/SolicitudesSigp'
 import CotizacionesSigp from './pages/sigp/CotizacionesSigp'
+import { ROLES_CON_ACCESO_SIGP } from './types/sigp/roles'
 
 const ALLOWED_ROLES = ['sst', 'admin']
 
@@ -75,10 +76,10 @@ function ProtectedRoutes() {
             ('admin' siempre incluido como fallback). La sección del Sidebar se
             oculta con SIGP_ENABLED; estas rutas responden por URL directa si el
             rol del usuario lo permite. */}
-        <Route path="/sigp/panel" element={<ProtectedRoute rolesPermitidos={['admin', 'gerencia_general', 'gerencia_comercial', 'gerencia_administrativa', 'director_proyectos', 'residente_sst', 'gestion_integral']}><PanelSigp /></ProtectedRoute>} />
-        <Route path="/sigp/clientes" element={<ProtectedRoute rolesPermitidos={['admin', 'gerencia_comercial', 'gerencia_general']}><ClientesSigp /></ProtectedRoute>} />
-        <Route path="/sigp/solicitudes" element={<ProtectedRoute rolesPermitidos={['admin', 'gerencia_comercial', 'director_proyectos']}><SolicitudesSigp /></ProtectedRoute>} />
-        <Route path="/sigp/cotizaciones" element={<ProtectedRoute rolesPermitidos={['admin', 'gerencia_comercial', 'director_proyectos', 'gerencia_general']}><CotizacionesSigp /></ProtectedRoute>} />
+        <Route path="/sigp/panel" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><PanelSigp /></ProtectedRoute>} />
+        <Route path="/sigp/clientes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ClientesSigp /></ProtectedRoute>} />
+        <Route path="/sigp/solicitudes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><SolicitudesSigp /></ProtectedRoute>} />
+        <Route path="/sigp/cotizaciones" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionesSigp /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
