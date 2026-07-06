@@ -74,9 +74,10 @@ function ProtectedRoutes() {
 
         {/* Rutas SIGP (placeholders F0). Protegidas por rol con ProtectedRoute
             ('admin' siempre incluido como fallback). La sección del Sidebar se
-            oculta con SIGP_ENABLED; estas rutas responden por URL directa si el
+            oculta con el flag sigp_f1_enabled (Remote Config); responden por URL directa si el
             rol del usuario lo permite. */}
         <Route path="/sigp/panel" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><PanelSigp /></ProtectedRoute>} />
+        <Route path="/sigp/obras" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><Obras /></ProtectedRoute>} />
         <Route path="/sigp/clientes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ClientesSigp /></ProtectedRoute>} />
         <Route path="/sigp/solicitudes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><SolicitudesSigp /></ProtectedRoute>} />
         <Route path="/sigp/cotizaciones" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionesSigp /></ProtectedRoute>} />

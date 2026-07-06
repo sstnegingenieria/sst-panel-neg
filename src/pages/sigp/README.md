@@ -10,9 +10,9 @@ Páginas principales del módulo SIGP. Todas bajo la ruta /sigp/*.
 - `CotizacionesSigp.tsx` → /sigp/cotizaciones — cotizaciones OFR (Fase 1)
 
 Todas están protegidas por `ProtectedRoute` con los roles apropiados.
-El feature flag `SIGP_ENABLED` (temporal en F0) controla la visibilidad
-de la sección SIGP en el Sidebar; las rutas responden si se accede por
-URL directa (siempre que el rol lo permita).
+El feature flag `sigp_f1_enabled` (Firebase Remote Config, vía el hook
+`useFeatureFlag`) controla la visibilidad de la sección SIGP en el Sidebar;
+las rutas responden si se accede por URL directa (siempre que el rol lo permita).
 
 ## Previstas
 

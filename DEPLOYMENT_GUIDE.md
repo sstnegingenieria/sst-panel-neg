@@ -88,16 +88,13 @@ firebase emulators:exec --project demo-neg --only functions,firestore,auth \
 - Credenciales dummy vía `.env.test`; `firebase/config.ts` conecta a `127.0.0.1` en modo test.
 - La verificación del estado de `consecutivos` se hace por la API REST del emulador con `Authorization: Bearer owner` (bypass de reglas), porque `consecutivos` es una colección **solo-función** y las reglas deniegan la lectura desde el cliente.
 
-### Feature flag temporal `SIGP_ENABLED` (Iteración 0.4)
+### Feature flag `sigp_f1_enabled` (Firebase Remote Config)
 
-La visibilidad del módulo SIGP en el panel se controla con un flag **temporal hardcodeado** en `src/config/featureFlags.ts`:
+La visibilidad del módulo SIGP en el panel se controla con el flag **`sigp_f1_enabled`** en **Firebase Remote Config** (Consola de Firebase → Remote Config → parámetro `sigp_f1_enabled`, Boolean, default `false`). Se lee vía el hook `useFeatureFlag('sigp_f1_enabled', false)` (`src/hooks/useFeatureFlag.ts`).
 
-```ts
-export const SIGP_ENABLED = false as const
-```
-
-- Con `false` (default), la sección SIGP del Sidebar no se renderiza y **se elimina del bundle de producción por tree-shaking** (gracias a `as const`). Las rutas `/sigp/*` siguen existiendo (protegidas por rol con `ProtectedRoute`), pero no hay entrada visible en el menú.
-- En la **Iteración 0.5 de F0** este flag se reemplaza por un hook `useFeatureFlag('sigp_f1_enabled')` que lee de **Firebase Remote Config**, permitiendo activar el SIGP en producción **sin redeploy** (a cambio de perder el tree-shaking, ya que pasa a ser runtime).
+- Los cambios se propagan a las apps **sin necesidad de deploy**. En desarrollo, refresh cada 60s; en producción, cada 12h (default de Firebase).
+- Con el parámetro en `false`, la sección SIGP del Sidebar no aparece; las rutas `/sigp/*` siguen existiendo (protegidas por rol con `ProtectedRoute`), pero no hay entrada visible en el menú.
+- Al pasar del flag hardcodeado (F0.4) a Remote Config (F0.5), el código SIGP del Sidebar ya no se tree-shakea (el flag es runtime). Costo aceptado a cambio de poder activar sin redeploy.
 
 ---
 

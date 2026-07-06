@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useNotificaciones } from '../contexts/NotificacionesContext'
-import { SIGP_ENABLED } from '../config/featureFlags'
+import { useFeatureFlag } from '../hooks/useFeatureFlag'
 import { accesoSIGP, type Rol } from '../types/sigp/roles'
 
 interface SidebarProps {
@@ -73,9 +73,9 @@ const navItems = [
   },
 ]
 
-// Ítems de navegación del SIGP. Se muestran TODOS si SIGP_ENABLED y el usuario
-// tiene acceso SIGP (ver accesoSIGP). La granularidad fina por vista se maneja
-// dentro de cada página, no en el sidebar.
+// Ítems de navegación del SIGP. Se muestran TODOS si el flag sigp_f1_enabled
+// (Remote Config) está activo y el usuario tiene acceso SIGP (ver accesoSIGP).
+// La granularidad fina por vista se maneja dentro de cada página, no en el sidebar.
 const sigpNavItems: {
   to: string
   label: string
@@ -88,6 +88,16 @@ const sigpNavItems: {
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
           d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+      </svg>
+    ),
+  },
+  {
+    to: '/sigp/obras',
+    label: 'Obras',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
       </svg>
     ),
   },
@@ -126,6 +136,7 @@ const sigpNavItems: {
 export default function Sidebar({ collapsed }: SidebarProps) {
   const { user } = useAuth()
   const { pendientesRegistros, pendientesTecnicos } = useNotificaciones()
+  const sigpEnabled = useFeatureFlag('sigp_f1_enabled', false)
   const visibleItems = navItems.filter(item => !item.adminOnly || user?.rol === 'admin')
 
   return (
@@ -199,12 +210,11 @@ export default function Sidebar({ collapsed }: SidebarProps) {
           </NavLink>
         ))}
 
-        {/* Sección SIGP — solo con el feature flag encendido y si el usuario tiene
-            acceso SIGP (accesoSIGP). Si lo tiene, ve TODOS los ítems SIGP; la
-            granularidad fina por vista se maneja dentro de cada página, no aquí.
-            Con SIGP_ENABLED=false (default) todo el bloque se elimina del bundle
-            por tree-shaking. */}
-        {SIGP_ENABLED && (() => {
+        {/* Sección SIGP — solo si el feature flag de Remote Config está encendido
+            (sigp_f1_enabled) y el usuario tiene acceso SIGP (accesoSIGP). Si lo
+            tiene, ve TODOS los ítems SIGP; la granularidad fina por vista se
+            maneja dentro de cada página, no aquí. */}
+        {sigpEnabled && (() => {
           if (!user?.rol || !accesoSIGP(user.rol as Rol)) return null
           return (
             <div className="mt-4 pt-4 border-t border-gray-100">
