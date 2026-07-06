@@ -57,7 +57,7 @@ Luego, cerrar la regla de `contratistas` a `allow read: if isAuthed()`.
 ## H-002 · Doble campo `rol` / `role` en la colección `users` sin consolidación
 
 **Severidad**: Media
-**Estado**: Abierto — mantenimiento cosmético post-F0
+**Estado**: Resuelto — 05-jul-2026 (parte de datos). El mantenimiento cosmético del fallback `?? role` en código Flutter queda como refinamiento post-F0 no bloqueante.
 
 ### Descripción
 
@@ -252,12 +252,37 @@ Esta validación confirma end-to-end: autenticación con Firebase Auth, invocaci
 
 ---
 
+## Migración de roles a modelo SIGP (05-jul-2026)
+
+Ejecutada como parte del sub-bloque 0.5.c de F0.
+
+**Ámbito**:
+- 5 usuarios existentes: 1 actualización (Paula Moreno: `admin` → `director_proyectos`), 4 confirmaciones sin cambio (Giovanny, Ingrid, Juan Carlos, Mabel).
+- 3 usuarios nuevos creados en Firebase Auth + Firestore:
+  - Pedro Rodríguez (`pedro.rodriguez@negingenieria.com`) — `gerencia_general`
+  - Marcela Montoya (`marcelamontoya@negingenieria.com`) — `gerencia_administrativa`
+  - Karen Cartagena (`licitaciones@negingenieria.com`) — `operacion_comercial`
+
+**Estado post-migración**:
+- Colección `users`: 20 documentos totales (12 técnicos + 8 usuarios de panel).
+- Distribución de roles: `tecnico` (12), `admin` (2 — Giovanny, Ingrid), `sst` (2 — Juan Carlos, Mabel), `director_proyectos` (1), `gerencia_general` (1), `gerencia_administrativa` (1), `operacion_comercial` (1).
+- Campo `role` (legacy): 0 documentos.
+- Conflictos `rol` vs `role`: 0.
+
+**Método**: script `functions/scripts/migrar-usuarios-sigp.js` con Admin SDK. Ejecutado primero en `--dry-run` para validar el plan (0 errores), luego en `--apply` con autorización explícita. Duración total del `--apply`: 8.0 s.
+
+**Seguridad**: el password temporal se pasa vía variable de entorno `PASSWORD_TEMPORAL_NUEVOS`; no queda persistido en el repo. Los 3 usuarios nuevos deben cambiar su contraseña en el primer login (recordatorio operacional al momento de entregar credenciales).
+
+**Impacto en H-002**: este proceso cierra formalmente el hallazgo H-002 (doble campo `rol` / `role`). Cero documentos con `role` legacy en la colección al momento del cierre.
+
+---
+
 ## Bitácora de resolución
 
 | Hallazgo | Fecha detección | Estado | Fecha resolución | Commit / referencia |
 |---|---|---|---|---|
 | H-001 | 05-jul-2026 | Abierto | — | — |
-| H-002 | 05-jul-2026 | Abierto (mantenimiento cosmético post-F0) | — | — |
+| H-002 | 05-jul-2026 | Resuelto (datos; fallback Flutter cosmético post-F0) | 05-jul-2026 | commit F0 0.5.c |
 | H-003 | 05-jul-2026 | Resuelto | 05-jul-2026 | commit F0 0.3.c-bis |
 | H-004 | 05-jul-2026 | Parcialmente resuelto — 05-jul-2026 (Node 22 en 0.3.d, `firebase-functions` v6 pendiente) | 05-jul-2026 (parcial) | commit F0 0.3.d.2-bis |
 | H-005 | 05-jul-2026 | Abierto (agendar en F1) | — | — |
