@@ -11,7 +11,7 @@ Cada hallazgo tiene: identificador, severidad (Alta / Media / Baja), descripció
 
 ## H-001 · Colección `contratistas` con lectura pública sin autenticación
 
-**Severidad**: Alta
+**Severidad**: Baja
 **Estado**: Abierto
 
 ### Descripción
@@ -51,6 +51,23 @@ Luego, cerrar la regla de `contratistas` a `allow read: if isAuthed()`.
 - ISO 9001 cláusula 7.5 (control de la información documentada — datos de partes interesadas).
 - ISO 27001 (si NEG lo cita como referencia): control A.13.2.1 (transferencia segura de información).
 - Ley 1581/2012 (Colombia): tratamiento de datos personales de contratistas persona natural.
+
+### Reevaluación del caso de uso (05-jul-2026)
+
+Consultado con Giovanny durante el sub-bloque 0.6.a-bis: la lectura 
+pública está justificada por el flujo de registro en la app Flutter. 
+Cuando un técnico descarga la app y crea su cuenta, debe seleccionar 
+a qué contratista pertenece — este selector se popula ANTES del 
+login (el usuario aún no existe en Auth). Sin lectura pública, el 
+flujo de onboarding se rompe.
+
+Exposición controlada: solo el nombre del contratista es visible. 
+NIT, cédula, teléfono y dirección son campos internos de Firestore 
+que la app Flutter no consulta ni muestra en el selector público.
+
+**Cambio de severidad**: Alta → Baja.
+**Estado**: Refinamiento opcional para F1+ (Cloud Function callable 
+que expone solo `{ id, nombre }` sin acceso público a otros campos).
 
 ---
 
@@ -284,6 +301,108 @@ Ahora los **8 roles** con acceso al panel web —la unión `accesoSST` ∪ `acce
 
 ---
 
+## H-007 · Reglas Firestore no reflejaban roles SIGP nuevos
+
+**Severidad**: Alta (funcional) / Baja (impacto — cazado antes de operación)
+**Estado**: Resuelto — 05-jul-2026 (commit F0 0.6.a-bis)
+
+### Descripción
+
+Similar al H-006 (gatekeeper del panel), las reglas Firestore de 
+`firestore.rules` fueron escritas asumiendo solo los tres roles del 
+panel SST original (`sst`, `admin`, `tecnico`). El helper `isSST()` 
+autorizaba lectura/escritura solo si el rol era `sst` o `admin`.
+
+Al migrar los usuarios del panel a los nuevos roles SIGP en el sub-
+bloque 0.5.c (Pedro → `gerencia_general`, Marcela → 
+`gerencia_administrativa`, Karen → `operacion_comercial`, Paula → 
+`auxiliar_proyectos`), estos usuarios pasaron el gatekeeper del panel 
+pero no podían leer las colecciones básicas (`users`, `obras`, 
+`formularios`, `notificaciones`). El panel mostraba errores tipo 
+"Error al cargar usuarios" en todas las páginas.
+
+### Detección
+
+Cazado en la validación funcional del sub-bloque 0.6.a (05-jul-2026) 
+al probar login de Pedro y Paula: entraban al panel pero ninguna 
+página cargaba datos.
+
+### Impacto real
+
+Cuatro usuarios en producción sin capacidad de leer datos hasta el 
+fix: Pedro, Marcela, Karen, Paula. Los usuarios `admin` y `sst` 
+(Giovanny, Ingrid, Juan Carlos, Mabel) no fueron afectados porque 
+sus roles seguían en la lista original.
+
+### Causa raíz
+
+Refactor incompleto. Similar a H-006, pero en un plano distinto: 
+mientras H-006 era el gatekeeper del panel (código React), H-007 es 
+el gatekeeper de la base de datos (reglas Firestore). Los dos son 
+capas de defensa independientes, y la migración de roles debe 
+propagarse a ambas.
+
+### Solución aplicada
+
+Reemplazar el helper único `isSST()` por cuatro helpers específicos 
+que mapean funciones de negocio reales:
+
+1. `esPersonalPanel()` — acceso general de lectura de `users` (9 roles).
+2. `puedeGestionarProyectos()` — administración de obras y contratistas 
+   (5 roles: admin, gerencia_general, operacion_comercial, 
+   auxiliar_proyectos, director_proyectos). NO incluye sst.
+3. `puedeAdministrarSST()` — administración del subsistema SST 
+   (3 roles: sst, admin, gestion_integral).
+4. `puedeVerSSTSoloLectura()` — visión ejecutiva del SST 
+   (solo `gerencia_general`).
+
+Regresión evitada: durante el diseño se identificó que las reglas 
+originales daban `obras.read` a cualquier autenticado. Se preservó 
+`allow read: if isAuthed()` para no romper el flujo de Juan Carlos/
+Mabel (que necesitan ver obras en el hub SST) ni la app Flutter 
+(técnicos seleccionan obra al crear formulario). Cero regresión 
+funcional para usuarios existentes.
+
+Decisión de diseño sobre sst en escritura: aunque el helper viejo 
+`isSST()` daba a los sst permiso de escritura sobre `obras` y 
+`contratistas`, en la práctica Juan Carlos y Mabel nunca han creado 
+obras (su función es revisar formularios SST). Se decidió NO incluir 
+`sst` en `puedeGestionarProyectos()` para alinear las reglas con la 
+matriz de negocio real y evitar riesgo de escritura no intencional. 
+Los sst pierden un permiso teórico que no usaban.
+
+### Verificación post-fix
+
+Tras el deploy de las reglas, se re-ejecuta la validación funcional 
+del 0.6.a con Pedro y Paula. Ambos deben:
+- Pasar el gatekeeper (ya funcionaba tras 0.5.d).
+- Ver datos en las páginas relevantes.
+
+Adicionalmente, verificar que Juan Carlos (sst) sigue viendo 
+`/registros` sin problema pero NO puede crear obras via URL directa.
+
+**Validación ejecutada el 06-jul-2026**: Pedro y Paula cargan datos correctamente; Juan Carlos y Mabel sin regresión. Deploy de reglas exitoso.
+
+### Lecciones para futuras iteraciones
+
+- Cambios en el modelo de roles requieren propagación a MÍNIMO tres 
+  capas: (1) tipos TypeScript, (2) gatekeeper del panel, (3) reglas 
+  Firestore. Considerar un test de integración que verifique todas 
+  las capas antes del deploy.
+- La granularidad por función de negocio (4 helpers vs 1 único) 
+  refleja mejor la realidad y facilita cambios futuros.
+- Alinear reglas técnicas con la matriz de negocio declarada evita 
+  riesgo de escritura no intencional aunque implique "perder" 
+  permisos teóricos históricos.
+
+### Vinculación ISO
+
+- ISO 9001 cláusula 5.3 (roles, responsabilidades y autoridades).
+- ISO 9001 cláusula 8.5.1 (control de operaciones).
+- ISO 27001 (referencia): control A.9.2 (gestión de acceso de usuarios).
+
+---
+
 ## Nota de configuración · APIs habilitadas en `neg-sst-app`
 
 El 05-jul-2026, durante el pre-flight del deploy de `generarConsecutivo`, el CLI de Firebase habilitó automáticamente dos APIs de Google Cloud necesarias para Cloud Functions 2ª gen:
@@ -338,15 +457,44 @@ Ejecutada como parte del sub-bloque 0.5.c de F0.
 
 ---
 
+## Corrección de rol de Paula Moreno (05-jul-2026)
+
+Durante la validación funcional del sub-bloque 0.6.a, se detectó una 
+inconsistencia entre el rol asignado a Paula Moreno en el sub-bloque 
+0.5.c (`director_proyectos`) y su cargo real según el organigrama 
+oficial de NEG (Auxiliar de Proyectos).
+
+**Riesgo de no conformidad ISO**: la asignación de un rol funcional 
+que excede el cargo real en el organigrama puede generar hallazgos 
+en auditoría (ISO 9001 cláusula 5.3 — autoridades y responsabilidades).
+
+**Acción correctiva**: 
+- Nuevo rol `auxiliar_proyectos` agregado a `types/sigp/roles.ts`, 
+  a `ROLES_PANEL_WEB`, y a `ROLES_CON_ACCESO_SIGP`.
+- Rol de Paula en Firestore actualizado manualmente por Giovanny en 
+  la Consola de Firebase: `director_proyectos` → `auxiliar_proyectos`.
+- Las reglas Firestore del sub-bloque 0.6.a-bis incluyen 
+  `auxiliar_proyectos` en `esPersonalPanel()` y 
+  `puedeGestionarProyectos()`, garantizando que Paula mantiene sus 
+  funciones operacionales (creación de obras) sin exceder su cargo 
+  formal.
+
+El rol `director_proyectos` queda disponible en el tipo `Rol` para 
+uso futuro (el cargo Director de Proyectos existe en el organigrama 
+pero no está ocupado hoy).
+
+---
+
 ## Bitácora de resolución
 
 | Hallazgo | Fecha detección | Estado | Fecha resolución | Commit / referencia |
 |---|---|---|---|---|
-| H-001 | 05-jul-2026 | Abierto | — | — |
+| H-001 | 05-jul-2026 | Abierto — severidad bajada Alta → Baja (refinamiento opcional F1+) | — | — |
 | H-002 | 05-jul-2026 | Resuelto (datos; fallback Flutter cosmético post-F0) | 05-jul-2026 | commit F0 0.5.c |
 | H-003 | 05-jul-2026 | Resuelto | 05-jul-2026 | commit F0 0.3.c-bis |
 | H-004 | 05-jul-2026 | Parcialmente resuelto — 05-jul-2026 (Node 22 en 0.3.d, `firebase-functions` v6 pendiente) | 05-jul-2026 (parcial) | commit F0 0.3.d.2-bis |
 | H-005 | 05-jul-2026 | Abierto (agendar en F1) | — | — |
 | H-006 | 05-jul-2026 | Resuelto | 05-jul-2026 | commit F0 0.5.d |
+| H-007 | 05-jul-2026 | Resuelto | 06-jul-2026 | commit F0 0.6.a-bis |
 
 Cuando cada hallazgo se resuelva, actualizar esta bitácora con la fecha y el commit/PR que lo cerró.

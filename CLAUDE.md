@@ -278,6 +278,7 @@ Los roles viven en `users.rol` y las reglas Firestore los usan para autorizar.
 | `gerencia_administrativa` | Preliquidaciones, pagos, facturación, presupuestos |
 | `operacion_comercial` | Solicitudes, cotizaciones, aprobaciones comerciales |
 | `director_proyectos` | Proyectos, asignaciones, avances, actas |
+| `auxiliar_proyectos` | Apoyo operativo a proyectos: creación de obras y seguimiento (cargo real actual, p. ej. Paula Moreno) |
 | `residente_sst` | Visitas técnicas (para levantamiento), lectura de proyectos |
 | `gestion_integral` | Habilitación de contratistas, no conformidades, auditorías, indicadores |
 | `contratista` | Sube avances por actividad, ve sus proyectos asignados |
@@ -288,7 +289,7 @@ Los roles viven en `users.rol` y las reglas Firestore los usan para autorizar.
 El acceso a cada panel se determina por **área funcional**, no por listas de roles por-ruta. Dos helpers en `types/sigp/roles.ts` son la fuente única de verdad:
 
 - **`accesoSST(rol)`** → `true` para `sst`, `admin`, `gerencia_general`, `gestion_integral`, `residente_sst`.
-- **`accesoSIGP(rol)`** → `true` para `admin`, `gerencia_general`, `gerencia_administrativa`, `operacion_comercial`, `director_proyectos`, `gestion_integral`.
+- **`accesoSIGP(rol)`** → `true` para `admin`, `gerencia_general`, `gerencia_administrativa`, `operacion_comercial`, `director_proyectos`, `auxiliar_proyectos`, `gestion_integral`.
 
 Cada helper consume su array exportado (`ROLES_CON_ACCESO_SST` / `ROLES_CON_ACCESO_SIGP`), que también alimenta la protección de rutas en `App.tsx` (`<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}>`) y el filtro del Sidebar. Consecuencia: **cualquier rol con acceso SIGP ve todas las vistas SIGP**; la granularidad fina (qué acciones puede ejecutar dentro de una vista) se maneja **dentro de cada página**, no en el ruteo ni el sidebar.
 

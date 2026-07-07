@@ -2,7 +2,7 @@
  * Roles del sistema.
  *
  * Los tres primeros son heredados del panel SST original.
- * Los ocho siguientes son introducidos por el SIGP.
+ * Los nueve siguientes son introducidos por el SIGP.
  *
  * La migración de usuarios de rol SST a rol SIGP se ejecuta en la
  * Iteración 0.5 de F0 (solo los 5 usuarios de panel: 3 admin + 2 sst).
@@ -17,6 +17,7 @@ export type RolSIGP =
   | 'gerencia_administrativa'
   | 'operacion_comercial'
   | 'director_proyectos'
+  | 'auxiliar_proyectos'
   | 'residente_sst'
   | 'gestion_integral'
   | 'contratista'
@@ -30,7 +31,7 @@ export type Rol = RolSST | RolSIGP
 export const ROLES_PANEL_WEB: Rol[] = [
   'sst', 'admin',
   'gerencia_general', 'gerencia_administrativa', 'operacion_comercial',
-  'director_proyectos', 'residente_sst', 'gestion_integral',
+  'director_proyectos', 'auxiliar_proyectos', 'residente_sst', 'gestion_integral',
   'cliente_final',
 ]
 
@@ -61,6 +62,7 @@ export function accesoSST(rol: Rol): boolean {
  * - gerencia_administrativa: preliquidaciones, pagos, facturación.
  * - operacion_comercial: solicitudes, cotizaciones, licitaciones.
  * - director_proyectos: gestión de proyectos y ejecución.
+ * - auxiliar_proyectos: apoyo operativo a proyectos (creación de obras, seguimiento).
  * - gestion_integral: habilitación de contratistas, NC, auditorías.
  *
  * NO tienen acceso SIGP: tecnico, sst, residente_sst, contratista, cliente_final.
@@ -71,6 +73,7 @@ export const ROLES_CON_ACCESO_SIGP: Rol[] = [
   'gerencia_administrativa',
   'operacion_comercial',
   'director_proyectos',
+  'auxiliar_proyectos',
   'gestion_integral',
 ]
 
