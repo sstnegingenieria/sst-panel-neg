@@ -485,6 +485,26 @@ pero no está ocupado hoy).
 
 ---
 
+## Cierre de Fase 0 (06-jul-2026)
+
+F0 (Base del SIGP) se cerró el **06-jul-2026** con el merge del **PR #1** (`sigp/f0-base` → `main`, commit de merge **`3f7673a`**) y el **auto-deploy de Vercel a producción verificado** (https://sst-panel-neg.vercel.app → HTTP 200). El feature flag `sigp_f1_enabled` sigue en **`false`**: el SIGP está en producción pero **invisible para todos los usuarios**.
+
+**Estado final de los hallazgos:**
+
+| ID | Estado al cierre de F0 |
+|---|---|
+| H-001 | **Baja** — refinamiento opcional F1+ (lectura pública de `contratistas` justificada por el onboarding en la app Flutter) |
+| H-002 | **Resuelto** — datos consolidados (0 campos `role` legacy); fallback cosmético en Flutter queda post-F0 |
+| H-003 | **Resuelto** — 5 Cloud Functions legacy eliminadas del código |
+| H-004 | **Parcialmente resuelto** — Node 22 desplegado; bump de `firebase-functions` v6 pendiente (mantenimiento) |
+| H-005 | **Abierto** — CI/CD de Cloud Functions, agendado para F1 |
+| H-006 | **Resuelto** — gatekeeper del panel usa `accesoSST`/`accesoSIGP` |
+| H-007 | **Resuelto** — reglas Firestore por rol desplegadas en producción |
+
+Seguimiento abierto post-F0: **H-001** (refinamiento opcional), **H-004** (bump a v6) y **H-005** (CI/CD).
+
+---
+
 ## Bitácora de resolución
 
 | Hallazgo | Fecha detección | Estado | Fecha resolución | Commit / referencia |

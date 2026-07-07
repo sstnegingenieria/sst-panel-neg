@@ -425,14 +425,22 @@ Frase útil: "Antes de proceder, quiero validar contigo esta decisión porque im
 | F4 | Cierre financiero | Facturación contra documento de cierre, pagos, saldo contratista, evaluación, satisfacción |
 | F5 | Cierre ISO | Indicadores automatizados, tablero SGI, auditorías, revisión por la dirección |
 
-### Estado de F0 (al 05-jul-2026)
+### Estado de F0 — ✅ CERRADA (06-jul-2026)
+
+F0 se cerró con el merge del **PR #1** (`sigp/f0-base` → `main`, commit de merge **`3f7673a`**) y el auto-deploy de Vercel a producción **verificado** (https://sst-panel-neg.vercel.app → HTTP 200). **`sigp_f1_enabled` sigue en `false`** → el SIGP está en `main` y desplegado, pero **invisible para todos los usuarios** hasta que F1 esté lista.
 
 - 0.1 ✅ dependencias (pdf-lib, Vitest, Emulator Suite, Storage/Functions en `config.ts`)
 - 0.2 ✅ `ProtectedRoute` genérico + estructura de carpetas `sigp/`
 - 0.3 ✅ sistema de consecutivos (Cloud Function desplegada y validada en producción)
 - 0.4 ✅ layout SIGP + rutas placeholder + sidebar
-- 0.5 🚧 refactor de accesos (`accesoSST`/`accesoSIGP`) + Remote Config (`useFeatureFlag`) + migración Obras a `/sigp/obras` + migración de roles (en curso)
-- 0.6 ⏳ regresión SST + merge a `main` (pendiente)
+- 0.5 ✅ refactor de accesos (`accesoSST`/`accesoSIGP`) + Remote Config (`useFeatureFlag`) + migración Obras a `/sigp/obras` + migración de 5 usuarios + creación de 3 nuevos
+- 0.6 ✅ reglas Firestore por rol (H-007) + **0.6.a-ter** + regresión SST + merge a `main`
+
+**Sub-bloque 0.6.a-ter (NO estaba en la planificación original):** durante la validación funcional afloró que las reglas Firestore ya eran correctas, pero la UI mostraba elementos que los roles nuevos no debían ver ni usar. Se creó **`types/sigp/permisos.ts`** — fuente única de permisos de UI (helpers `veX(rol)` de visibilidad y `puedeX(rol)` de acción) que alimenta el gating del Sidebar, de las rutas (`ProtectedRoute`) y de los botones de cada página (aprobar/rechazar, gestión de obras, gestión + habilitación de contratistas). Además se desplegó una regla Firestore que permite a `gerencia_administrativa` un `update` limitado de `contratistas` **solo sobre el campo `estado`** (habilitar/deshabilitar), vía `diff().affectedKeys().hasOnly(['estado', 'fecha_actualizacion'])`.
+
+**Seguimiento abierto post-F0:** H-001 (refinamiento opcional), H-004 (bump `firebase-functions` v6), H-005 (CI/CD de functions). Ver `HALLAZGOS_AUDITORIA.md`.
+
+**Siguiente fase: F1 (Comercial)** — LPU, solicitudes, visitas técnicas, cotizaciones, aprobación del cliente. Ver `PLAN_FASE_1_SIGP.md`.
 
 Cada fase termina con: reglas de seguridad actualizadas, tests verdes, deploy a producción con feature flag, y un chequeo de brechas ISO cubiertas.
 
