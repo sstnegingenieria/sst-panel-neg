@@ -84,7 +84,20 @@ export const ROLES_GESTIONA_CONTRATISTAS: Rol[] = ['admin']
 // Habilitar/deshabilitar contratistas: admin + gerencia_administrativa.
 export const ROLES_HABILITA_CONTRATISTAS: Rol[] = ['admin', 'gerencia_administrativa']
 
+// Crear/editar/desactivar clientes (dominio comercial, F1). Alineado con
+// `puedeGestionarProyectos()` de firestore.rules — los mismos roles que
+// escribirán en `clientes`/`lpus` (ver 1.1.e). La visibilidad de la página
+// se controla aparte con accesoSIGP().
+export const ROLES_GESTIONA_CLIENTES: Rol[] = [
+  'admin', 'gerencia_general', 'operacion_comercial',
+  'auxiliar_proyectos', 'director_proyectos',
+]
+
 export const puedeAprobarRegistros = (rol: string | undefined) => en(rol, ROLES_APROBAR_REGISTROS)
 export const puedeGestionarObrasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_OBRAS)
 export const puedeGestionarContratistasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CONTRATISTAS)
 export const puedeHabilitarContratistas = (rol: string | undefined) => en(rol, ROLES_HABILITA_CONTRATISTAS)
+export const puedeGestionarClientesUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
+// La gestión de LPU (importar, versionar) usa los mismos roles que la de
+// clientes (comercial/proyectos), alineado con puedeGestionarProyectos().
+export const puedeGestionarLpusUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)

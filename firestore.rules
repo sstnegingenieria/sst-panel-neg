@@ -54,6 +54,16 @@ service cloud.firestore {
       return isAuthed() && rolActual() in ['gerencia_general'];
     }
 
+    // 5. Acceso al módulo SIGP (lectura de colecciones comerciales/proyectos).
+    //    Espeja ROLES_CON_ACCESO_SIGP de types/sigp/roles.ts.
+    function accesoSIGP() {
+      return isAuthed() && rolActual() in [
+        'admin', 'gerencia_general', 'gerencia_administrativa',
+        'operacion_comercial', 'director_proyectos', 'auxiliar_proyectos',
+        'gestion_integral'
+      ];
+    }
+
     // ────────────────────────────────────────────────────────────────
     // COLECCIÓN: users
     // ────────────────────────────────────────────────────────────────
@@ -187,6 +197,33 @@ service cloud.firestore {
       );
 
       allow delete: if puedeAdministrarSST();
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: clientes (SIGP — Comercial, F1)
+    // ────────────────────────────────────────────────────────────────
+    // Read: cualquier rol con acceso al módulo SIGP.
+    // Write: solo roles que gestionan proyectos/comercial.
+
+    match /clientes/{clienteId} {
+      allow read: if accesoSIGP();
+      allow create, update, delete: if puedeGestionarProyectos();
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: lpus (+ subcolección items) — SIGP, Comercial, F1
+    // ────────────────────────────────────────────────────────────────
+    // Read: cualquier rol con acceso SIGP. Write: gestión de proyectos.
+    // Los ítems (~900 por LPU) viven en la subcolección lpus/{id}/items.
+
+    match /lpus/{lpuId} {
+      allow read: if accesoSIGP();
+      allow create, update, delete: if puedeGestionarProyectos();
+
+      match /items/{itemId} {
+        allow read: if accesoSIGP();
+        allow create, update, delete: if puedeGestionarProyectos();
+      }
     }
 
     // ────────────────────────────────────────────────────────────────

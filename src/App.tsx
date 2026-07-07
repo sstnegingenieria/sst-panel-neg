@@ -14,6 +14,8 @@ import { ToastContainer } from './components/shared/Toast'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import PanelSigp from './pages/sigp/PanelSigp'
 import ClientesSigp from './pages/sigp/ClientesSigp'
+import LpusSigp from './pages/sigp/LpusSigp'
+import LpuDetalleSigp from './pages/sigp/LpuDetalleSigp'
 import SolicitudesSigp from './pages/sigp/SolicitudesSigp'
 import CotizacionesSigp from './pages/sigp/CotizacionesSigp'
 import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, type Rol } from './types/sigp/roles'
@@ -85,6 +87,8 @@ function ProtectedRoutes() {
         <Route path="/sigp/panel" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><PanelSigp /></ProtectedRoute>} />
         <Route path="/sigp/obras" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><Obras /></ProtectedRoute>} />
         <Route path="/sigp/clientes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ClientesSigp /></ProtectedRoute>} />
+        <Route path="/sigp/lpus" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><LpusSigp /></ProtectedRoute>} />
+        <Route path="/sigp/lpus/:lpuId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><LpuDetalleSigp /></ProtectedRoute>} />
         <Route path="/sigp/solicitudes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><SolicitudesSigp /></ProtectedRoute>} />
         <Route path="/sigp/cotizaciones" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionesSigp /></ProtectedRoute>} />
 

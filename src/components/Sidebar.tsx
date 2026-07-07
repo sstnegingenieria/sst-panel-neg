@@ -124,6 +124,16 @@ const sigpNavItems: {
     ),
   },
   {
+    to: '/sigp/lpus',
+    label: 'LPU',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+      </svg>
+    ),
+  },
+  {
     to: '/sigp/solicitudes',
     label: 'Solicitudes',
     icon: (
@@ -149,7 +159,15 @@ export default function Sidebar({ collapsed }: SidebarProps) {
   const { user } = useAuth()
   const { pendientesRegistros, pendientesTecnicos } = useNotificaciones()
   const sigpEnabled = useFeatureFlag('sigp_f1_enabled', false)
-  const visibleItems = navItems.filter(item => item.ve(user?.rol))
+  // El bloque SIGP se muestra si el flag está activo y el rol tiene acceso SIGP.
+  const mostrarSigp = sigpEnabled && !!user?.rol && accesoSIGP(user.rol as Rol)
+  // "Obras" es canónicamente del flujo SIGP (F0.5.b): cuando el bloque SIGP está
+  // visible, se oculta del bloque SST para no duplicar la entrada. Con el flag
+  // apagado (producción hoy) sigue apareciendo una sola vez en el bloque SST.
+  const visibleItems = navItems.filter(item => {
+    if (item.to === '/obras' && mostrarSigp) return false
+    return item.ve(user?.rol)
+  })
 
   return (
     <aside
@@ -226,8 +244,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
             (sigp_f1_enabled) y el usuario tiene acceso SIGP (accesoSIGP). Si lo
             tiene, ve TODOS los ítems SIGP; la granularidad fina por vista se
             maneja dentro de cada página, no aquí. */}
-        {sigpEnabled && (() => {
-          if (!user?.rol || !accesoSIGP(user.rol as Rol)) return null
+        {mostrarSigp && (() => {
           return (
             <div className="mt-4 pt-4 border-t border-gray-100">
               {!collapsed && (

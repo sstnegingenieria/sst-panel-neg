@@ -9,15 +9,35 @@ import { app } from '../firebase/config'
  * Firebase antes de ser leídos. En caso de error de red o parámetro
  * inexistente, retorna el defaultValue.
  *
+ * En desarrollo (`import.meta.env.DEV`) se puede forzar el valor de un flag sin
+ * tocar Remote Config definiendo `VITE_FF_<nombre>` en `.env.local` (gitignored).
+ * Ej: `VITE_FF_sigp_f1_enabled=true` habilita el módulo SIGP solo en local. En
+ * build de producción `import.meta.env.DEV` es `false`, así que el override es
+ * inerte y nunca afecta a los usuarios.
+ *
  * @param nombre - Nombre del parámetro en Remote Config (ej: 'sigp_f1_enabled')
  * @param defaultValue - Valor por defecto si falla la lectura (default: false)
  * @returns El valor booleano del flag
  */
+function overrideLocal(nombre: string): boolean | undefined {
+  if (!import.meta.env.DEV) return undefined
+  const raw = import.meta.env[`VITE_FF_${nombre}`]
+  if (raw === undefined) return undefined
+  return raw === 'true' || raw === '1'
+}
+
 export function useFeatureFlag(nombre: string, defaultValue = false): boolean {
-  const [valor, setValor] = useState<boolean>(defaultValue)
+  const [valor, setValor] = useState<boolean>(() => overrideLocal(nombre) ?? defaultValue)
 
   useEffect(() => {
     let cancelado = false
+
+    // Override de desarrollo: cortocircuita Remote Config (ver doc del hook).
+    const forzado = overrideLocal(nombre)
+    if (forzado !== undefined) {
+      setValor(forzado)
+      return
+    }
 
     async function cargar() {
       try {
