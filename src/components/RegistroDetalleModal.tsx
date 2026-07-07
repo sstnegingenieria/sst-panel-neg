@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { toast } from './shared/Toast'
 import { Formulario, TIPO_LABELS } from './RegistrosTable'
+import { puedeAprobarRegistros } from '../types/sigp/permisos'
 
 interface Props {
   formulario: Formulario
@@ -203,6 +204,11 @@ export default function RegistroDetalleModal({ formulario: f, onClose, onVistobu
               </p>
             )}
 
+            {/* Controles de revisión: solo roles con permiso de aprobar/rechazar
+                (admin, sst, gestion_integral). Los demás (p. ej. gerencia_general)
+                ven el estado de revisión, pero no lo editan. */}
+            {puedeAprobarRegistros(user?.rol) && (
+              <>
             {/* Toggle aprobar / rechazar */}
             <div className="flex gap-3">
               <label
@@ -270,6 +276,8 @@ export default function RegistroDetalleModal({ formulario: f, onClose, onVistobu
                 'Guardar revisión'
               )}
             </button>
+              </>
+            )}
           </section>
         </div>
       </div>

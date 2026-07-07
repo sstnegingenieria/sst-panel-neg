@@ -3,6 +3,14 @@ import { useAuth } from '../contexts/AuthContext'
 import { useNotificaciones } from '../contexts/NotificacionesContext'
 import { useFeatureFlag } from '../hooks/useFeatureFlag'
 import { accesoSIGP, type Rol } from '../types/sigp/roles'
+import {
+  veDashboardSST,
+  veObras,
+  veContratistas,
+  veTecnicos,
+  veRegistros,
+  veReportes,
+} from '../types/sigp/permisos'
 
 interface SidebarProps {
   collapsed: boolean
@@ -12,6 +20,7 @@ const navItems = [
   {
     to: '/',
     label: 'Dashboard',
+    ve: veDashboardSST,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -22,7 +31,7 @@ const navItems = [
   {
     to: '/obras',
     label: 'Obras',
-    adminOnly: true,
+    ve: veObras,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -33,7 +42,7 @@ const navItems = [
   {
     to: '/contratistas',
     label: 'Contratistas',
-    adminOnly: true,
+    ve: veContratistas,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -44,6 +53,7 @@ const navItems = [
   {
     to: '/usuarios',
     label: 'Técnicos',
+    ve: veTecnicos,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -54,6 +64,7 @@ const navItems = [
   {
     to: '/registros',
     label: 'Registros',
+    ve: veRegistros,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -64,6 +75,7 @@ const navItems = [
   {
     to: '/reportes',
     label: 'Reportes',
+    ve: veReportes,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -137,7 +149,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
   const { user } = useAuth()
   const { pendientesRegistros, pendientesTecnicos } = useNotificaciones()
   const sigpEnabled = useFeatureFlag('sigp_f1_enabled', false)
-  const visibleItems = navItems.filter(item => !item.adminOnly || user?.rol === 'admin')
+  const visibleItems = navItems.filter(item => item.ve(user?.rol))
 
   return (
     <aside

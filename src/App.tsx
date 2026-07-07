@@ -17,6 +17,14 @@ import ClientesSigp from './pages/sigp/ClientesSigp'
 import SolicitudesSigp from './pages/sigp/SolicitudesSigp'
 import CotizacionesSigp from './pages/sigp/CotizacionesSigp'
 import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, type Rol } from './types/sigp/roles'
+import {
+  ROLES_VE_DASHBOARD_SST,
+  ROLES_VE_TECNICOS,
+  ROLES_VE_REGISTROS,
+  ROLES_VE_REPORTES,
+  ROLES_VE_OBRAS,
+  ROLES_VE_CONTRATISTAS,
+} from './types/sigp/permisos'
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth()
@@ -62,13 +70,13 @@ function ProtectedRoutes() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/obras" element={<ProtectedRoute rolesPermitidos={['admin']}><Obras /></ProtectedRoute>} />
-        <Route path="/contratistas" element={<ProtectedRoute rolesPermitidos={['admin']}><Contratistas /></ProtectedRoute>} />
-        <Route path="/usuarios" element={<Usuarios />} />
-        <Route path="/registros" element={<ObrasHub />} />
-        <Route path="/registros/:obraId" element={<ObraRegistros />} />
-        <Route path="/reportes" element={<Reportes />} />
+        <Route path="/" element={<ProtectedRoute rolesPermitidos={ROLES_VE_DASHBOARD_SST} redirectTo="/obras"><Dashboard /></ProtectedRoute>} />
+        <Route path="/obras" element={<ProtectedRoute rolesPermitidos={ROLES_VE_OBRAS}><Obras /></ProtectedRoute>} />
+        <Route path="/contratistas" element={<ProtectedRoute rolesPermitidos={ROLES_VE_CONTRATISTAS}><Contratistas /></ProtectedRoute>} />
+        <Route path="/usuarios" element={<ProtectedRoute rolesPermitidos={ROLES_VE_TECNICOS} redirectTo="/obras"><Usuarios /></ProtectedRoute>} />
+        <Route path="/registros" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/obras"><ObrasHub /></ProtectedRoute>} />
+        <Route path="/registros/:obraId" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/obras"><ObraRegistros /></ProtectedRoute>} />
+        <Route path="/reportes" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REPORTES} redirectTo="/obras"><Reportes /></ProtectedRoute>} />
 
         {/* Rutas SIGP (placeholders F0). Protegidas por rol con ProtectedRoute
             ('admin' siempre incluido como fallback). La sección del Sidebar se

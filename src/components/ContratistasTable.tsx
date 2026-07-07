@@ -12,6 +12,8 @@ interface ContratistasTableProps {
   loading: boolean
   onEdit: (c: Contratista) => void
   onToggleEstado: (c: Contratista) => void
+  puedeGestionar: boolean
+  puedeHabilitar: boolean
 }
 
 const tipoBadge = {
@@ -35,7 +37,7 @@ function initials(name: string): string {
   )
 }
 
-export default function ContratistasTable({ contratistas, loading, onEdit, onToggleEstado }: ContratistasTableProps) {
+export default function ContratistasTable({ contratistas, loading, onEdit, onToggleEstado, puedeGestionar, puedeHabilitar }: ContratistasTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full text-sm">
@@ -94,24 +96,32 @@ export default function ContratistasTable({ contratistas, loading, onEdit, onTog
                   </span>
                 </td>
                 <td className="py-3 px-4 text-right">
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      onClick={() => onEdit(c)}
-                      className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition font-medium"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => onToggleEstado(c)}
-                      className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition ${
-                        c.estado === 'activo'
-                          ? 'border-red-200 text-red-600 hover:bg-red-50'
-                          : 'border-green-200 text-green-600 hover:bg-green-50'
-                      }`}
-                    >
-                      {c.estado === 'activo' ? 'Desactivar' : 'Activar'}
-                    </button>
-                  </div>
+                  {(puedeGestionar || puedeHabilitar) ? (
+                    <div className="flex items-center justify-end gap-2">
+                      {puedeGestionar && (
+                        <button
+                          onClick={() => onEdit(c)}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition font-medium"
+                        >
+                          Editar
+                        </button>
+                      )}
+                      {puedeHabilitar && (
+                        <button
+                          onClick={() => onToggleEstado(c)}
+                          className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition ${
+                            c.estado === 'activo'
+                              ? 'border-red-200 text-red-600 hover:bg-red-50'
+                              : 'border-green-200 text-green-600 hover:bg-green-50'
+                          }`}
+                        >
+                          {c.estado === 'activo' ? 'Desactivar' : 'Activar'}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-gray-300 text-xs">—</span>
+                  )}
                 </td>
               </tr>
             ))}

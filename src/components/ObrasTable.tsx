@@ -12,6 +12,7 @@ interface ObrasTableProps {
   loading: boolean
   onEdit: (obra: Obra) => void
   onToggleEstado: (obra: Obra) => void
+  puedeGestionar: boolean
 }
 
 const estadoBadge = {
@@ -19,7 +20,7 @@ const estadoBadge = {
   inactiva: 'bg-amber-50 text-amber-700',
 }
 
-export default function ObrasTable({ obras, loading, onEdit, onToggleEstado }: ObrasTableProps) {
+export default function ObrasTable({ obras, loading, onEdit, onToggleEstado, puedeGestionar }: ObrasTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full text-sm">
@@ -71,24 +72,28 @@ export default function ObrasTable({ obras, loading, onEdit, onToggleEstado }: O
                   </span>
                 </td>
                 <td className="py-3 px-4 text-right">
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      onClick={() => onEdit(obra)}
-                      className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition font-medium"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => onToggleEstado(obra)}
-                      className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition ${
-                        obra.estado === 'activa'
-                          ? 'border-red-200 text-red-600 hover:bg-red-50'
-                          : 'border-green-200 text-green-600 hover:bg-green-50'
-                      }`}
-                    >
-                      {obra.estado === 'activa' ? 'Desactivar' : 'Activar'}
-                    </button>
-                  </div>
+                  {puedeGestionar ? (
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => onEdit(obra)}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition font-medium"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => onToggleEstado(obra)}
+                        className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition ${
+                          obra.estado === 'activa'
+                            ? 'border-red-200 text-red-600 hover:bg-red-50'
+                            : 'border-green-200 text-green-600 hover:bg-green-50'
+                        }`}
+                      >
+                        {obra.estado === 'activa' ? 'Desactivar' : 'Activar'}
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-gray-300 text-xs">—</span>
+                  )}
                 </td>
               </tr>
             ))}

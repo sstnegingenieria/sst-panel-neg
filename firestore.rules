@@ -108,7 +108,18 @@ service cloud.firestore {
 
     match /contratistas/{contratistaId} {
       allow read: if true;
+
+      // Gestión completa (crear/editar/eliminar).
       allow create, update, delete: if puedeGestionarProyectos();
+
+      // gerencia_administrativa: habilitar/deshabilitar contratistas. SOLO puede
+      // cambiar el campo `estado`. El panel (useFirestore) inyecta
+      // `fecha_actualizacion` en cada update, así que se permite junto a `estado`.
+      // No puede crear ni eliminar ni tocar ningún otro campo.
+      allow update: if isAuthed()
+                    && rolActual() == 'gerencia_administrativa'
+                    && request.resource.data.diff(resource.data)
+                        .affectedKeys().hasOnly(['estado', 'fecha_actualizacion']);
     }
 
     // ────────────────────────────────────────────────────────────────
