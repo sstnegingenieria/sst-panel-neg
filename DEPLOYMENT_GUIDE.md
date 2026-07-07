@@ -2,13 +2,15 @@
 
 ## 📋 Resumen de Cambios Implementados
 
-### 1. Custom Claims en JWT (50% reducción de costos)
-- **Problema anterior**: Cada operación hacía 2 consultas a Firestore para verificar el rol
-- **Solución**: El rol se incluye directamente en el token JWT como custom claim
-- **Cloud Functions**:
-  - `setCustomClaimsOnUserCreate`: Asigna rol al crear usuario
-  - `updateCustomClaimsOnRoleChange`: Actualiza rol cuando cambia
-  - `removeCustomClaimsOnUserDelete`: Limpia claims al eliminar usuario
+### 1. Cloud Functions activas
+
+**Cloud Functions activas**: `generarConsecutivo` (SIGP · consecutivos transaccionales, 2ª gen). No hay otras Cloud Functions desplegadas.
+
+Nota histórica: en julio 2026 se limpiaron 5 funciones legacy que estaban en el código pero nunca operaron en producción. Ver commit correspondiente a la Iteración 0.3.c-bis.
+
+El rol del usuario se lee directamente de `users/{uid}.rol` en Firestore en cada verificación (patrón "role-in-Firestore"). No se usan Firebase Auth custom claims.
+
+> ⚠️ El resto de esta guía conserva secciones del plan original de *custom claims* (Migración de Usuarios, Test 1, Troubleshooting, etc.) que describen ese sistema nunca desplegado. Son referencia histórica; el mecanismo real es el role-in-Firestore descrito arriba.
 
 ### 2. Acceso a Contratistas Restringido
 - **Antes**: Lectura pública (cualquier autenticado)
@@ -24,6 +26,75 @@
 - **Lectura**: Solo SST/Admin
 - **Creación**: Usuarios autenticados (solo propio registro)
 - **Actualización/Eliminación**: NUNCA (auditoría limpia)
+
+---
+
+## 🧩 SIGP — Fase 0: Dependencias del panel
+
+### `pdf-lib` disponible para generación de PDFs (Iteración 0.1.1)
+
+A partir de F0, el panel web incluye **`pdf-lib` (`^1.17.1`)** como dependencia de producción. Habilita la **generación de PDFs desde el panel** (cotizaciones, actas, informes) sin depender de la app Flutter.
+
+- **Contexto**: hasta ahora los PDFs del panel provenían de la app Flutter (`pdf_url`); el panel solo los mostraba. `pdf-lib` prepara el terreno para que el SIGP genere sus propios documentos (ver Tarea 1.4.5 del plan F1).
+- **Impacto en el bundle**: **ninguno todavía.** Como aún no se importa en ningún archivo, el tree-shaking de Vite la excluye del bundle. Verificado con `npm run build`: el bundle JS quedó idéntico antes y después de instalarla (`1,412.49 kB` / gzip `398.03 kB`, mismo hash de chunk). El peso solo se sumará cuando algún módulo del SIGP la importe.
+- **Sin acción de deployment requerida**: es una dependencia npm estándar; Vercel la instala en el build. No toca Firebase, reglas ni Cloud Functions.
+
+### Desarrollo local con emuladores (Iteración 0.1.3 / 0.1.4)
+
+El panel se conecta **automáticamente a la Firebase Emulator Suite cuando corre en modo dev** (`import.meta.env.DEV`). En producción (`npm run build`) ese bloque se elimina del bundle, así que **no afecta a los usuarios ni a `auth`/`db`/`storage`/`functions` reales**.
+
+`firebase-tools` está instalado como devDependency, así que se invoca con `npx firebase`. Requiere **Java (JDK 11+)** en el PATH para los emuladores de Firestore y Storage.
+
+**Flujo de trabajo local (dos terminales):**
+
+1. **Terminal 1 — levantar los emuladores:**
+   ```bash
+   npx firebase emulators:start
+   ```
+   Levanta Auth (9099), Firestore (8080), Storage (9199), Functions (5001) y la UI (http://127.0.0.1:4000). El primer arranque descarga los binarios de los emuladores (es normal).
+
+2. **Terminal 2 — levantar el panel:**
+   ```bash
+   npm run dev
+   ```
+
+3. El panel en dev **conecta solo a los emuladores** (`127.0.0.1`); no toca datos de producción. Puertos definidos en `firebase.json` → sección `emulators`.
+
+> ⚠️ `storage.rules` en la raíz es un **placeholder solo para el emulador** (`allow read, write: if request.auth != null`). **No** son reglas de producción y **no se despliegan**.
+
+### Ejecutar tests contra emuladores (SIGP) (Iteración 0.3.c)
+
+Hay **dos comandos de test** con propósitos distintos:
+
+| Comando | Qué corre | Dependencias |
+|---|---|---|
+| `npm test` | Tests rápidos de UI/lógica (smoke). **Default de CI y desarrollo.** | Ninguna externa |
+| `npm run test:emulator` | Tests funcionales contra Cloud Functions + Firestore. | **Java (JDK 11+)** + Firebase Emulator Suite |
+
+Los tests que dependen de Cloud Functions y Firestore (p. ej. `useConsecutivo`) corren contra el Firebase Emulator Suite y viven en `src/hooks/sigp/__tests__/`. Están **excluidos del `npm test` por defecto** (ver `vitest.config.ts`) para que un desarrollador nuevo no se tope con un test que exige Java sin avisar.
+
+```bash
+# Requiere Java en el PATH. Levanta emuladores, corre los tests y los apaga solo.
+npm run test:emulator
+```
+
+Internamente:
+```
+firebase emulators:exec --project demo-neg --only functions,firestore,auth \
+  "vitest run --config vitest.emulator.config.ts"
+```
+
+- Usa el proyecto **`demo-neg`** (solo-emulador; nunca contacta servicios reales).
+- Credenciales dummy vía `.env.test`; `firebase/config.ts` conecta a `127.0.0.1` en modo test.
+- La verificación del estado de `consecutivos` se hace por la API REST del emulador con `Authorization: Bearer owner` (bypass de reglas), porque `consecutivos` es una colección **solo-función** y las reglas deniegan la lectura desde el cliente.
+
+### Feature flag `sigp_f1_enabled` (Firebase Remote Config)
+
+La visibilidad del módulo SIGP en el panel se controla con el flag **`sigp_f1_enabled`** en **Firebase Remote Config** (Consola de Firebase → Remote Config → parámetro `sigp_f1_enabled`, Boolean, default `false`). Se lee vía el hook `useFeatureFlag('sigp_f1_enabled', false)` (`src/hooks/useFeatureFlag.ts`).
+
+- Los cambios se propagan a las apps **sin necesidad de deploy**. En desarrollo, refresh cada 60s; en producción, cada 12h (default de Firebase).
+- Con el parámetro en `false`, la sección SIGP del Sidebar no aparece; las rutas `/sigp/*` siguen existiendo (protegidas por rol con `ProtectedRoute`), pero no hay entrada visible en el menú.
+- Al pasar del flag hardcodeado (F0.4) a Remote Config (F0.5), el código SIGP del Sidebar ya no se tree-shakea (el flag es runtime). Costo aceptado a cambio de poder activar sin redeploy.
 
 ---
 

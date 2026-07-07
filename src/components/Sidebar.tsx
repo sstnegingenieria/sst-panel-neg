@@ -1,6 +1,16 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useNotificaciones } from '../contexts/NotificacionesContext'
+import { useFeatureFlag } from '../hooks/useFeatureFlag'
+import { accesoSIGP, type Rol } from '../types/sigp/roles'
+import {
+  veDashboardSST,
+  veObras,
+  veContratistas,
+  veTecnicos,
+  veRegistros,
+  veReportes,
+} from '../types/sigp/permisos'
 
 interface SidebarProps {
   collapsed: boolean
@@ -10,6 +20,7 @@ const navItems = [
   {
     to: '/',
     label: 'Dashboard',
+    ve: veDashboardSST,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -20,7 +31,7 @@ const navItems = [
   {
     to: '/obras',
     label: 'Obras',
-    adminOnly: true,
+    ve: veObras,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -31,7 +42,7 @@ const navItems = [
   {
     to: '/contratistas',
     label: 'Contratistas',
-    adminOnly: true,
+    ve: veContratistas,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -42,6 +53,7 @@ const navItems = [
   {
     to: '/usuarios',
     label: 'Técnicos',
+    ve: veTecnicos,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -52,6 +64,7 @@ const navItems = [
   {
     to: '/registros',
     label: 'Registros',
+    ve: veRegistros,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -62,6 +75,7 @@ const navItems = [
   {
     to: '/reportes',
     label: 'Reportes',
+    ve: veReportes,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -71,10 +85,71 @@ const navItems = [
   },
 ]
 
+// Ítems de navegación del SIGP. Se muestran TODOS si el flag sigp_f1_enabled
+// (Remote Config) está activo y el usuario tiene acceso SIGP (ver accesoSIGP).
+// La granularidad fina por vista se maneja dentro de cada página, no en el sidebar.
+const sigpNavItems: {
+  to: string
+  label: string
+  icon: JSX.Element
+}[] = [
+  {
+    to: '/sigp/panel',
+    label: 'Panel',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+      </svg>
+    ),
+  },
+  {
+    to: '/sigp/obras',
+    label: 'Obras',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+      </svg>
+    ),
+  },
+  {
+    to: '/sigp/clientes',
+    label: 'Clientes',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    to: '/sigp/solicitudes',
+    label: 'Solicitudes',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+      </svg>
+    ),
+  },
+  {
+    to: '/sigp/cotizaciones',
+    label: 'Cotizaciones',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+]
+
 export default function Sidebar({ collapsed }: SidebarProps) {
   const { user } = useAuth()
   const { pendientesRegistros, pendientesTecnicos } = useNotificaciones()
-  const visibleItems = navItems.filter(item => !item.adminOnly || user?.rol === 'admin')
+  const sigpEnabled = useFeatureFlag('sigp_f1_enabled', false)
+  const visibleItems = navItems.filter(item => item.ve(user?.rol))
 
   return (
     <aside
@@ -146,6 +221,39 @@ export default function Sidebar({ collapsed }: SidebarProps) {
             )}
           </NavLink>
         ))}
+
+        {/* Sección SIGP — solo si el feature flag de Remote Config está encendido
+            (sigp_f1_enabled) y el usuario tiene acceso SIGP (accesoSIGP). Si lo
+            tiene, ve TODOS los ítems SIGP; la granularidad fina por vista se
+            maneja dentro de cada página, no aquí. */}
+        {sigpEnabled && (() => {
+          if (!user?.rol || !accesoSIGP(user.rol as Rol)) return null
+          return (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              {!collapsed && (
+                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                  SIGP
+                </p>
+              )}
+              {sigpNavItems.map(item => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                      isActive
+                        ? 'bg-brand-50 text-brand-700 font-semibold'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }`
+                  }
+                >
+                  <span className="flex-shrink-0">{item.icon}</span>
+                  {!collapsed && <span>{item.label}</span>}
+                </NavLink>
+              ))}
+            </div>
+          )
+        })()}
       </nav>
 
       {/* Footer */}

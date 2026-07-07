@@ -5,6 +5,8 @@ import StatCard from '../components/StatCard'
 import { useModal } from '../hooks/useModal'
 import { useFirestore } from '../hooks/useFirestore'
 import { toast } from '../components/shared/Toast'
+import { useAuth } from '../contexts/AuthContext'
+import { puedeGestionarObrasUI } from '../types/sigp/permisos'
 
 export default function Obras() {
   const [obras, setObras] = useState<Obra[]>([])
@@ -12,6 +14,8 @@ export default function Obras() {
   const [editTarget, setEditTarget] = useState<Obra | null>(null)
   const modal = useModal()
   const { add, update, getAllOrdered } = useFirestore()
+  const { user } = useAuth()
+  const puedeGestionar = puedeGestionarObrasUI(user?.rol)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -81,15 +85,17 @@ export default function Obras() {
           <h1 className="text-2xl font-bold text-gray-800">Obras</h1>
           <p className="text-sm text-gray-500 mt-0.5">Gestión de sitios y proyectos</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 bg-brand-700 hover:bg-brand-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Nueva obra
-        </button>
+        {puedeGestionar && (
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-2 bg-brand-700 hover:bg-brand-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Nueva obra
+          </button>
+        )}
       </div>
 
       {/* Stat cards */}
@@ -147,6 +153,7 @@ export default function Obras() {
           loading={loading}
           onEdit={openEdit}
           onToggleEstado={handleToggle}
+          puedeGestionar={puedeGestionar}
         />
       </div>
 

@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { NotificacionesProvider } from './contexts/NotificacionesContext'
-import React from 'react'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Obras from './pages/Obras'
@@ -12,14 +11,20 @@ import ObraRegistros from './pages/ObraRegistros'
 import Reportes from './pages/Reportes'
 import Layout from './components/Layout'
 import { ToastContainer } from './components/shared/Toast'
-
-const ALLOWED_ROLES = ['sst', 'admin']
-
-function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth()
-  if (user?.rol !== 'admin') return <Navigate to="/registros" replace />
-  return <>{children}</>
-}
+import { ProtectedRoute } from './components/ProtectedRoute'
+import PanelSigp from './pages/sigp/PanelSigp'
+import ClientesSigp from './pages/sigp/ClientesSigp'
+import SolicitudesSigp from './pages/sigp/SolicitudesSigp'
+import CotizacionesSigp from './pages/sigp/CotizacionesSigp'
+import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, type Rol } from './types/sigp/roles'
+import {
+  ROLES_VE_DASHBOARD_SST,
+  ROLES_VE_TECNICOS,
+  ROLES_VE_REGISTROS,
+  ROLES_VE_REPORTES,
+  ROLES_VE_OBRAS,
+  ROLES_VE_CONTRATISTAS,
+} from './types/sigp/permisos'
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth()
@@ -37,7 +42,7 @@ function ProtectedRoutes() {
 
   if (!user) return <Login />
 
-  if (!ALLOWED_ROLES.includes(user.rol)) {
+  if (!accesoSST(user.rol as Rol) && !accesoSIGP(user.rol as Rol)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
         <div className="text-center">
@@ -65,13 +70,24 @@ function ProtectedRoutes() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/obras" element={<AdminRoute><Obras /></AdminRoute>} />
-        <Route path="/contratistas" element={<AdminRoute><Contratistas /></AdminRoute>} />
-        <Route path="/usuarios" element={<Usuarios />} />
-        <Route path="/registros" element={<ObrasHub />} />
-        <Route path="/registros/:obraId" element={<ObraRegistros />} />
-        <Route path="/reportes" element={<Reportes />} />
+        <Route path="/" element={<ProtectedRoute rolesPermitidos={ROLES_VE_DASHBOARD_SST} redirectTo="/obras"><Dashboard /></ProtectedRoute>} />
+        <Route path="/obras" element={<ProtectedRoute rolesPermitidos={ROLES_VE_OBRAS}><Obras /></ProtectedRoute>} />
+        <Route path="/contratistas" element={<ProtectedRoute rolesPermitidos={ROLES_VE_CONTRATISTAS}><Contratistas /></ProtectedRoute>} />
+        <Route path="/usuarios" element={<ProtectedRoute rolesPermitidos={ROLES_VE_TECNICOS} redirectTo="/obras"><Usuarios /></ProtectedRoute>} />
+        <Route path="/registros" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/obras"><ObrasHub /></ProtectedRoute>} />
+        <Route path="/registros/:obraId" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/obras"><ObraRegistros /></ProtectedRoute>} />
+        <Route path="/reportes" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REPORTES} redirectTo="/obras"><Reportes /></ProtectedRoute>} />
+
+        {/* Rutas SIGP (placeholders F0). Protegidas por rol con ProtectedRoute
+            ('admin' siempre incluido como fallback). La sección del Sidebar se
+            oculta con el flag sigp_f1_enabled (Remote Config); responden por URL directa si el
+            rol del usuario lo permite. */}
+        <Route path="/sigp/panel" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><PanelSigp /></ProtectedRoute>} />
+        <Route path="/sigp/obras" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><Obras /></ProtectedRoute>} />
+        <Route path="/sigp/clientes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ClientesSigp /></ProtectedRoute>} />
+        <Route path="/sigp/solicitudes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><SolicitudesSigp /></ProtectedRoute>} />
+        <Route path="/sigp/cotizaciones" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionesSigp /></ProtectedRoute>} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

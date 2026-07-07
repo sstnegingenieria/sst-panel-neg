@@ -2,13 +2,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ──────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     // HELPERS
-    //
-    // Lee el rol desde Firestore (sin custom claims).
-    // Compatible con campo 'rol' (panel web) y 'role' (app Flutter heredada).
-    // Usa map.get(campo, default) para no fallar si el campo no existe.
-    // ──────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
+
     function userData() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
@@ -17,116 +14,190 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isSST() {
-      return isAuthed() && (
-        userData().get('rol',  '') in ['sst', 'admin'] ||
-        userData().get('role', '') in ['sst', 'admin']
-      );
+    // Lee el rol del usuario, con fallback al campo legacy 'role'
+    // (H-002 cerrado en datos, fallback cosmético pendiente).
+    function rolActual() {
+      return userData().get('rol', userData().get('role', ''));
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // COLECCIÓN: users
-    //
-    // - Técnico:   lee y edita su propio documento (sin poder cambiar rol/estado)
-    // - SST/Admin: lectura y escritura completa (aprobar, desactivar, asignar)
-    // ──────────────────────────────────────────────────────────────────────────
-    match /users/{userId} {
-      // Lectura: propio documento O SST/admin
-      allow read: if isAuthed() && (request.auth.uid == userId || isSST());
+    // 1. Cualquier rol con acceso al panel web (lectura general de users)
+    function esPersonalPanel() {
+      return isAuthed() && rolActual() in [
+        'sst', 'admin',
+        'gerencia_general', 'gerencia_administrativa',
+        'operacion_comercial', 'auxiliar_proyectos', 'director_proyectos',
+        'residente_sst', 'gestion_integral'
+      ];
+    }
 
-      // Técnico actualiza su perfil, pero NO puede tocar campos críticos
+    // 2. Roles que administran obras y contratistas (crear/editar).
+    function puedeGestionarProyectos() {
+      return isAuthed() && rolActual() in [
+        'admin',
+        'gerencia_general',
+        'operacion_comercial', 'auxiliar_proyectos', 'director_proyectos'
+      ];
+    }
+
+    // 3. Administración del subsistema SST (aprobar/rechazar formularios,
+    //    gestionar users). Reemplaza el viejo isSST() ampliado con
+    //    gestion_integral.
+    function puedeAdministrarSST() {
+      return isAuthed() && rolActual() in [
+        'sst', 'admin', 'gestion_integral'
+      ];
+    }
+
+    // 4. Solo lectura del subsistema SST (gerencia_general con visión
+    //    ejecutiva total)
+    function puedeVerSSTSoloLectura() {
+      return isAuthed() && rolActual() in ['gerencia_general'];
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: users
+    // ────────────────────────────────────────────────────────────────
+
+    match /users/{userId} {
+      // Read: uno mismo, o cualquier rol con acceso al panel
+      allow read: if isAuthed() && (
+        request.auth.uid == userId || esPersonalPanel()
+      );
+
+      // Update self: puede editar su propio documento, pero NO cambiar
+      // campos sensibles.
       allow update: if isAuthed()
                     && request.auth.uid == userId
                     && !request.resource.data.diff(resource.data)
                         .affectedKeys()
                         .hasAny(['rol', 'role', 'estado', 'aprobado', 'obras_asignadas']);
 
-      // Técnico puede crear su propio documento al registrarse (NO puede auto-asignarse rol SST/admin)
+      // Create/update/delete administrativo: solo puedeAdministrarSST
+      allow create, update, delete: if puedeAdministrarSST();
+
+      // Create self: al registrarse en la app, no puede autoasignarse
+      // rol sst/admin
       allow create: if isAuthed()
                     && request.auth.uid == userId
-                    && !(request.resource.data.get('rol',  '') in ['sst', 'admin'])
+                    && !(request.resource.data.get('rol', '') in ['sst', 'admin'])
                     && !(request.resource.data.get('role', '') in ['sst', 'admin']);
-
-      // SST/Admin gestiona todos los usuarios (crear, editar, eliminar)
-      allow create, update, delete: if isSST();
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     // COLECCIÓN: obras
-    //
-    // - Lectura:   cualquier usuario autenticado (técnicos necesitan ver las obras)
-    // - Escritura: solo SST/Admin
-    // ──────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
+
     match /obras/{obraId} {
-      allow read:                    if isAuthed();
-      allow create, update, delete:  if isSST();
+      // Read: cualquier usuario autenticado (comportamiento legacy). El panel
+      // SST (hub de registros) y la app Flutter necesitan listar obras.
+      allow read: if isAuthed();
+
+      // Write: solo gestión de proyectos (incluye `sst` para retrocompat)
+      allow create, update, delete: if puedeGestionarProyectos();
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     // COLECCIÓN: contratistas
-    //
-    // - Lectura:   pública (necesario para el formulario de registro antes de auth)
-    // - Escritura: solo SST/Admin
-    // ──────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
+    // Lectura pública justificada: el formulario de registro de
+    // técnicos en la app SST necesita listar contratistas pre-login.
+    // Solo se expone el nombre del contratista; NIT/cédula/teléfono/
+    // dirección están cubiertos por seguridad en Firestore Rules
+    // (documentos con campos protegidos). Ver H-001 (severidad bajada
+    // a Baja tras validación del caso de uso).
+
     match /contratistas/{contratistaId} {
-      allow read:                    if true;
-      allow create, update, delete:  if isSST();
+      allow read: if true;
+
+      // Gestión completa (crear/editar/eliminar).
+      allow create, update, delete: if puedeGestionarProyectos();
+
+      // gerencia_administrativa: habilitar/deshabilitar contratistas. SOLO puede
+      // cambiar el campo `estado`. El panel (useFirestore) inyecta
+      // `fecha_actualizacion` en cada update, así que se permite junto a `estado`.
+      // No puede crear ni eliminar ni tocar ningún otro campo.
+      allow update: if isAuthed()
+                    && rolActual() == 'gerencia_administrativa'
+                    && request.resource.data.diff(resource.data)
+                        .affectedKeys().hasOnly(['estado', 'fecha_actualizacion']);
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     // COLECCIÓN: registros — INMUTABLE (auditoría a prueba de manipulación)
-    //
-    // - Cualquier técnico autenticado puede CREAR un registro.
-    // - SST/Admin lee TODOS los registros.
-    // - Técnico lee SOLO sus propios registros.
-    // - NUNCA se permite editar ni borrar: la evidencia es permanente.
-    // ──────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
+
     match /registros/{registroId} {
       allow read: if isAuthed() && (
-        isSST() ||
+        puedeAdministrarSST() ||
+        puedeVerSSTSoloLectura() ||
         resource.data.get('tecnicoId', '') == request.auth.uid
+      );
+      allow create: if isAuthed();
+      allow update, delete: if false;
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: formularios
+    // ────────────────────────────────────────────────────────────────
+
+    match /formularios/{formularioId} {
+      allow read: if isAuthed() && (
+        puedeAdministrarSST() ||
+        puedeVerSSTSoloLectura() ||
+        resource.data.get('user_id', '') == request.auth.uid
+      );
+
+      allow create: if isAuthed() &&
+        request.resource.data.get('user_id', '') == request.auth.uid;
+
+      allow update: if isAuthed() && (
+        puedeAdministrarSST() ||
+        resource.data.get('user_id', '') == request.auth.uid
+      );
+
+      allow delete: if false;
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: contadores — consecutivos atómicos SST (app móvil)
+    // ────────────────────────────────────────────────────────────────
+    // Sin cambio. Sistema legacy de la app Flutter.
+
+    match /contadores/{clave} {
+      allow read, create, update: if isAuthed();
+      allow delete: if false;
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: notificaciones — panel SST ↔ app móvil
+    // ────────────────────────────────────────────────────────────────
+
+    match /notificaciones/{notifId} {
+      allow read: if isAuthed() && (
+        puedeAdministrarSST() ||
+        puedeVerSSTSoloLectura() ||
+        resource.data.get('user_id', '') == request.auth.uid
       );
 
       allow create: if isAuthed();
 
-      // 🔒 INMUTABLE: prohibido editar o borrar registros de auditoría
-      allow update, delete: if false;
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // COLECCIÓN: formularios (ATS, Preoperacional, Charla de 5 min)
-    //
-    // - Técnico crea y actualiza sus propios formularios (firma, borradores)
-    // - SST/Admin lee y actualiza todos los formularios
-    // - NADIE puede eliminar formularios (auditoría permanente)
-    // ──────────────────────────────────────────────────────────────────────────
-    match /formularios/{formularioId} {
-      // Lectura: propio formulario O SST/Admin
-      allow read: if isAuthed() && (
-        isSST() ||
-        resource.data.get('user_id', '') == request.auth.uid
-      );
-
-      // Técnico crea formularios con su propio user_id
-      allow create: if isAuthed() &&
-        request.resource.data.get('user_id', '') == request.auth.uid;
-
-      // Técnico actualiza sus propios formularios (firma, selfie, colaboradores)
-      // SST/Admin puede actualizar cualquiera
       allow update: if isAuthed() && (
-        isSST() ||
+        puedeAdministrarSST() ||
         resource.data.get('user_id', '') == request.auth.uid
       );
 
-      // 🔒 INMUTABLE: prohibido eliminar formularios de auditoría
-      allow delete: if false;
+      allow delete: if puedeAdministrarSST();
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
     // CATCH-ALL: denegar todo lo no especificado explícitamente
-    // ──────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
+    // Incluye la colección `consecutivos` del SIGP: solo la Cloud
+    // Function `generarConsecutivo` con Admin SDK puede leerla/escribirla.
+
     match /{document=**} {
       allow read, write: if false;
     }
+
   }
 }

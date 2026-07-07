@@ -5,6 +5,8 @@ import StatCard from '../components/StatCard'
 import { useModal } from '../hooks/useModal'
 import { useFirestore } from '../hooks/useFirestore'
 import { toast } from '../components/shared/Toast'
+import { useAuth } from '../contexts/AuthContext'
+import { puedeGestionarContratistasUI, puedeHabilitarContratistas } from '../types/sigp/permisos'
 
 export default function Contratistas() {
   const [contratistas, setContratistas] = useState<Contratista[]>([])
@@ -12,6 +14,9 @@ export default function Contratistas() {
   const [editTarget, setEditTarget] = useState<Contratista | null>(null)
   const modal = useModal()
   const { add, update, getAllOrdered } = useFirestore()
+  const { user } = useAuth()
+  const puedeGestionar = puedeGestionarContratistasUI(user?.rol)
+  const puedeHabilitar = puedeHabilitarContratistas(user?.rol)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -77,15 +82,17 @@ export default function Contratistas() {
           <h1 className="text-2xl font-bold text-gray-800">Contratistas</h1>
           <p className="text-sm text-gray-500 mt-0.5">Personas jurídicas y naturales</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 bg-brand-700 hover:bg-brand-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Nuevo contratista
-        </button>
+        {puedeGestionar && (
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-2 bg-brand-700 hover:bg-brand-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Nuevo contratista
+          </button>
+        )}
       </div>
 
       {/* Stat cards */}
@@ -150,6 +157,8 @@ export default function Contratistas() {
           loading={loading}
           onEdit={openEdit}
           onToggleEstado={handleToggle}
+          puedeGestionar={puedeGestionar}
+          puedeHabilitar={puedeHabilitar}
         />
       </div>
 
