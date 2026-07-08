@@ -237,6 +237,16 @@ service cloud.firestore {
     }
 
     // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: visitas (SIGP — Comercial, F1 — levantamiento)
+    // ────────────────────────────────────────────────────────────────
+    // Read: acceso SIGP. Write: gestión de proyectos.
+
+    match /visitas/{visitaId} {
+      allow read: if accesoSIGP();
+      allow create, update, delete: if puedeGestionarProyectos();
+    }
+
+    // ────────────────────────────────────────────────────────────────
     // CATCH-ALL: denegar todo lo no especificado explícitamente
     // ────────────────────────────────────────────────────────────────
     // Incluye la colección `consecutivos` del SIGP: solo la Cloud
