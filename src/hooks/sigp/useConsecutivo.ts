@@ -15,11 +15,6 @@ interface GenerarConsecutivoResponse {
   consecutivo: string
 }
 
-const generarConsecutivoCallable = httpsCallable<
-  GenerarConsecutivoRequest,
-  GenerarConsecutivoResponse
->(functions, 'generarConsecutivo')
-
 /**
  * Hook para generar consecutivos transaccionales del SIGP.
  *
@@ -38,6 +33,12 @@ const generarConsecutivoCallable = httpsCallable<
  */
 export function useConsecutivo() {
   async function obtener(prefijo: PrefijoConsecutivo): Promise<string> {
+    // El callable se crea aquí (no a nivel de módulo) para evitar efectos
+    // secundarios al importar el hook (rompía tests que mockean firebase/config).
+    const generarConsecutivoCallable = httpsCallable<
+      GenerarConsecutivoRequest,
+      GenerarConsecutivoResponse
+    >(functions, 'generarConsecutivo')
     const resultado = await generarConsecutivoCallable({ prefijo })
     return resultado.data.consecutivo
   }

@@ -101,3 +101,6 @@ export const puedeGestionarClientesUI = (rol: string | undefined) => en(rol, ROL
 // La gestión de LPU (importar, versionar) usa los mismos roles que la de
 // clientes (comercial/proyectos), alineado con puedeGestionarProyectos().
 export const puedeGestionarLpusUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
+// Registrar/gestionar solicitudes: mismos roles (comercial/proyectos),
+// alineado con puedeGestionarProyectos() de firestore.rules.
+export const puedeGestionarSolicitudesUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
