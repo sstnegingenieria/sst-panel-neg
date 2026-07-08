@@ -17,6 +17,7 @@ import ClientesSigp from './pages/sigp/ClientesSigp'
 import LpusSigp from './pages/sigp/LpusSigp'
 import LpuDetalleSigp from './pages/sigp/LpuDetalleSigp'
 import SolicitudesSigp from './pages/sigp/SolicitudesSigp'
+import SolicitudDetalleSigp from './pages/sigp/SolicitudDetalleSigp'
 import CotizacionesSigp from './pages/sigp/CotizacionesSigp'
 import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, type Rol } from './types/sigp/roles'
 import {
@@ -90,6 +91,7 @@ function ProtectedRoutes() {
         <Route path="/sigp/lpus" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><LpusSigp /></ProtectedRoute>} />
         <Route path="/sigp/lpus/:lpuId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><LpuDetalleSigp /></ProtectedRoute>} />
         <Route path="/sigp/solicitudes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><SolicitudesSigp /></ProtectedRoute>} />
+        <Route path="/sigp/solicitudes/:solicitudId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><SolicitudDetalleSigp /></ProtectedRoute>} />
         <Route path="/sigp/cotizaciones" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionesSigp /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
