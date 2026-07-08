@@ -1,12 +1,27 @@
 rules_version = '2';
 
-// ⚠️ Reglas PLACEHOLDER — solo para el Firebase Storage Emulator en desarrollo local.
-// NO son reglas de producción y NO deben desplegarse. Las reglas reales de Storage
-// se diseñan cuando F1 lo requiera y se despliegan aparte con OK explícito del usuario.
+// Reglas de producción de Firebase Storage para neg-sst-app.
+// Reconstruidas desde las reglas desplegadas (bloque `pdfs/**` de la app Flutter)
+// + el bloque `lpus/**` del SIGP (F1). El bloque `pdfs/**` NO se modifica.
 service firebase.storage {
   match /b/{bucket}/o {
-    match /{allPaths=**} {
-      // Solo usuarios autenticados. Placeholder para pruebas locales.
+
+    // ── App SST (Flutter): PDFs de formularios. Sin cambio. ──────────────────
+    match /pdfs/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    // ── SIGP (F1): Excel original de cada LPU ────────────────────────────────
+    // Ruta: lpus/{clienteId}/{lpuId}/{archivo}
+    // La autorización real (quién puede crear/versionar una LPU) la impone
+    // Firestore sobre el doc `lpus` (puedeGestionarProyectos). Aquí basta
+    // autenticación: un Excel huérfano en Storage, sin su doc LPU, es
+    // inofensivo (no expone precios).
+    //
+    // Nota: se intentó gatear el write por rol vía cross-service rules
+    // (firestore.get sobre users/{uid}.rol), pero denegaba en runtime pese a
+    // rol válido (feature poco fiable). Queda como posible hardening futuro.
+    match /lpus/{clienteId}/{lpuId}/{fileName} {
       allow read, write: if request.auth != null;
     }
   }

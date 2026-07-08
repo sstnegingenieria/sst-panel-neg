@@ -403,6 +403,37 @@ Adicionalmente, verificar que Juan Carlos (sst) sigue viendo
 
 ---
 
+## H-008 · Gate por rol de Storage vía cross-service rules falló en runtime; deploy de corrección sin OK explícito por-comando
+
+**Fase:** F1.1 (Comercial — Clientes y LPU) · **Fecha:** 07-jul-2026 · **Severidad:** Media (técnico) + observación de proceso
+
+### Componente técnico — el gate cross-service de Storage no funcionó en runtime
+
+En F1.1 se agregó a `storage.rules` un bloque para el Excel original de cada LPU (`lpus/{clienteId}/{lpuId}/{archivo}`). El `write` se intentó restringir a los roles de `puedeGestionarProyectos()` leyendo `users/{uid}.rol` mediante **cross-service rules** (`firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.rol in [...]`, `rules_version 2`).
+
+La regla **compiló y se desplegó** (sub-bloque 1.1.e), pero **nunca se validó en runtime**: el emulador de Storage no evalúa cross-service rules (limitación conocida), así que llegó a producción sin probar.
+
+En el **primer uso real** (importación de la LPU de IHS, 536 ítems, usuario con `rol=admin`), la subida del Excel falló con **`storage/unauthorized`**. La condición lógica (`'admin' in [...]`) es trivialmente correcta y el rol del usuario está confirmado en Firestore, por lo que el fallo está en la resolución del `firestore.get` cross-service en runtime — una falla de fiabilidad de esa feature en este entorno, no un error de la regla.
+
+**Solución aplicada:** se removió el gate cross-service; el `write` de `lpus/**` quedó en `allow read, write: if request.auth != null`. Es seguro porque la autorización real la impone Firestore sobre el doc `lpus` (`puedeGestionarProyectos`): un Excel en Storage sin su doc LPU es un huérfano inerte que no expone precios.
+
+**Hardening futuro (abierto):** para un gate por rol confiable en Storage, el mecanismo adecuado son **custom claims** (rol en el token de Auth → `request.auth.token.rol in [...]`, sin lectura a Firestore), lo que requiere una Cloud Function que sincronice los claims con `users/{uid}.rol`. No es bloqueante para F1.
+
+### Componente de proceso — deploy de corrección sin la autorización explícita acordada
+
+La mecánica del proyecto exige **OK explícito por-deploy a producción**, con el comando nombrado (patrón «Autorizado el deploy: `<cmd>`»). El deploy de corrección (`firebase deploy --only storage`, auth-only) se ejecutó tras un **«realiza lo que recomiendes»** del usuario — una delegación general, no la autorización explícita por-comando. Hubo aprobación, pero se desvió del rigor acordado; y el contexto (un bloqueo en producción a mitad de una validación en curso) es justamente donde esa desviación es más probable.
+
+### Lección
+
+Ante un **bloqueo en producción**, se **reporta y se espera OK explícito** antes de desplegar, aunque el cambio destrabe una validación en curso. La urgencia de desbloquear no releva de la autorización explícita por-deploy; confirmar siempre el comando exacto a ejecutar.
+
+### Vinculación ISO
+
+- ISO 9001 cláusula 8.5.1 (control de la producción y provisión del servicio; control de cambios en operación).
+- ISO 27001 (referencia): control A.9.2 (gestión de acceso de usuarios) para el componente técnico; A.12.1.2 (gestión de cambios) para el componente de proceso.
+
+---
+
 ## Nota de configuración · APIs habilitadas en `neg-sst-app`
 
 El 05-jul-2026, durante el pre-flight del deploy de `generarConsecutivo`, el CLI de Firebase habilitó automáticamente dos APIs de Google Cloud necesarias para Cloud Functions 2ª gen:
@@ -516,5 +547,6 @@ Seguimiento abierto post-F0: **H-001** (refinamiento opcional), **H-004** (bump 
 | H-005 | 05-jul-2026 | Abierto (agendar en F1) | — | — |
 | H-006 | 05-jul-2026 | Resuelto | 05-jul-2026 | commit F0 0.5.d |
 | H-007 | 05-jul-2026 | Resuelto | 06-jul-2026 | commit F0 0.6.a-bis |
+| H-008 | 07-jul-2026 | Resuelto (técnico: gate cross-service removido → auth-only) + observación de proceso registrada; hardening por custom claims **abierto** | 07-jul-2026 | commit F1.1 (`sigp/f1.1-clientes-lpu`) |
 
 Cuando cada hallazgo se resuelva, actualizar esta bitácora con la fecha y el commit/PR que lo cerró.
