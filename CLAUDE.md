@@ -440,7 +440,15 @@ F0 se cerró con el merge del **PR #1** (`sigp/f0-base` → `main`, commit de me
 
 **Seguimiento abierto post-F0:** H-001 (refinamiento opcional), H-004 (bump `firebase-functions` v6), H-005 (CI/CD de functions). Ver `HALLAZGOS_AUDITORIA.md`.
 
-**Siguiente fase: F1 (Comercial)** — LPU, solicitudes, visitas técnicas, cotizaciones, aprobación del cliente. Ver `PLAN_FASE_1_SIGP.md`.
+### Estado de F1 (Comercial — en curso)
+
+F1 se desarrolla por sub-iteraciones. Ver `PLAN_FASE_1_SIGP.md`.
+
+- **1.1 ✅ Clientes y gestión de LPU** — cerrada 07-jul-2026 con el merge del **PR #2** (`sigp/f1.1-clientes-lpu` → `main`, commit de merge **`24d1fd3`**). Incluye: CRUD de clientes (contactos, condiciones IVA pleno/AIU); **importador asistido de LPU** (wizard con SheetJS: selección de hojas, mapeo de columnas con heurísticas, vista previa consolidada, escritura de ítems en batches ≤500 + Excel original a Storage + guardado del mapeo en el cliente); **detalle de LPU** con ítems agrupados por categoría/capítulo y **trazabilidad de versiones** (cadena `reemplaza_a`); reglas Firestore (`clientes`/`lpus`/`lpus/{id}/items`) y Storage (`lpus/**`) desplegadas; 19 tests de la lógica del importador. Validada contra producción con la LPU real de IHS (536 ítems). Ver **H-008** en `HALLAZGOS_AUDITORIA.md` (gate cross-service de Storage removido → `auth-only`; hardening por custom claims pendiente).
+- **1.2 ⏳ Solicitudes** — siguiente sub-iteración.
+- 1.3+ — visitas técnicas, cotizaciones, aprobación del cliente (según el plan F1).
+
+**`sigp_f1_enabled` sigue en `false`**: el SIGP está en `main` y desplegado, pero invisible para los usuarios hasta que F1 esté completa y se decida activarlo.
 
 Cada fase termina con: reglas de seguridad actualizadas, tests verdes, deploy a producción con feature flag, y un chequeo de brechas ISO cubiertas.
 
@@ -467,4 +475,4 @@ Ante duda sobre alcance ISO o proceso NEG, consultar estos documentos antes que 
 
 Este repositorio es propiedad de NEG Ingeniería S.A.S. BIC. La dirección técnica del SIGP la lleva la Gerencia con soporte del equipo de Gestión Integral. Cualquier PR que toque las reglas del capítulo 7 requiere revisión de la Gerencia.
 
-*Última actualización de este archivo: 02 de julio de 2026. Versión: 1.0.*
+*Última actualización de este archivo: 07 de julio de 2026, tras el cierre de la iteración F1.1 (Clientes y LPU). Versión: 1.1.*
