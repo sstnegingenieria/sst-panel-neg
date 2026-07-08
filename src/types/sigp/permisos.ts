@@ -104,3 +104,5 @@ export const puedeGestionarLpusUI = (rol: string | undefined) => en(rol, ROLES_G
 // Registrar/gestionar solicitudes: mismos roles (comercial/proyectos),
 // alineado con puedeGestionarProyectos() de firestore.rules.
 export const puedeGestionarSolicitudesUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
+// Programar/ejecutar visitas técnicas: mismos roles (comercial/proyectos).
+export const puedeGestionarVisitasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
