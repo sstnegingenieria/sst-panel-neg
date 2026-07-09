@@ -14,6 +14,10 @@ import {
 
 interface SidebarProps {
   collapsed: boolean
+  /** Cajón abierto (solo aplica en móvil, < lg). */
+  mobileOpen?: boolean
+  /** Se llama al hacer clic en un ítem (cierra el cajón en móvil). */
+  onNavigate?: () => void
 }
 
 const navItems = [
@@ -167,7 +171,7 @@ const sigpNavItems: {
   },
 ]
 
-export default function Sidebar({ collapsed }: SidebarProps) {
+export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: SidebarProps) {
   const { user } = useAuth()
   const { pendientesRegistros, pendientesTecnicos } = useNotificaciones()
   const sigpEnabled = useFeatureFlag('sigp_f1_enabled', false)
@@ -183,9 +187,9 @@ export default function Sidebar({ collapsed }: SidebarProps) {
 
   return (
     <aside
-      className={`h-screen bg-white border-r border-gray-200 text-gray-700 flex flex-col transition-all duration-300 ${
-        collapsed ? 'w-16' : 'w-60'
-      }`}
+      className={`fixed inset-y-0 left-0 z-50 lg:static lg:z-auto h-screen bg-white border-r border-gray-200 text-gray-700 flex flex-col transition-all duration-300 w-60 ${
+        collapsed ? 'lg:w-16' : 'lg:w-60'
+      } ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}
     >
       {/* Brand */}
       <div className="flex items-center gap-3 px-4 py-5 border-b border-gray-100">
@@ -212,6 +216,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
             key={item.to}
             to={item.to}
             end={item.to === '/'}
+            onClick={onNavigate}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                 isActive
@@ -268,6 +273,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  onClick={onNavigate}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                       isActive
