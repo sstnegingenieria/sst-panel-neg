@@ -247,6 +247,22 @@ service cloud.firestore {
     }
 
     // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: cotizaciones (+ subcolección versiones) — SIGP, Comercial, F1
+    // ────────────────────────────────────────────────────────────────
+    // Read: acceso SIGP. Write: gestión de proyectos. Cada versión (snapshot con
+    // ítems inline) vive en la subcolección cotizaciones/{id}/versiones.
+
+    match /cotizaciones/{cotizacionId} {
+      allow read: if accesoSIGP();
+      allow create, update, delete: if puedeGestionarProyectos();
+
+      match /versiones/{versionId} {
+        allow read: if accesoSIGP();
+        allow create, update, delete: if puedeGestionarProyectos();
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────────
     // CATCH-ALL: denegar todo lo no especificado explícitamente
     // ────────────────────────────────────────────────────────────────
     // Incluye la colección `consecutivos` del SIGP: solo la Cloud

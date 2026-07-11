@@ -14,5 +14,9 @@ dist/
 # Salidas de scripts de auditoría
 functions/audit-*.csv
 
+# Exports del Firebase Emulator Suite (datos locales de prueba)
+emu-export/
+firebase-export-*/
+
 # Brainstorming companion (visual mockups)
 .superpowers/

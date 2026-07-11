@@ -162,7 +162,9 @@ export function sugerirMapeoColumnas(hoja: HojaCruda, filaEncabezado: number): M
 
   const codigo = buscar(/c[oó]digo|c[oó]d\b|item|referencia|ref\b/i)
   const capitulo = buscar(/cap[ií]tulo|grupo|secci[oó]n/i)
-  const unidad = buscar(/unidad|und\b|u\.?m|medida/i)
+  // Cubre también plantillas en inglés (ej. IHS: "UNIT OF MEASUREMENT").
+  // Se evita el genérico /unit/ para no capturar "UNIT PRICE" (valor).
+  const unidad = buscar(/unidad|und\b|u\.?m|medida|unit of meas|measurement|u\/m/i)
   let valor = buscar(/valor|precio|vr\.?|v\/u|unitario/i)
   let descripcion = buscar(/descrip|concepto|actividad|detalle/i)
 

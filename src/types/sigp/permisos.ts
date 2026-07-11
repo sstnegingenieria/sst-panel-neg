@@ -106,3 +106,5 @@ export const puedeGestionarLpusUI = (rol: string | undefined) => en(rol, ROLES_G
 export const puedeGestionarSolicitudesUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
 // Programar/ejecutar visitas técnicas: mismos roles (comercial/proyectos).
 export const puedeGestionarVisitasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
+// Crear/gestionar cotizaciones: mismos roles (comercial/proyectos).
+export const puedeGestionarCotizacionesUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)

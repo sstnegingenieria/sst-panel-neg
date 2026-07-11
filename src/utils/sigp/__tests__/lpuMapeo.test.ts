@@ -64,6 +64,29 @@ describe('sugerirMapeoColumnas', () => {
     expect(m).toMatchObject({ codigo: 0, descripcion: 1, unidad: 2, valor_unitario: 3 })
   })
 
+  it('reconoce encabezados en inglés (plantilla real IHS) sin confundir unidad con precio', () => {
+    // Fila de encabezados real de LPU_NEG_IHS_2026.xlsx (hojas OBRA CIVIL/ELECTRICA/ESTRUCTURAS).
+    const h = hoja('OBRA CIVIL', [
+      ['', 'ITEM', 'DESCRIPTION OF THE WORK, GOOD OR SERVICE', 'QUANTITY', 'UNIT OF MEASUREMENT', 'PRECIOS FIJOS 2026'],
+      ['', '52', 'Acometida 3 x 2 + 1 x 4', 1, 'ml', 125000],
+    ])
+    const m = sugerirMapeoColumnas(h, 0)
+    expect(m.codigo).toBe(1)          // ITEM
+    expect(m.descripcion).toBe(2)     // DESCRIPTION…
+    expect(m.unidad).toBe(4)          // UNIT OF MEASUREMENT (bug real: antes quedaba null)
+    expect(m.valor_unitario).toBe(5)  // PRECIOS FIJOS 2026
+  })
+
+  it('no captura "UNIT PRICE" como unidad', () => {
+    const h = hoja('LPU', [
+      ['ITEM', 'DESCRIPTION', 'UNIT PRICE'],
+      ['A-1', 'Cable', 3500],
+    ])
+    const m = sugerirMapeoColumnas(h, 0)
+    expect(m.unidad).toBeNull()
+    expect(m.valor_unitario).toBe(2)  // cae por contenido a la columna de precios
+  })
+
   it('cae al contenido cuando no hay encabezados reconocibles', () => {
     const h = hoja('LPU', [
       ['x', 'y', 'z'],
