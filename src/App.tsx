@@ -21,6 +21,7 @@ import SolicitudDetalleSigp from './pages/sigp/SolicitudDetalleSigp'
 import VisitasSigp from './pages/sigp/VisitasSigp'
 import VisitaDetalleSigp from './pages/sigp/VisitaDetalleSigp'
 import CotizacionesSigp from './pages/sigp/CotizacionesSigp'
+import CotizacionDetalleSigp from './pages/sigp/CotizacionDetalleSigp'
 import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, type Rol } from './types/sigp/roles'
 import {
   ROLES_VE_DASHBOARD_SST,
@@ -97,6 +98,7 @@ function ProtectedRoutes() {
         <Route path="/sigp/visitas" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><VisitasSigp /></ProtectedRoute>} />
         <Route path="/sigp/visitas/:visitaId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><VisitaDetalleSigp /></ProtectedRoute>} />
         <Route path="/sigp/cotizaciones" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionesSigp /></ProtectedRoute>} />
+        <Route path="/sigp/cotizaciones/:cotizacionId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionDetalleSigp /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

@@ -434,6 +434,34 @@ Ante un **bloqueo en producción**, se **reporta y se espera OK explícito** ant
 
 ---
 
+## H-009 · Heurística de mapeo de LPU solo-español: la LPU IHS se importó con `unidad` vacía en sus 536 ítems
+
+**Fase:** F1.4-A (Comercial — Cotizaciones núcleo) · **Fecha:** 10-jul-2026 · **Severidad:** Media (dato) + defecto de heurística
+
+### Qué pasó
+
+Durante la validación de F1.4-A, Giovanny reportó que al agregar ítems desde el LPU a una cotización la **unidad llegaba vacía**. La investigación (lectura directa de Firestore prod + descarga del Excel original desde Storage) determinó:
+
+1. El Excel real `LPU_NEG_IHS_2026.xlsx` **sí contiene la unidad** — pero sus encabezados están **en inglés**: la columna se llama **"UNIT OF MEASUREMENT"**.
+2. La heurística de `sugerirMapeoColumnas` (`utils/sigp/lpuMapeo.ts`) solo buscaba términos en español (`/unidad|und\b|u\.?m|medida/i`) → no detectó la columna → los **536 ítems** se importaron con `unidad: ''` en F1.1. (Descripción y precio sí se detectaron: "DESCRIPTION…" matchea `/descrip/` y "PRECIOS FIJOS 2026" matchea `/precio/`.)
+3. El constructor de cotizaciones **siempre heredó correctamente** la unidad del ítem LPU — heredaba un dato vacío. Se descartó clipping visual y renombre de campo con verificación por API.
+
+### Corrección aplicada
+
+- **Código**: heurística extendida a `unit of meas|measurement|u\/m` (se evitó el genérico `/unit/` para no capturar "UNIT PRICE" como unidad) + 2 tests con la fila de encabezados real de IHS.
+- **Datos**: backfill quirúrgico en producción (`backfill-unidad.js`, autorizado por Giovanny el 11-jul-2026): parseó el Excel de Storage, matcheó por hoja+código+descripción y escribió **solo el campo `unidad`** (`updateMask`) — **536/536 ítems poblados, 0 sin match**, precios intactos, verificado post-aplicación. Las cotizaciones existentes no cambian (son snapshots).
+- **UI (defensa en profundidad)**: en el constructor de cotizaciones, la unidad de ítems origen `lpu` es solo lectura (heredada); si el dato heredado viene vacío (LPU legacy), el campo queda editable como fallback.
+
+### Lección
+
+Las heurísticas de import sobre documentos de clientes deben asumir **plantillas bilingües** (los clientes de telecom usan formatos corporativos en inglés). Al validar una importación, verificar una muestra de **todas las columnas mapeadas** contra el archivo fuente — en F1.1 se validó conteo de ítems y precios, no la completitud de unidad.
+
+### Vinculación ISO
+
+- ISO 9001 cláusula 8.4.3 (información para proveedores externos — integridad de datos de origen del cliente) y 8.5.1 (control de la provisión del servicio: precios/unidades pactados fieles al documento fuente).
+
+---
+
 ## Nota de configuración · APIs habilitadas en `neg-sst-app`
 
 El 05-jul-2026, durante el pre-flight del deploy de `generarConsecutivo`, el CLI de Firebase habilitó automáticamente dos APIs de Google Cloud necesarias para Cloud Functions 2ª gen:
@@ -548,5 +576,6 @@ Seguimiento abierto post-F0: **H-001** (refinamiento opcional), **H-004** (bump 
 | H-006 | 05-jul-2026 | Resuelto | 05-jul-2026 | commit F0 0.5.d |
 | H-007 | 05-jul-2026 | Resuelto | 06-jul-2026 | commit F0 0.6.a-bis |
 | H-008 | 07-jul-2026 | Resuelto (técnico: gate cross-service removido → auth-only) + observación de proceso registrada; hardening por custom claims **abierto** | 07-jul-2026 | commit F1.1 (`sigp/f1.1-clientes-lpu`) |
+| H-009 | 10-jul-2026 | Resuelto (heurística bilingüe + tests; backfill de `unidad` 536/536 en prod autorizado y verificado) | 11-jul-2026 | commit F1.4-A (`sigp/f1.4a-cotizaciones`) |
 
 Cuando cada hallazgo se resuelva, actualizar esta bitácora con la fecha y el commit/PR que lo cerró.

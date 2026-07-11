@@ -5,8 +5,8 @@
  * Formato: PREFIJO-YYYY-NNN (o NNNN si supera 999 en el año).
  *
  * Prefijos válidos: SOL (solicitudes), VIS (visitas técnicas),
- * OFR (cotizaciones), PRY (proyectos), ACT (actas),
- * LIQ (liquidaciones), FAC (facturas), NC (no conformidades).
+ * COT (cotizaciones), OFR (cotizaciones legacy), PRY (proyectos),
+ * ACT (actas), LIQ (liquidaciones), FAC (facturas), NC (no conformidades).
  *
  * Cada prefijo tiene su propio contador anual en la colección
  * `consecutivos`, documento con ID `{prefijo}_{año}`.
@@ -26,7 +26,7 @@ const { FieldValue } = require('firebase-admin/firestore');
 
 // Nota: admin.initializeApp() ya se llama en index.js — no re-inicializar
 
-const PREFIJOS_VALIDOS = ['SOL', 'VIS', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC'];
+const PREFIJOS_VALIDOS = ['SOL', 'VIS', 'COT', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC'];
 
 const generarConsecutivo = onCall(
   {
