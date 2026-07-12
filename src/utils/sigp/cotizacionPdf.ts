@@ -14,6 +14,7 @@ import type {
   EsquemaTributario, ConfigAIU, ModoAgrupacion, Actividad,
 } from '../../types/sigp/cotizacion'
 import { subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../types/sigp/cotizacion'
+import { etiquetaVersion, fmtNum } from './formato'
 
 // ── Control documental ISO (actualizar cuando el SGI re-versione el formato) ──
 const ISO = { area: 'COMERCIAL', codigo: 'CM-FT-CT-19', version: '05', modificado: 'JUL-2026' }
@@ -94,7 +95,7 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-const fMoneda = (n: number) => '$ ' + Math.round(n || 0).toLocaleString('es-CO')
+const fMoneda = (n: number) => '$ ' + fmtNum(n || 0)   // F1.5 p.4: máx. 2 decimales
 const fFechaLarga = (d: Date) =>
   d.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })
 
@@ -137,7 +138,8 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   ])
   const logo = await doc.embedPng(assets.logo)
 
-  doc.setTitle(`${datos.consecutivo} v${datos.versionNum} — Cotización NEG Ingeniería`)
+  const etiqV = etiquetaVersion(datos.versionNum)
+  doc.setTitle(`${datos.consecutivo}${etiqV ? ' ' + etiqV : ''} — Cotización NEG Ingeniería`)
   doc.setAuthor('NEG Ingeniería S.A.S. BIC')
   doc.setSubject(datos.asunto)
 
@@ -151,7 +153,7 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
 
   const encabezadoCompacto = () => {
     y = ALTO - 40
-    page.drawText(`${datos.consecutivo} · v${datos.versionNum}`, { x: MARGEN, y, size: 10, font: fB, color: VERDE })
+    page.drawText(`${datos.consecutivo}${etiqV ? ' · ' + etiqV : ''}`, { x: MARGEN, y, size: 10, font: fB, color: VERDE })
     page.drawText('COTIZACIÓN', { x: ANCHO - MARGEN - fS.widthOfTextAtSize('COTIZACIÓN', 8), y: y + 1, size: 8, font: fS, color: GRIS_MEDIO })
     y -= 10
     page.drawRectangle({ x: MARGEN, y, width: CONTENIDO, height: 3, color: VERDE })
@@ -212,7 +214,7 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     // título + consecutivo
     texto('COTIZACIÓN', MARGEN, 14, fB, GRIS)
     const consec = `${datos.consecutivo}`
-    const vTag = `  v${datos.versionNum}`
+    const vTag = etiqV ? `  ${etiqV}` : ''
     const wC = fB.widthOfTextAtSize(consec, 17), wV = fS.widthOfTextAtSize(vTag, 10)
     page.drawText(consec, { x: ANCHO - MARGEN - wC - wV, y: y - 2, size: 17, font: fB, color: VERDE })
     page.drawText(vTag, { x: ANCHO - MARGEN - wV, y: y - 2, size: 10, font: fS, color: GRIS_MEDIO })
@@ -304,7 +306,7 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
       lineas.forEach((l, i) => page.drawText(l, { x: xDesc + 4, y: yTop - i * 10, size: 8, font: fR, color: TINTA }))
       page.drawText(it.unidad || '—', { x: xUnd + 4, y: yTop, size: 8, font: fR, color: TINTA })
       const der = (t: string, xd: number) => page.drawText(t, { x: xd - fR.widthOfTextAtSize(t, 8), y: yTop, size: 8, font: fR, color: TINTA })
-      der(String(it.cantidad), xCant + col.cant - 4)
+      der(fmtNum(it.cantidad), xCant + col.cant - 4)
       der(fMoneda(it.valor_unitario), xVu + col.vu - 4)
       der(fMoneda(it.valor_total), xVt + col.vt - 4)
       y -= hFila

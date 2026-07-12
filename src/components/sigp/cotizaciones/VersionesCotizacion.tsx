@@ -3,8 +3,9 @@ import { collection, getDocs } from 'firebase/firestore'
 import { db } from '../../../firebase/config'
 import type { VersionCotizacion } from '../../../types/sigp/cotizacion'
 import { ESQUEMA_LABEL } from '../../../types/sigp/cotizacion'
+import { etiquetaVersion, fmtNum } from '../../../utils/sigp/formato'
 
-const fMoneda = (n: number | undefined) => n === undefined ? '—' : '$ ' + Math.round(n || 0).toLocaleString('es-CO')
+const fMoneda = (n: number | undefined) => n === undefined ? '—' : '$ ' + fmtNum(n || 0)
 
 function fFecha(ts: unknown): string {
   const d = (ts as { toDate?: () => Date })?.toDate?.()
@@ -50,7 +51,7 @@ export default function VersionesCotizacion({ cotizacionId, versionActiva }: { c
               <th className="px-2 py-2 font-semibold"></th>
               {versiones.map(v => (
                 <th key={v.version} className={`px-2 py-2 font-semibold text-right ${v.version === versionActiva ? 'text-brand-700' : ''}`}>
-                  v{v.version}{v.version === versionActiva && ' (activa)'}
+                  {etiquetaVersion(v.version) || '1ª emisión'}{v.version === versionActiva && ' (activa)'}
                 </th>
               ))}
             </tr>
