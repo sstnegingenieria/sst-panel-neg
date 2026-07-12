@@ -7,7 +7,7 @@ import { useFirestore } from '../../hooks/useFirestore'
 import { toast } from '../../components/shared/Toast'
 import { useAuth } from '../../contexts/AuthContext'
 import { puedeGestionarCotizacionesUI } from '../../types/sigp/permisos'
-import { ESTADOS_COTIZACION, ESTADO_COT_LABEL, estadoEfectivo } from '../../types/sigp/cotizacion'
+import { ESTADOS_COTIZACION, ESTADO_COT_LABEL, estadoEfectivo, TIPOS_INVERSION, TIPO_INVERSION_LABEL } from '../../types/sigp/cotizacion'
 import type { Cliente } from '../../types/sigp/cliente'
 
 export default function CotizacionesSigp() {
@@ -19,6 +19,7 @@ export default function CotizacionesSigp() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [filtroEstado, setFiltroEstado] = useState('')
   const [filtroCliente, setFiltroCliente] = useState('')
+  const [filtroInversion, setFiltroInversion] = useState('')
   const [formOpen, setFormOpen] = useState(false)
 
   const loadClientes = useCallback(async () => {
@@ -39,8 +40,9 @@ export default function CotizacionesSigp() {
 
   const filtradas = useMemo(() => cotizaciones.filter(c =>
     (!filtroEstado || estadoEfectivo(c) === filtroEstado) &&
-    (!filtroCliente || c.cliente_id === filtroCliente),
-  ), [cotizaciones, filtroEstado, filtroCliente])
+    (!filtroCliente || c.cliente_id === filtroCliente) &&
+    (!filtroInversion || c.tipo_inversion === filtroInversion),
+  ), [cotizaciones, filtroEstado, filtroCliente, filtroInversion])
 
   const stats = useMemo(() => {
     const efectivos = cotizaciones.map(estadoEfectivo)
@@ -100,6 +102,11 @@ export default function CotizacionesSigp() {
               className="w-48 px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
               <option value="">Todos los clientes</option>
               {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+            <select value={filtroInversion} onChange={e => setFiltroInversion(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+              <option value="">OPEX y CAPEX</option>
+              {TIPOS_INVERSION.map(t => <option key={t} value={t}>{TIPO_INVERSION_LABEL[t]}</option>)}
             </select>
           </div>
         </div>

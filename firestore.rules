@@ -263,6 +263,17 @@ service cloud.firestore {
     }
 
     // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: catalogo_items — catálogo NEG de ítems propios (F1.4-B)
+    // ────────────────────────────────────────────────────────────────
+    // Read: acceso SIGP. Write: gestión de proyectos. El código CAT-NNNN lo
+    // genera la Cloud Function generarConsecutivo (contador acumulativo).
+
+    match /catalogo_items/{itemId} {
+      allow read: if accesoSIGP();
+      allow create, update, delete: if puedeGestionarProyectos();
+    }
+
+    // ────────────────────────────────────────────────────────────────
     // CATCH-ALL: denegar todo lo no especificado explícitamente
     // ────────────────────────────────────────────────────────────────
     // Incluye la colección `consecutivos` del SIGP: solo la Cloud

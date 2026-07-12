@@ -13,10 +13,10 @@ interface ModalProps {
   onClose: () => void
   children: ReactNode
   actions?: ModalAction[]
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'sm' | 'md' | 'lg' | 'xl'
 }
 
-const sizeClass = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg' }
+const sizeClass = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-3xl' }
 const btnClass = {
   primary: 'bg-brand-700 hover:bg-brand-800 text-white',
   danger: 'bg-red-600 hover:bg-red-700 text-white',

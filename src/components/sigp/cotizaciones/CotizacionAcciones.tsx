@@ -16,6 +16,8 @@ interface CotizacionAccionesProps {
   puedeGestionar: boolean
   /** Persiste el borrador en pantalla antes de enviar (congela el snapshot). Devuelve false si se canceló. */
   guardarBorrador: () => Promise<boolean>
+  /** Genera y sube el PDF de la versión congelada (1.4B.e). null = falló → el envío se aborta. */
+  generarPdf: (fechaEmision: Date) => Promise<{ url: string; hash: string } | null>
   reload: () => Promise<void>
 }
 
@@ -25,7 +27,7 @@ interface CotizacionAccionesProps {
  *  - enviada   → Aprobar (evidencia OBLIGATORIA) | Rechazar (motivo obligatorio)
  *  - enviada/rechazada/vencida → Nueva versión (copia completa como borrador v+1)
  */
-export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestionar, guardarBorrador, reload }: CotizacionAccionesProps) {
+export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestionar, guardarBorrador, generarPdf, reload }: CotizacionAccionesProps) {
   const { user } = useAuth()
   const [aplicando, setAplicando] = useState(false)
   const [modalRechazo, setModalRechazo] = useState(false)
@@ -44,20 +46,24 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
   })
 
   const enviar = async () => {
-    if (!window.confirm(`¿Enviar la versión v${cotizacion.version_activa} de ${cotizacion.consecutivo}? El snapshot se congela y la cotización deja de ser editable.`)) return
+    if (!window.confirm(`¿Enviar la versión v${cotizacion.version_activa} de ${cotizacion.consecutivo}? El snapshot se congela, se genera el PDF y la cotización deja de ser editable.`)) return
     setAplicando(true)
     try {
-      // Congelar lo que el usuario ve: persistir el borrador actual primero.
+      // 1. Congelar lo que el usuario ve: persistir el borrador actual.
       if (!(await guardarBorrador())) { setAplicando(false); return }
       const ahora = Timestamp.now()
+      // 2. Generar el PDF de la versión congelada. Si falla, el envío NO se completa.
+      const pdf = await generarPdf(ahora.toDate())
+      if (!pdf) { setAplicando(false); return }
+      // 3. Marcar enviada: fecha + pdf en la versión, estado en el padre.
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(cotizacion.version_activa)), {
-        fecha_envio: ahora,
+        fecha_envio: ahora, pdf_url: pdf.url, pdf_hash: pdf.hash,
       })
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id), {
         estado: 'enviada', fecha_envio: ahora, fecha_actualizacion: ahora,
         historial: arrayUnion(entrada('borrador', 'enviada')),
       })
-      toast(`${cotizacion.consecutivo} enviada`)
+      toast(`${cotizacion.consecutivo} enviada — PDF generado`)
       await reload()
     } catch { toast('Error al enviar', 'error') } finally { setAplicando(false) }
   }
@@ -108,7 +114,7 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
       const vSnap = await getDoc(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(cotizacion.version_activa)))
       if (!vSnap.exists()) throw new Error('versión activa no encontrada')
       const base = vSnap.data() as Omit<VersionCotizacion, 'id'>
-      const { fecha_envio: _fe, pdf_url: _pdf, ...copia } = base
+      const { fecha_envio: _fe, pdf_url: _pdf, pdf_hash: _ph, ...copia } = base
       await setDoc(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(n)), {
         ...copia, version: n, creada_por: user?.uid ?? '', fecha_creacion: Timestamp.now(),
       })

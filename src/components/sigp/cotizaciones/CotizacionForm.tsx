@@ -8,8 +8,8 @@ import { toast } from '../../shared/Toast'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
 import { useFirestore } from '../../../hooks/useFirestore'
-import { ESQUEMAS, ESQUEMA_LABEL, calcularTotales } from '../../../types/sigp/cotizacion'
-import type { EsquemaTributario, ConfigAIU, CondicionesCotizacion } from '../../../types/sigp/cotizacion'
+import { ESQUEMAS, ESQUEMA_LABEL, calcularTotales, TIPOS_INVERSION, TIPO_INVERSION_LABEL } from '../../../types/sigp/cotizacion'
+import type { EsquemaTributario, ConfigAIU, CondicionesCotizacion, TipoInversion } from '../../../types/sigp/cotizacion'
 import type { Cliente } from '../../../types/sigp/cliente'
 import type { Solicitud } from '../../../types/sigp/solicitud'
 
@@ -26,6 +26,7 @@ interface FormState {
   clienteId: string
   prospectoNombre: string
   esLicitacion: boolean
+  tipoInversion: TipoInversion | ''
   esquema: EsquemaTributario
   aiuAdmin: string
   aiuImprev: string
@@ -39,7 +40,7 @@ interface FormState {
 }
 
 const inicial = (): FormState => ({
-  asunto: '', solicitudId: '', clienteId: '', prospectoNombre: '', esLicitacion: false,
+  asunto: '', solicitudId: '', clienteId: '', prospectoNombre: '', esLicitacion: false, tipoInversion: '',
   esquema: 'iva_pleno', aiuAdmin: '9', aiuImprev: '5', aiuUtil: '4', ivaPct: '19',
   formaPago: '', validezDias: '30', tiempoEjecucion: '', garantia: '', observaciones: '',
 })
@@ -157,6 +158,7 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
       if (form.clienteId) parentData.cliente_id = form.clienteId
       if (form.prospectoNombre.trim()) parentData.prospecto_nombre = form.prospectoNombre.trim()
       if (form.solicitudId) parentData.solicitud_id = form.solicitudId
+      if (form.tipoInversion) parentData.tipo_inversion = form.tipoInversion
 
       const batch = writeBatch(db)
       batch.set(doc(db, 'cotizaciones', cotizacionId), parentData)
@@ -251,6 +253,15 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
             <input type="checkbox" checked={form.esLicitacion} onChange={e => set('esLicitacion', e.target.checked)} className="w-4 h-4 accent-brand-700" />
             Es licitación (el documento final es externo, se adjunta)
           </label>
+          <SelectField
+            label="Tipo de inversión (contratos tipo Claro — opcional)"
+            value={form.tipoInversion}
+            onChange={v => set('tipoInversion', v as TipoInversion | '')}
+            options={[
+              { value: '', label: '— Sin clasificar —' },
+              ...TIPOS_INVERSION.map(t => ({ value: t, label: TIPO_INVERSION_LABEL[t] })),
+            ]}
+          />
         </div>
 
         {/* Esquema tributario */}

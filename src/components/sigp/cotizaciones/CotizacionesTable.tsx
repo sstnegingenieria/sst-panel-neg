@@ -1,6 +1,9 @@
 import { useNavigate } from 'react-router-dom'
 import type { Cotizacion } from '../../../types/sigp/cotizacion'
-import { ESTADO_COT_LABEL, ESTADO_COT_COLOR, estadoEfectivo } from '../../../types/sigp/cotizacion'
+import {
+  ESTADO_COT_LABEL, ESTADO_COT_COLOR, estadoEfectivo,
+  TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR, diasDesdeEnvio, colorSeguimiento,
+} from '../../../types/sigp/cotizacion'
 
 interface CotizacionesTableProps {
   cotizaciones: Cotizacion[]
@@ -63,13 +66,23 @@ export default function CotizacionesTable({ cotizaciones, loading, clienteNombre
                   <td className="py-3 px-4 font-mono text-xs text-gray-700">
                     {c.consecutivo}
                     {c.es_licitacion && <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-50 text-violet-700">LIC</span>}
+                    {c.tipo_inversion && <span className={`ml-1 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold ${TIPO_INVERSION_COLOR[c.tipo_inversion]}`}>{TIPO_INVERSION_LABEL[c.tipo_inversion]}</span>}
                   </td>
                   <td className="py-3 px-4 font-medium text-gray-800">{origen(c, clienteNombres)}</td>
                   <td className="py-3 px-4 text-gray-600 max-w-[16rem] truncate" title={c.asunto}>{c.asunto || '—'}</td>
-                  <td className="py-3 px-4">
+                  <td className="py-3 px-4 whitespace-nowrap">
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${ESTADO_COT_COLOR[est]}`}>
                       {ESTADO_COT_LABEL[est]}
                     </span>
+                    {est === 'enviada' && (() => {
+                      const dias = diasDesdeEnvio(c.fecha_envio)
+                      return dias !== null && (
+                        <span className={`ml-1.5 inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-medium ${colorSeguimiento(dias)}`}
+                          title="Días desde el envío (seguimiento)">
+                          hace {dias} {dias === 1 ? 'día' : 'días'}
+                        </span>
+                      )
+                    })()}
                   </td>
                   <td className="py-3 px-4 text-right font-mono text-xs text-gray-700">{fMoneda(c.total)}</td>
                   <td className="py-3 px-4 text-gray-500 text-xs">v{c.version_activa}</td>

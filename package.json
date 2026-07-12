@@ -12,6 +12,7 @@
     "test:emulator": "firebase emulators:exec --project demo-neg --only functions,firestore,auth \"vitest run --config vitest.emulator.config.ts\""
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
     "firebase": "^10.12.2",
     "pdf-lib": "^1.17.1",
     "react": "^18.3.1",
