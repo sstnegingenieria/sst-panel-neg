@@ -11,9 +11,9 @@ import { PDFDocument, PDFFont, PDFPage, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import type {
   ItemCotizacion, TotalesCotizacion, CondicionesCotizacion,
-  EsquemaTributario, ConfigAIU, AgrupadorItems,
+  EsquemaTributario, ConfigAIU, ModoAgrupacion, Actividad,
 } from '../../types/sigp/cotizacion'
-import { AGRUPADOR_SINGULAR } from '../../types/sigp/cotizacion'
+import { subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../types/sigp/cotizacion'
 
 // ── Control documental ISO (actualizar cuando el SGI re-versione el formato) ──
 const ISO = { area: 'COMERCIAL', codigo: 'CM-FT-CT-19', version: '05', modificado: 'JUL-2026' }
@@ -54,7 +54,11 @@ export interface DatosPdfCotizacion {
   ivaPct: number
   items: ItemCotizacion[]
   totales: TotalesCotizacion
-  agrupador: AgrupadorItems
+  /** F1.5.2c — agrupación real de la versión: por capítulo o por actividades
+   *  (entidad propia). Los títulos, el orden y los subtotales de grupo salen
+   *  de `subtotalesPorGrupo` (misma fuente que el constructor y el snapshot). */
+  modo: ModoAgrupacion
+  actividades?: Actividad[]
   condiciones: CondicionesCotizacion
   observaciones?: string
   firmante: { nombre: string; correo?: string; celular?: string }
@@ -259,19 +263,26 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     y -= 20
   }
 
-  // agrupar preservando orden de aparición
-  const sinGrupo = `Sin ${AGRUPADOR_SINGULAR[datos.agrupador].toLowerCase()}`
-  const grupos = new Map<string, ItemCotizacion[]>()
+  // Agrupación (F1.5.2c): títulos, orden y subtotales desde subtotalesPorGrupo —
+  // la MISMA fuente del constructor y del snapshot. En modo actividad se
+  // respeta el orden de las actividades; huérfanos → 'Otros'. Los grupos sin
+  // ítems se OMITEN en el documento (cara al cliente, una actividad vacía con
+  // $0 es ruido; su ausencia no altera la suma).
+  const desglose = subtotalesPorGrupo(datos.items, datos.modo, datos.actividades ?? [])
+  const buckets = new Map(desglose.map(g => [g.grupo_id, { g, items: [] as ItemCotizacion[] }]))
   for (const it of datos.items) {
-    const g = it.capitulo?.trim() || sinGrupo
-    if (!grupos.has(g)) grupos.set(g, [])
-    grupos.get(g)!.push(it)
+    const id = datos.modo === 'actividad'
+      ? (it.actividad_id && buckets.has(it.actividad_id) ? it.actividad_id : GRUPO_OTROS_ID)
+      : (it.capitulo?.trim() || GRUPO_OTROS_ID)
+    buckets.get(id)?.items.push(it)
   }
+  const grupos = [...buckets.values()].filter(b => b.items.length > 0)
 
   encabezadoTabla()
   let alterna = false
-  for (const [grupo, itemsG] of grupos) {
-    const subtotal = itemsG.reduce((s, it) => s + (it.valor_total || 0), 0)
+  for (const { g, items: itemsG } of grupos) {
+    const grupo = g.grupo_nombre
+    const subtotal = g.subtotal
     // título de grupo (no huérfano: reserva título + una fila)
     asegurar(34)
     if (y - 34 < MARGEN_INF) { nuevaPagina(); encabezadoTabla() }

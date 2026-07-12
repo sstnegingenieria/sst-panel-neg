@@ -15,11 +15,12 @@ import { puedeGestionarCotizacionesUI } from '../../types/sigp/permisos'
 import {
   calcularTotales, valorTotalItem, estadoEfectivo,
   ESTADO_COT_LABEL, ESTADO_COT_COLOR, ESQUEMA_LABEL, ESQUEMAS,
-  precioDesdeCosto, margenDesdePrecio, asignarCodigosINP,
-  AGRUPADORES, AGRUPADOR_LABEL, AGRUPADOR_SINGULAR,
+  asignarCodigosINP, esItemBloqueado, patchInstancia,
   TIPOS_INVERSION, TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR,
+  subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, GRUPO_OTROS_ID,
+  conInstanciaIds, nuevaInstanciaId, sembrarActividadesDesdeCapitulos,
 } from '../../types/sigp/cotizacion'
-import type { AgrupadorItems, TipoInversion } from '../../types/sigp/cotizacion'
+import type { ModoAgrupacion, Actividad, TipoInversion } from '../../types/sigp/cotizacion'
 import type { CatalogoItem } from '../../types/sigp/catalogo'
 import type { ItemCotizacion, EsquemaTributario, ConfigAIU, CondicionesCotizacion, APU } from '../../types/sigp/cotizacion'
 import ApuModal from '../../components/sigp/cotizaciones/ApuModal'
@@ -54,14 +55,17 @@ export default function CotizacionDetalleSigp() {
   const [cond, setCond] = useState<CondicionesCotizacion>({ forma_pago: '', validez_dias: 30, tiempo_ejecucion: '', garantia: '', moneda: 'COP' })
   const [busqueda, setBusqueda] = useState('')
   const [guardando, setGuardando] = useState(false)
-  // Filas con descripción expandida (por índice del ítem)
-  const [expandidos, setExpandidos] = useState<Record<number, boolean>>({})
+  // Filas con descripción expandida (por instancia_id del ítem)
+  const [expandidos, setExpandidos] = useState<Record<string, boolean>>({})
   const [asunto, setAsunto] = useState('')
   // 1.4B.b — análisis económico interno (toggle apagado por defecto) + modal APU
   const [analisis, setAnalisis] = useState(false)
   const [apuIdx, setApuIdx] = useState<number | null>(null)
-  // 1.4B.d — agrupador de la VERSIÓN (capitulos default) y tipo de inversión del padre
-  const [agrupador, setAgrupador] = useState<AgrupadorItems>('capitulos')
+  // F1.5.2b — modo de agrupación de la VERSIÓN + actividades (entidad propia).
+  // Reemplaza al `agrupador` de 1.4B.d (reetiquetado, deprecated).
+  const [modoAgr, setModoAgr] = useState<ModoAgrupacion>('capitulo')
+  const [actividades, setActividades] = useState<Actividad[]>([])
+  // 1.4B.d — tipo de inversión del padre
   const [tipoInversion, setTipoInversion] = useState<TipoInversion | ''>('')
 
   // Datos auxiliares
@@ -80,14 +84,15 @@ export default function CotizacionDetalleSigp() {
 
   useEffect(() => {
     if (!version) return
-    setItems(version.items ?? [])
+    setItems(conInstanciaIds(version.items ?? []))   // default lazy de instancia_id
     setEsquema(version.esquema)
     setAiuAdmin(String(version.aiu?.admin ?? 9))
     setAiuImprev(String(version.aiu?.imprevistos ?? 5))
     setAiuUtil(String(version.aiu?.utilidad ?? 4))
     setIvaPct(String(version.iva_pct))
     setCond(version.condiciones)
-    setAgrupador(version.agrupador ?? 'capitulos') // versiones pre-1.4B → capitulos
+    setModoAgr(modoAgrupacionDe(version))            // versiones previas → 'capitulo'
+    setActividades(actividadesDe(version))
   }, [version?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cargar LPU vigente del cliente (para el buscador) y visita realizada vinculada.
@@ -125,24 +130,28 @@ export default function CotizacionDetalleSigp() {
     esquema === 'aiu' ? { admin: Number(aiuAdmin), imprevistos: Number(aiuImprev), utilidad: Number(aiuUtil) } : undefined
 
   const totales = useMemo(
-    () => calcularTotales(items, esquema, aiuConfig(), Number(ivaPct) || 0),
-    [items, esquema, aiuAdmin, aiuImprev, aiuUtil, ivaPct], // eslint-disable-line react-hooks/exhaustive-deps
+    () => calcularTotales(items, esquema, aiuConfig(), Number(ivaPct) || 0, { modo: modoAgr, actividades }),
+    [items, esquema, aiuAdmin, aiuImprev, aiuUtil, ivaPct, modoAgr, actividades], // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   const editable = cotizacion?.estado === 'borrador' && puedeGestionar
   const capitulos = useMemo(() => [...new Set(items.map(i => i.capitulo?.trim()).filter(Boolean))] as string[], [items])
   const itemsCero = items.filter(i => (i.valor_unitario || 0) <= 0).length
+  const actividadesOrdenadas = useMemo(() => [...actividades].sort((a, b) => a.orden - b.orden), [actividades])
 
-  const grupos = useMemo(() => {
-    const sinGrupo = `Sin ${AGRUPADOR_SINGULAR[agrupador].toLowerCase()}`
-    const m = new Map<string, { it: ItemCotizacion; idx: number }[]>()
+  // Grupos para render: misma fuente que los subtotales (subtotalesPorGrupo) —
+  // el encabezado de cada grupo muestra SU subtotal del desglose oficial.
+  const gruposRender = useMemo(() => {
+    const sub = subtotalesPorGrupo(items, modoAgr, actividades)
+    const buckets = new Map(sub.map(g => [g.grupo_id, { g, filas: [] as { it: ItemCotizacion; idx: number }[] }]))
     items.forEach((it, idx) => {
-      const cap = it.capitulo?.trim() || sinGrupo
-      if (!m.has(cap)) m.set(cap, [])
-      m.get(cap)!.push({ it, idx })
+      const id = modoAgr === 'actividad'
+        ? (it.actividad_id && buckets.has(it.actividad_id) ? it.actividad_id : GRUPO_OTROS_ID)
+        : (it.capitulo?.trim() || GRUPO_OTROS_ID)
+      buckets.get(id)?.filas.push({ it, idx })
     })
-    return [...m.entries()]
-  }, [items, agrupador])
+    return [...buckets.values()]
+  }, [items, modoAgr, actividades])
 
   const lpuFiltrado = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
@@ -185,27 +194,10 @@ export default function CotizacionDetalleSigp() {
     )
   }
 
-  const setItem = (i: number, patch: Partial<ItemCotizacion>) => setItems(prev => prev.map((it, j) => {
-    if (j !== i) return it
-    const m = { ...it, ...patch }
-    // Goal-seek del análisis económico (1.4B.b):
-    // - teclear margen válido → recalcula el precio desde el costo
-    // - teclear precio o costo → re-deriva el margen mostrado
-    // - limpiar el costo → el margen pierde su base y se limpia
-    if ('margen' in patch && m.margen !== undefined && m.costo_directo !== undefined) {
-      const p = precioDesdeCosto(m.costo_directo, m.margen)
-      if (p !== null) m.valor_unitario = Math.round(p)
-    } else if (('valor_unitario' in patch || 'costo_directo' in patch) && !('margen' in patch)) {
-      if (m.costo_directo === undefined) {
-        delete m.margen
-      } else {
-        const mg = margenDesdePrecio(m.costo_directo, m.valor_unitario)
-        if (mg !== null) m.margen = Math.round(mg * 10) / 10
-      }
-    }
-    m.valor_total = valorTotalItem(m.valor_unitario, m.cantidad)
-    return m
-  }))
+  // Merge con reglas del constructor: bloqueo de snapshots LPU/catálogo +
+  // goal-seek del análisis económico (lógica pura testeada: patchInstancia).
+  const setItem = (i: number, patch: Partial<ItemCotizacion>) =>
+    setItems(prev => prev.map((it, j) => (j === i ? patchInstancia(it, patch) : it)))
   const quitarItem = (i: number) => setItems(prev => prev.filter((_, j) => j !== i))
 
   // ── APU (1.4B.b) ──
@@ -218,11 +210,61 @@ export default function CotizacionDetalleSigp() {
     return { ...resto, origen: 'manual' as const }
   }))
 
+  // ── F1.5.2b — modo de agrupación y actividades ──
+
+  const cambiarModo = (m: ModoAgrupacion) => {
+    if (m === modoAgr) return
+    if (m === 'actividad' && actividades.length === 0) {
+      // Siembra: una actividad por capítulo actual, con sus ítems dentro.
+      const s = sembrarActividadesDesdeCapitulos(items)
+      setActividades(s.actividades)
+      setItems(conInstanciaIds(s.items))
+    }
+    // actividad → capítulo es NO destructivo: actividades y actividad_id se
+    // conservan (solo dejan de usarse para agrupar). La vuelta tampoco
+    // re-siembra si ya hay actividades.
+    setModoAgr(m)
+  }
+
+  const agregarActividad = () => setActividades(p => [
+    ...p,
+    { id: nuevaInstanciaId(), nombre: `Actividad ${p.length + 1}`, orden: p.length ? Math.max(...p.map(a => a.orden)) + 1 : 0 },
+  ])
+
+  const renombrarActividad = (id: string, nombre: string) =>
+    setActividades(p => p.map(a => (a.id === id ? { ...a, nombre } : a)))
+
+  /** Sube/baja la actividad intercambiando `orden` con su vecina. */
+  const moverActividad = (id: string, dir: -1 | 1) => setActividades(p => {
+    const s = [...p].sort((a, b) => a.orden - b.orden)
+    const i = s.findIndex(a => a.id === id)
+    const j = i + dir
+    if (i < 0 || j < 0 || j >= s.length) return p
+    const oi = s[i].orden, oj = s[j].orden
+    return p.map(a => (a.id === s[i].id ? { ...a, orden: oj } : a.id === s[j].id ? { ...a, orden: oi } : a))
+  })
+
+  const eliminarActividad = (id: string) => {
+    const act = actividades.find(a => a.id === id)
+    const afectados = items.filter(it => it.actividad_id === id).length
+    if (!window.confirm(`¿Eliminar la actividad "${act?.nombre}"?${afectados ? ` Sus ${afectados} ítem(s) pasan a "Otros" — no se borran.` : ''}`)) return
+    setActividades(p => p.filter(a => a.id !== id))
+    setItems(p => p.map(it => {
+      if (it.actividad_id !== id) return it
+      const { actividad_id: _a, ...resto } = it
+      return resto
+    }))
+  }
+
+  // (b-fix) La duplicación de instancias ("Añadir a…") se retiró: repetir un
+  // ítem en otra actividad se logra volviéndolo a buscar en el buscador dual.
+
   const agregarLpu = (li: ItemLPU) => setItems(prev => [...prev, {
     origen: 'lpu', codigo: li.codigo, descripcion: li.descripcion, unidad: li.unidad,
     valor_unitario: li.valor_unitario, cantidad: 1, valor_total: valorTotalItem(li.valor_unitario, 1),
     ...(li.capitulo ? { capitulo: li.capitulo } : {}),
     ...(lpuVigenteId ? { lpu_id: lpuVigenteId } : {}), lpu_item_id: li.id,
+    instancia_id: nuevaInstanciaId(),
   }])
 
   /** Agregar del catálogo NEG: snapshot completo + catalogo_id (trazabilidad). */
@@ -234,13 +276,14 @@ export default function CotizacionDetalleSigp() {
     ...(c.margen !== undefined ? { margen: c.margen } : {}),
     ...(c.apu ? { apu: c.apu } : {}),
     catalogo_id: c.id,
+    instancia_id: nuevaInstanciaId(),
   }])
 
-  const agregarManual = () => setItems(prev => [...prev, { origen: 'manual', codigo: '', descripcion: '', unidad: '', valor_unitario: 0, cantidad: 1, valor_total: 0 }])
+  const agregarManual = () => setItems(prev => [...prev, { origen: 'manual', codigo: '', descripcion: '', unidad: '', valor_unitario: 0, cantidad: 1, valor_total: 0, instancia_id: nuevaInstanciaId() }])
 
   const prellenarVisita = () => setItems(prev => [...prev, ...visitaCant.map(c => ({
     origen: 'manual' as const, codigo: '', descripcion: c.descripcion, unidad: c.unidad,
-    valor_unitario: 0, cantidad: c.cantidad, valor_total: 0,
+    valor_unitario: 0, cantidad: c.cantidad, valor_total: 0, instancia_id: nuevaInstanciaId(),
   }))])
 
   /** Persiste un array de ítems concreto (validaciones incluidas). */
@@ -255,13 +298,18 @@ export default function CotizacionDetalleSigp() {
     setGuardando(true)
     try {
       const aiu = aiuConfig()
-      const tot = calcularTotales(its, esquema, aiu, Number(ivaPct) || 0)
+      // Actividades normalizadas: nombre vacío → "Actividad N" (por orden).
+      const actividadesLimpias = [...actividades]
+        .sort((a, b) => a.orden - b.orden)
+        .map((a, i) => ({ ...a, nombre: a.nombre.trim() || `Actividad ${i + 1}` }))
+      const tot = calcularTotales(its, esquema, aiu, Number(ivaPct) || 0, { modo: modoAgr, actividades: actividadesLimpias })
       // JSON round-trip: elimina claves undefined (Firestore las rechaza).
       const itemsLimpios = JSON.parse(JSON.stringify(its)) as ItemCotizacion[]
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(cotizacion.version_activa)), {
         items: itemsLimpios, esquema, aiu: aiu ?? deleteField(), iva_pct: Number(ivaPct) || 0, condiciones: { ...cond, validez_dias: Number(cond.validez_dias) || 0 }, totales: tot,
-        agrupador,
+        modo_agrupacion: modoAgr, actividades: actividadesLimpias,
       })
+      setActividades(actividadesLimpias)
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id), {
         total: tot.total, validez_dias: Number(cond.validez_dias) || 0,
         asunto: asunto.trim(), tipo_inversion: tipoInversion || deleteField(),
@@ -311,7 +359,7 @@ export default function CotizacionDetalleSigp() {
       if (!window.confirm(`¿Incorporar "${it.descripcion}" al catálogo NEG?`)) continue
       try {
         const r = await crearEnCatalogo(it)
-        nuevos[i] = { ...it, ...r }
+        nuevos[i] = { ...it, ...r }   // por línea (comportamiento F1.4)
         cambio = true
         toast(`"${it.descripcion.slice(0, 30)}" → catálogo NEG (${r.codigo})`)
       } catch {
@@ -372,7 +420,8 @@ export default function CotizacionDetalleSigp() {
         ivaPct: v.iva_pct,
         items: v.items ?? [],
         totales: v.totales,
-        agrupador: v.agrupador ?? 'capitulos',
+        modo: modoAgrupacionDe(v),
+        actividades: actividadesDe(v),
         condiciones: v.condiciones,
         observaciones: v.condiciones?.observaciones,
         firmante: { nombre: user?.nombre ?? user?.email ?? '—', correo: user?.email ?? undefined, celular },
@@ -399,7 +448,7 @@ export default function CotizacionDetalleSigp() {
     if (!window.confirm(`¿Incorporar "${it.descripcion}" al catálogo NEG?`)) return
     try {
       const r = await crearEnCatalogo(it)
-      const finales = its.map((x, j) => (j === idx ? { ...x, ...r } : x))
+      const finales = its.map((x, j) => (j === idx ? { ...x, ...r } : x))   // por línea (F1.4)
       setItems(finales)
       toast(`"${it.descripcion.slice(0, 30)}" → catálogo NEG (${r.codigo})`)
       // Persistir ya: el doc de catálogo existe; el vínculo no debe quedar solo en memoria.
@@ -546,9 +595,10 @@ export default function CotizacionDetalleSigp() {
               <div className="flex items-center gap-2">
                 {editable && <>
                   <label className="text-xs text-gray-500">Agrupar por</label>
-                  <select value={agrupador} onChange={e => setAgrupador(e.target.value as AgrupadorItems)}
+                  <select value={modoAgr} onChange={e => cambiarModo(e.target.value as ModoAgrupacion)}
                     className="text-xs px-2 py-1.5 border border-gray-300 rounded-lg bg-white">
-                    {AGRUPADORES.map(a => <option key={a} value={a}>{AGRUPADOR_LABEL[a]}</option>)}
+                    <option value="capitulo">Capítulos</option>
+                    <option value="actividad">Actividades</option>
                   </select>
                   <label className="text-xs text-gray-500 ml-2">Inversión</label>
                   <select value={tipoInversion} onChange={e => setTipoInversion(e.target.value as TipoInversion | '')}
@@ -564,6 +614,33 @@ export default function CotizacionDetalleSigp() {
                 }`}>
                 📊 Análisis económico {analisis ? '· interno — no sale al cliente' : ''}
               </button>}
+            </div>
+          )}
+
+          {/* Panel de actividades (F1.5.2b — solo modo actividad, editable) */}
+          {editable && modoAgr === 'actividad' && (
+            <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Actividades</h3>
+                <button onClick={agregarActividad} className="text-xs px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 font-medium">+ Actividad</button>
+              </div>
+              {actividadesOrdenadas.length === 0 && <p className="text-xs text-gray-400">Sin actividades — créalas con «+ Actividad».</p>}
+              {actividadesOrdenadas.map((a, i) => (
+                <div key={a.id} className="flex items-center gap-1.5">
+                  <button onClick={() => moverActividad(a.id, -1)} disabled={i === 0} title="Subir"
+                    className="text-gray-400 hover:text-gray-700 disabled:opacity-25 text-xs px-1">▲</button>
+                  <button onClick={() => moverActividad(a.id, 1)} disabled={i === actividadesOrdenadas.length - 1} title="Bajar"
+                    className="text-gray-400 hover:text-gray-700 disabled:opacity-25 text-xs px-1">▼</button>
+                  <input value={a.nombre} onChange={e => renombrarActividad(a.id, e.target.value)}
+                    placeholder={`Actividad ${i + 1}`}
+                    className="flex-1 px-2 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                  <span className="text-[11px] text-gray-400 font-mono w-24 text-right">
+                    {fMoneda(totales.subtotales_por_grupo?.find(g => g.grupo_id === a.id)?.subtotal ?? 0)}
+                  </span>
+                  <button onClick={() => eliminarActividad(a.id)} title="Eliminar (sus ítems pasan a Otros)"
+                    className="text-red-400 hover:text-red-600 text-xs px-1">✕</button>
+                </div>
+              ))}
             </div>
           )}
 
@@ -588,45 +665,61 @@ export default function CotizacionDetalleSigp() {
                 </tr>
               </thead>
               {items.length === 0 && <tbody><tr><td colSpan={nCols} className="px-2 py-6 text-center text-gray-400">Sin ítems. Agrega desde el LPU o manuales.</td></tr></tbody>}
-              {grupos.map(([cap, filas]) => {
-                  const sub = filas.reduce((s, f) => s + (f.it.valor_total || 0), 0)
+              {gruposRender.map(({ g, filas }) => {
                   return (
-                    <tbody key={cap}>
-                      <tr className="bg-gray-50"><td colSpan={nCols} className="px-2 py-1.5 text-[11px] font-semibold text-gray-600 uppercase">{cap} <span className="text-gray-400 normal-case">· {fMoneda(sub)}</span></td></tr>
+                    <tbody key={g.grupo_id}>
+                      <tr className="bg-gray-50"><td colSpan={nCols} className="px-2 py-1.5 text-[11px] font-semibold text-gray-600 uppercase">{g.grupo_nombre} <span className="text-gray-400 normal-case">· {fMoneda(g.subtotal)}</span></td></tr>
+                      {filas.length === 0 && (
+                        <tr className="border-b border-gray-50"><td colSpan={nCols} className="px-2 py-2 text-center text-gray-300 text-[11px]">Sin ítems en esta actividad.</td></tr>
+                      )}
                       {filas.map(({ it, idx }) => {
+                        const kExp = it.instancia_id ?? String(idx)
                         const cero = (it.valor_unitario || 0) <= 0
-                        const exp = !!expandidos[idx]
-                        const toggleExp = () => setExpandidos(p => ({ ...p, [idx]: !p[idx] }))
+                        const exp = !!expandidos[kExp]
+                        // b-fix: snapshot LPU/catálogo bloqueado — solo cantidad y actividad editables
+                        const bloq = esItemBloqueado(it)
+                        const toggleExp = () => setExpandidos(p => ({ ...p, [kExp]: !p[kExp] }))
                         return (
-                          <Fragment key={idx}>
+                          <Fragment key={kExp}>
                           <tr className={`${exp ? '' : 'border-b border-gray-50'} ${cero ? 'bg-amber-50' : ''}`}>
-                            <td className="px-2 py-1 whitespace-nowrap">{editable ? <input value={it.codigo} onChange={e => setItem(idx, { codigo: e.target.value })} className="w-16 px-1 py-1 border border-gray-200 rounded" /> : <>
-                              <span className="font-mono text-gray-500">{it.codigo || '—'}</span>
-                              {it.apu && <button onClick={() => setApuIdx(idx)} title="Ver desglose APU (solo lectura)" className="ml-1 text-[10px] px-1.5 py-0.5 rounded font-semibold bg-brand-600 text-white">APU</button>}
+                            <td className="px-2 py-1 whitespace-nowrap">{editable && !bloq ? <input value={it.codigo} onChange={e => setItem(idx, { codigo: e.target.value })} className="w-16 px-1 py-1 border border-gray-200 rounded" /> : <>
+                              <span className="font-mono text-gray-500" title={bloq ? 'Snapshot del LPU/catálogo — solo lectura' : undefined}>{it.codigo || '—'}</span>
+                              {!editable && it.apu && <button onClick={() => setApuIdx(idx)} title="Ver desglose APU (solo lectura)" className="ml-1 text-[10px] px-1.5 py-0.5 rounded font-semibold bg-brand-600 text-white">APU</button>}
                             </>}</td>
                             <td className="px-2 py-1 max-w-md">
                               <div className="flex items-start gap-1">
-                                {editable
+                                {editable && !bloq
                                   ? <input value={it.descripcion} onChange={e => setItem(idx, { descripcion: e.target.value })} className="w-full min-w-[10rem] px-1 py-1 border border-gray-200 rounded" />
                                   : <span onClick={toggleExp} title="Clic para expandir / contraer" className="block w-full text-gray-800 cursor-pointer truncate">{it.descripcion}</span>}
                                 <button onClick={toggleExp} title={exp ? 'Contraer' : 'Ver descripción completa'} className="text-gray-400 hover:text-gray-600 mt-1 flex-shrink-0">{exp ? '▴' : '▾'}</button>
                               </div>
-                              {editable && <input list="capitulos" value={it.capitulo ?? ''} onChange={e => setItem(idx, { capitulo: e.target.value })} placeholder={AGRUPADOR_SINGULAR[agrupador].toLowerCase()} className="mt-1 w-full px-1 py-0.5 border border-gray-100 rounded text-[11px] text-gray-500" />}</td>
+                              {editable && modoAgr === 'capitulo' &&
+                                <input list="capitulos" value={it.capitulo ?? ''} onChange={e => setItem(idx, { capitulo: e.target.value })} placeholder="capítulo" className="mt-1 w-full px-1 py-0.5 border border-gray-100 rounded text-[11px] text-gray-500" />}
+                              {editable && modoAgr === 'actividad' && (
+                                <div className="mt-1 flex gap-1">
+                                  <select value={it.actividad_id ?? ''} title="Actividad de esta instancia"
+                                    onChange={e => setItem(idx, { actividad_id: e.target.value || undefined })}
+                                    className="flex-1 px-1 py-0.5 border border-gray-200 rounded text-[11px] text-gray-600 bg-white">
+                                    <option value="">— Otros —</option>
+                                    {actividadesOrdenadas.map(a => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+                                  </select>
+                                </div>
+                              )}</td>
                             <td className="px-2 py-1">
-                              {/* Unidad: heredada del LPU = solo lectura. Editable solo en ítems
-                                  manuales — o si la LPU importada no traía unidad (dato legacy). */}
-                              {editable && (it.origen !== 'lpu' || !it.unidad)
+                              {/* Unidad: snapshot LPU/catálogo = solo lectura (b-fix). */}
+                              {editable && !bloq
                                 ? <input value={it.unidad} onChange={e => setItem(idx, { unidad: e.target.value })} className="w-12 px-1 py-1 border border-gray-200 rounded" />
-                                : <span title={it.origen === 'lpu' ? 'Heredada del LPU (solo lectura)' : undefined}>{it.unidad || '—'}</span>}
+                                : <span title={bloq ? 'Snapshot del LPU/catálogo — solo lectura' : undefined}>{it.unidad || '—'}</span>}
                             </td>
-                            <td className="px-2 py-1 text-right">{editable ? <input inputMode="numeric" value={it.valor_unitario ? '$ ' + it.valor_unitario.toLocaleString('es-CO') : ''}
+                            <td className="px-2 py-1 text-right">{editable && !bloq ? <input inputMode="numeric" value={it.valor_unitario ? '$ ' + it.valor_unitario.toLocaleString('es-CO') : ''}
                                 onChange={e => {
                                   // es-CO: punto = miles (se descarta), coma = decimal. Preserva
                                   // precios LPU con decimales reales (ej. 16031,954) sin corromperlos.
                                   const crudo = e.target.value.replace(/[^\d,]/g, '').replace(',', '.')
                                   setItem(idx, { valor_unitario: Number(crudo) || 0 })
                                 }}
-                                placeholder="$ 0" className={`w-28 px-1 py-1 border rounded text-right ${cero ? 'border-amber-300' : 'border-gray-200'}`} /> : fMoneda(it.valor_unitario)}</td>
+                                placeholder="$ 0" className={`w-28 px-1 py-1 border rounded text-right ${cero ? 'border-amber-300' : 'border-gray-200'}`} />
+                              : <span className="font-mono" title={bloq ? 'Precio del LPU/catálogo — solo lectura' : undefined}>{fMoneda(it.valor_unitario)}</span>}</td>
                             <td className="px-2 py-1 text-right">{editable ? <input type="number" value={it.cantidad || ''} onChange={e => setItem(idx, { cantidad: Number(e.target.value) })} className="w-16 px-1 py-1 border border-gray-200 rounded text-right" /> : it.cantidad}</td>
                             <td className="px-2 py-1 text-right font-mono text-gray-700">{fMoneda(it.valor_total)}</td>
                             {analisis && <>
@@ -644,7 +737,7 @@ export default function CotizacionDetalleSigp() {
                                     </span>}
                               </td>
                               <td className="px-2 py-1 text-right bg-gray-100/80">
-                                {editable && it.costo_directo !== undefined
+                                {editable && !bloq && it.costo_directo !== undefined
                                   ? <input type="number" step="0.1" value={it.margen ?? ''}
                                       onChange={e => setItem(idx, { margen: e.target.value === '' ? undefined : Number(e.target.value) })}
                                       className={`w-16 px-1 py-1 border rounded text-right bg-white ${it.margen !== undefined && (it.margen < 0 || it.margen >= 100) ? 'border-red-400' : 'border-gray-300'}`} />
@@ -674,7 +767,7 @@ export default function CotizacionDetalleSigp() {
                           {exp && (
                             <tr className={`border-b border-gray-50 ${cero ? 'bg-amber-50' : ''}`}>
                               <td colSpan={nCols} className="px-2 pb-2 pt-0">
-                                {editable
+                                {editable && !bloq
                                   ? <textarea value={it.descripcion} onChange={e => setItem(idx, { descripcion: e.target.value })} rows={3} autoFocus
                                       className="w-full px-2 py-1.5 border border-gray-200 rounded resize-y text-xs focus:outline-none focus:ring-2 focus:ring-brand-300" />
                                   : <p className="w-full text-gray-700 whitespace-pre-wrap bg-gray-50 rounded px-2 py-1.5">{it.descripcion}</p>}
@@ -799,7 +892,7 @@ export default function CotizacionDetalleSigp() {
         <ApuModal
           isOpen
           onClose={() => setApuIdx(null)}
-          editable={editable}
+          editable={editable && !esItemBloqueado(items[apuIdx])}
           codigoItem={items[apuIdx].codigo}
           descripcionItem={items[apuIdx].descripcion}
           apu={items[apuIdx].apu}

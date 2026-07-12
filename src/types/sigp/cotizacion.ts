@@ -22,8 +22,33 @@ export type CategoriaAdjunto = 'licitacion' | 'evidencia' | 'otro'
 /** Cómo se titulan/semantizan los grupos de ítems de una VERSIÓN (mismo campo
  *  `capitulo` del ítem; solo cambia etiqueta). Vive en la versión — no en el
  *  padre — por integridad de snapshot: el PDF de cada versión enviada conserva
- *  su propio agrupador. Default: 'capitulos'. */
+ *  su propio agrupador. Default: 'capitulos'.
+ *  @deprecated F1.5.2 — reetiquetado superficial de F1.4-B. La fuente nueva es
+ *  `modo_agrupacion` + `actividades` (entidad propia). Se conserva para leer
+ *  versiones existentes; la UI/PDF lo reconcilian en F1.5.2b/c. */
 export type AgrupadorItems = 'capitulos' | 'actividades'
+
+/** Modo de agrupación de una VERSIÓN (F1.5.2): por `capitulo` del ítem
+ *  (comportamiento histórico) o por ACTIVIDADES como entidad propia. */
+export type ModoAgrupacion = 'capitulo' | 'actividad'
+
+/** Actividad de una versión (F1.5.2 — entidad propia, no reetiquetado):
+ *  nombre libre editable; un ítem puede repetirse en varias actividades
+ *  (varias INSTANCIAS en items[] con igual `codigo` y distinta `cantidad` /
+ *  `actividad_id`); una actividad puede contener ítems de capítulos distintos. */
+export interface Actividad {
+  id: string                   // id local de la versión (no doc Firestore)
+  nombre: string
+  orden: number
+}
+
+/** Subtotal de un grupo (capítulo o actividad), ANTES de impuestos. */
+export interface SubtotalGrupo {
+  grupo_id: string             // capitulo (texto) | actividad.id | '__otros__'
+  grupo_nombre: string
+  orden: number
+  subtotal: number             // Σ valor_total de sus ítems (redondeado a peso)
+}
 
 /** Clasificación de inversión para contratos tipo Claro (badge + filtro). */
 export type TipoInversion = 'opex' | 'capex'
@@ -84,7 +109,21 @@ export interface ItemCotizacion {
   valor_unitario: number
   cantidad: number
   valor_total: number          // snapshot = valor_unitario * cantidad
-  capitulo?: string            // agrupador (capítulo o actividad, según la versión)
+  capitulo?: string            // capítulo de origen (agrupa en modo 'capitulo')
+
+  // ── Instancia (F1.5.2): cada línea de items[] es una INSTANCIA. El mismo
+  //    ítem repetido = varias entradas con igual `codigo` y distinta
+  //    `cantidad`/`actividad_id` — ningún código debe asumir `codigo` único. ──
+  /** Id estable de la INSTANCIA (uuid local de la versión): key de React, DnD
+   *  y asignación a actividad. Ausente en líneas guardadas antes de F1.5.2 →
+   *  default lazy con `conInstanciaIds()`. No participa en la matemática. */
+  instancia_id?: string
+  /** Actividad a la que pertenece ESTA instancia (solo en modo 'actividad');
+   *  referencia a `Actividad.id` de la versión. */
+  actividad_id?: string
+  /** Orden estable de la instancia dentro de su grupo (lo asigna la UI);
+   *  ausente → orden de aparición en items[]. */
+  orden?: number
 
   // ── Análisis económico (INTERNO — jamás se pinta en el PDF) ────────────────
   costo_directo?: number       // costo interno UNITARIO (del APU o manual)
@@ -126,6 +165,9 @@ export interface TotalesCotizacion {
   base_iva: number             // iva_pleno: costos_directos | aiu: utilidad
   iva: number                  // base_iva * iva_pct / 100
   total: number
+  /** Desglose por grupo ANTES de impuestos (F1.5.2). Presente solo cuando
+   *  calcularTotales recibe la agrupación; ausente en snapshots anteriores. */
+  subtotales_por_grupo?: SubtotalGrupo[]
 }
 
 // ── Versión (subcolección cotizaciones/{id}/versiones/{versionId}) ────────────
@@ -141,8 +183,16 @@ export interface VersionCotizacion {
   totales: TotalesCotizacion   // snapshot calculado
   /** Cómo se agrupan/titulan los ítems de ESTA versión. Ausente en versiones
    *  anteriores a F1.4-B → leer como 'capitulos'. Editable solo en borrador;
-   *  se copia al crear nueva versión. */
+   *  se copia al crear nueva versión.
+   *  @deprecated F1.5.2 — ver `modo_agrupacion`. */
   agrupador?: AgrupadorItems
+
+  /** Modo de agrupación (F1.5.2). Ausente en versiones existentes → leer como
+   *  'capitulo' (usar `modoAgrupacionDe()`; default lazy, sin migración). */
+  modo_agrupacion?: ModoAgrupacion
+  /** Actividades de la versión (solo modo 'actividad'; vacío en modo capítulo).
+   *  Ausente en versiones existentes → leer como []. */
+  actividades?: Actividad[]
   fecha_envio?: Timestamp      // cuándo se envió ESTA versión
   pdf_url?: string             // PDF generado al enviar (cara al cliente)
   pdf_hash?: string            // SHA-256 de los bytes del PDF (evidencia de integridad)
@@ -282,6 +332,70 @@ export function valorTotalItem(valorUnitario: number, cantidad: number): number 
   return Math.round((valorUnitario || 0) * (cantidad || 0))
 }
 
+// ── Agrupación (F1.5.2) ───────────────────────────────────────────────────────
+
+/** id reservado del grupo de ítems sin capítulo / sin actividad asignada. */
+export const GRUPO_OTROS_ID = '__otros__'
+
+/** Default lazy de retrocompatibilidad: versión sin `modo_agrupacion` (todas
+ *  las anteriores a F1.5.2) se comporta como 'capitulo'. Sin migración. */
+export function modoAgrupacionDe(v: Pick<VersionCotizacion, 'modo_agrupacion'>): ModoAgrupacion {
+  return v.modo_agrupacion ?? 'capitulo'
+}
+
+/** Default lazy: versión sin `actividades` → []. */
+export function actividadesDe(v: Pick<VersionCotizacion, 'actividades'>): Actividad[] {
+  return v.actividades ?? []
+}
+
+/**
+ * Subtotales por grupo, ANTES de impuestos (Σ valor_total de los ítems del grupo).
+ * - modo 'capitulo': agrupa por `item.capitulo` en orden de primera aparición;
+ *   ítems sin capítulo → grupo 'Otros'.
+ * - modo 'actividad': agrupa por `item.actividad_id`; nombre y orden vienen de
+ *   `actividades` (se respeta su `orden`, incluidas actividades declaradas sin
+ *   ítems, con subtotal 0); instancias huérfanas (sin actividad o con id no
+ *   declarado) → grupo 'Otros' al final.
+ * Invariante: Σ subtotales === costos_directos (antes de impuestos).
+ */
+export function subtotalesPorGrupo(
+  items: ItemCotizacion[],
+  modo: ModoAgrupacion,
+  actividades: Actividad[] = [],
+): SubtotalGrupo[] {
+  if (modo === 'actividad') {
+    const ordenadas = [...actividades].sort((a, b) => a.orden - b.orden)
+    const porId = new Map<string, SubtotalGrupo>(
+      ordenadas.map(a => [a.id, { grupo_id: a.id, grupo_nombre: a.nombre, orden: a.orden, subtotal: 0 }]),
+    )
+    const maxOrden = ordenadas.reduce((m, a) => Math.max(m, a.orden), -1)
+    const otros: SubtotalGrupo = { grupo_id: GRUPO_OTROS_ID, grupo_nombre: 'Otros', orden: maxOrden + 1, subtotal: 0 }
+    let hayHuerfanos = false
+    for (const it of items) {
+      const g = it.actividad_id ? porId.get(it.actividad_id) : undefined
+      if (g) g.subtotal += it.valor_total || 0
+      else { otros.subtotal += it.valor_total || 0; hayHuerfanos = true }
+    }
+    const res = [...porId.values()]
+    if (hayHuerfanos) res.push(otros)
+    res.forEach(g => { g.subtotal = Math.round(g.subtotal) })
+    return res
+  }
+
+  // modo 'capitulo': orden de primera aparición
+  const m = new Map<string, SubtotalGrupo>()
+  let n = 0
+  for (const it of items) {
+    const nombre = it.capitulo?.trim() || 'Otros'
+    const id = it.capitulo?.trim() ? nombre : GRUPO_OTROS_ID
+    if (!m.has(id)) m.set(id, { grupo_id: id, grupo_nombre: nombre, orden: n++, subtotal: 0 })
+    m.get(id)!.subtotal += it.valor_total || 0
+  }
+  const res = [...m.values()]
+  res.forEach(g => { g.subtotal = Math.round(g.subtotal) })
+  return res
+}
+
 /**
  * Calcula el bloque de totales según el esquema.
  * - iva_pleno: total = CD + IVA(CD)
@@ -291,15 +405,26 @@ export function valorTotalItem(valorUnitario: number, cantidad: number): number 
  * REDONDEO: cada componente (CD, A, I, U, IVA, Total) se redondea a peso con
  * Math.round al final; la operación intermedia usa precisión completa. Así el
  * snapshot guardado coincide con lo que mostrará el PDF.
+ *
+ * F1.5.2 — `agrupacion` (opcional): si se pasa, el resultado incluye
+ * `subtotales_por_grupo` (desglose ANTES de impuestos). Los impuestos se
+ * calculan a nivel versión exactamente igual con o sin agrupación; las
+ * llamadas existentes (sin 5º argumento) devuelven un resultado idéntico
+ * al histórico.
  */
 export function calcularTotales(
   items: ItemCotizacion[],
   esquema: EsquemaTributario,
   aiu: ConfigAIU | undefined,
   ivaPct: number,
+  agrupacion?: { modo: ModoAgrupacion; actividades?: Actividad[] },
 ): TotalesCotizacion {
   // CD = suma de valor_total (ya redondeado por ítem); se redondea de nuevo por robustez.
   const costos_directos = Math.round(items.reduce((s, it) => s + (it.valor_total || 0), 0))
+
+  const desglose = agrupacion
+    ? { subtotales_por_grupo: subtotalesPorGrupo(items, agrupacion.modo, agrupacion.actividades) }
+    : {}
 
   if (esquema === 'aiu') {
     const a = aiu ?? { admin: 0, imprevistos: 0, utilidad: 0 }
@@ -311,11 +436,12 @@ export function calcularTotales(
       costos_directos, admin, imprevistos, utilidad,
       base_iva: utilidad, iva,
       total: costos_directos + admin + imprevistos + utilidad + iva,
+      ...desglose,
     }
   }
 
   const iva = Math.round(costos_directos * ivaPct / 100)
-  return { costos_directos, base_iva: costos_directos, iva, total: costos_directos + iva }
+  return { costos_directos, base_iva: costos_directos, iva, total: costos_directos + iva, ...desglose }
 }
 
 // ── Análisis económico (interno) ──────────────────────────────────────────────
@@ -349,13 +475,102 @@ export function costoDirectoAPU(apu: Omit<APU, 'costo_directo'>): number {
   return SECCIONES_APU.reduce((t, sec) => t + suma(apu[sec] ?? []), 0)
 }
 
+// ── Instancias (F1.5.2b) ──────────────────────────────────────────────────────
+
+/** Id de instancia nuevo (uuid local de la versión). */
+export function nuevaInstanciaId(): string {
+  return crypto.randomUUID()
+}
+
+/** Default lazy: asigna `instancia_id` a las líneas guardadas antes de F1.5.2
+ *  que no lo tienen. Las que ya lo tienen no cambian. Devuelve un array nuevo. */
+export function conInstanciaIds(items: ItemCotizacion[]): ItemCotizacion[] {
+  return items.map(it => (it.instancia_id ? it : { ...it, instancia_id: nuevaInstanciaId() }))
+}
+
+/**
+ * Siembra del cambio capítulo → actividad (F1.5.2b): crea una actividad por
+ * cada grupo de capítulo actual (en orden de primera aparición; sin capítulo →
+ * 'Otros') y asigna cada instancia a la actividad de su capítulo.
+ * Puro salvo por la generación de ids. Devuelve estructuras nuevas.
+ */
+export function sembrarActividadesDesdeCapitulos(
+  items: ItemCotizacion[],
+): { actividades: Actividad[]; items: ItemCotizacion[] } {
+  const porCapitulo = new Map<string, Actividad>()
+  for (const it of items) {
+    const nombre = it.capitulo?.trim() || 'Otros'
+    if (!porCapitulo.has(nombre)) {
+      porCapitulo.set(nombre, { id: nuevaInstanciaId(), nombre, orden: porCapitulo.size })
+    }
+  }
+  const actividades = [...porCapitulo.values()]
+  const itemsAsignados = items.map(it => ({
+    ...it,
+    actividad_id: porCapitulo.get(it.capitulo?.trim() || 'Otros')!.id,
+  }))
+  return { actividades, items: itemsAsignados }
+}
+
+// ── Bloqueo de ítems de origen LPU/catálogo (F1.5.2 b-fix) ───────────────────
+
+/**
+ * Un ítem que viene del LPU del cliente o del catálogo NEG es un SNAPSHOT
+ * comercial: código, descripción, unidad y valor unitario no se editan en la
+ * cotización (fidelidad al precio pactado / al catálogo). Editables: cantidad
+ * y actividad. Un APU manual construido para la cotización es editable; un
+ * ítem traído del catálogo (catalogo_id) se bloquea.
+ */
+export function esItemBloqueado(it: Pick<ItemCotizacion, 'origen' | 'catalogo_id'>): boolean {
+  return it.origen === 'lpu' || !!it.catalogo_id
+}
+
+/**
+ * Aplica un patch a una instancia con las reglas del constructor (F1.5.2 b-fix):
+ * - Ítems bloqueados (LPU/catálogo): se IGNORAN los cambios a codigo,
+ *   descripcion, unidad y valor_unitario — el snapshot no puede mutarse ni por
+ *   código. También se ignora `margen` directo (su goal-seek alteraría el
+ *   precio protegido); el margen queda derivado del costo y el precio.
+ * - Goal-seek del análisis económico (solo no bloqueados): margen válido →
+ *   recalcula precio; precio/costo → re-deriva margen; costo limpiado → margen
+ *   limpiado.
+ * - valor_total SIEMPRE se recalcula (cantidad sigue siendo editable).
+ */
+export function patchInstancia(it: ItemCotizacion, patch: Partial<ItemCotizacion>): ItemCotizacion {
+  const bloqueado = esItemBloqueado(it)
+  const p: Partial<ItemCotizacion> = { ...patch }
+  if (bloqueado) {
+    delete p.codigo
+    delete p.descripcion
+    delete p.unidad
+    delete p.valor_unitario
+    delete p.margen
+  }
+  const m = { ...it, ...p }
+  if (!bloqueado && 'margen' in p && m.margen !== undefined && m.costo_directo !== undefined) {
+    const precio = precioDesdeCosto(m.costo_directo, m.margen)
+    if (precio !== null) m.valor_unitario = Math.round(precio)
+  } else if (('valor_unitario' in p || 'costo_directo' in p) && !('margen' in p)) {
+    if (m.costo_directo === undefined) {
+      delete m.margen
+    } else {
+      const mg = margenDesdePrecio(m.costo_directo, m.valor_unitario)
+      if (mg !== null) m.margen = Math.round(mg * 10) / 10
+    }
+  }
+  m.valor_total = valorTotalItem(m.valor_unitario, m.cantidad)
+  return m
+}
+
 // ── Códigos INP temporales ────────────────────────────────────────────────────
 
 const RE_INP = /^INP-\d+$/
 
 /**
  * Renumera los códigos temporales INP-NNN de una versión: los ítems manual/apu
- * con código vacío o INP-* reciben INP-001, INP-002… en orden de aparición.
+ * con código vacío o INP-* reciben INP-001, INP-002… en orden de aparición,
+ * cada línea el suyo (comportamiento F1.4; la sincronización entre "instancias
+ * hermanas" de F1.5.2b se retiró junto con la duplicación de instancias).
  * Contador LOCAL de la versión (no consecutivo global). Los códigos LPU,
  * CAT-NNNN y los tecleados por el usuario no se tocan. Devuelve un array nuevo.
  */
