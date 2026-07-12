@@ -19,6 +19,15 @@ export type EstadoCotizacion = 'borrador' | 'enviada' | 'aprobada' | 'rechazada'
 
 export type CategoriaAdjunto = 'licitacion' | 'evidencia' | 'otro'
 
+/** Cómo se titulan/semantizan los grupos de ítems de una VERSIÓN (mismo campo
+ *  `capitulo` del ítem; solo cambia etiqueta). Vive en la versión — no en el
+ *  padre — por integridad de snapshot: el PDF de cada versión enviada conserva
+ *  su propio agrupador. Default: 'capitulos'. */
+export type AgrupadorItems = 'capitulos' | 'actividades'
+
+/** Clasificación de inversión para contratos tipo Claro (badge + filtro). */
+export type TipoInversion = 'opex' | 'capex'
+
 // ── Sub-tipos ─────────────────────────────────────────────────────────────────
 
 export interface Adjunto {
@@ -30,19 +39,66 @@ export interface Adjunto {
   subido_en?: Timestamp
 }
 
+/** Insumo de una sección del APU (formato canónico APU_CLARO_113).
+ *  `rendimiento` es el consumo por UNA unidad de la actividad — el corazón
+ *  del análisis, no una cantidad de lote; acepta decimales finos (0.0909).
+ *  El subtotal conserva precisión completa; el redondeo a peso ocurre en los
+ *  totales de la cotización, no aquí. */
+export interface InsumoAPU {
+  descripcion: string
+  unidad: string
+  rendimiento: number          // consumo por unidad de la actividad
+  costo_unitario: number
+  subtotal: number             // rendimiento × costo_unitario (precisión completa)
+}
+
+/** Análisis de Precios Unitarios embebido en el ítem (origen 'apu').
+ *  5 secciones fijas en orden canónico (APU_CLARO_113); cualquiera puede ir
+ *  vacía. Es snapshot: editarlo después no toca versiones enviadas. */
+export interface APU {
+  mano_obra: InsumoAPU[]
+  materiales: InsumoAPU[]
+  equipo: InsumoAPU[]
+  transporte: InsumoAPU[]
+  herramienta_menor: InsumoAPU[]
+  costo_directo: number        // suma de las 5 secciones (snapshot)
+}
+
+/** Orden canónico de las secciones del APU + etiquetas de UI/PDF interno. */
+export const SECCIONES_APU = ['mano_obra', 'materiales', 'equipo', 'transporte', 'herramienta_menor'] as const
+export type SeccionAPU = typeof SECCIONES_APU[number]
+
+export const SECCION_APU_LABEL: Record<SeccionAPU, string> = {
+  mano_obra: 'Mano de obra',
+  materiales: 'Materiales',
+  equipo: 'Equipo',
+  transporte: 'Transporte',
+  herramienta_menor: 'Herramienta menor',
+}
+
 export interface ItemCotizacion {
   origen: OrigenItem
-  codigo: string
+  codigo: string               // código LPU · CAT-NNNN · INP-NNN temporal · ''
   descripcion: string
   unidad: string
   valor_unitario: number
   cantidad: number
   valor_total: number          // snapshot = valor_unitario * cantidad
-  capitulo?: string            // agrupador
+  capitulo?: string            // agrupador (capítulo o actividad, según la versión)
+
+  // ── Análisis económico (INTERNO — jamás se pinta en el PDF) ────────────────
+  costo_directo?: number       // costo interno UNITARIO (del APU o manual)
+  /** % de utilidad sobre el PRECIO: precio = costo / (1 - margen/100).
+   *  El "factor 0,9" del Excel DC-FT-CT-24 equivale a margen = 10.
+   *  Rango válido: [0, 100). */
+  margen?: number
+
+  apu?: APU                    // solo origen 'apu' (embebido, snapshot)
+
   // Referencias de origen — SOLO trazabilidad, NUNCA lectura viva (es snapshot):
   lpu_id?: string
   lpu_item_id?: string
-  apu_id?: string              // F1.4-B
+  catalogo_id?: string         // si vino del catálogo NEG o se incorporó a él
 }
 
 /** Porcentajes AIU (enteros). */
@@ -83,8 +139,13 @@ export interface VersionCotizacion {
   items: ItemCotizacion[]      // inline
   condiciones: CondicionesCotizacion
   totales: TotalesCotizacion   // snapshot calculado
+  /** Cómo se agrupan/titulan los ítems de ESTA versión. Ausente en versiones
+   *  anteriores a F1.4-B → leer como 'capitulos'. Editable solo en borrador;
+   *  se copia al crear nueva versión. */
+  agrupador?: AgrupadorItems
   fecha_envio?: Timestamp      // cuándo se envió ESTA versión
-  pdf_url?: string             // futuro
+  pdf_url?: string             // PDF generado al enviar (cara al cliente)
+  pdf_hash?: string            // SHA-256 de los bytes del PDF (evidencia de integridad)
   creada_por: string
   fecha_creacion: Timestamp
 }
@@ -116,6 +177,7 @@ export interface Cotizacion {
   solicitud_id?: string
 
   es_licitacion: boolean
+  tipo_inversion?: TipoInversion   // OPEX/CAPEX (contratos tipo Claro) — opcional
   estado: EstadoCotizacion     // borrador|enviada|aprobada|rechazada (vencida = derivada)
   version_activa: number       // nº de la versión activa (la última)
 
@@ -161,6 +223,33 @@ export const ESTADO_COT_COLOR: Record<EstadoCotizacion, string> = {
 export const ESQUEMA_LABEL: Record<EsquemaTributario, string> = {
   iva_pleno: 'IVA pleno',
   aiu: 'AIU',
+}
+
+export const AGRUPADORES = ['capitulos', 'actividades'] as const
+
+/** Plural — títulos de sección/PDF. */
+export const AGRUPADOR_LABEL: Record<AgrupadorItems, string> = {
+  capitulos: 'Capítulos',
+  actividades: 'Actividades',
+}
+
+/** Singular — encabezado de columna y campo del ítem. */
+export const AGRUPADOR_SINGULAR: Record<AgrupadorItems, string> = {
+  capitulos: 'Capítulo',
+  actividades: 'Actividad',
+}
+
+export const TIPOS_INVERSION = ['opex', 'capex'] as const
+
+export const TIPO_INVERSION_LABEL: Record<TipoInversion, string> = {
+  opex: 'OPEX',
+  capex: 'CAPEX',
+}
+
+/** Badge en neutros de marca (clasificación, no estado). */
+export const TIPO_INVERSION_COLOR: Record<TipoInversion, string> = {
+  opex: 'bg-gray-100 text-gray-700',
+  capex: 'bg-brand-50 text-brand-700',
 }
 
 /**
@@ -227,6 +316,74 @@ export function calcularTotales(
 
   const iva = Math.round(costos_directos * ivaPct / 100)
   return { costos_directos, base_iva: costos_directos, iva, total: costos_directos + iva }
+}
+
+// ── Análisis económico (interno) ──────────────────────────────────────────────
+
+/**
+ * Precio de venta a partir del costo interno y el margen (% de utilidad sobre
+ * el PRECIO): precio = costo / (1 - margen/100). El "factor 0,9" del Excel
+ * DC-FT-CT-24 equivale a margen = 10.
+ * Devuelve null si el margen está fuera de [0, 100) (división por cero o
+ * precio negativo) o el costo es negativo.
+ */
+export function precioDesdeCosto(costo: number, margen: number): number | null {
+  if (!Number.isFinite(costo) || !Number.isFinite(margen)) return null
+  if (costo < 0 || margen < 0 || margen >= 100) return null
+  return costo / (1 - margen / 100)
+}
+
+/**
+ * Margen implícito (% de utilidad sobre el precio) dado costo y precio:
+ * margen = (1 - costo/precio) × 100. Puede ser negativo (venta a pérdida) —
+ * la UI lo muestra como alerta. Devuelve null si el precio es <= 0.
+ */
+export function margenDesdePrecio(costo: number, precio: number): number | null {
+  if (!Number.isFinite(costo) || !Number.isFinite(precio) || precio <= 0 || costo < 0) return null
+  return (1 - costo / precio) * 100
+}
+
+/** Costo directo de un APU = suma de subtotales de sus 5 secciones canónicas. */
+export function costoDirectoAPU(apu: Omit<APU, 'costo_directo'>): number {
+  const suma = (xs: InsumoAPU[]) => xs.reduce((s, i) => s + (i.subtotal || 0), 0)
+  return SECCIONES_APU.reduce((t, sec) => t + suma(apu[sec] ?? []), 0)
+}
+
+// ── Códigos INP temporales ────────────────────────────────────────────────────
+
+const RE_INP = /^INP-\d+$/
+
+/**
+ * Renumera los códigos temporales INP-NNN de una versión: los ítems manual/apu
+ * con código vacío o INP-* reciben INP-001, INP-002… en orden de aparición.
+ * Contador LOCAL de la versión (no consecutivo global). Los códigos LPU,
+ * CAT-NNNN y los tecleados por el usuario no se tocan. Devuelve un array nuevo.
+ */
+export function asignarCodigosINP(items: ItemCotizacion[]): ItemCotizacion[] {
+  let n = 0
+  return items.map(it => {
+    const esTemporal = it.origen !== 'lpu' && (!it.codigo.trim() || RE_INP.test(it.codigo.trim()))
+    if (!esTemporal) return it
+    n++
+    return { ...it, codigo: `INP-${String(n).padStart(3, '0')}` }
+  })
+}
+
+// ── Seguimiento de enviadas (derivado, nada se almacena) ──────────────────────
+
+/** Días completos desde el envío, o null si no hay fecha. */
+export function diasDesdeEnvio(fechaEnvio?: Timestamp): number | null {
+  const d = fechaEnvio?.toDate?.()
+  if (!d) return null
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86_400_000))
+}
+
+/** Escala del indicador "hace N días": verde <7 · ámbar 7–14 · naranja 15–29 · rojo ≥30. */
+export function colorSeguimiento(dias: number): string {
+  if (dias < 7) return 'bg-emerald-50 text-emerald-700'
+  if (dias < 15) return 'bg-amber-50 text-amber-700'
+  if (dias < 30) return 'bg-orange-50 text-orange-700'
+  return 'bg-red-50 text-red-700'
 }
 
 /** Estado derivado: si enviada y venció la validez → 'vencida' (solo UI). */

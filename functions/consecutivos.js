@@ -6,10 +6,14 @@
  *
  * Prefijos válidos: SOL (solicitudes), VIS (visitas técnicas),
  * COT (cotizaciones), OFR (cotizaciones legacy), PRY (proyectos),
- * ACT (actas), LIQ (liquidaciones), FAC (facturas), NC (no conformidades).
+ * ACT (actas), LIQ (liquidaciones), FAC (facturas), NC (no conformidades),
+ * CAT (catálogo NEG de ítems propios).
  *
  * Cada prefijo tiene su propio contador anual en la colección
  * `consecutivos`, documento con ID `{prefijo}_{año}`.
+ *
+ * Caso especial CAT: el catálogo es ACUMULATIVO, no anual — formato
+ * CAT-NNNN (padding 4, sin año), contador en `consecutivos/CAT`.
  *
  * La transacción de Firestore garantiza secuencialidad y evita
  * duplicados bajo concurrencia.
@@ -26,7 +30,7 @@ const { FieldValue } = require('firebase-admin/firestore');
 
 // Nota: admin.initializeApp() ya se llama en index.js — no re-inicializar
 
-const PREFIJOS_VALIDOS = ['SOL', 'VIS', 'COT', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC'];
+const PREFIJOS_VALIDOS = ['SOL', 'VIS', 'COT', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC', 'CAT'];
 
 const generarConsecutivo = onCall(
   {
@@ -57,10 +61,13 @@ const generarConsecutivo = onCall(
       );
     }
 
-    // Generación transaccional
+    // Generación transaccional.
+    // CAT es acumulativo (sin año, padding 4, contador `consecutivos/CAT`);
+    // el resto usa contador anual `consecutivos/{prefijo}_{año}`.
+    const esCatalogo = prefijo === 'CAT';
     const año = new Date().getFullYear();
     const db = admin.firestore();
-    const ref = db.doc(`consecutivos/${prefijo}_${año}`);
+    const ref = db.doc(esCatalogo ? 'consecutivos/CAT' : `consecutivos/${prefijo}_${año}`);
 
     try {
       const consecutivo = await db.runTransaction(async (tx) => {
@@ -71,11 +78,16 @@ const generarConsecutivo = onCall(
         tx.set(ref, {
           ultimo: siguiente,
           prefijo: prefijo,
-          año: año,
+          ...(esCatalogo ? {} : { año: año }),
           actualizado: FieldValue.serverTimestamp(),
           actualizado_por: request.auth.uid,
         }, { merge: true });
 
+        if (esCatalogo) {
+          // Padding: mínimo 4 dígitos, se extiende naturalmente si crece
+          const numero = String(siguiente).padStart(Math.max(4, String(siguiente).length), '0');
+          return `CAT-${numero}`;
+        }
         // Padding: mínimo 3 dígitos, se extiende naturalmente si crece
         const padding = Math.max(3, String(siguiente).length);
         const numero = String(siguiente).padStart(padding, '0');

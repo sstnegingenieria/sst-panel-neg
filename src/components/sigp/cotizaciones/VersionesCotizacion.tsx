@@ -66,6 +66,17 @@ export default function VersionesCotizacion({ cotizacionId, versionActiva }: { c
                 ))}
               </tr>
             ))}
+            <tr>
+              <td className="px-2 py-1.5 text-gray-500">PDF</td>
+              {versiones.map(v => (
+                <td key={v.version} className="px-2 py-1.5 text-right">
+                  {v.pdf_url
+                    ? <a href={v.pdf_url} target="_blank" rel="noreferrer" title={v.pdf_hash ? `SHA-256: ${v.pdf_hash.slice(0, 16)}…` : undefined}
+                        className="text-brand-700 hover:underline font-medium">📄 Descargar</a>
+                    : <span className="text-gray-300">—</span>}
+                </td>
+              ))}
+            </tr>
           </tbody>
         </table>
       </div>
