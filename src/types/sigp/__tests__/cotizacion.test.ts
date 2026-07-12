@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest'
 import {
   calcularTotales, valorTotalItem, TRANSICIONES, puedeNuevaVersion,
   precioDesdeCosto, margenDesdePrecio, costoDirectoAPU, asignarCodigosINP, colorSeguimiento,
+  subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, GRUPO_OTROS_ID,
+  conInstanciaIds, sembrarActividadesDesdeCapitulos, esItemBloqueado, patchInstancia,
 } from '../cotizacion'
-import type { ItemCotizacion } from '../cotizacion'
+import type { ItemCotizacion, Actividad } from '../cotizacion'
 
 const item = (valor_total: number): ItemCotizacion => ({
   origen: 'manual', codigo: '', descripcion: 'x', unidad: 'und',
@@ -53,6 +55,218 @@ describe('calcularTotales — aiu', () => {
   it('suma los valor_total de varios ítems como CD', () => {
     const t = calcularTotales([item(1000), item(2500), item(500)], 'iva_pleno', undefined, 19)
     expect(t.costos_directos).toBe(4000)
+  })
+})
+
+// ── F1.5.2a — agrupación por capítulo / actividad (entidad propia) ────────────
+
+const inst = (p: Partial<ItemCotizacion>): ItemCotizacion => ({
+  origen: 'manual', codigo: '', descripcion: 'x', unidad: 'und',
+  valor_unitario: 0, cantidad: 0, valor_total: 0, ...p,
+})
+
+describe('subtotalesPorGrupo — modo capitulo', () => {
+  it('agrupa por capitulo en orden de aparición; sin capítulo → "Otros"', () => {
+    const r = subtotalesPorGrupo([
+      inst({ capitulo: 'Redes MT', valor_total: 1000 }),
+      inst({ valor_total: 50 }),                          // sin capítulo
+      inst({ capitulo: 'Obra civil', valor_total: 300 }),
+      inst({ capitulo: 'Redes MT', valor_total: 200 }),
+      inst({ capitulo: '  ', valor_total: 25 }),          // solo espacios = sin capítulo
+    ], 'capitulo')
+    expect(r).toEqual([
+      { grupo_id: 'Redes MT', grupo_nombre: 'Redes MT', orden: 0, subtotal: 1200 },
+      { grupo_id: GRUPO_OTROS_ID, grupo_nombre: 'Otros', orden: 1, subtotal: 75 },
+      { grupo_id: 'Obra civil', grupo_nombre: 'Obra civil', orden: 2, subtotal: 300 },
+    ])
+  })
+})
+
+describe('subtotalesPorGrupo — modo actividad', () => {
+  const acts: Actividad[] = [
+    { id: 'a2', nombre: 'Adecuación torre', orden: 1 },
+    { id: 'a1', nombre: 'Obra preliminar', orden: 0 },   // declarada fuera de orden
+    { id: 'a3', nombre: 'Cierre y aseo', orden: 2 },     // sin ítems
+  ]
+
+  it('agrupa por actividad_id, respeta el orden de las actividades e incluye las vacías', () => {
+    const r = subtotalesPorGrupo([
+      inst({ actividad_id: 'a2', valor_total: 500 }),
+      inst({ actividad_id: 'a1', valor_total: 100 }),
+      inst({ actividad_id: 'a2', valor_total: 250 }),
+    ], 'actividad', acts)
+    expect(r).toEqual([
+      { grupo_id: 'a1', grupo_nombre: 'Obra preliminar', orden: 0, subtotal: 100 },
+      { grupo_id: 'a2', grupo_nombre: 'Adecuación torre', orden: 1, subtotal: 750 },
+      { grupo_id: 'a3', grupo_nombre: 'Cierre y aseo', orden: 2, subtotal: 0 },
+    ])
+  })
+
+  it('mismo codigo en dos actividades con cantidades distintas → dos subtotales sin colisión', () => {
+    const r = subtotalesPorGrupo([
+      inst({ codigo: 'CAT-0001', cantidad: 2, valor_total: 2000, actividad_id: 'a1' }),
+      inst({ codigo: 'CAT-0001', cantidad: 5, valor_total: 5000, actividad_id: 'a2' }),
+    ], 'actividad', acts)
+    expect(r.find(g => g.grupo_id === 'a1')?.subtotal).toBe(2000)
+    expect(r.find(g => g.grupo_id === 'a2')?.subtotal).toBe(5000)
+  })
+
+  it('instancias huérfanas (sin actividad o con id no declarado) → "Otros" al final', () => {
+    const r = subtotalesPorGrupo([
+      inst({ actividad_id: 'a1', valor_total: 100 }),
+      inst({ valor_total: 40 }),
+      inst({ actividad_id: 'no-existe', valor_total: 60 }),
+    ], 'actividad', acts)
+    const otros = r[r.length - 1]
+    expect(otros).toEqual({ grupo_id: GRUPO_OTROS_ID, grupo_nombre: 'Otros', orden: 3, subtotal: 100 })
+  })
+})
+
+describe('calcularTotales + agrupación (F1.5.2a)', () => {
+  const items = [
+    inst({ capitulo: 'A', actividad_id: 'a1', valor_total: 1_000_000 }),
+    inst({ capitulo: 'B', actividad_id: 'a2', valor_total: 234_567 }),
+    inst({ actividad_id: 'a1', valor_total: 500 }),
+  ]
+
+  it('Σ subtotales por grupo = costos_directos (antes de impuestos), en ambos modos', () => {
+    for (const agrupacion of [
+      { modo: 'capitulo' as const },
+      { modo: 'actividad' as const, actividades: [{ id: 'a1', nombre: 'X', orden: 0 }, { id: 'a2', nombre: 'Y', orden: 1 }] },
+    ]) {
+      const t = calcularTotales(items, 'aiu', { admin: 10, imprevistos: 6, utilidad: 8 }, 19, agrupacion)
+      const suma = t.subtotales_por_grupo!.reduce((s, g) => s + g.subtotal, 0)
+      expect(suma).toBe(t.costos_directos)
+    }
+  })
+
+  it('los impuestos son idénticos con y sin agrupación (misma matemática de versión)', () => {
+    const sin = calcularTotales(items, 'aiu', { admin: 10, imprevistos: 6, utilidad: 8 }, 19)
+    const con = calcularTotales(items, 'aiu', { admin: 10, imprevistos: 6, utilidad: 8 }, 19, { modo: 'capitulo' })
+    const { subtotales_por_grupo: _d, ...conSinDesglose } = con
+    expect(conSinDesglose).toEqual(sin)
+    expect(sin.subtotales_por_grupo).toBeUndefined()   // llamadas históricas: resultado intacto
+  })
+})
+
+describe('retrocompatibilidad F1.5.2a (defaults lazy, sin migración)', () => {
+  it('versión sin modo_agrupacion se comporta como capitulo con actividades []', () => {
+    const versionVieja = {} as { modo_agrupacion?: undefined; actividades?: undefined }
+    expect(modoAgrupacionDe(versionVieja)).toBe('capitulo')
+    expect(actividadesDe(versionVieja)).toEqual([])
+    const r = subtotalesPorGrupo(
+      [inst({ capitulo: 'Redes MT', valor_total: 700 })],
+      modoAgrupacionDe(versionVieja),
+      actividadesDe(versionVieja),
+    )
+    expect(r).toEqual([{ grupo_id: 'Redes MT', grupo_nombre: 'Redes MT', orden: 0, subtotal: 700 }])
+  })
+})
+
+describe('conInstanciaIds (F1.5.2b — default lazy)', () => {
+  it('asigna instancia_id a líneas sin él y respeta los existentes', () => {
+    const orig = [inst({ instancia_id: 'fijo-1' }), inst({})]
+    const r = conInstanciaIds(orig)
+    expect(r[0].instancia_id).toBe('fijo-1')
+    expect(r[1].instancia_id).toBeTruthy()
+    expect(orig[1].instancia_id).toBeUndefined()   // no muta
+  })
+})
+
+describe('sembrarActividadesDesdeCapitulos (F1.5.2b)', () => {
+  it('una actividad por capítulo (orden de aparición, sin capítulo → Otros) e ítems asignados', () => {
+    const { actividades, items } = sembrarActividadesDesdeCapitulos([
+      inst({ capitulo: 'Redes MT', valor_total: 1 }),
+      inst({ valor_total: 2 }),
+      inst({ capitulo: 'Obra civil', valor_total: 3 }),
+      inst({ capitulo: 'Redes MT', valor_total: 4 }),
+    ])
+    expect(actividades.map(a => [a.nombre, a.orden])).toEqual([['Redes MT', 0], ['Otros', 1], ['Obra civil', 2]])
+    const idDe = (n: string) => actividades.find(a => a.nombre === n)!.id
+    expect(items.map(i => i.actividad_id)).toEqual([idDe('Redes MT'), idDe('Otros'), idDe('Obra civil'), idDe('Redes MT')])
+    // la siembra + subtotales por actividad reproduce los grupos de capítulo
+    const sub = subtotalesPorGrupo(items, 'actividad', actividades)
+    expect(sub.map(g => [g.grupo_nombre, g.subtotal])).toEqual([['Redes MT', 5], ['Otros', 2], ['Obra civil', 3]])
+  })
+})
+
+describe('asignarCodigosINP — por línea (b-fix: comportamiento F1.4 restaurado)', () => {
+  const it_ = (origen: ItemCotizacion['origen'], codigo: string): ItemCotizacion => ({
+    origen, codigo, descripcion: 'x', unidad: 'und', valor_unitario: 0, cantidad: 1, valor_total: 0,
+  })
+
+  it('cada línea temporal recibe su propio INP, incluso si dos traen el mismo código viejo', () => {
+    const r = asignarCodigosINP([
+      it_('manual', 'INP-005'),
+      it_('manual', ''),
+      it_('manual', 'INP-005'),
+    ])
+    expect(r.map(x => x.codigo)).toEqual(['INP-001', 'INP-002', 'INP-003'])
+  })
+
+  it('líneas con código vacío reciben números propios', () => {
+    const r = asignarCodigosINP([it_('manual', ''), it_('manual', '')])
+    expect(r.map(x => x.codigo)).toEqual(['INP-001', 'INP-002'])
+  })
+})
+
+describe('bloqueo de snapshots LPU/catálogo (b-fix): esItemBloqueado + patchInstancia', () => {
+  const lpu = (): ItemCotizacion => ({
+    origen: 'lpu', codigo: 'RED-001', descripcion: 'Tendido de cable MT 15kV', unidad: 'm',
+    valor_unitario: 45_000, cantidad: 10, valor_total: 450_000, lpu_id: 'L1', lpu_item_id: 'i1',
+  })
+  const cat = (): ItemCotizacion => ({
+    origen: 'apu', codigo: 'CAT-0001', descripcion: 'Postes a instalar', unidad: 'und',
+    valor_unitario: 1_074_241, cantidad: 2, valor_total: 2_148_482, catalogo_id: 'doc1', costo_directo: 966_816.5,
+  })
+  const manual = (): ItemCotizacion => ({
+    origen: 'manual', codigo: 'INP-001', descripcion: 'Excavación', unidad: 'm3',
+    valor_unitario: 37_500, cantidad: 48, valor_total: 1_800_000,
+  })
+
+  it('esItemBloqueado: lpu y catálogo sí; manual (incluso con APU propio) no', () => {
+    expect(esItemBloqueado(lpu())).toBe(true)
+    expect(esItemBloqueado(cat())).toBe(true)
+    expect(esItemBloqueado(manual())).toBe(false)
+    expect(esItemBloqueado({ origen: 'apu' })).toBe(false)   // APU manual sin catálogo
+  })
+
+  it('lpu: IGNORA cambios a codigo/descripcion/unidad/valor_unitario (ni por código se muta)', () => {
+    const r = patchInstancia(lpu(), { codigo: 'HACK', descripcion: 'x', unidad: 'kg', valor_unitario: 1 })
+    expect(r.codigo).toBe('RED-001')
+    expect(r.descripcion).toBe('Tendido de cable MT 15kV')
+    expect(r.unidad).toBe('m')
+    expect(r.valor_unitario).toBe(45_000)
+    expect(r.valor_total).toBe(450_000)
+  })
+
+  it('catálogo: igual de bloqueado; margen directo también se ignora (alteraría el precio)', () => {
+    const r = patchInstancia(cat(), { valor_unitario: 999, margen: 50, descripcion: 'x' })
+    expect(r.valor_unitario).toBe(1_074_241)
+    expect(r.descripcion).toBe('Postes a instalar')
+    expect(r.margen).toBeUndefined()
+  })
+
+  it('bloqueado: cantidad SÍ es editable y recalcula valor_total', () => {
+    const r = patchInstancia(lpu(), { cantidad: 25 })
+    expect(r.cantidad).toBe(25)
+    expect(r.valor_total).toBe(1_125_000)
+  })
+
+  it('manual: todos los campos editables, goal-seek intacto', () => {
+    const r1 = patchInstancia(manual(), { valor_unitario: 40_000, descripcion: 'Excavación mecánica' })
+    expect(r1.valor_unitario).toBe(40_000)
+    expect(r1.descripcion).toBe('Excavación mecánica')
+    expect(r1.valor_total).toBe(1_920_000)
+    // goal-seek: costo + margen → precio
+    const r2 = patchInstancia({ ...manual(), costo_directo: 90_000 }, { margen: 10 })
+    expect(r2.valor_unitario).toBe(100_000)
+  })
+
+  it('bloqueado: costo interno editable re-deriva el margen sin tocar el precio', () => {
+    const r = patchInstancia(lpu(), { costo_directo: 40_500 })
+    expect(r.valor_unitario).toBe(45_000)          // precio intacto
+    expect(r.margen).toBeCloseTo(10)               // (1 - 40500/45000) × 100
   })
 })
 
