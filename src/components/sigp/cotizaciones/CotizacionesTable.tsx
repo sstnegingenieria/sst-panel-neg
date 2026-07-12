@@ -4,6 +4,7 @@ import {
   ESTADO_COT_LABEL, ESTADO_COT_COLOR, estadoEfectivo,
   TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR, diasDesdeEnvio, colorSeguimiento,
 } from '../../../types/sigp/cotizacion'
+import { etiquetaVersion, fmtMoney } from '../../../utils/sigp/formato'
 
 interface CotizacionesTableProps {
   cotizaciones: Cotizacion[]
@@ -16,7 +17,6 @@ function fFecha(ts: unknown): string {
   const d = (ts as { toDate?: () => Date })?.toDate?.()
   return d ? d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
 }
-const fMoneda = (n: number) => '$ ' + (n || 0).toLocaleString('es-CO')
 
 function origen(c: Cotizacion, clienteNombres: Record<string, string>): string {
   if (c.cliente_id && clienteNombres[c.cliente_id]) return clienteNombres[c.cliente_id]
@@ -84,8 +84,8 @@ export default function CotizacionesTable({ cotizaciones, loading, clienteNombre
                       )
                     })()}
                   </td>
-                  <td className="py-3 px-4 text-right font-mono text-xs text-gray-700">{fMoneda(c.total)}</td>
-                  <td className="py-3 px-4 text-gray-500 text-xs">v{c.version_activa}</td>
+                  <td className="py-3 px-4 text-right font-mono text-xs text-gray-700">{fmtMoney(c.total)}</td>
+                  <td className="py-3 px-4 text-gray-500 text-xs">{etiquetaVersion(c.version_activa)}</td>
                   <td className="py-3 px-4 text-gray-600">{fFecha(c.fecha_creacion)}</td>
                 </tr>
               )

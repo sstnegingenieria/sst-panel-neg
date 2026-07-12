@@ -8,6 +8,7 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import { puedeNuevaVersion } from '../../../types/sigp/cotizacion'
+import { etiquetaVersion } from '../../../utils/sigp/formato'
 import type { Cotizacion, EstadoCotizacion, VersionCotizacion } from '../../../types/sigp/cotizacion'
 
 interface CotizacionAccionesProps {
@@ -46,7 +47,8 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
   })
 
   const enviar = async () => {
-    if (!window.confirm(`¿Enviar la versión v${cotizacion.version_activa} de ${cotizacion.consecutivo}? El snapshot se congela, se genera el PDF y la cotización deja de ser editable.`)) return
+    const etiq = etiquetaVersion(cotizacion.version_activa)
+    if (!window.confirm(`¿Enviar ${etiq ? `la versión ${etiq} de ` : ''}${cotizacion.consecutivo}? El snapshot se congela, se genera el PDF y la cotización deja de ser editable.`)) return
     setAplicando(true)
     try {
       // 1. Congelar lo que el usuario ve: persistir el borrador actual.
@@ -108,7 +110,7 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
 
   const nuevaVersion = async () => {
     const n = cotizacion.version_activa + 1
-    if (!window.confirm(`¿Crear la versión v${n} de ${cotizacion.consecutivo}? Se copia la v${cotizacion.version_activa} completa como borrador editable.`)) return
+    if (!window.confirm(`¿Crear la versión ${etiquetaVersion(n)} de ${cotizacion.consecutivo}? Se copia ${etiquetaVersion(cotizacion.version_activa) || 'la emisión inicial'} completa como borrador editable.`)) return
     setAplicando(true)
     try {
       const vSnap = await getDoc(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(cotizacion.version_activa)))
@@ -124,7 +126,7 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
         fecha_actualizacion: Timestamp.now(),
         historial: arrayUnion(entrada(efectivo, 'borrador', { motivo: `Nueva versión v${n}`, version: n })),
       })
-      toast(`Versión v${n} creada (borrador)`)
+      toast(`Versión ${etiquetaVersion(n)} creada (borrador)`)
       await reload()
     } catch { toast('Error al crear la nueva versión', 'error') } finally { setAplicando(false) }
   }

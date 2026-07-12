@@ -6,6 +6,7 @@ import {
 import { ref as sRef, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../firebase/config'
 import { generarPdfCotizacion, cargarAssetsPdf, sha256Hex } from '../../utils/sigp/cotizacionPdf'
+import { etiquetaVersion, fmtNum, fmtMoney } from '../../utils/sigp/formato'
 import type { VersionCotizacion } from '../../types/sigp/cotizacion'
 import { useCotizacionDetalle } from '../../hooks/sigp/useCotizacionDetalle'
 import { useAuth } from '../../contexts/AuthContext'
@@ -29,7 +30,8 @@ import type { CantidadPreliminar } from '../../types/sigp/visita'
 import CotizacionAcciones from '../../components/sigp/cotizaciones/CotizacionAcciones'
 import VersionesCotizacion from '../../components/sigp/cotizaciones/VersionesCotizacion'
 
-const fMoneda = (n: number) => '$ ' + Math.round(n || 0).toLocaleString('es-CO')
+// F1.5 p.4 — formato único es-CO máx. 2 decimales (solo render; precisión interna intacta)
+const fMoneda = fmtMoney
 
 function fFecha(ts: unknown): string {
   const d = (ts as { toDate?: () => Date })?.toDate?.()
@@ -463,13 +465,13 @@ export default function CotizacionDetalleSigp() {
   const origen = cliente?.nombre ?? cotizacion.prospecto_nombre ?? '—'
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5 pb-24">
+    <div className={`${analisis ? 'max-w-none' : 'max-w-6xl'} mx-auto space-y-5 pb-24`}>
       <Link to="/sigp/cotizaciones" className="text-sm text-gray-500 hover:text-brand-700 inline-flex items-center gap-1">← Cotizaciones</Link>
 
       <div className="flex items-center gap-3 flex-wrap">
         <h1 className="text-2xl font-bold text-gray-800 font-mono">{cotizacion.consecutivo}</h1>
         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${ESTADO_COT_COLOR[est]}`}>{ESTADO_COT_LABEL[est]}</span>
-        <span className="text-sm text-gray-400">v{cotizacion.version_activa}</span>
+        {etiquetaVersion(cotizacion.version_activa) && <span className="text-sm text-gray-400">{etiquetaVersion(cotizacion.version_activa)}</span>}
         <span className="text-sm text-gray-600">· {origen}{cotizacion.es_licitacion && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 font-semibold">LICITACIÓN</span>}</span>
         {cotizacion.tipo_inversion && !editable && (
           <span className={`inline-flex px-1.5 py-0.5 rounded text-[11px] font-semibold ${TIPO_INVERSION_COLOR[cotizacion.tipo_inversion]}`}>
@@ -479,7 +481,7 @@ export default function CotizacionDetalleSigp() {
         {version?.pdf_url && (
           <a href={version.pdf_url} target="_blank" rel="noreferrer" title={version.pdf_hash ? `SHA-256: ${version.pdf_hash.slice(0, 16)}…` : undefined}
             className="text-xs px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 font-medium">
-            📄 PDF v{cotizacion.version_activa}
+            📄 PDF{etiquetaVersion(cotizacion.version_activa) ? ` ${etiquetaVersion(cotizacion.version_activa)}` : ''}
           </a>
         )}
       </div>
@@ -508,7 +510,7 @@ export default function CotizacionDetalleSigp() {
 
       {!editable && (
         <div className="rounded-lg bg-gray-100 border border-gray-200 px-4 py-2 text-xs text-gray-600">
-          Versión v{cotizacion.version_activa} en estado «{ESTADO_COT_LABEL[est]}» — solo lectura.
+          {etiquetaVersion(cotizacion.version_activa) ? `Versión ${etiquetaVersion(cotizacion.version_activa)}` : 'Cotización'} en estado «{ESTADO_COT_LABEL[est]}» — solo lectura.
         </div>
       )}
 
@@ -527,9 +529,9 @@ export default function CotizacionDetalleSigp() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className={analisis ? 'flex flex-col gap-5' : 'flex flex-col lg:flex-row gap-5'}>
         {/* Constructor de ítems */}
-        <div className="lg:col-span-2 space-y-3">
+        <div className="flex-1 min-w-0 space-y-3">
           {editable && (
             <div className="space-y-2">
               <div className="flex gap-2 flex-wrap">
@@ -648,10 +650,10 @@ export default function CotizacionDetalleSigp() {
           <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
             <datalist id="capitulos">{capitulos.map(c => <option key={c} value={c} />)}</datalist>
             <table className="min-w-full text-xs">
-              <thead>
+              <thead className="sticky top-0 z-20 bg-white">
                 <tr className="text-left text-gray-500 border-b border-gray-100">
-                  <th className="px-2 py-2 font-semibold">Código</th>
-                  <th className="px-2 py-2 font-semibold">Descripción</th>
+                  <th className="px-2 py-2 font-semibold sticky left-0 z-10 bg-white">Código</th>
+                  <th className="px-2 py-2 font-semibold sticky left-[72px] z-10 bg-white">Descripción</th>
                   <th className="px-2 py-2 font-semibold">Und</th>
                   <th className="px-2 py-2 font-semibold text-right">V. Unit</th>
                   <th className="px-2 py-2 font-semibold text-right">Cant</th>
@@ -681,16 +683,16 @@ export default function CotizacionDetalleSigp() {
                         const toggleExp = () => setExpandidos(p => ({ ...p, [kExp]: !p[kExp] }))
                         return (
                           <Fragment key={kExp}>
-                          <tr className={`${exp ? '' : 'border-b border-gray-50'} ${cero ? 'bg-amber-50' : ''}`}>
-                            <td className="px-2 py-1 whitespace-nowrap">{editable && !bloq ? <input value={it.codigo} onChange={e => setItem(idx, { codigo: e.target.value })} className="w-16 px-1 py-1 border border-gray-200 rounded" /> : <>
+                          <tr className={`${exp ? '' : 'border-b border-gray-50'} ${cero ? 'bg-amber-50' : 'bg-white'}`}>
+                            <td className="px-2 py-1 whitespace-nowrap sticky left-0 bg-inherit z-10">{editable && !bloq ? <input value={it.codigo} onChange={e => setItem(idx, { codigo: e.target.value })} className="w-14 px-1 py-1 border border-gray-200 rounded" /> : <>
                               <span className="font-mono text-gray-500" title={bloq ? 'Snapshot del LPU/catálogo — solo lectura' : undefined}>{it.codigo || '—'}</span>
                               {!editable && it.apu && <button onClick={() => setApuIdx(idx)} title="Ver desglose APU (solo lectura)" className="ml-1 text-[10px] px-1.5 py-0.5 rounded font-semibold bg-brand-600 text-white">APU</button>}
                             </>}</td>
-                            <td className="px-2 py-1 max-w-md">
+                            <td className="px-2 py-1 max-w-md sticky left-[72px] bg-inherit z-10">
                               <div className="flex items-start gap-1">
                                 {editable && !bloq
-                                  ? <input value={it.descripcion} onChange={e => setItem(idx, { descripcion: e.target.value })} className="w-full min-w-[10rem] px-1 py-1 border border-gray-200 rounded" />
-                                  : <span onClick={toggleExp} title="Clic para expandir / contraer" className="block w-full text-gray-800 cursor-pointer truncate">{it.descripcion}</span>}
+                                  ? <input value={it.descripcion} onChange={e => setItem(idx, { descripcion: e.target.value })} title={it.descripcion} className="w-full min-w-[8rem] px-1 py-1 border border-gray-200 rounded" />
+                                  : <span onClick={toggleExp} title={it.descripcion} className="block w-full text-gray-800 cursor-pointer truncate">{it.descripcion}</span>}
                                 <button onClick={toggleExp} title={exp ? 'Contraer' : 'Ver descripción completa'} className="text-gray-400 hover:text-gray-600 mt-1 flex-shrink-0">{exp ? '▴' : '▾'}</button>
                               </div>
                               {editable && modoAgr === 'capitulo' &&
@@ -718,9 +720,9 @@ export default function CotizacionDetalleSigp() {
                                   const crudo = e.target.value.replace(/[^\d,]/g, '').replace(',', '.')
                                   setItem(idx, { valor_unitario: Number(crudo) || 0 })
                                 }}
-                                placeholder="$ 0" className={`w-28 px-1 py-1 border rounded text-right ${cero ? 'border-amber-300' : 'border-gray-200'}`} />
+                                placeholder="$ 0" className={`w-24 px-1 py-1 border rounded text-right ${cero ? 'border-amber-300' : 'border-gray-200'}`} />
                               : <span className="font-mono" title={bloq ? 'Precio del LPU/catálogo — solo lectura' : undefined}>{fMoneda(it.valor_unitario)}</span>}</td>
-                            <td className="px-2 py-1 text-right">{editable ? <input type="number" value={it.cantidad || ''} onChange={e => setItem(idx, { cantidad: Number(e.target.value) })} className="w-16 px-1 py-1 border border-gray-200 rounded text-right" /> : it.cantidad}</td>
+                            <td className="px-2 py-1 text-right">{editable ? <input type="number" value={it.cantidad || ''} onChange={e => setItem(idx, { cantidad: Number(e.target.value) })} className="w-14 px-1 py-1 border border-gray-200 rounded text-right" /> : fmtNum(it.cantidad)}</td>
                             <td className="px-2 py-1 text-right font-mono text-gray-700">{fMoneda(it.valor_total)}</td>
                             {analisis && <>
                               {/* Columnas internas (análisis económico) — jamás salen al PDF */}
@@ -731,9 +733,9 @@ export default function CotizacionDetalleSigp() {
                                         const crudo = e.target.value.replace(/[^\d,]/g, '').replace(',', '.')
                                         setItem(idx, { costo_directo: crudo === '' ? undefined : Number(crudo) || 0 })
                                       }}
-                                      placeholder="$ —" className="w-28 px-1 py-1 border border-gray-300 rounded text-right bg-white" />
+                                      placeholder="$ —" className="w-24 px-1 py-1 border border-gray-300 rounded text-right bg-white" />
                                   : <span className="font-mono text-gray-600" title={it.origen === 'apu' ? 'Del desglose APU — edítalo en el modal' : undefined}>
-                                      {it.costo_directo !== undefined ? '$ ' + it.costo_directo.toLocaleString('es-CO', { maximumFractionDigits: 2 }) : '—'}
+                                      {it.costo_directo !== undefined ? fmtMoney(it.costo_directo) : '—'}
                                     </span>}
                               </td>
                               <td className="px-2 py-1 text-right bg-gray-100/80">
@@ -742,11 +744,11 @@ export default function CotizacionDetalleSigp() {
                                       onChange={e => setItem(idx, { margen: e.target.value === '' ? undefined : Number(e.target.value) })}
                                       className={`w-16 px-1 py-1 border rounded text-right bg-white ${it.margen !== undefined && (it.margen < 0 || it.margen >= 100) ? 'border-red-400' : 'border-gray-300'}`} />
                                   : <span className={`font-mono ${it.margen !== undefined && it.margen < 0 ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>
-                                      {it.margen !== undefined ? `${it.margen.toLocaleString('es-CO', { maximumFractionDigits: 1 })}${it.margen < 0 ? ' ⚠' : ''}` : '—'}
+                                      {it.margen !== undefined ? `${fmtNum(it.margen, 1)}${it.margen < 0 ? ' ⚠' : ''}` : '—'}
                                     </span>}
                               </td>
                               <td className="px-2 py-1 text-right bg-gray-100/80 font-mono text-gray-600">
-                                {totales.costos_directos > 0 ? ((it.valor_total / totales.costos_directos) * 100).toLocaleString('es-CO', { maximumFractionDigits: 1 }) : '—'}
+                                {totales.costos_directos > 0 ? fmtNum((it.valor_total / totales.costos_directos) * 100, 1) : '—'}
                               </td>
                             </>}
                             {editable && <td className="px-2 py-1 text-right whitespace-nowrap">
@@ -785,9 +787,9 @@ export default function CotizacionDetalleSigp() {
           {editable && itemsCero > 0 && <p className="text-xs text-amber-700">⚠ {itemsCero} ítem(s) en $0 (resaltados). Se puede guardar, pero completa los precios antes de enviar.</p>}
         </div>
 
-        {/* Totales */}
-        <div className="space-y-3">
-          <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3 lg:sticky lg:top-4">
+        {/* Totales: columna lateral fija; con análisis ON bajan a ancho completo (2 tarjetas) */}
+        <div className={analisis ? 'grid gap-5 sm:grid-cols-2 items-start' : 'lg:w-72 flex-shrink-0 space-y-3'}>
+          <div className={`bg-white rounded-lg border border-gray-200 p-4 space-y-3 ${analisis ? '' : 'lg:sticky lg:top-4'}`}>
             <h2 className="font-semibold text-gray-800 text-sm">Totales</h2>
             {editable && (
               <div className="space-y-2">
@@ -830,7 +832,7 @@ export default function CotizacionDetalleSigp() {
                   <span>% Utilidad</span>
                   <span className="font-mono">
                     {resumenEconomico.pctUtilidad !== null
-                      ? resumenEconomico.pctUtilidad.toLocaleString('es-CO', { maximumFractionDigits: 1 }) + ' %'
+                      ? fmtNum(resumenEconomico.pctUtilidad, 1) + ' %'
                       : '—'}
                   </span>
                 </div>
@@ -877,7 +879,7 @@ export default function CotizacionDetalleSigp() {
                   <span className="text-gray-800 font-medium">
                     {h.de ? `${ESTADO_COT_LABEL[h.de]} → ` : ''}{ESTADO_COT_LABEL[h.a]}
                   </span>
-                  {h.version !== undefined && <span className="ml-1 text-gray-400">(v{h.version})</span>}
+                  {h.version !== undefined && etiquetaVersion(h.version) && <span className="ml-1 text-gray-400">({etiquetaVersion(h.version)})</span>}
                   <span className="ml-2 text-gray-400">{fFecha(h.fecha)}</span>
                   {h.motivo && <p className="text-gray-500 mt-0.5">{h.motivo}</p>}
                 </div>

@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import Modal from '../../shared/Modal'
+import { fmtNum } from '../../../utils/sigp/formato'
 import {
   SECCIONES_APU, SECCION_APU_LABEL, costoDirectoAPU, precioDesdeCosto,
 } from '../../../types/sigp/cotizacion'
 import type { APU, InsumoAPU, SeccionAPU } from '../../../types/sigp/cotizacion'
 
-const fMoneda = (n: number) =>
-  '$ ' + (n || 0).toLocaleString('es-CO', { maximumFractionDigits: 2 })
+const fMoneda = (n: number) => '$ ' + fmtNum(n || 0)
 
 /** Rendimientos nunca llevan miles: punto Y coma son decimal (acepta 0.0909 y 0,0909). */
 const parseRendimiento = (s: string): number => {
@@ -162,7 +162,7 @@ export default function ApuModal({
                           : ins.unidad}</td>
                         <td className="px-1 py-1 text-right">{editable
                           ? <input inputMode="decimal" value={ins.rendimiento} onChange={e => setInsumo(sec, i, { rendimiento: e.target.value })} placeholder="0,0909" className="w-20 px-1 py-1 border border-gray-200 rounded text-right" />
-                          : ins.rendimiento}</td>
+                          : fmtNum(parseRendimiento(ins.rendimiento))}</td>
                         <td className="px-1 py-1 text-right">{editable
                           ? <input inputMode="numeric" value={ins.costo_unitario} onChange={e => setInsumo(sec, i, { costo_unitario: e.target.value })} placeholder="$ 0" className="w-24 px-1 py-1 border border-gray-200 rounded text-right" />
                           : fMoneda(parseCosto(ins.costo_unitario))}</td>
