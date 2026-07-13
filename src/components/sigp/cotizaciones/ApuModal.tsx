@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import Modal from '../../shared/Modal'
 import { fmtNum } from '../../../utils/sigp/formato'
+import { evaluarExpresion, numeroATexto } from '../../../utils/sigp/expresion'
 import {
   SECCIONES_APU, SECCION_APU_LABEL, costoDirectoAPU, precioDesdeCosto,
 } from '../../../types/sigp/cotizacion'
@@ -58,13 +59,29 @@ export default function ApuModal({
   const [secciones, setSecciones] = useState<SeccionesForm>(() => inicial(apu))
   const [abiertas, setAbiertas] = useState<Record<SeccionAPU, boolean>>(() => abiertasInicial(apu))
   const [margen, setMargen] = useState('10')
+  // F1.5 p.1 — campos con expresión inválida (clave `sec-i-campo`); bloquean Aplicar
+  const [erroresExp, setErroresExp] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!isOpen) return
     setSecciones(inicial(apu))
     setAbiertas(abiertasInicial(apu))
     setMargen(margenActual !== undefined ? String(margenActual).replace('.', ',') : '10')
+    setErroresExp({})
   }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** F1.5 p.1 — al confirmar (blur/Enter): evalúa la expresión del insumo.
+   *  Válida → normaliza al resultado (precisión completa); inválida → marca
+   *  el campo (borde rojo + motivo) sin persistir; vacía → sin cambio. */
+  const confirmarExpresion = (sec: SeccionAPU, i: number, campo: 'rendimiento' | 'costo_unitario') => {
+    const clave = `${sec}-${i}-${campo}`
+    const r = evaluarExpresion(secciones[sec][i][campo])
+    if (r === null) { setErroresExp(p => { const { [clave]: _x, ...resto } = p; return resto }); return }
+    if ('error' in r) { setErroresExp(p => ({ ...p, [clave]: r.error })); return }
+    setErroresExp(p => { const { [clave]: _x, ...resto } = p; return resto })
+    setInsumo(sec, i, { [campo]: numeroATexto(r.valor) })
+  }
+  const hayErroresExp = Object.keys(erroresExp).length > 0
 
   const setInsumo = (sec: SeccionAPU, i: number, patch: Partial<InsumoForm>) =>
     setSecciones(p => ({ ...p, [sec]: p[sec].map((x, j) => (j === i ? { ...x, ...patch } : x)) }))
@@ -161,10 +178,20 @@ export default function ApuModal({
                           ? <input value={ins.unidad} onChange={e => setInsumo(sec, i, { unidad: e.target.value })} className="w-14 px-1 py-1 border border-gray-200 rounded" />
                           : ins.unidad}</td>
                         <td className="px-1 py-1 text-right">{editable
-                          ? <input inputMode="decimal" value={ins.rendimiento} onChange={e => setInsumo(sec, i, { rendimiento: e.target.value })} placeholder="0,0909" className="w-20 px-1 py-1 border border-gray-200 rounded text-right" />
+                          ? <input inputMode="decimal" value={ins.rendimiento}
+                              onChange={e => setInsumo(sec, i, { rendimiento: e.target.value })}
+                              onBlur={() => confirmarExpresion(sec, i, 'rendimiento')}
+                              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                              title={erroresExp[`${sec}-${i}-rendimiento`] ?? 'Acepta expresiones: 1/54 · 0,5*3'}
+                              placeholder="0,0909" className={`w-20 px-1 py-1 border rounded text-right ${erroresExp[`${sec}-${i}-rendimiento`] ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
                           : fmtNum(parseRendimiento(ins.rendimiento))}</td>
                         <td className="px-1 py-1 text-right">{editable
-                          ? <input inputMode="numeric" value={ins.costo_unitario} onChange={e => setInsumo(sec, i, { costo_unitario: e.target.value })} placeholder="$ 0" className="w-24 px-1 py-1 border border-gray-200 rounded text-right" />
+                          ? <input inputMode="decimal" value={ins.costo_unitario}
+                              onChange={e => setInsumo(sec, i, { costo_unitario: e.target.value })}
+                              onBlur={() => confirmarExpresion(sec, i, 'costo_unitario')}
+                              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                              title={erroresExp[`${sec}-${i}-costo_unitario`] ?? 'Acepta expresiones: 185000/8 · 2500*4'}
+                              placeholder="$ 0" className={`w-24 px-1 py-1 border rounded text-right ${erroresExp[`${sec}-${i}-costo_unitario`] ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
                           : fMoneda(parseCosto(ins.costo_unitario))}</td>
                         <td className="px-1 py-1 text-right font-mono text-gray-700">{fMoneda(subtotalInsumo(ins))}</td>
                         {editable && <td className="px-1 py-1 text-right"><button onClick={() => quitarInsumo(sec, i)} className="text-red-400 hover:text-red-600">✕</button></td>}
@@ -214,7 +241,7 @@ export default function ApuModal({
               {editable ? 'Cancelar' : 'Cerrar'}
             </button>
             {editable && (
-              <button onClick={aplicar} disabled={!margenValido || costoDirecto <= 0}
+              <button onClick={aplicar} disabled={!margenValido || costoDirecto <= 0 || hayErroresExp}
                 className="text-sm px-3 py-1.5 rounded-lg font-medium bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50">
                 Aplicar al ítem
               </button>
