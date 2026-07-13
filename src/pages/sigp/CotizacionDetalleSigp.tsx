@@ -25,6 +25,7 @@ import type { ModoAgrupacion, Actividad, TipoInversion } from '../../types/sigp/
 import type { CatalogoItem } from '../../types/sigp/catalogo'
 import type { ItemCotizacion, EsquemaTributario, ConfigAIU, CondicionesCotizacion, APU } from '../../types/sigp/cotizacion'
 import ApuModal from '../../components/sigp/cotizaciones/ApuModal'
+import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
 import type { ItemLPU } from '../../types/sigp/lpu'
 import type { CantidadPreliminar } from '../../types/sigp/visita'
 import CotizacionAcciones from '../../components/sigp/cotizaciones/CotizacionAcciones'
@@ -713,27 +714,24 @@ export default function CotizacionDetalleSigp() {
                                 ? <input value={it.unidad} onChange={e => setItem(idx, { unidad: e.target.value })} className="w-12 px-1 py-1 border border-gray-200 rounded" />
                                 : <span title={bloq ? 'Snapshot del LPU/catálogo — solo lectura' : undefined}>{it.unidad || '—'}</span>}
                             </td>
-                            <td className="px-2 py-1 text-right">{editable && !bloq ? <input inputMode="numeric" value={it.valor_unitario ? '$ ' + it.valor_unitario.toLocaleString('es-CO') : ''}
-                                onChange={e => {
-                                  // es-CO: punto = miles (se descarta), coma = decimal. Preserva
-                                  // precios LPU con decimales reales (ej. 16031,954) sin corromperlos.
-                                  const crudo = e.target.value.replace(/[^\d,]/g, '').replace(',', '.')
-                                  setItem(idx, { valor_unitario: Number(crudo) || 0 })
-                                }}
-                                placeholder="$ 0" className={`w-24 px-1 py-1 border rounded text-right ${cero ? 'border-amber-300' : 'border-gray-200'}`} />
+                            <td className="px-2 py-1 text-right">{editable && !bloq
+                              ? <InputExpresion valor={it.valor_unitario} onValor={n => setItem(idx, { valor_unitario: n })}
+                                  placeholder="0" className={`w-24 px-1 py-1 border rounded text-right ${cero ? 'border-amber-300' : 'border-gray-200'}`} />
                               : <span className="font-mono" title={bloq ? 'Precio del LPU/catálogo — solo lectura' : undefined}>{fMoneda(it.valor_unitario)}</span>}</td>
-                            <td className="px-2 py-1 text-right">{editable ? <input type="number" value={it.cantidad || ''} onChange={e => setItem(idx, { cantidad: Number(e.target.value) })} className="w-14 px-1 py-1 border border-gray-200 rounded text-right" /> : fmtNum(it.cantidad)}</td>
+                            <td className="px-2 py-1 text-right">{editable
+                              ? <InputExpresion valor={it.cantidad} onValor={n => setItem(idx, { cantidad: n })}
+                                  placeholder="0" className="w-14 px-1 py-1 border border-gray-200 rounded text-right" />
+                              : fmtNum(it.cantidad)}</td>
                             <td className="px-2 py-1 text-right font-mono text-gray-700">{fMoneda(it.valor_total)}</td>
                             {analisis && <>
                               {/* Columnas internas (análisis económico) — jamás salen al PDF */}
                               <td className="px-2 py-1 text-right bg-gray-100/80">
                                 {editable && it.origen !== 'apu'
-                                  ? <input inputMode="numeric" value={it.costo_directo !== undefined ? '$ ' + it.costo_directo.toLocaleString('es-CO') : ''}
-                                      onChange={e => {
-                                        const crudo = e.target.value.replace(/[^\d,]/g, '').replace(',', '.')
-                                        setItem(idx, { costo_directo: crudo === '' ? undefined : Number(crudo) || 0 })
-                                      }}
-                                      placeholder="$ —" className="w-24 px-1 py-1 border border-gray-300 rounded text-right bg-white" />
+                                  ? <InputExpresion valor={it.costo_directo}
+                                      onValor={n => setItem(idx, { costo_directo: n })}
+                                      onVacio={() => setItem(idx, { costo_directo: undefined })}
+                                      titulo="Costo interno — acepta expresiones: 12000+3500+800 · 2*45000"
+                                      placeholder="—" className="w-24 px-1 py-1 border border-gray-300 rounded text-right bg-white" />
                                   : <span className="font-mono text-gray-600" title={it.origen === 'apu' ? 'Del desglose APU — edítalo en el modal' : undefined}>
                                       {it.costo_directo !== undefined ? fmtMoney(it.costo_directo) : '—'}
                                     </span>}
