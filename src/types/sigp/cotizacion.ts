@@ -156,6 +156,39 @@ export interface CondicionesCotizacion {
   observaciones?: string       // exclusiones / notas
 }
 
+// ── F1.5.5 — Presets de condiciones comerciales ──
+// Sugerencias elegibles (datalist): el usuario puede escoger una o escribir
+// texto libre. Ajustar estas listas con el área comercial cuando use el formato.
+export const PRESETS_FORMA_PAGO = [
+  '50% anticipo, 50% contra entrega a satisfacción',
+  '30% anticipo, 70% contra entrega a satisfacción',
+  '100% contra entrega a satisfacción',
+  'Crédito a 30 días tras radicación de la factura',
+  'Crédito a 45 días tras radicación de la factura',
+  'Según actas de avance mensuales',
+]
+export const PRESETS_TIEMPO_EJECUCION = [
+  '15 días calendario',
+  '30 días calendario',
+  '45 días calendario',
+  '60 días calendario',
+  '90 días calendario',
+  'Según cronograma acordado con el cliente',
+]
+export const PRESETS_GARANTIA = [
+  '6 meses sobre mano de obra',
+  '12 meses sobre mano de obra',
+  '12 meses sobre materiales y mano de obra',
+  'La otorgada por el fabricante sobre equipos y materiales',
+]
+
+/** Texto base de "Notas importantes" del PDF — se siembra al crear la
+ *  cotización y el usuario lo ajusta según la necesidad (una nota por línea). */
+export const OBSERVACIONES_BASE =
+  'Los precios no incluyen actividades ni suministros no descritos en el alcance de esta propuesta.\n' +
+  'Cualquier trabajo adicional será objeto de cotización por separado.\n' +
+  'Vencida la validez indicada, los valores de esta propuesta podrán ser ajustados.'
+
 /** Bloque de totales calculado (snapshot). */
 export interface TotalesCotizacion {
   costos_directos: number      // suma de valor_total de ítems

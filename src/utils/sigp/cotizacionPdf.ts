@@ -223,7 +223,8 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     if (y - alto < MARGEN_INF) nuevaPagina()
   }
 
-  // ════ CUADRO ISO DE CONTROL DOCUMENTAL — INTACTO (premisa dura de M1) ════
+  // ════ CUADRO ISO DE CONTROL DOCUMENTAL — estructura intacta; todo el texto
+  //      en negro (pedido de Giovanny 15-jul: sin verde en este cuadro) ════
   nuevaPagina(true)
   {
     const hIso = 58
@@ -238,17 +239,17 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     ]
     let yl = yIso + hIso - 13
     for (const [k, v] of filasIzq) {
-      page.drawText(k, { x: MARGEN + 8, y: yl, size: 6.5, font: fB, color: VERDE_OSCURO })
-      if (v) page.drawText(v, { x: MARGEN + 8 + fB.widthOfTextAtSize(k, 6.5) + 3, y: yl, size: 6.5, font: fR, color: GRIS })
+      page.drawText(k, { x: MARGEN + 8, y: yl, size: 6.5, font: fB, color: TINTA })
+      if (v) page.drawText(v, { x: MARGEN + 8 + fB.widthOfTextAtSize(k, 6.5) + 3, y: yl, size: 6.5, font: fR, color: TINTA })
       yl -= 12
     }
     const cx = MARGEN + c1 + c2 / 2
     const centrado = (t: string, yy: number, size: number, font: PDFFont, color = TINTA) =>
       page.drawText(t, { x: cx - font.widthOfTextAtSize(t, size) / 2, y: yy, size, font, color })
     centrado('NEG INGENIERÍA S.A.S., BIC', yIso + hIso - 14, 9, fB, TINTA)
-    centrado('NIT. 900.975.870-1', yIso + hIso - 25, 7.5, fR, GRIS)
-    centrado('ÁREA COMERCIAL', yIso + hIso - 35, 6.5, fR, GRIS_MEDIO)
-    centrado('FORMATO DE COTIZACIÓN', yIso + hIso - 47, 8, fS, VERDE)
+    centrado('NIT. 900.975.870-1', yIso + hIso - 25, 7.5, fR, TINTA)
+    centrado('ÁREA COMERCIAL', yIso + hIso - 35, 6.5, fR, TINTA)
+    centrado('FORMATO DE COTIZACIÓN', yIso + hIso - 47, 8, fS, TINTA)
     const maxW = c3 - 20, maxH = hIso - 14
     const esc = Math.min(maxW / logo.width, maxH / logo.height)
     const lw = logo.width * esc, lh = logo.height * esc
@@ -354,8 +355,7 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
 
   const encabezadoTabla = () => {
     asegurar(24)
-    // banda gris carbón: el verde queda como acento, no como bloque
-    page.drawRectangle({ x: MARGEN, y: y - 15, width: CONTENIDO, height: 19, color: GRIS })
+    page.drawRectangle({ x: MARGEN, y: y - 15, width: CONTENIDO, height: 19, color: VERDE })
     const yh = y - 9
     const h = (t: string, x: number) => page.drawText(t, { x, y: yh, size: 6.5, font: fS, color: BLANCO })
     const hc = (t: string, xc: number, wc: number) =>

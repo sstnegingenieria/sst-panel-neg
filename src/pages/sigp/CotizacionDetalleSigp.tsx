@@ -20,6 +20,7 @@ import {
   TIPOS_INVERSION, TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR,
   subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, GRUPO_OTROS_ID,
   conInstanciaIds, nuevaInstanciaId, sembrarActividadesDesdeCapitulos,
+  PRESETS_FORMA_PAGO, PRESETS_TIEMPO_EJECUCION, PRESETS_GARANTIA, OBSERVACIONES_BASE,
 } from '../../types/sigp/cotizacion'
 import type { ModoAgrupacion, Actividad, TipoInversion } from '../../types/sigp/cotizacion'
 import type { CatalogoItem } from '../../types/sigp/catalogo'
@@ -860,14 +861,20 @@ export default function CotizacionDetalleSigp() {
         <h2 className="font-semibold text-gray-800 text-sm">Condiciones comerciales</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
           <Campo label="Validez (días)" tipo="number" v={String(cond.validez_dias)} on={v => setCond(c => ({ ...c, validez_dias: Number(v) }))} editable={editable} />
-          <Campo label="Forma de pago" v={cond.forma_pago} on={v => setCond(c => ({ ...c, forma_pago: v }))} editable={editable} />
-          <Campo label="Tiempo de ejecución" v={cond.tiempo_ejecucion} on={v => setCond(c => ({ ...c, tiempo_ejecucion: v }))} editable={editable} />
-          <Campo label="Garantía" v={cond.garantia} on={v => setCond(c => ({ ...c, garantia: v }))} editable={editable} />
+          <Campo label="Forma de pago" v={cond.forma_pago} on={v => setCond(c => ({ ...c, forma_pago: v }))} editable={editable} sugerencias={PRESETS_FORMA_PAGO} />
+          <Campo label="Tiempo de ejecución" v={cond.tiempo_ejecucion} on={v => setCond(c => ({ ...c, tiempo_ejecucion: v }))} editable={editable} sugerencias={PRESETS_TIEMPO_EJECUCION} />
+          <Campo label="Garantía" v={cond.garantia} on={v => setCond(c => ({ ...c, garantia: v }))} editable={editable} sugerencias={PRESETS_GARANTIA} />
         </div>
         <div>
-          <label className="text-xs text-gray-500">Observaciones / exclusiones</label>
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-gray-500">Observaciones / exclusiones — salen como "Notas importantes" en el PDF (una por línea)</label>
+            {editable && !(cond.observaciones ?? '').trim() && (
+              <button onClick={() => setCond(c => ({ ...c, observaciones: OBSERVACIONES_BASE }))}
+                className="text-xs text-brand-700 hover:underline">Insertar texto base</button>
+            )}
+          </div>
           {editable
-            ? <textarea value={cond.observaciones ?? ''} onChange={e => setCond(c => ({ ...c, observaciones: e.target.value }))} rows={2} className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            ? <textarea value={cond.observaciones ?? ''} onChange={e => setCond(c => ({ ...c, observaciones: e.target.value }))} rows={3} className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
             : <p className="text-sm text-gray-700 mt-1 whitespace-pre-wrap">{cond.observaciones || '—'}</p>}
         </div>
       </div>
@@ -931,12 +938,22 @@ function Fila({ k, v }: { k: string; v: string }) {
   return <div className="flex justify-between text-gray-600"><span>{k}</span><span className="font-mono text-gray-800">{v}</span></div>
 }
 
-function Campo({ label, v, on, editable, tipo }: { label: string; v: string; on: (v: string) => void; editable?: boolean; tipo?: string }) {
+function Campo({ label, v, on, editable, tipo, sugerencias }: {
+  label: string; v: string; on: (v: string) => void; editable?: boolean; tipo?: string
+  /** Opciones elegibles (datalist) — el usuario también puede escribir libre. */
+  sugerencias?: string[]
+}) {
+  const idLista = sugerencias ? `dl-${label.toLowerCase().replace(/[^a-z]+/g, '-')}` : undefined
   return (
     <div className="flex flex-col gap-1">
       <label className="text-xs text-gray-500">{label}</label>
       {editable
-        ? <input type={tipo} value={v} onChange={e => on(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+        ? <>
+            <input type={tipo} value={v} onChange={e => on(e.target.value)} list={idLista}
+              placeholder={sugerencias ? 'Elige una opción o escribe libre' : undefined}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            {sugerencias && <datalist id={idLista}>{sugerencias.map(o => <option key={o} value={o} />)}</datalist>}
+          </>
         : <p className="text-gray-800">{v || '—'}</p>}
     </div>
   )
