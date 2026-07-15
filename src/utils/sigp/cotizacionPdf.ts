@@ -354,7 +354,8 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
 
   const encabezadoTabla = () => {
     asegurar(24)
-    page.drawRectangle({ x: MARGEN, y: y - 15, width: CONTENIDO, height: 19, color: VERDE })
+    // banda gris carbón: el verde queda como acento, no como bloque
+    page.drawRectangle({ x: MARGEN, y: y - 15, width: CONTENIDO, height: 19, color: GRIS })
     const yh = y - 9
     const h = (t: string, x: number) => page.drawText(t, { x, y: yh, size: 6.5, font: fS, color: BLANCO })
     const hc = (t: string, xc: number, wc: number) =>
