@@ -207,9 +207,10 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   }
 
   const encabezadoCompacto = () => {
+    // páginas 2+: consecutivo a la izquierda, control documental a la derecha
     y = ALTO - 40
     page.drawText(`${datos.consecutivo}${etiqV ? ' · Versión ' + datos.versionNum : ''}`, { x: MARGEN, y, size: 10, font: fB, color: VERDE })
-    textoDer('PROPUESTA ECONÓMICA', ANCHO - MARGEN, y + 1, 8, fS, GRIS_MEDIO)
+    textoDer(`${ISO.codigo} · v${ISO.version}`, ANCHO - MARGEN, y + 1, 7, fR, GRIS_MEDIO)
     reglaMarca(y - 6, 3)
     y -= 26
   }
@@ -377,23 +378,42 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   }
   const grupos = [...buckets.values()].filter(b => b.items.length > 0)
 
-  encabezadoTabla()
-  for (const { g, items: itemsG } of grupos) {
-    // encabezado de grupo — fondo blanco, icono + nombre en gris oscuro (sobriedad:
-    // el verde queda para los acentos), subtotal en negro; sin acentos verticales
-    if (y - 48 < MARGEN_INF) { nuevaPagina(); encabezadoTabla() }
+  // Una fila nunca se parte entre páginas: se mide completa antes de dibujar.
+  const filaDe = (it: ItemCotizacion) => {
+    const lineas = partirMax(it.descripcion, fR, 8, wDesc - 12, 2)
+    return { lineas, h: lineas.length * 11 + 10 }
+  }
+  const H_ENC_GRUPO = 37   // 16 de aire + 21 del renglón con regla
+
+  // encabezado de grupo — fondo blanco, icono + nombre en gris oscuro (sobriedad:
+  // el verde queda para los acentos), subtotal en negro; sin acentos verticales.
+  // `cont`: reanudación tras salto de página — "(cont.)" y sin repetir subtotal.
+  const encabezadoGrupo = (g: { grupo_nombre: string; subtotal: number }, cont = false) => {
     y -= 16
     icono(ICO.capas, MARGEN + 6, y - 1, 9, GRIS, 1.3)
-    page.drawText(g.grupo_nombre.toUpperCase(), { x: MARGEN + 20, y: y - 8, size: 7.7, font: fB, color: GRIS })
-    textoDer(fMoneda(g.subtotal), xVt + col.vt - 4, y - 8, 7.7, fS, TINTA)
+    const nombre = g.grupo_nombre.toUpperCase()
+    page.drawText(nombre, { x: MARGEN + 20, y: y - 8, size: 7.7, font: fB, color: GRIS })
+    if (cont) {
+      const wN = fB.widthOfTextAtSize(nombre, 7.7)
+      page.drawText('(cont.)', { x: MARGEN + 20 + wN + 5, y: y - 8, size: 6.5, font: fR, color: GRIS_MEDIO })
+    } else {
+      textoDer(fMoneda(g.subtotal), xVt + col.vt - 4, y - 8, 7.7, fS, TINTA)
+    }
     page.drawLine({ start: { x: MARGEN, y: y - 14 }, end: { x: MARGEN + CONTENIDO, y: y - 14 }, color: BORDE, thickness: 1.1 })
     y -= 21
+  }
+
+  encabezadoTabla()
+  for (const { g, items: itemsG } of grupos) {
+    // keep-with: el encabezado del grupo entra con al menos su primera fila
+    const hPrimera = itemsG.length ? filaDe(itemsG[0]).h : 0
+    if (y - (H_ENC_GRUPO + hPrimera) < MARGEN_INF) { nuevaPagina(); encabezadoTabla() }
+    encabezadoGrupo(g)
 
     let fila = 0
     for (const it of itemsG) {
-      const lineas = partirMax(it.descripcion, fR, 8, wDesc - 12, 2)
-      const hFila = lineas.length * 11 + 10
-      if (y - hFila < MARGEN_INF) { nuevaPagina(); encabezadoTabla() }
+      const { lineas, h: hFila } = filaDe(it)
+      if (y - hFila < MARGEN_INF) { nuevaPagina(); encabezadoTabla(); encabezadoGrupo(g, true) }
       if (fila % 2 === 1)
         page.drawRectangle({ x: MARGEN, y: y - hFila + 3, width: CONTENIDO, height: hFila, color: ZEBRA })
       const yTop = y - 10
@@ -493,8 +513,12 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
 
   // ════ 8. NOTAS IMPORTANTES — cláusulas con viñeta › ════
   if ((datos.observaciones || '').trim()) {
-    seccion(ICO.info, 'NOTAS IMPORTANTES', 18)
     const clausulas = datos.observaciones!.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+    // keep-with: el título entra con al menos la primera cláusula completa
+    const hPrimera = clausulas.length
+      ? partir(clausulas[0], fR, 8.8, CONTENIDO - 16).length * 12.5 + 6
+      : 18
+    seccion(ICO.info, 'NOTAS IMPORTANTES', hPrimera)
     for (const cl of clausulas) {
       const lineas = partir(cl, fR, 8.8, CONTENIDO - 16)
       asegurar(lineas.length * 12.5 + 5)
