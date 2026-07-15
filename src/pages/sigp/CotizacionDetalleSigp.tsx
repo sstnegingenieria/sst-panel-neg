@@ -61,6 +61,7 @@ export default function CotizacionDetalleSigp() {
   // Filas con descripción expandida (por instancia_id del ítem)
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({})
   const [asunto, setAsunto] = useState('')
+  const [contactoNombre, setContactoNombre] = useState('')
   // 1.4B.b — análisis económico interno (toggle apagado por defecto) + modal APU
   const [analisis, setAnalisis] = useState(false)
   const [apuIdx, setApuIdx] = useState<number | null>(null)
@@ -82,8 +83,9 @@ export default function CotizacionDetalleSigp() {
 
   useEffect(() => {
     setAsunto(cotizacion?.asunto ?? '')
+    setContactoNombre(cotizacion?.contacto ?? '')
     setTipoInversion(cotizacion?.tipo_inversion ?? '')
-  }, [cotizacion?.id, cotizacion?.asunto, cotizacion?.tipo_inversion]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cotizacion?.id, cotizacion?.asunto, cotizacion?.contacto, cotizacion?.tipo_inversion]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!version) return
@@ -315,7 +317,8 @@ export default function CotizacionDetalleSigp() {
       setActividades(actividadesLimpias)
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id), {
         total: tot.total, validez_dias: Number(cond.validez_dias) || 0,
-        asunto: asunto.trim(), tipo_inversion: tipoInversion || deleteField(),
+        asunto: asunto.trim(), contacto: contactoNombre.trim() || deleteField(),
+        tipo_inversion: tipoInversion || deleteField(),
         fecha_actualizacion: Timestamp.now(),
       })
       if (!silencioso) { toast('Cotización guardada'); await reload() }
@@ -404,9 +407,9 @@ export default function CotizacionDetalleSigp() {
         celular = (u.data()?.celular ?? u.data()?.telefono) || undefined
       } catch { /* opcional */ }
 
-      // Contacto del cliente: primer contacto registrado en su ficha
-      const c0 = cliente?.contactos?.[0]
-      const contacto = c0 ? [c0.nombre, c0.email, c0.telefono].filter(Boolean).join(' · ') : undefined
+      // Contacto: campo de presentación de la cotización (prellenado del
+      // contacto principal del cliente al crear; editable en borrador)
+      const contacto = contactoNombre.trim() || undefined
 
       const assets = await cargarAssetsPdf()
       const bytes = await generarPdfCotizacion({
@@ -487,16 +490,23 @@ export default function CotizacionDetalleSigp() {
         )}
       </div>
 
-      {/* Asunto (CM-FT-CT-19): editable solo en borrador */}
+      {/* Asunto + contacto (presentación): editables solo en borrador */}
       {editable ? (
-        <div className="flex items-center gap-2 max-w-xl">
+        <div className="flex items-center gap-2 max-w-3xl">
           <label className="text-xs text-gray-500 flex-shrink-0">Asunto</label>
           <input value={asunto} onChange={e => setAsunto(e.target.value)}
             placeholder="Ej: Adecuaciones estación Ráquira"
             className={`w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 ${asunto.trim() ? 'border-gray-300' : 'border-amber-300'}`} />
+          <label className="text-xs text-gray-500 flex-shrink-0 ml-2">Contacto</label>
+          <input value={contactoNombre} onChange={e => setContactoNombre(e.target.value)}
+            placeholder="Contacto del cliente" title="Nombre del contacto del cliente (sale en el PDF, bajo el NIT)"
+            className="w-56 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
         </div>
       ) : (
-        <p className="text-sm text-gray-700"><span className="text-xs text-gray-400 mr-2">Asunto</span>{cotizacion.asunto || '—'}</p>
+        <p className="text-sm text-gray-700">
+          <span className="text-xs text-gray-400 mr-2">Asunto</span>{cotizacion.asunto || '—'}
+          {cotizacion.contacto && <span className="ml-4"><span className="text-xs text-gray-400 mr-2">Contacto</span>{cotizacion.contacto}</span>}
+        </p>
       )}
 
       {/* Acciones de estado */}

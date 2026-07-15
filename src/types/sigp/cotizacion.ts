@@ -221,6 +221,11 @@ export interface Cotizacion {
    *  Ráquira"). Obligatorio al crear; editable mientras esté en borrador. */
   asunto: string
 
+  /** Nombre del contacto del cliente para ESTA cotización (dato de
+   *  presentación, PDF/meta): prellenado desde el contacto principal del
+   *  cliente vinculado; editable en borrador; manual para prospectos. */
+  contacto?: string
+
   // Origen: cliente/prospecto y/o solicitud (hereda cliente/prospecto).
   cliente_id?: string
   prospecto_nombre?: string

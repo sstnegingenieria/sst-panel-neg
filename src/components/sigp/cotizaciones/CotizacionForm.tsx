@@ -155,7 +155,12 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
         adjuntos: [], historial: [{ de: null, a: 'borrador', por: uid, fecha: ahora }],
         registrada_por: uid, fecha_creacion: ahora,
       }
-      if (form.clienteId) parentData.cliente_id = form.clienteId
+      if (form.clienteId) {
+        parentData.cliente_id = form.clienteId
+        // Contacto principal del cliente → prellenado de presentación (editable en borrador)
+        const contactoPrincipal = clientes.find(c => c.id === form.clienteId)?.contactos?.[0]?.nombre
+        if (contactoPrincipal) parentData.contacto = contactoPrincipal
+      }
       if (form.prospectoNombre.trim()) parentData.prospecto_nombre = form.prospectoNombre.trim()
       if (form.solicitudId) parentData.solicitud_id = form.solicitudId
       if (form.tipoInversion) parentData.tipo_inversion = form.tipoInversion
