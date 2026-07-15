@@ -8,7 +8,10 @@ import { toast } from '../../shared/Toast'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
 import { useFirestore } from '../../../hooks/useFirestore'
-import { ESQUEMAS, ESQUEMA_LABEL, calcularTotales, TIPOS_INVERSION, TIPO_INVERSION_LABEL } from '../../../types/sigp/cotizacion'
+import {
+  ESQUEMAS, ESQUEMA_LABEL, calcularTotales, TIPOS_INVERSION, TIPO_INVERSION_LABEL,
+  PRESETS_FORMA_PAGO, PRESETS_TIEMPO_EJECUCION, PRESETS_GARANTIA, OBSERVACIONES_BASE,
+} from '../../../types/sigp/cotizacion'
 import type { EsquemaTributario, ConfigAIU, CondicionesCotizacion, TipoInversion } from '../../../types/sigp/cotizacion'
 import type { Cliente } from '../../../types/sigp/cliente'
 import type { Solicitud } from '../../../types/sigp/solicitud'
@@ -42,7 +45,7 @@ interface FormState {
 const inicial = (): FormState => ({
   asunto: '', solicitudId: '', clienteId: '', prospectoNombre: '', esLicitacion: false, tipoInversion: '',
   esquema: 'iva_pleno', aiuAdmin: '9', aiuImprev: '5', aiuUtil: '4', ivaPct: '19',
-  formaPago: '', validezDias: '30', tiempoEjecucion: '', garantia: '', observaciones: '',
+  formaPago: '', validezDias: '30', tiempoEjecucion: '', garantia: '', observaciones: OBSERVACIONES_BASE,
 })
 
 interface Pendiente { id: string; consecutivo: string }
@@ -155,7 +158,12 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
         adjuntos: [], historial: [{ de: null, a: 'borrador', por: uid, fecha: ahora }],
         registrada_por: uid, fecha_creacion: ahora,
       }
-      if (form.clienteId) parentData.cliente_id = form.clienteId
+      if (form.clienteId) {
+        parentData.cliente_id = form.clienteId
+        // Contacto principal del cliente → prellenado de presentación (editable en borrador)
+        const contactoPrincipal = clientes.find(c => c.id === form.clienteId)?.contactos?.[0]?.nombre
+        if (contactoPrincipal) parentData.contacto = contactoPrincipal
+      }
       if (form.prospectoNombre.trim()) parentData.prospecto_nombre = form.prospectoNombre.trim()
       if (form.solicitudId) parentData.solicitud_id = form.solicitudId
       if (form.tipoInversion) parentData.tipo_inversion = form.tipoInversion
@@ -291,14 +299,21 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
           <p className="text-sm font-semibold text-gray-700">Condiciones comerciales</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <TextField label="Validez (días)" type="number" value={form.validezDias} onChange={v => set('validezDias', v)} error={errores.validezDias} />
-            <TextField label="Forma de pago" value={form.formaPago} onChange={v => set('formaPago', v)} placeholder="Ej: 50% anticipo, 50% contra entrega" />
-            <TextField label="Tiempo de ejecución" value={form.tiempoEjecucion} onChange={v => set('tiempoEjecucion', v)} />
-            <TextField label="Garantía" value={form.garantia} onChange={v => set('garantia', v)} />
+            <TextField label="Forma de pago" value={form.formaPago} onChange={v => set('formaPago', v)}
+              placeholder="Elige una opción o escribe libre" list="dl-forma-pago" />
+            <TextField label="Tiempo de ejecución" value={form.tiempoEjecucion} onChange={v => set('tiempoEjecucion', v)}
+              placeholder="Elige una opción o escribe libre" list="dl-tiempo-ejecucion" />
+            <TextField label="Garantía" value={form.garantia} onChange={v => set('garantia', v)}
+              placeholder="Elige una opción o escribe libre" list="dl-garantia" />
+            <datalist id="dl-forma-pago">{PRESETS_FORMA_PAGO.map(o => <option key={o} value={o} />)}</datalist>
+            <datalist id="dl-tiempo-ejecucion">{PRESETS_TIEMPO_EJECUCION.map(o => <option key={o} value={o} />)}</datalist>
+            <datalist id="dl-garantia">{PRESETS_GARANTIA.map(o => <option key={o} value={o} />)}</datalist>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">Observaciones / exclusiones</label>
-            <textarea value={form.observaciones} onChange={e => set('observaciones', e.target.value)} rows={2}
+            <textarea value={form.observaciones} onChange={e => set('observaciones', e.target.value)} rows={3}
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            <p className="text-xs text-gray-400">Texto base sugerido — ajústalo según la necesidad; salen como "Notas importantes" en el PDF (una por línea).</p>
           </div>
           <p className="text-xs text-gray-400">Los ítems y totales se construyen en el detalle de la cotización.</p>
         </div>

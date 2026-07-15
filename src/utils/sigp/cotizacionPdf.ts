@@ -1,11 +1,15 @@
 // src/utils/sigp/cotizacionPdf.ts
 //
-// Generador client-side del PDF de cotización (F1.4-B.e) — formato ISO
-// CM-FT-CT-19 v05 modernizado, fiel al manual de marca NEG (verde #628E3A,
-// Montserrat, Lato italic solo para el slogan).
+// Generador client-side del PDF de cotización — "propuesta económica" de
+// firma de ingeniería: elegante, sobria, jerárquica. El CUADRO ISO de control
+// documental superior NO se toca. El asunto es el título del documento; verde
+// #628E3A como único acento (lima solo en la regla superior), filas alternadas
+// en gris muy claro, pie institucional idéntico en todas las páginas y datos
+// del cotizador solo al cierre del contenido. Menos es más.
 //
 // EL PDF ES CARA AL CLIENTE: jamás pinta costo_directo, margen, APU ni nada
-// del análisis económico interno.
+// del análisis económico interno. La matemática de totales NO vive aquí
+// (llega calculada en el snapshot); esto es solo presentación.
 
 import { PDFDocument, PDFFont, PDFPage, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
@@ -19,27 +23,47 @@ import { etiquetaVersion, fmtNum } from './formato'
 // ── Control documental ISO (actualizar cuando el SGI re-versione el formato) ──
 const ISO = { area: 'COMERCIAL', codigo: 'CM-FT-CT-19', version: '05', modificado: 'JUL-2026' }
 
-// Pie de página institucional
-const PIE_IZQUIERDA = 'NEG Ingeniería S.A.S. BIC · NIT 900.975.870-1 · Colombia'
-const SLOGAN = 'Ingeniería que cambia el mundo'
+// Pie corporativo
+const TELEFONOS = 'Tel. 350 545 9018 · 350 545 9017'
+const WEB = 'www.negingenieria.com'
+// (el eslogan viaja DENTRO del logo gris del pie — no se dibuja como texto)
 
-// ── Marca ──
-const VERDE = rgb(0x62 / 255, 0x8e / 255, 0x3a / 255)        // #628E3A
+// ── Paleta sobria (manual de marca; NUNCA azul) ──
+const VERDE = rgb(0x62 / 255, 0x8e / 255, 0x3a / 255)        // #628E3A — único acento
 const VERDE_OSCURO = rgb(0x4f / 255, 0x73 / 255, 0x30 / 255) // #4F7330
-const LIMA = rgb(0xd7 / 255, 0xda / 255, 0x33 / 255)         // #D7DA33
-const GRIS = rgb(0x45 / 255, 0x45 / 255, 0x45 / 255)         // #454545
-const GRIS_MEDIO = rgb(0x6b / 255, 0x72 / 255, 0x80 / 255)
-const GRIS_FONDO = rgb(0xef / 255, 0xf1 / 255, 0xf4 / 255)   // #EFF1F4
-const GRIS_BORDE = rgb(0xd7 / 255, 0xdb / 255, 0xe0 / 255)
-const TINTA = rgb(0x1f / 255, 0x29 / 255, 0x37 / 255)
+const TINTA = rgb(0x1c / 255, 0x1c / 255, 0x1c / 255)        // casi-negro
+const GRIS = rgb(0x45 / 255, 0x45 / 255, 0x45 / 255)
+const GRIS_MEDIO = rgb(0x8a / 255, 0x8f / 255, 0x98 / 255)
+const ZEBRA = rgb(0xf0 / 255, 0xf2 / 255, 0xf0 / 255)        // filas alternadas
+const BORDE = rgb(0xdd / 255, 0xe1 / 255, 0xdd / 255)
+const DIVISOR = rgb(0xec / 255, 0xee / 255, 0xec / 255)
 const BLANCO = rgb(1, 1, 1)
 
 // ── Geometría A4 ──
 const ANCHO = 595.28
 const ALTO = 841.89
 const MARGEN = 46
-const MARGEN_INF = 64          // reserva del pie
+const MARGEN_INF = 118         // reserva del pie institucional
 const CONTENIDO = ANCHO - MARGEN * 2
+
+// ── Iconografía de línea (paths SVG 24×24, trazo monocromo, legible en B/N) ──
+const ICO = {
+  edificio: 'M5 21V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v16 M15 9h3a1 1 0 0 1 1 1v11 M3.5 21h17 M8.5 8h2 M8.5 12h2 M8.5 16h2',
+  hash: 'M5 9.5h14 M5 14.5h14 M10 4.5l-2 15 M16 4.5l-2 15',
+  usuario: 'M12 4a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7 M5 20c.5-3.5 3.2-5.5 7-5.5s6.5 2 7 5.5',
+  calendario: 'M4 6.5h16V21H4z M4 10.5h16 M8 3.5v5 M16 3.5v5',
+  reloj: 'M12 4a8 8 0 1 0 0 16a8 8 0 0 0 0-16 M12 8v4.2l3 1.8',
+  moneda: 'M12 4a8 8 0 1 0 0 16a8 8 0 0 0 0-16 M12 7.2v9.6 M14.6 9.4c-.5-.9-1.4-1.3-2.6-1.3c-1.5 0-2.6.7-2.6 1.7c0 2.4 5.2 1.2 5.2 3.6c0 1-1.1 1.7-2.6 1.7c-1.2 0-2.1-.4-2.6-1.3',
+  capas: 'M12 3l9 4.8l-9 4.8l-9-4.8z M3 12.6l9 4.8l9-4.8 M3 17l9 4.8l9-4.8',
+  calculadora: 'M6.5 3h11v18h-11z M6.5 8.5h11 M9.6 12.4h.8 M11.6 12.4h.8 M13.6 12.4h.8 M9.6 15.4h.8 M11.6 15.4h.8 M13.6 15.4h.8 M9.6 18.2h.8',
+  clipboard: 'M9.5 3.5h5V7h-5z M14.5 5h3.5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h3.5',
+  escudo: 'M12 3l7 2.6v5.6c0 4.6-3 7.6-7 9.3c-4-1.7-7-4.7-7-9.3V5.6z',
+  info: 'M12 4a8 8 0 1 0 0 16a8 8 0 0 0 0-16 M12 11v5 M11.9 7.8h.7',
+  pluma: 'M16.8 3.6l3.6 3.6L8.2 19.4L4 20l.6-4.2z M14.6 5.8l3.6 3.6',
+  linkedin: 'M5.2 4.2a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 0 0 0-3.2 M4.6 10.2V20 M10 10.2V20 M10 13.6c0-2 1.6-3.6 3.6-3.6s3.6 1.6 3.6 3.6V20',
+  instagram: 'M7 3.8h10a3.2 3.2 0 0 1 3.2 3.2v10A3.2 3.2 0 0 1 17 20.2H7A3.2 3.2 0 0 1 3.8 17V7A3.2 3.2 0 0 1 7 3.8 M12 8.4a3.6 3.6 0 1 0 0 7.2a3.6 3.6 0 0 0 0-7.2 M16.6 6.9v.7',
+  facebook: 'M15.6 3.8h-2.4a3.6 3.6 0 0 0-3.6 3.6v2.4H7v3.6h2.6V21h3.6v-7.6h2.6l.6-3.6h-3.2V7.6a1 1 0 0 1 1-1h2.4z',
+}
 
 export interface DatosPdfCotizacion {
   consecutivo: string
@@ -55,9 +79,8 @@ export interface DatosPdfCotizacion {
   ivaPct: number
   items: ItemCotizacion[]
   totales: TotalesCotizacion
-  /** F1.5.2c — agrupación real de la versión: por capítulo o por actividades
-   *  (entidad propia). Los títulos, el orden y los subtotales de grupo salen
-   *  de `subtotalesPorGrupo` (misma fuente que el constructor y el snapshot). */
+  /** Agrupación real de la versión — títulos/orden/subtotales desde
+   *  subtotalesPorGrupo (misma fuente que el constructor y el snapshot). */
   modo: ModoAgrupacion
   actividades?: Actividad[]
   condiciones: CondicionesCotizacion
@@ -67,27 +90,29 @@ export interface DatosPdfCotizacion {
 
 interface Assets {
   logo: ArrayBuffer              // PNG del logo completo (con sello BIC)
+  logoGris: ArrayBuffer          // logo gris con eslogan y sello BIC (pie corporativo)
+  qr: ArrayBuffer                // QR estático → https://www.negingenieria.com
   regular: ArrayBuffer
   semibold: ArrayBuffer
   bold: ArrayBuffer
-  slogan: ArrayBuffer            // Lato Italic
 }
 
-/** Carga logo y fuentes servidos como estáticos del panel. */
+/** Carga logo, QR y fuentes servidos como estáticos del panel. */
 export async function cargarAssetsPdf(): Promise<Assets> {
   const traer = async (ruta: string) => {
     const r = await fetch(ruta)
     if (!r.ok) throw new Error(`asset ${ruta}: ${r.status}`)
     return r.arrayBuffer()
   }
-  const [logo, regular, semibold, bold, slogan] = await Promise.all([
+  const [logo, logoGris, qr, regular, semibold, bold] = await Promise.all([
     traer('/logo-neg-full.png'),
+    traer('/logo-neg-gris.png'),
+    traer('/qr-web.png'),
     traer('/fonts/Montserrat-Regular.ttf'),
     traer('/fonts/Montserrat-SemiBold.ttf'),
     traer('/fonts/Montserrat-Bold.ttf'),
-    traer('/fonts/Lato-Italic.ttf'),
   ])
-  return { logo, regular, semibold, bold, slogan }
+  return { logo, logoGris, qr, regular, semibold, bold }
 }
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -95,7 +120,7 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-const fMoneda = (n: number) => '$ ' + fmtNum(n || 0)   // F1.5 p.4: máx. 2 decimales
+const fMoneda = (n: number) => '$ ' + fmtNum(n || 0)   // es-CO, máx. 2 decimales
 const fFechaLarga = (d: Date) =>
   d.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })
 
@@ -109,7 +134,6 @@ function partir(texto: string, font: PDFFont, size: number, maxAncho: number): s
     const intento = actual ? `${actual} ${p}` : p
     if (font.widthOfTextAtSize(intento, size) <= maxAncho) { actual = intento; continue }
     if (actual) lineas.push(actual)
-    // palabra más ancha que la columna: cortar por caracteres
     let resto = p
     while (font.widthOfTextAtSize(resto, size) > maxAncho && resto.length > 1) {
       let corte = resto.length - 1
@@ -123,42 +147,71 @@ function partir(texto: string, font: PDFFont, size: number, maxAncho: number): s
   return lineas
 }
 
-/**
- * Genera el PDF de la versión. Devuelve los bytes (el hash y la subida a
- * Storage los maneja el caller).
- */
+/** Máximo `max` líneas; la última termina en … si el texto sigue. */
+function partirMax(texto: string, font: PDFFont, size: number, maxAncho: number, max: number): string[] {
+  const lineas = partir(texto, font, size, maxAncho)
+  if (lineas.length <= max) return lineas
+  const visibles = lineas.slice(0, max)
+  let ultima = visibles[max - 1]
+  while (font.widthOfTextAtSize(ultima + '…', size) > maxAncho && ultima.length > 1) ultima = ultima.slice(0, -1)
+  visibles[max - 1] = ultima + '…'
+  return visibles
+}
+
+/** Path de rectángulo redondeado en coordenadas SVG locales (origen arriba-izq). */
+function pathRectRedondeado(w: number, h: number, r: number): string {
+  return `M ${r} 0 H ${w - r} Q ${w} 0 ${w} ${r} V ${h - r} Q ${w} ${h} ${w - r} ${h} H ${r} Q 0 ${h} 0 ${h - r} V ${r} Q 0 0 ${r} 0 Z`
+}
+
 export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: Assets): Promise<Uint8Array> {
   const doc = await PDFDocument.create()
   doc.registerFontkit(fontkit)
-  const [fR, fS, fB, fI] = await Promise.all([
+  const [fR, fS, fB] = await Promise.all([
     doc.embedFont(assets.regular, { subset: true }),
     doc.embedFont(assets.semibold, { subset: true }),
     doc.embedFont(assets.bold, { subset: true }),
-    doc.embedFont(assets.slogan, { subset: true }),
   ])
   const logo = await doc.embedPng(assets.logo)
+  const logoGris = await doc.embedPng(assets.logoGris)
+  const qr = await doc.embedPng(assets.qr)
 
   const etiqV = etiquetaVersion(datos.versionNum)
-  doc.setTitle(`${datos.consecutivo}${etiqV ? ' ' + etiqV : ''} — Cotización NEG Ingeniería`)
+  doc.setTitle(`${datos.consecutivo}${etiqV ? ' ' + etiqV : ''} — Propuesta económica NEG Ingeniería`)
   doc.setAuthor('NEG Ingeniería S.A.S. BIC')
   doc.setSubject(datos.asunto)
 
   let page!: PDFPage
   let y = 0
 
-  const texto = (t: string, x: number, size: number, font: PDFFont, color = TINTA) =>
-    page.drawText(t, { x, y, size, font, color })
-  const textoDer = (t: string, xDerecha: number, size: number, font: PDFFont, color = TINTA) =>
-    page.drawText(t, { x: xDerecha - font.widthOfTextAtSize(t, size), y, size, font, color })
+  const icono = (d: string, x: number, yTop: number, size: number, color = GRIS_MEDIO, grosor = 1.3) =>
+    page.drawSvgPath(d, { x, y: yTop, scale: size / 24, borderColor: color, borderWidth: grosor })
+
+  const rectR = (x: number, yTopPdf: number, w: number, h: number, r: number,
+    opts: { color?: ReturnType<typeof rgb>; borderColor?: ReturnType<typeof rgb>; borderWidth?: number }) =>
+    page.drawSvgPath(pathRectRedondeado(w, h, r), { x, y: yTopPdf, ...opts })
+
+  const textoDer = (t: string, xDerecha: number, yy: number, size: number, font: PDFFont, color = TINTA) =>
+    page.drawText(t, { x: xDerecha - font.widthOfTextAtSize(t, size), y: yy, size, font, color })
+
+  const reglaMarca = (yTop: number, alto = 5) => {
+    // regla verde → lima por segmentos (pdf-lib no trae degradados nativos)
+    const pasos = 24
+    for (let s = 0; s < pasos; s++) {
+      const t = s / (pasos - 1)
+      const mez = (a: number, b: number) => a + (b - a) * t
+      page.drawRectangle({
+        x: MARGEN + (CONTENIDO / pasos) * s, y: yTop - alto, width: CONTENIDO / pasos + 0.5, height: alto,
+        color: rgb(mez(0x62 / 255, 0xd7 / 255), mez(0x8e / 255, 0xda / 255), mez(0x3a / 255, 0x33 / 255)),
+      })
+    }
+  }
 
   const encabezadoCompacto = () => {
     y = ALTO - 40
-    page.drawText(`${datos.consecutivo}${etiqV ? ' · ' + etiqV : ''}`, { x: MARGEN, y, size: 10, font: fB, color: VERDE })
-    page.drawText('COTIZACIÓN', { x: ANCHO - MARGEN - fS.widthOfTextAtSize('COTIZACIÓN', 8), y: y + 1, size: 8, font: fS, color: GRIS_MEDIO })
-    y -= 10
-    page.drawRectangle({ x: MARGEN, y, width: CONTENIDO, height: 3, color: VERDE })
-    page.drawRectangle({ x: MARGEN + CONTENIDO - 90, y, width: 90, height: 3, color: LIMA })
-    y -= 20
+    page.drawText(`${datos.consecutivo}${etiqV ? ' · Versión ' + datos.versionNum : ''}`, { x: MARGEN, y, size: 10, font: fB, color: VERDE })
+    textoDer('PROPUESTA ECONÓMICA', ANCHO - MARGEN, y + 1, 8, fS, GRIS_MEDIO)
+    reglaMarca(y - 6, 3)
+    y -= 26
   }
 
   const nuevaPagina = (primera = false) => {
@@ -170,106 +223,150 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     if (y - alto < MARGEN_INF) nuevaPagina()
   }
 
-  // ════ Página 1: encabezado de control documental ISO ════
+  // ════ CUADRO ISO DE CONTROL DOCUMENTAL — estructura intacta; todo el texto
+  //      en negro (pedido de Giovanny 15-jul: sin verde en este cuadro) ════
   nuevaPagina(true)
   {
     const hIso = 58
     const yIso = ALTO - 44 - hIso
     const c1 = 138, c3 = 150
     const c2 = CONTENIDO - c1 - c3
-    // marco y separadores
-    page.drawRectangle({ x: MARGEN, y: yIso, width: CONTENIDO, height: hIso, borderColor: GRIS_BORDE, borderWidth: 1 })
-    page.drawLine({ start: { x: MARGEN + c1, y: yIso }, end: { x: MARGEN + c1, y: yIso + hIso }, color: GRIS_BORDE, thickness: 1 })
-    page.drawLine({ start: { x: MARGEN + c1 + c2, y: yIso }, end: { x: MARGEN + c1 + c2, y: yIso + hIso }, color: GRIS_BORDE, thickness: 1 })
-    // col 1: control documental
+    page.drawRectangle({ x: MARGEN, y: yIso, width: CONTENIDO, height: hIso, borderColor: BORDE, borderWidth: 1 })
+    page.drawLine({ start: { x: MARGEN + c1, y: yIso }, end: { x: MARGEN + c1, y: yIso + hIso }, color: BORDE, thickness: 1 })
+    page.drawLine({ start: { x: MARGEN + c1 + c2, y: yIso }, end: { x: MARGEN + c1 + c2, y: yIso + hIso }, color: BORDE, thickness: 1 })
     const filasIzq: [string, string][] = [
-      ['COMERCIAL', ''], ['CÓDIGO:', ISO.codigo], ['VERSIÓN:', ISO.version], ['MODIFICADO:', ISO.modificado],
+      [ISO.area, ''], ['CÓDIGO:', ISO.codigo], ['VERSIÓN:', ISO.version], ['MODIFICADO:', ISO.modificado],
     ]
     let yl = yIso + hIso - 13
     for (const [k, v] of filasIzq) {
-      page.drawText(k, { x: MARGEN + 8, y: yl, size: 6.5, font: fB, color: VERDE_OSCURO })
-      if (v) page.drawText(v, { x: MARGEN + 8 + fB.widthOfTextAtSize(k, 6.5) + 3, y: yl, size: 6.5, font: fR, color: GRIS })
+      page.drawText(k, { x: MARGEN + 8, y: yl, size: 6.5, font: fB, color: TINTA })
+      if (v) page.drawText(v, { x: MARGEN + 8 + fB.widthOfTextAtSize(k, 6.5) + 3, y: yl, size: 6.5, font: fR, color: TINTA })
       yl -= 12
     }
-    // col 2: identidad del formato (centrada)
     const cx = MARGEN + c1 + c2 / 2
     const centrado = (t: string, yy: number, size: number, font: PDFFont, color = TINTA) =>
       page.drawText(t, { x: cx - font.widthOfTextAtSize(t, size) / 2, y: yy, size, font, color })
     centrado('NEG INGENIERÍA S.A.S., BIC', yIso + hIso - 14, 9, fB, TINTA)
-    centrado('NIT. 900.975.870-1', yIso + hIso - 25, 7.5, fR, GRIS)
-    centrado('ÁREA COMERCIAL', yIso + hIso - 35, 6.5, fR, GRIS_MEDIO)
-    centrado('FORMATO DE COTIZACIÓN', yIso + hIso - 47, 8, fS, VERDE)
-    // col 3: logo (respetando zona de seguridad)
+    centrado('NIT. 900.975.870-1', yIso + hIso - 25, 7.5, fR, TINTA)
+    centrado('ÁREA COMERCIAL', yIso + hIso - 35, 6.5, fR, TINTA)
+    centrado('FORMATO DE COTIZACIÓN', yIso + hIso - 47, 8, fS, TINTA)
     const maxW = c3 - 20, maxH = hIso - 14
     const esc = Math.min(maxW / logo.width, maxH / logo.height)
     const lw = logo.width * esc, lh = logo.height * esc
     page.drawImage(logo, { x: MARGEN + c1 + c2 + (c3 - lw) / 2, y: yIso + (hIso - lh) / 2, width: lw, height: lh })
-
-    // banda de marca
-    y = yIso - 12
-    page.drawRectangle({ x: MARGEN, y, width: CONTENIDO, height: 4, color: VERDE })
-    page.drawRectangle({ x: MARGEN + CONTENIDO - 110, y, width: 110, height: 4, color: LIMA })
-    y -= 24
-
-    // título + consecutivo
-    texto('COTIZACIÓN', MARGEN, 14, fB, GRIS)
-    const consec = `${datos.consecutivo}`
-    const vTag = etiqV ? `  ${etiqV}` : ''
-    const wC = fB.widthOfTextAtSize(consec, 17), wV = fS.widthOfTextAtSize(vTag, 10)
-    page.drawText(consec, { x: ANCHO - MARGEN - wC - wV, y: y - 2, size: 17, font: fB, color: VERDE })
-    page.drawText(vTag, { x: ANCHO - MARGEN - wV, y: y - 2, size: 10, font: fS, color: GRIS_MEDIO })
-    y -= 22
+    y = yIso - 10
   }
 
-  // ════ Bloque de datos ════
+  // ════ 1. Regla de marca (degradado verde → lima) ════
+  reglaMarca(y)
+  y -= 34
+
+  // ════ 2. Encabezado comercial — el asunto ES el título del documento;
+  //         debajo, un subtítulo discreto; consecutivo a la derecha ════
+  {
+    const wC = fB.widthOfTextAtSize(datos.consecutivo, 17)
+    page.drawText(datos.consecutivo, { x: ANCHO - MARGEN - wC, y, size: 17, font: fB, color: VERDE })
+    // la versión es información documental: discreta, bajo el consecutivo
+    if (etiqV) textoDer(`Versión ${datos.versionNum}`, ANCHO - MARGEN, y - 13, 7.5, fS, GRIS_MEDIO)
+    const wVer = etiqV ? fS.widthOfTextAtSize(`Versión ${datos.versionNum}`, 7.5) : 0
+
+    // La línea 1 respeta el consecutivo (y la 2 a la versión); el resto usa el
+    // ancho completo. Si a 14pt no cabe en 2 líneas, baja a 12pt (hasta 3).
+    const titulo = (datos.asunto.trim() || 'Propuesta económica').replace(/\s+/g, ' ')
+    const wLinea1 = CONTENIDO - wC - 24
+    const acomodar = (size: number, maxLineas: number) => {
+      const lineas = [partir(titulo, fB, size, wLinea1)[0]]
+      let resto = titulo.slice(lineas[0].length).trim()
+      const wLinea2 = wVer ? CONTENIDO - wVer - 24 : CONTENIDO   // solo la 2 respeta la versión
+      if (resto && maxLineas === 2) lineas.push(partirMax(resto, fB, size, wLinea2, 1)[0])
+      else if (resto) {
+        lineas.push(partir(resto, fB, size, wLinea2)[0])
+        resto = resto.slice(lineas[1].length).trim()
+        if (resto) lineas.push(...partirMax(resto, fB, size, CONTENIDO, maxLineas - 2))
+      }
+      return { size, lineas }
+    }
+    let t = acomodar(14, 2)
+    if (t.lineas[t.lineas.length - 1].endsWith('…')) t = acomodar(12, 3)
+    t.lineas.forEach((l, i) => page.drawText(l, { x: MARGEN, y: y - i * (t.size + 3), size: t.size, font: fB, color: TINTA }))
+    y -= (t.lineas.length - 1) * (t.size + 3)
+    if (datos.asunto.trim()) {
+      y -= 14
+      page.drawText('Propuesta económica', { x: MARGEN, y, size: 8.5, font: fS, color: GRIS_MEDIO })
+    }
+    y -= 24
+  }
+
+  // ════ 4. META — caja redondeada, 2 columnas, iconos, sin filas vacías ════
   {
     const vence = new Date(datos.fechaEmision.getTime() + datos.validezDias * 86_400_000)
-    const pares: [string, string][] = [
-      ['CLIENTE', datos.clienteNit ? `${datos.clienteNombre} · NIT ${datos.clienteNit}` : datos.clienteNombre],
-      ['FECHA', fFechaLarga(datos.fechaEmision)],
-      ...(datos.contacto ? [['CONTACTO', datos.contacto] as [string, string]] : []),
-      ['VALIDEZ', `${datos.validezDias} días (hasta el ${fFechaLarga(vence)})`],
+    type Fila = { ico: string; etiqueta: string; valor: string; destacada?: boolean }
+    const izq: Fila[] = [
+      { ico: ICO.edificio, etiqueta: 'CLIENTE', valor: datos.clienteNombre, destacada: true },
+      ...(datos.clienteNit ? [{ ico: ICO.hash, etiqueta: 'NIT', valor: datos.clienteNit }] : []),
+      ...(datos.contacto ? [{ ico: ICO.usuario, etiqueta: 'CONTACTO', valor: datos.contacto }] : []),
     ]
-    const colW = CONTENIDO / 2 - 18
-    const filas = Math.ceil(pares.length / 2) + 1  // +1 asunto
-    const hBloque = filas * 15 + 16
-    page.drawRectangle({ x: MARGEN, y: y - hBloque, width: CONTENIDO, height: hBloque, color: GRIS_FONDO })
-    let yy = y - 18
-    pares.forEach((p, i) => {
-      const x = MARGEN + 14 + (i % 2) * (CONTENIDO / 2)
-      page.drawText(p[0], { x, y: yy, size: 6.5, font: fB, color: VERDE_OSCURO })
-      const val = partir(p[1], fR, 8.5, colW - 60)[0]
-      page.drawText(val, { x: x + 58, y: yy, size: 8.5, font: fR, color: TINTA })
-      if (i % 2 === 1) yy -= 15
-    })
-    if (pares.length % 2 === 1) yy -= 15
-    page.drawText('ASUNTO', { x: MARGEN + 14, y: yy, size: 6.5, font: fB, color: VERDE_OSCURO })
-    page.drawText(partir(datos.asunto, fS, 9, CONTENIDO - 90)[0], { x: MARGEN + 72, y: yy, size: 9, font: fS, color: TINTA })
-    y -= hBloque + 16
+    const der: Fila[] = [
+      { ico: ICO.calendario, etiqueta: 'FECHA', valor: fFechaLarga(datos.fechaEmision) },
+      { ico: ICO.reloj, etiqueta: 'VALIDEZ', valor: `${datos.validezDias} días · hasta el ${fFechaLarga(vence)}` },
+      { ico: ICO.moneda, etiqueta: 'MONEDA', valor: datos.condiciones.moneda === 'COP' ? 'Pesos colombianos (COP)' : datos.condiciones.moneda },
+    ]
+    const hFila = 25
+    const hCaja = Math.max(izq.length, der.length) * hFila + 14
+    rectR(MARGEN, y, CONTENIDO, hCaja, 8, { borderColor: BORDE, borderWidth: 1 })
+    const colW = CONTENIDO / 2
+    const pintar = (filas: Fila[], x0: number) => {
+      let yy = y - 21
+      for (const f of filas) {
+        icono(f.ico, x0 + 14, yy + 11, 10.5, f.destacada ? VERDE : GRIS_MEDIO, 1.2)
+        page.drawText(f.etiqueta, { x: x0 + 32, y: yy + 3.5, size: 5.8, font: fS, color: GRIS_MEDIO })
+        const linea = partir(f.valor, f.destacada ? fB : fR, f.destacada ? 9.5 : 8.5, colW - 46)[0]
+        page.drawText(linea, { x: x0 + 32, y: yy - 7.5, size: f.destacada ? 9.5 : 8.5, font: f.destacada ? fB : fR, color: TINTA })
+        yy -= hFila
+      }
+    }
+    pintar(izq, MARGEN)
+    pintar(der, MARGEN + colW)
+    y -= hCaja + 22
   }
 
-  // ════ Tabla de ítems ════
-  const col = { cod: 58, und: 34, cant: 42, vu: 78, vt: 88 }
+  // ════ 4b. Introducción institucional — saludo breve y genérico ════
+  {
+    const nombre = (datos.contacto || '').trim()
+    const saludo = nombre ? `Apreciado(a) ${nombre}:` : 'Apreciados señores:'
+    const cuerpo = `${nombre ? 'Reciba' : 'Reciban'} un cordial saludo. Atendiendo su solicitud, presentamos para su ` +
+      'consideración la siguiente propuesta económica. Agradecemos la oportunidad y quedamos atentos a cualquier inquietud.'
+    const lineas = partir(cuerpo, fR, 8.5, CONTENIDO)
+    asegurar(16 + lineas.length * 12.5)
+    page.drawText(saludo, { x: MARGEN, y, size: 8.5, font: fS, color: TINTA })
+    y -= 15
+    for (const l of lineas) {
+      page.drawText(l, { x: MARGEN, y, size: 8.5, font: fR, color: GRIS })
+      y -= 12.5
+    }
+    y -= 12
+  }
+
+  // ════ 5. TABLA de ítems ════
+  const col = { cod: 54, und: 40, cant: 46, vu: 82, vt: 92 }
   const wDesc = CONTENIDO - col.cod - col.und - col.cant - col.vu - col.vt
   const xCod = MARGEN, xDesc = xCod + col.cod, xUnd = xDesc + wDesc,
     xCant = xUnd + col.und, xVu = xCant + col.cant, xVt = xVu + col.vu
 
   const encabezadoTabla = () => {
-    asegurar(20)
-    page.drawRectangle({ x: MARGEN, y: y - 14, width: CONTENIDO, height: 18, color: VERDE })
-    const yh = y - 8
-    const h = (t: string, x: number) => page.drawText(t, { x, y: yh, size: 7, font: fS, color: BLANCO })
-    const hd = (t: string, xd: number) => page.drawText(t, { x: xd - fS.widthOfTextAtSize(t, 7), y: yh, size: 7, font: fS, color: BLANCO })
-    h('CÓDIGO', xCod + 6); h('DESCRIPCIÓN', xDesc + 4); h('UND', xUnd + 4)
-    hd('CANT', xCant + col.cant - 4); hd('VR. UNITARIO', xVu + col.vu - 4); hd('VR. TOTAL', xVt + col.vt - 4)
-    y -= 20
+    asegurar(24)
+    page.drawRectangle({ x: MARGEN, y: y - 15, width: CONTENIDO, height: 19, color: VERDE })
+    const yh = y - 9
+    const h = (t: string, x: number) => page.drawText(t, { x, y: yh, size: 6.5, font: fS, color: BLANCO })
+    const hc = (t: string, xc: number, wc: number) =>
+      page.drawText(t, { x: xc + wc / 2 - fS.widthOfTextAtSize(t, 6.5) / 2, y: yh, size: 6.5, font: fS, color: BLANCO })
+    const hd = (t: string, xd: number) => page.drawText(t, { x: xd - fS.widthOfTextAtSize(t, 6.5), y: yh, size: 6.5, font: fS, color: BLANCO })
+    h('CÓDIGO', xCod + 13); h('DESCRIPCIÓN', xDesc + 4)
+    hc('UND', xUnd, col.und); hc('CANT', xCant, col.cant)
+    hd('VR. UNITARIO', xVu + col.vu - 4); hd('VR. TOTAL', xVt + col.vt - 4)
+    y -= 22
   }
 
-  // Agrupación (F1.5.2c): títulos, orden y subtotales desde subtotalesPorGrupo —
-  // la MISMA fuente del constructor y del snapshot. En modo actividad se
-  // respeta el orden de las actividades; huérfanos → 'Otros'. Los grupos sin
-  // ítems se OMITEN en el documento (cara al cliente, una actividad vacía con
-  // $0 es ruido; su ausencia no altera la suma).
   const desglose = subtotalesPorGrupo(datos.items, datos.modo, datos.actividades ?? [])
   const buckets = new Map(desglose.map(g => [g.grupo_id, { g, items: [] as ItemCotizacion[] }]))
   for (const it of datos.items) {
@@ -281,40 +378,39 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   const grupos = [...buckets.values()].filter(b => b.items.length > 0)
 
   encabezadoTabla()
-  let alterna = false
   for (const { g, items: itemsG } of grupos) {
-    const grupo = g.grupo_nombre
-    const subtotal = g.subtotal
-    // título de grupo (no huérfano: reserva título + una fila)
-    asegurar(34)
-    if (y - 34 < MARGEN_INF) { nuevaPagina(); encabezadoTabla() }
-    y -= 6
-    page.drawText(grupo.toUpperCase(), { x: MARGEN + 6, y, size: 8, font: fB, color: VERDE_OSCURO })
-    textoDer(fMoneda(subtotal), xVt + col.vt - 4, 8, fS, GRIS_MEDIO)
-    y -= 5
-    page.drawLine({ start: { x: MARGEN, y }, end: { x: MARGEN + CONTENIDO, y }, color: VERDE, thickness: 1.2 })
-    y -= 4
-    alterna = false
+    // encabezado de grupo — fondo blanco, icono + nombre en gris oscuro (sobriedad:
+    // el verde queda para los acentos), subtotal en negro; sin acentos verticales
+    if (y - 48 < MARGEN_INF) { nuevaPagina(); encabezadoTabla() }
+    y -= 16
+    icono(ICO.capas, MARGEN + 6, y - 1, 9, GRIS, 1.3)
+    page.drawText(g.grupo_nombre.toUpperCase(), { x: MARGEN + 20, y: y - 8, size: 7.7, font: fB, color: GRIS })
+    textoDer(fMoneda(g.subtotal), xVt + col.vt - 4, y - 8, 7.7, fS, TINTA)
+    page.drawLine({ start: { x: MARGEN, y: y - 14 }, end: { x: MARGEN + CONTENIDO, y: y - 14 }, color: BORDE, thickness: 1.1 })
+    y -= 21
 
+    let fila = 0
     for (const it of itemsG) {
-      const lineas = partir(it.descripcion, fR, 8, wDesc - 10)
-      const hFila = Math.max(lineas.length * 10, 10) + 7
+      const lineas = partirMax(it.descripcion, fR, 8, wDesc - 12, 2)
+      const hFila = lineas.length * 11 + 10
       if (y - hFila < MARGEN_INF) { nuevaPagina(); encabezadoTabla() }
-      if (alterna) page.drawRectangle({ x: MARGEN, y: y - hFila + 4, width: CONTENIDO, height: hFila, color: GRIS_FONDO })
-      const yTop = y - 8
-      page.drawText(it.codigo || '—', { x: xCod + 6, y: yTop, size: 7.5, font: fR, color: GRIS_MEDIO })
-      lineas.forEach((l, i) => page.drawText(l, { x: xDesc + 4, y: yTop - i * 10, size: 8, font: fR, color: TINTA }))
-      page.drawText(it.unidad || '—', { x: xUnd + 4, y: yTop, size: 8, font: fR, color: TINTA })
-      const der = (t: string, xd: number) => page.drawText(t, { x: xd - fR.widthOfTextAtSize(t, 8), y: yTop, size: 8, font: fR, color: TINTA })
-      der(fmtNum(it.cantidad), xCant + col.cant - 4)
-      der(fMoneda(it.valor_unitario), xVu + col.vu - 4)
-      der(fMoneda(it.valor_total), xVt + col.vt - 4)
+      if (fila % 2 === 1)
+        page.drawRectangle({ x: MARGEN, y: y - hFila + 3, width: CONTENIDO, height: hFila, color: ZEBRA })
+      const yTop = y - 10
+      page.drawText(it.codigo || '—', { x: xCod + 13, y: yTop, size: 7.5, font: fS, color: GRIS_MEDIO })
+      lineas.forEach((l, i) => page.drawText(l, { x: xDesc + 4, y: yTop - i * 11, size: 8, font: fR, color: TINTA }))
+      const centrado = (t: string, xc: number, wc: number) =>
+        page.drawText(t, { x: xc + wc / 2 - fR.widthOfTextAtSize(t, 8) / 2, y: yTop, size: 8, font: fR, color: GRIS })
+      centrado(it.unidad || '—', xUnd, col.und)
+      centrado(fmtNum(it.cantidad), xCant, col.cant)
+      textoDer(fMoneda(it.valor_unitario), xVu + col.vu - 4, yTop, 8, fR, TINTA)
+      textoDer(fMoneda(it.valor_total), xVt + col.vt - 4, yTop, 8, fS, TINTA)
       y -= hFila
-      alterna = !alterna
+      fila++
     }
   }
 
-  // ════ Tarjeta de totales ════
+  // ════ 6. RESUMEN ECONÓMICO — héroe ════
   {
     const filas: [string, string][] = datos.esquema === 'aiu'
       ? [
@@ -328,90 +424,127 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
           ['Costo directo', fMoneda(datos.totales.costos_directos)],
           [`IVA (${datos.ivaPct}%)`, fMoneda(datos.totales.iva)],
         ]
-    const hFila = 17, hTotal = 24
-    const hCard = filas.length * hFila + hTotal
-    const wCard = 240
+    const wCard = CONTENIDO * 0.56
     const xCard = ANCHO - MARGEN - wCard
-    asegurar(hCard + 18)
-    y -= 12
-    const yCardTop = y
-    page.drawRectangle({ x: xCard, y: yCardTop - hCard, width: wCard, height: hCard, borderColor: VERDE, borderWidth: 1.2 })
-    let yf = yCardTop
+    const hFila = 16.5, hTotal = 26, hCab = 24
+    const hCard = hCab + filas.length * hFila + hTotal + 6
+    asegurar(hCard + 24)
+    y -= 18
+    const yTop = y
+    rectR(xCard, yTop, wCard, hCard, 8, { borderColor: BORDE, borderWidth: 1 })
+    icono(ICO.calculadora, xCard + 14, yTop - 8, 10, VERDE, 1.3)
+    page.drawText('RESUMEN ECONÓMICO', { x: xCard + 30, y: yTop - 16, size: 6.8, font: fS, color: VERDE_OSCURO })
+    let yf = yTop - hCab
     filas.forEach(([k, v], i) => {
-      if (i % 2 === 1) page.drawRectangle({ x: xCard + 1, y: yf - hFila, width: wCard - 2, height: hFila, color: GRIS_FONDO })
-      page.drawText(k, { x: xCard + 12, y: yf - 12, size: 8.5, font: fR, color: GRIS })
-      page.drawText(v, { x: xCard + wCard - 12 - fS.widthOfTextAtSize(v, 8.5), y: yf - 12, size: 8.5, font: fS, color: TINTA })
+      const esIva = i === filas.length - 1
+      if (i % 2 === 1)
+        page.drawRectangle({ x: xCard + 1, y: yf - hFila + 3, width: wCard - 2, height: hFila, color: ZEBRA })
+      if (esIva) page.drawLine({ start: { x: xCard + 12, y: yf + 3 }, end: { x: xCard + wCard - 12, y: yf + 3 }, color: DIVISOR, thickness: 0.8 })
+      page.drawText(k, { x: xCard + 16, y: yf - 9, size: 8.5, font: fR, color: GRIS })
+      textoDer(v, xCard + wCard - 16, yf - 9, 8.5, fS, GRIS)
       yf -= hFila
     })
-    page.drawRectangle({ x: xCard, y: yf - hTotal, width: wCard, height: hTotal, color: VERDE })
-    page.drawText('TOTAL', { x: xCard + 12, y: yf - 16, size: 10.5, font: fB, color: BLANCO })
-    page.drawText('COP', { x: xCard + 12 + fB.widthOfTextAtSize('TOTAL', 10.5) + 4, y: yf - 16, size: 7, font: fR, color: BLANCO })
-    const tot = fMoneda(datos.totales.total)
-    page.drawText(tot, { x: xCard + wCard - 12 - fB.widthOfTextAtSize(tot, 12), y: yf - 16.5, size: 12, font: fB, color: BLANCO })
-    y = yCardTop - hCard - 8
+    // barra TOTAL — protagonista sin estridencia
+    const yBarra = yf - 4
+    page.drawSvgPath(
+      `M 0 0 H ${wCard} V ${hTotal - 8} Q ${wCard} ${hTotal} ${wCard - 8} ${hTotal} H 8 Q 0 ${hTotal} 0 ${hTotal - 8} Z`,
+      { x: xCard, y: yBarra, color: VERDE },
+    )
+    page.drawText('TOTAL', { x: xCard + 16, y: yBarra - 17.5, size: 11, font: fB, color: BLANCO })
+    page.drawText('COP', { x: xCard + 16 + fB.widthOfTextAtSize('TOTAL', 11) + 5, y: yBarra - 17, size: 6.5, font: fR, color: BLANCO })
+    textoDer(fMoneda(datos.totales.total), xCard + wCard - 16, yBarra - 18.5, 13, fB, BLANCO)
+    y = yBarra - hTotal - 8
   }
 
-  // ════ Condiciones comerciales ════
-  const seccion = (titulo: string) => {
-    asegurar(30)
-    y -= 14
-    page.drawText(titulo.toUpperCase(), { x: MARGEN, y, size: 8, font: fB, color: VERDE })
-    y -= 8
+  // ── encabezado de sección genérico (icono + versal verde-oscuro + regla) ──
+  // `reserva`: alto del primer contenido — evita títulos huérfanos al pie de página
+  const seccion = (icon: string, titulo: string, reserva = 0) => {
+    asegurar(36 + reserva)
+    y -= 20
+    icono(icon, MARGEN, y + 8.5, 11, VERDE, 1.3)   // centrado óptico con la versal
+    page.drawText(titulo, { x: MARGEN + 17, y, size: 8.5, font: fS, color: VERDE_OSCURO })
+    const wT = fS.widthOfTextAtSize(titulo, 8.5)
+    page.drawLine({ start: { x: MARGEN + 17 + wT + 10, y: y + 3 }, end: { x: ANCHO - MARGEN, y: y + 3 }, color: DIVISOR, thickness: 0.8 })
+    y -= 15
   }
+
+  // ════ 7. CONDICIONES COMERCIALES — rejilla 2 col, sin campos vacíos ════
   {
     const c = datos.condiciones
-    const pares: [string, string][] = [
-      ['Forma de pago', c.forma_pago], ['Tiempo de ejecución', c.tiempo_ejecucion],
-      ['Garantía', c.garantia], ['Moneda', c.moneda === 'COP' ? 'Pesos colombianos (COP)' : c.moneda],
-    ].filter(([, v]) => (v || '').trim()) as [string, string][]
-    if (pares.length) {
-      seccion('Condiciones comerciales')
-      const filasN = Math.ceil(pares.length / 2)
-      const hBloque = filasN * 24 + 10
-      asegurar(hBloque)
-      page.drawRectangle({ x: MARGEN, y: y - hBloque, width: CONTENIDO, height: hBloque, color: GRIS_FONDO })
-      pares.forEach((p, i) => {
-        const x = MARGEN + 14 + (i % 2) * (CONTENIDO / 2)
-        const yy = y - 15 - Math.floor(i / 2) * 24
-        page.drawText(p[0], { x, y: yy, size: 7.5, font: fS, color: GRIS })
-        page.drawText(partir(p[1], fR, 8, CONTENIDO / 2 - 28)[0], { x, y: yy - 10, size: 8, font: fR, color: TINTA })
+    const campos: { ico: string; etiqueta: string; valor: string }[] = [
+      { ico: ICO.moneda, etiqueta: 'FORMA DE PAGO', valor: c.forma_pago },
+      { ico: ICO.reloj, etiqueta: 'TIEMPO DE EJECUCIÓN', valor: c.tiempo_ejecucion },
+      { ico: ICO.escudo, etiqueta: 'GARANTÍA', valor: c.garantia },
+    ].filter(f => (f.valor || '').trim())
+    if (campos.length) {
+      const colW = CONTENIDO / 2
+      const filasN = Math.ceil(campos.length / 2)
+      seccion(ICO.clipboard, 'CONDICIONES COMERCIALES', filasN * 31)
+      campos.forEach((f, i) => {
+        const x0 = MARGEN + (i % 2) * colW
+        const yy = y - Math.floor(i / 2) * 31
+        icono(f.ico, x0, yy + 6.5, 9.5, GRIS_MEDIO, 1.2)   // centrado con el par etiqueta/valor
+        page.drawText(f.etiqueta, { x: x0 + 15, y: yy, size: 5.8, font: fS, color: GRIS_MEDIO })
+        page.drawText(partir(f.valor, fR, 8.5, colW - 26)[0], { x: x0 + 15, y: yy - 11.5, size: 8.5, font: fR, color: TINTA })
       })
-      y -= hBloque
+      y -= filasN * 31 + 4
     }
   }
 
-  // ════ Observaciones ════
+  // ════ 8. NOTAS IMPORTANTES — cláusulas con viñeta › ════
   if ((datos.observaciones || '').trim()) {
-    seccion('Observaciones y exclusiones')
-    for (const linea of partir(datos.observaciones!, fR, 8.5, CONTENIDO)) {
-      asegurar(12)
-      page.drawText(linea, { x: MARGEN, y: y - 4, size: 8.5, font: fR, color: TINTA })
-      y -= 12
+    seccion(ICO.info, 'NOTAS IMPORTANTES', 18)
+    const clausulas = datos.observaciones!.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+    for (const cl of clausulas) {
+      const lineas = partir(cl, fR, 8.8, CONTENIDO - 16)
+      asegurar(lineas.length * 12.5 + 5)
+      page.drawText('›', { x: MARGEN + 2, y: y - 4, size: 9.5, font: fB, color: VERDE })
+      lineas.forEach((l, i) => page.drawText(l, { x: MARGEN + 14, y: y - 4 - i * 12.5, size: 8.8, font: fR, color: GRIS }))
+      y -= lineas.length * 12.5 + 6
     }
   }
 
-  // ════ Firma ════
+  // ════ 9. COTIZADO POR — solo al cierre del contenido (última página) ════
   {
-    asegurar(64)
-    y -= 34
-    page.drawLine({ start: { x: MARGEN, y }, end: { x: MARGEN + 210, y }, color: GRIS_MEDIO, thickness: 0.8 })
-    y -= 11
-    page.drawText(datos.firmante.nombre, { x: MARGEN, y, size: 9, font: fB, color: TINTA })
-    y -= 10
-    const detalle = ['NEG Ingeniería S.A.S. BIC', datos.firmante.correo, datos.firmante.celular ? `Cel. ${datos.firmante.celular}` : '']
-      .filter(Boolean).join(' · ')
-    page.drawText(detalle, { x: MARGEN, y, size: 7.5, font: fR, color: GRIS_MEDIO })
+    seccion(ICO.pluma, 'COTIZADO POR', 84)
+    y -= 48                       // área generosa para firma digital o manuscrita
+    page.drawLine({ start: { x: MARGEN, y }, end: { x: MARGEN + 170, y }, color: GRIS_MEDIO, thickness: 0.8 })
+    page.drawText(datos.firmante.nombre, { x: MARGEN, y: y - 11, size: 9.5, font: fB, color: TINTA })
+    page.drawText('NEG Ingeniería S.A.S. BIC', { x: MARGEN, y: y - 22, size: 7.5, font: fR, color: GRIS })
+    const lineaContacto = [datos.firmante.correo, datos.firmante.celular].filter(Boolean).join(' · ')
+    if (lineaContacto) page.drawText(lineaContacto, { x: MARGEN, y: y - 32, size: 7, font: fR, color: GRIS_MEDIO })
   }
 
-  // ════ Pie en todas las páginas ════
+  // ════ 10. PIE institucional — idéntico en todas las páginas ════
   const paginas = doc.getPages()
-  paginas.forEach((p, i) => {
-    p.drawLine({ start: { x: MARGEN, y: 42 }, end: { x: ANCHO - MARGEN, y: 42 }, color: GRIS_BORDE, thickness: 0.8 })
-    p.drawText(PIE_IZQUIERDA, { x: MARGEN, y: 30, size: 7, font: fR, color: GRIS_MEDIO })
-    const wS = fI.widthOfTextAtSize(SLOGAN, 7.5)
-    p.drawText(SLOGAN, { x: ANCHO / 2 - wS / 2, y: 30, size: 7.5, font: fI, color: VERDE })
-    const pag = `Página ${i + 1} de ${paginas.length}`
-    p.drawText(pag, { x: ANCHO - MARGEN - fR.widthOfTextAtSize(pag, 7), y: 30, size: 7, font: fR, color: GRIS_MEDIO })
+  paginas.forEach((p, idx) => {
+    const yPie = 96
+    p.drawLine({ start: { x: MARGEN, y: yPie }, end: { x: ANCHO - MARGEN, y: yPie }, color: BORDE, thickness: 0.8 })
+    if (paginas.length > 1) {
+      const t = `Página ${idx + 1} de ${paginas.length}`
+      p.drawText(t, { x: ANCHO - MARGEN - fR.widthOfTextAtSize(t, 6.5), y: yPie + 5, size: 6.5, font: fR, color: GRIS_MEDIO })
+    }
+    const dib = (d: string, x: number, yTop: number, s: number, c = GRIS_MEDIO, g = 1.2) =>
+      p.drawSvgPath(d, { x, y: yTop, scale: s / 24, borderColor: c, borderWidth: g })
+
+    // Izquierda — logo gris (trae eslogan y sello BIC), centrado en la banda
+    const wLogo = 140
+    const hLogo = wLogo * (logoGris.height / logoGris.width)
+    p.drawImage(logoGris, { x: MARGEN, y: yPie - 18 - hLogo, width: wLogo, height: hLogo })
+
+    // Centro — QR → https://www.negingenieria.com
+    const qrSize = 48
+    p.drawImage(qr, { x: ANCHO / 2 - qrSize / 2, y: yPie - 15 - qrSize, width: qrSize, height: qrSize })
+    const cap = 'negingenieria.com'
+    p.drawText(cap, { x: ANCHO / 2 - fR.widthOfTextAtSize(cap, 6) / 2, y: yPie - 22 - qrSize, size: 6, font: fR, color: GRIS_MEDIO })
+
+    // Derecha — redes visibles, web y teléfonos institucionales
+    const xDer = ANCHO - MARGEN
+    const paso = 24, szRed = 16
+    const redes = [ICO.linkedin, ICO.instagram, ICO.facebook]
+    redes.forEach((d, i) => dib(d, xDer - (redes.length - i) * paso + (paso - szRed), yPie - 17, szRed, GRIS_MEDIO, 1.4))
+    p.drawText(WEB, { x: xDer - fR.widthOfTextAtSize(WEB, 7), y: yPie - 46, size: 7, font: fR, color: GRIS })
+    p.drawText(TELEFONOS, { x: xDer - fR.widthOfTextAtSize(TELEFONOS, 7), y: yPie - 56, size: 7, font: fR, color: GRIS_MEDIO })
   })
 
   return doc.save()
