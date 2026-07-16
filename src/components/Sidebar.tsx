@@ -211,6 +211,12 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
 
       {/* Nav */}
       <nav className="flex-1 py-4 space-y-1 px-2 overflow-y-auto">
+        {/* Título de la sección SST — mismo estilo que el de SIGP */}
+        {!collapsed && visibleItems.length > 0 && (
+          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+            SST
+          </p>
+        )}
         {visibleItems.map(item => (
           <NavLink
             key={item.to}
