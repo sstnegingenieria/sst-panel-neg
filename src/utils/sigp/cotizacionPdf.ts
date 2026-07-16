@@ -379,8 +379,10 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   const grupos = [...buckets.values()].filter(b => b.items.length > 0)
 
   // Una fila nunca se parte entre páginas: se mide completa antes de dibujar.
+  // La descripción sale COMPLETA (es el alcance pactado con el cliente); el tope
+  // de 20 líneas es solo un seguro anti-desborde — una fila jamás supera la página.
   const filaDe = (it: ItemCotizacion) => {
-    const lineas = partirMax(it.descripcion, fR, 8, wDesc - 12, 2)
+    const lineas = partirMax(it.descripcion, fR, 8, wDesc - 12, 20)
     return { lineas, h: lineas.length * 11 + 10 }
   }
   const H_ENC_GRUPO = 37   // 16 de aire + 21 del renglón con regla
