@@ -349,7 +349,8 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   }
 
   // ════ 5. TABLA de ítems ════
-  const col = { cod: 54, und: 40, cant: 46, vu: 82, vt: 92 }
+  // CANT y VR. UNITARIO angostos a favor de DESCRIPCIÓN (es la columna que respira)
+  const col = { cod: 54, und: 40, cant: 36, vu: 70, vt: 92 }
   const wDesc = CONTENIDO - col.cod - col.und - col.cant - col.vu - col.vt
   const xCod = MARGEN, xDesc = xCod + col.cod, xUnd = xDesc + wDesc,
     xCant = xUnd + col.und, xVu = xCant + col.cant, xVt = xVu + col.vu
@@ -357,7 +358,7 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   const encabezadoTabla = () => {
     asegurar(24)
     page.drawRectangle({ x: MARGEN, y: y - 15, width: CONTENIDO, height: 19, color: VERDE })
-    const yh = y - 9
+    const yh = y - 7.8   // centrado óptico de las versales en la banda de 19pt
     const h = (t: string, x: number) => page.drawText(t, { x, y: yh, size: 6.5, font: fS, color: BLANCO })
     const hc = (t: string, xc: number, wc: number) =>
       page.drawText(t, { x: xc + wc / 2 - fS.widthOfTextAtSize(t, 6.5) / 2, y: yh, size: 6.5, font: fS, color: BLANCO })
@@ -394,7 +395,7 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   // El aire de 16 es ENTRE grupos; pegado a la banda del encabezado se reduce.
   let trasEncabezadoTabla = false
   const encabezadoGrupo = (g: { grupo_nombre: string; subtotal: number }, cont = false) => {
-    y -= trasEncabezadoTabla ? 5 : 16
+    y -= trasEncabezadoTabla ? 0 : 16   // pegado a la banda; el aire va ENTRE grupos
     trasEncabezadoTabla = false
     icono(ICO.capas, MARGEN + 6, y - 1, 9, GRIS, 1.3)
     const nombre = g.grupo_nombre.toUpperCase()
