@@ -203,7 +203,7 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
             NEG Ingeniería
             <br />
             <span className="text-gray-400 font-sans font-medium text-[11px] uppercase tracking-wider">
-              Panel de Gestión SST
+              Panel del Sistema de Gestión Integral
             </span>
           </span>
         )}
@@ -297,7 +297,7 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
           <p className="font-slogan italic text-[11px] text-brand-700 leading-tight">
             Ingeniería que cambia el mundo
           </p>
-          <p className="text-[10px] text-gray-400 mt-1">NEG Ingeniería SST · v2</p>
+          <p className="text-[10px] text-gray-400 mt-1">NEG Ingeniería · v2</p>
         </div>
       )}
     </aside>
