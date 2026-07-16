@@ -366,6 +366,7 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     hc('UND', xUnd, col.und); hc('CANT', xCant, col.cant)
     hd('VR. UNITARIO', xVu + col.vu - 4); hd('VR. TOTAL', xVt + col.vt - 4)
     y -= 22
+    trasEncabezadoTabla = true
   }
 
   const desglose = subtotalesPorGrupo(datos.items, datos.modo, datos.actividades ?? [])
@@ -390,8 +391,11 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   // encabezado de grupo — fondo blanco, icono + nombre en gris oscuro (sobriedad:
   // el verde queda para los acentos), subtotal en negro; sin acentos verticales.
   // `cont`: reanudación tras salto de página — "(cont.)" y sin repetir subtotal.
+  // El aire de 16 es ENTRE grupos; pegado a la banda del encabezado se reduce.
+  let trasEncabezadoTabla = false
   const encabezadoGrupo = (g: { grupo_nombre: string; subtotal: number }, cont = false) => {
-    y -= 16
+    y -= trasEncabezadoTabla ? 5 : 16
+    trasEncabezadoTabla = false
     icono(ICO.capas, MARGEN + 6, y - 1, 9, GRIS, 1.3)
     const nombre = g.grupo_nombre.toUpperCase()
     page.drawText(nombre, { x: MARGEN + 20, y: y - 8, size: 7.7, font: fB, color: GRIS })
@@ -431,6 +435,9 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
       fila++
     }
   }
+  // regla de cierre — marca el final de la tabla
+  page.drawLine({ start: { x: MARGEN, y: y + 3 }, end: { x: MARGEN + CONTENIDO, y: y + 3 }, color: BORDE, thickness: 1.1 })
+  y -= 4
 
   // ════ 6. RESUMEN ECONÓMICO — héroe ════
   {
