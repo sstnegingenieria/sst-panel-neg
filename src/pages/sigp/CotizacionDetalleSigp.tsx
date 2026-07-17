@@ -469,6 +469,28 @@ export default function CotizacionDetalleSigp() {
   const est = estadoEfectivo(cotizacion)
   const origen = cliente?.nombre ?? cotizacion.prospecto_nombre ?? '—'
 
+  /** Descarga el PDF de la versión activa con nombre propio
+   *  ("COT-2026-010 v3 - TITAN PLAZA.pdf"). El atributo `download` no aplica
+   *  cross-origin, así que se baja como blob; si falla, se abre en pestaña. */
+  const descargarPdf = async () => {
+    if (!version?.pdf_url) return
+    const etiq = etiquetaVersion(cotizacion.version_activa)
+    const nombre = `${cotizacion.consecutivo}${etiq ? ' ' + etiq : ''} - ${origen}`
+      .replace(/[\\/:*?"<>|]/g, '').trim() + '.pdf'
+    try {
+      const r = await fetch(version.pdf_url)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const url = URL.createObjectURL(await r.blob())
+      const a = document.createElement('a')
+      a.href = url
+      a.download = nombre
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    } catch {
+      window.open(version.pdf_url, '_blank')
+    }
+  }
+
   return (
     <div className={`${analisis ? 'max-w-none' : 'max-w-6xl'} mx-auto space-y-5 pb-24`}>
       <Link to="/sigp/cotizaciones" className="text-sm text-gray-500 hover:text-brand-700 inline-flex items-center gap-1">← Cotizaciones</Link>
@@ -484,10 +506,17 @@ export default function CotizacionDetalleSigp() {
           </span>
         )}
         {version?.pdf_url && (
-          <a href={version.pdf_url} target="_blank" rel="noreferrer" title={version.pdf_hash ? `SHA-256: ${version.pdf_hash.slice(0, 16)}…` : undefined}
-            className="text-xs px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 font-medium">
-            📄 PDF{etiquetaVersion(cotizacion.version_activa) ? ` ${etiquetaVersion(cotizacion.version_activa)}` : ''}
-          </a>
+          <span className="inline-flex items-center gap-1.5">
+            <button onClick={descargarPdf} title={version.pdf_hash ? `SHA-256: ${version.pdf_hash.slice(0, 16)}…` : undefined}
+              className="text-xs px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 font-medium">
+              📄 Descargar PDF{etiquetaVersion(cotizacion.version_activa) ? ` ${etiquetaVersion(cotizacion.version_activa)}` : ''}
+            </button>
+            <a href={version.pdf_url} target="_blank" rel="noreferrer"
+              className="text-[11px] text-gray-400 hover:text-brand-700 underline underline-offset-2"
+              title="Abrir el PDF en una pestaña">
+              ver
+            </a>
+          </span>
         )}
       </div>
 
