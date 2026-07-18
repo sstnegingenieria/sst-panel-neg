@@ -108,3 +108,6 @@ export const puedeGestionarSolicitudesUI = (rol: string | undefined) => en(rol, 
 export const puedeGestionarVisitasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
 // Crear/gestionar cotizaciones: mismos roles (comercial/proyectos).
 export const puedeGestionarCotizacionesUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
+// Ver/gestionar Proyectos (F2.1.a): alineado con puedeGestionarProyectos() de
+// firestore.rules (mismos 5 roles). El sidebar además exige sigp_f2_enabled.
+export const puedeGestionarProyectosUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)

@@ -22,6 +22,8 @@ import VisitasSigp from './pages/sigp/VisitasSigp'
 import VisitaDetalleSigp from './pages/sigp/VisitaDetalleSigp'
 import CotizacionesSigp from './pages/sigp/CotizacionesSigp'
 import CotizacionDetalleSigp from './pages/sigp/CotizacionDetalleSigp'
+import ProyectosSigp from './pages/sigp/ProyectosSigp'
+import ProyectoDetalleSigp from './pages/sigp/ProyectoDetalleSigp'
 import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, type Rol } from './types/sigp/roles'
 import {
   ROLES_VE_DASHBOARD_SST,
@@ -99,6 +101,9 @@ function ProtectedRoutes() {
         <Route path="/sigp/visitas/:visitaId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><VisitaDetalleSigp /></ProtectedRoute>} />
         <Route path="/sigp/cotizaciones" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionesSigp /></ProtectedRoute>} />
         <Route path="/sigp/cotizaciones/:cotizacionId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionDetalleSigp /></ProtectedRoute>} />
+        {/* F2.1.a — las páginas además se auto-gatean con sigp_f2_enabled */}
+        <Route path="/sigp/proyectos" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ProyectosSigp /></ProtectedRoute>} />
+        <Route path="/sigp/proyectos/:proyectoId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ProyectoDetalleSigp /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

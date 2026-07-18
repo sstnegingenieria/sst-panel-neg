@@ -1,10 +1,14 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   doc, getDoc, setDoc, updateDoc, arrayUnion, deleteField, Timestamp,
 } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
+import { useFeatureFlag } from '../../../hooks/useFeatureFlag'
+import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
+import { crearProyectoDesdeCotizacion } from '../../../utils/sigp/proyectos'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import { puedeNuevaVersion } from '../../../types/sigp/cotizacion'
@@ -35,6 +39,40 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
   const [motivo, setMotivo] = useState('')
   const [modalAprobar, setModalAprobar] = useState(false)
   const [evidencia, setEvidencia] = useState<File | null>(null)
+
+  // ── F2.1.a — nacimiento del proyecto al aprobar, detrás de sigp_f2_enabled ──
+  const f2Enabled = useFeatureFlag('sigp_f2_enabled', false)
+  const { obtener } = useConsecutivo()
+  // Patrón SOL/VIS/COT: si la creación falla DESPUÉS de consumir el PRY-NNN,
+  // el número se preserva y el reintento lo reutiliza (no se queman huecos).
+  const pryPendiente = useRef<string | null>(null)
+  const obtenerPry = async () => {
+    if (pryPendiente.current) return pryPendiente.current
+    const c = await obtener('PRY')
+    pryPendiente.current = c
+    return c
+  }
+
+  /** Crea (o repara el enlace de) el proyecto 1:1 de esta cotización. */
+  const crearProyecto = async () => {
+    try {
+      const r = await crearProyectoDesdeCotizacion({
+        cotizacion, uid: user?.uid ?? '', obtenerConsecutivo: obtenerPry,
+      })
+      pryPendiente.current = null
+      if (r.creado) toast(`Proyecto ${r.consecutivo} creado`)
+      return true
+    } catch (e) {
+      console.error('Error creando el proyecto desde la cotización:', e)
+      toast('La cotización quedó aprobada, pero el proyecto no se pudo crear — usa "Crear proyecto" para reintentar', 'error')
+      return false
+    }
+  }
+
+  const reintentarProyecto = async () => {
+    setAplicando(true)
+    try { if (await crearProyecto()) await reload() } finally { setAplicando(false) }
+  }
 
   if (!puedeGestionar) return null
 
@@ -104,6 +142,10 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
       })
       toast(`${cotizacion.consecutivo} aprobada 🎉`)
       setModalAprobar(false); setEvidencia(null)
+      // F2.1.a: el proyecto nace de la aprobación (idempotente; solo con el
+      // flag activo — con sigp_f2_enabled=false este bloque es inerte y la
+      // aprobación se comporta EXACTAMENTE como en F1).
+      if (f2Enabled) await crearProyecto()
       await reload()
     } catch { toast('Error al aprobar', 'error') } finally { setAplicando(false) }
   }
@@ -158,7 +200,22 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
         </button>
       )}
       {efectivo === 'aprobada' && (
-        <span className="text-xs text-gray-400">Estado terminal · los cambios posteriores pertenecen al proyecto.</span>
+        f2Enabled ? (
+          cotizacion.proyecto_id ? (
+            <Link to={`/sigp/proyectos/${cotizacion.proyecto_id}`}
+              className="text-xs px-2.5 py-1 rounded-lg bg-brand-50 text-brand-700 font-semibold hover:bg-brand-100">
+              🏗 {cotizacion.proyecto_consecutivo ?? 'Proyecto'} →
+            </Link>
+          ) : (
+            <button onClick={reintentarProyecto} disabled={aplicando}
+              className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 font-medium disabled:opacity-50"
+              title="Esta cotización aprobada aún no tiene proyecto (creación fallida o aprobada antes de F2)">
+              🏗 Crear proyecto
+            </button>
+          )
+        ) : (
+          <span className="text-xs text-gray-400">Estado terminal · los cambios posteriores pertenecen al proyecto.</span>
+        )
       )}
 
       {/* Modal rechazar (motivo obligatorio) */}

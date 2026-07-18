@@ -280,6 +280,11 @@ export interface Cotizacion {
   fecha_aprobacion?: Timestamp
   motivo_rechazo?: string
 
+  // Enlace al proyecto nacido de esta cotización (F2.1.a; 1:1, id = id de la
+  // cotización). Solo existe si se aprobó con sigp_f2_enabled activo.
+  proyecto_id?: string
+  proyecto_consecutivo?: string
+
   adjuntos: Adjunto[]          // documento de licitación externo / otros
   historial: CambioEstadoCotizacion[]
   registrada_por: string
