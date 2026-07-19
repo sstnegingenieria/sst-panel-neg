@@ -124,8 +124,9 @@ const fMoneda = (n: number) => '$ ' + fmtNum(n || 0)   // es-CO, máx. 2 decimal
 const fFechaLarga = (d: Date) =>
   d.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })
 
-/** Parte un texto en líneas que caben en `maxAncho` (medido con la fuente). */
-function partir(texto: string, font: PDFFont, size: number, maxAncho: number): string[] {
+/** Parte un texto en líneas que caben en `maxAncho` (medido con la fuente).
+ *  Exportado: lo reutiliza el PDF de preliquidación del contratista (F2.1.c). */
+export function partir(texto: string, font: PDFFont, size: number, maxAncho: number): string[] {
   const palabras = (texto || '').split(/\s+/).filter(Boolean)
   if (palabras.length === 0) return ['']
   const lineas: string[] = []

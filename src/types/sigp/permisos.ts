@@ -111,3 +111,14 @@ export const puedeGestionarCotizacionesUI = (rol: string | undefined) => en(rol,
 // Ver/gestionar Proyectos (F2.1.a): alineado con puedeGestionarProyectos() de
 // firestore.rules (mismos 5 roles). El sidebar además exige sigp_f2_enabled.
 export const puedeGestionarProyectosUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
+
+// SEGREGACIÓN DE FUNCIONES (F2.1.c): aprobar la preliquidación y registrar el
+// anticipo girado es de gerencia_administrativa (quien define ≠ quien
+// desembolsa). `admin` se incluye como rol de infraestructura, igual que en
+// ROLES_HABILITA_CONTRATISTAS. Respaldado por la regla hasOnly de `proyectos`.
+export const ROLES_APRUEBA_PRELIQUIDACION: Rol[] = ['admin', 'gerencia_administrativa']
+export const puedeAprobarPreliquidacionUI = (rol: string | undefined) => en(rol, ROLES_APRUEBA_PRELIQUIDACION)
+// Visibilidad del módulo Proyectos: gestión O aprobación (gerencia_administrativa
+// necesita entrar a la ficha para aprobar/girar).
+export const veProyectosUI = (rol: string | undefined) =>
+  puedeGestionarProyectosUI(rol) || puedeAprobarPreliquidacionUI(rol)

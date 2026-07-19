@@ -8,9 +8,10 @@ import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import { useAuth } from '../../contexts/AuthContext'
 import { useFeatureFlag } from '../../hooks/useFeatureFlag'
-import { puedeGestionarProyectosUI } from '../../types/sigp/permisos'
+import { puedeGestionarProyectosUI, puedeAprobarPreliquidacionUI } from '../../types/sigp/permisos'
 import AsignacionContratista from '../../components/sigp/proyectos/AsignacionContratista'
 import PermisosIngreso from '../../components/sigp/proyectos/PermisosIngreso'
+import PreliquidacionProyecto from '../../components/sigp/proyectos/PreliquidacionProyecto'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR } from '../../types/sigp/proyecto'
@@ -35,6 +36,7 @@ export default function ProyectoDetalleSigp() {
   const { user } = useAuth()
   const f2Enabled = useFeatureFlag('sigp_f2_enabled', false)
   const puedeGestionar = puedeGestionarProyectosUI(user?.rol)
+  const puedeAprobar = puedeAprobarPreliquidacionUI(user?.rol)
   const [proyecto, setProyecto] = useState<Proyecto | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -163,11 +165,11 @@ export default function ProyectoDetalleSigp() {
         <PermisosIngreso proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
       </div>
 
-      {/* Módulos futuros (F2.1.c/d) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Placeholder titulo="Preliquidación" detalle="Valor contratista, utilidad y anticipo — próximamente (F2.1.c)" />
-        <Placeholder titulo="Ejecución" detalle="Avances y cierre — próximamente (F2.1.d)" />
-      </div>
+      {/* Preliquidación (F2.1.c) */}
+      <PreliquidacionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} puedeAprobar={puedeAprobar} reload={load} />
+
+      {/* Módulo futuro (F2.1.d) */}
+      <Placeholder titulo="Ejecución" detalle="Avances y cierre — próximamente (F2.1.d)" />
 
       {/* Línea de tiempo */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">

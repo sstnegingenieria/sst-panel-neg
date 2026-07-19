@@ -18,6 +18,7 @@ export const ESTADOS_PROYECTO = [
   'creado',
   'contratista_asignado',
   'permisos_en_tramite',
+  'preliquidacion_definida',
   'preliquidacion_aprobada',
   'anticipo_girado',
   'en_ejecucion',
@@ -35,6 +36,7 @@ export const ESTADO_PRY_LABEL: Record<EstadoProyecto, string> = {
   creado: 'Creado',
   contratista_asignado: 'Contratista asignado',
   permisos_en_tramite: 'Permisos en trámite',
+  preliquidacion_definida: 'Preliquidación definida',
   preliquidacion_aprobada: 'Preliquidación aprobada',
   anticipo_girado: 'Anticipo girado',
   en_ejecucion: 'En ejecución',
@@ -52,8 +54,9 @@ export const ESTADO_PRY_COLOR: Record<EstadoProyecto, string> = {
   creado: 'bg-gray-100 text-gray-700',
   contratista_asignado: 'bg-stone-200 text-stone-700',
   permisos_en_tramite: 'bg-amber-100 text-amber-800',
-  preliquidacion_aprobada: 'bg-yellow-100 text-yellow-800',
-  anticipo_girado: 'bg-lime-100 text-lime-800',
+  preliquidacion_definida: 'bg-yellow-100 text-yellow-800',
+  preliquidacion_aprobada: 'bg-lime-100 text-lime-800',
+  anticipo_girado: 'bg-emerald-50 text-emerald-700',
   en_ejecucion: 'bg-brand-50 text-brand-700',
   ejecutado: 'bg-green-100 text-green-800',
   informe_entregado: 'bg-emerald-100 text-emerald-800',
@@ -153,6 +156,64 @@ export interface PermisosProyecto {
   nota?: string
 }
 
+// ── Preliquidación (F2.1.c) ──
+//
+// Corazón financiero del proyecto: cuánto vale la venta (del snapshot, solo
+// lectura), cuánto se le paga al contratista (tecleado) y qué utilidad queda.
+// SEGREGACIÓN DE FUNCIONES: la define el área de proyectos; la APRUEBA y
+// registra el anticipo SOLO gerencia_administrativa (quien define ≠ quien
+// desembolsa). El pago del cliente y el saldo del contratista son F2.1.d.
+
+export interface AnticipoGirado {
+  fecha: Timestamp
+  valor: number
+  evidencia_url?: string
+  evidencia_nombre?: string
+  registrado_por: string
+}
+
+export interface PreliquidacionProyecto {
+  /** Copiado del snapshot al definir (evidencia congelada, no editable). */
+  valor_venta: number
+  /** Total que NEG paga al contratista (acepta expresiones al teclear). */
+  valor_contratista: number
+  /** % de anticipo configurable por proyecto (default 50). */
+  anticipo_pct: number
+  /** Observación por ítem del alcance (keyed por claveItemAlcance). Opcional.
+   *  Precisa de qué trata la actividad y dónde ejecutarla — SALE en el
+   *  documento del contratista. */
+  observaciones?: Record<string, string>
+  definida_por: string
+  fecha_definicion: Timestamp
+  aprobada_por?: string
+  fecha_aprobacion?: Timestamp
+  anticipo?: AnticipoGirado
+}
+
+export const ANTICIPO_PCT_DEFAULT = 50
+
+// Derivados (puros — precisión completa; el recorte a 2 decimales es solo de render)
+export const utilidadDe = (p: Pick<PreliquidacionProyecto, 'valor_venta' | 'valor_contratista'>) =>
+  p.valor_venta - p.valor_contratista
+export const margenPctDe = (p: Pick<PreliquidacionProyecto, 'valor_venta' | 'valor_contratista'>) =>
+  p.valor_venta > 0 ? (utilidadDe(p) / p.valor_venta) * 100 : 0
+export const anticipoValorDe = (p: Pick<PreliquidacionProyecto, 'valor_contratista' | 'anticipo_pct'>) =>
+  p.valor_contratista * (p.anticipo_pct / 100)
+/** Palanca de margen tipo APU (misma convención del cotizador: margen = %
+ *  de utilidad sobre el precio, aquí con el valor de venta como total):
+ *  contratista = venta × (1 − margen/100). Inversa de margenPctDe. */
+export const contratistaDesdeMargen = (valorVenta: number, margenPct: number) =>
+  valorVenta * (1 - margenPct / 100)
+
+/** Clave ESTABLE de un ítem del alcance para las observaciones: instancia_id
+ *  (F1.5.2+); fallback a código o al índice dentro del snapshot congelado
+ *  (versiones previas sin instancia_id). El snapshot es inmutable → el índice
+ *  es estable. */
+export const claveItemAlcance = (it: { instancia_id?: string; codigo?: string }, idx: number) =>
+  it.instancia_id ?? (it.codigo?.trim() ? `cod:${it.codigo.trim()}:${idx}` : `idx:${idx}`)
+export const saldoValorDe = (p: Pick<PreliquidacionProyecto, 'valor_contratista' | 'anticipo_pct'>) =>
+  p.valor_contratista - anticipoValorDe(p)
+
 // ── Documento ──
 
 export interface EntradaHistorialProyecto {
@@ -196,6 +257,7 @@ export interface Proyecto {
   estado: EstadoProyecto
   asignacion?: AsignacionProyecto      // F2.1.b — congela la evidencia del proveedor
   permisos?: PermisosProyecto          // F2.1.b — permisos de ingreso
+  preliquidacion?: PreliquidacionProyecto  // F2.1.c — definir → aprobar → anticipo
   historial: EntradaHistorialProyecto[]
   creado_por: string
   fecha_creacion: Timestamp
