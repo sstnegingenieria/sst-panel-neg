@@ -477,6 +477,22 @@ F1 se desarrolló por sub-iteraciones (ver `PLAN_FASE_1_SIGP.md`). Con el merge 
 
 **Rebrand del panel** (16-jul-2026, **PR #13**, merge **`00df9b5`**): el nombre global pasó de "Panel SST" a **"Panel del Sistema de Gestión Integral"** (pestaña, login y sidebar); "SST" se conserva como nombre de área. Solo texto visible.
 
+### Estado de F2 (Planeación / Ejecución) — EN CURSO
+
+**TODA la Fase 2 va detrás del flag Remote Config `sigp_f2_enabled` (default `false`)**: con el flag apagado el módulo Proyectos es invisible y el gancho de creación es inerte — F1 en producción queda intacto. Override local vía `.env.local` (`VITE_FF_sigp_f2_enabled=true`), mismo patrón que F1.
+
+- **2.1.a ✅ Ficha de Proyecto (columna vertebral)** — HECHA (18-jul-2026, rama `sigp/f2.1a-proyectos`, validada por Giovanny en emulador). Entregado: **colección `proyectos`** (`types/sigp/proyecto.ts`: enum completo de 12 estados creado → … → cerrado, labels/colores sin azules; snapshot COPIA de la versión aprobada — cliente/NIT/asunto/contacto/valor_venta/esquema/tipo_inversion/alcance resumido por grupo con `subtotalesPorGrupo`, misma fuente que el PDF); **nacimiento automático al aprobar una cotización** (`utils/sigp/proyectos.ts` + gancho en `CotizacionAcciones`): consecutivo **PRY-YYYY-NNN server-side**, **idempotente por construcción** (doc id = id de la cotización → 1:1 garantizado; re-aprobación/doble clic no duplican; consecutivo preservado ante fallo — patrón SOL/VIS/COT; auto-reparación del enlace inverso `cotizacion.proyecto_id`); chip "🏗 PRY-…" en la cotización aprobada o botón "Crear proyecto" (retry + **mecanismo de backfill manual** de aprobadas previas — previsto, no ejecutado); **bandeja** `/sigp/proyectos` (filtro por 12 estados + buscador) y **ficha** (ciclo de vida visual, "Lo pactado", alcance, línea de tiempo, enlace a la cotización origen, placeholders b/c/d); sidebar gateado por flag + `puedeGestionarProyectosUI`. Tests 92 → **98**. E2E en emulador flag ON (nace PRY-2026-001) y flag OFF (F1 byte-idéntico).
+- **2.1.b ⏳ Asignación de contratista** (criterio, puntaje, gate SST) — pendiente.
+- **2.1.c ⏳ Preliquidación** (valor contratista, utilidad, anticipo) — pendiente.
+- **2.1.d ⏳ Ejecución** (permisos, avances, cierre) — pendiente.
+
+**APARCADO hasta el go-live de F2.1** (no ejecutar antes):
+1. Crear el parámetro Remote Config **`sigp_f2_enabled`** (boolean, default `false`) en la consola — lo hace Giovanny.
+2. **Deploy de la regla `proyectos`** en `firestore.rules` (read `accesoSIGP`, write `puedeGestionarProyectos`) — con OK explícito y verificación pre-deploy (prod == HEAD). Hasta ese deploy, las escrituras a `proyectos` fallarían en producción — coherente con el flag apagado.
+3. Functions: **nada** — el prefijo `PRY` ya está en la `generarConsecutivo` desplegada desde F0.
+
+El merge de 2.1.a a `main` **NO requiere deploy alguno**: el código queda invisible tras el flag y no toca reglas ni functions en producción.
+
 Cada fase termina con: reglas de seguridad actualizadas, tests verdes, deploy a producción con feature flag, y un chequeo de brechas ISO cubiertas.
 
 ---
@@ -502,4 +518,4 @@ Ante duda sobre alcance ISO o proceso NEG, consultar estos documentos antes que 
 
 Este repositorio es propiedad de NEG Ingeniería S.A.S. BIC. La dirección técnica del SIGP la lleva la Gerencia con soporte del equipo de Gestión Integral. Cualquier PR que toque las reglas del capítulo 7 requiere revisión de la Gerencia.
 
-*Última actualización de este archivo: 16 de julio de 2026 — **SIGP F1 EN PRODUCCIÓN** (`sigp_f1_enabled` activado), panel renombrado a "Panel del Sistema de Gestión Integral" (PR #13), PDF con descripción completa (PR #15), refinamientos de tabla del piloto (PR #16 y #17) y descarga con nombre propio (PR #18); limpieza autorizada de cotizaciones de prueba en producción. Pendientes: ajustes que pida el área comercial en uso real, aviso de "versión nueva del panel" tras deploys, campo `celular` en perfiles, H-008 (hardening Storage antes de roles externos F3+). Versión: 1.6.4.*
+*Última actualización de este archivo: 18 de julio de 2026 — **F2.1.a HECHA** (ficha de Proyecto + nacimiento automático desde cotización aprobada, todo tras `sigp_f2_enabled` default false). F1 sigue EN PRODUCCIÓN con el piloto comercial activo. Pendientes: F2.1.b/c/d; al go-live de F2.1: parámetro Remote Config + deploy de la regla `proyectos`; ajustes del piloto, aviso de "versión nueva del panel" tras deploys, campo `celular` en perfiles, H-008. Versión: 2.1.0.*

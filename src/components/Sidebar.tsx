@@ -10,6 +10,7 @@ import {
   veTecnicos,
   veRegistros,
   veReportes,
+  puedeGestionarProyectosUI,
 } from '../types/sigp/permisos'
 
 interface SidebarProps {
@@ -169,14 +170,30 @@ const sigpNavItems: {
       </svg>
     ),
   },
+  // F2.1.a — visible solo con sigp_f2_enabled + puedeGestionarProyectosUI
+  // (filtro en el render, no aquí).
+  {
+    to: '/sigp/proyectos',
+    label: 'Proyectos',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" />
+      </svg>
+    ),
+  },
 ]
 
 export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: SidebarProps) {
   const { user } = useAuth()
   const { pendientesRegistros, pendientesTecnicos } = useNotificaciones()
   const sigpEnabled = useFeatureFlag('sigp_f1_enabled', false)
+  const f2Enabled = useFeatureFlag('sigp_f2_enabled', false)
   // El bloque SIGP se muestra si el flag está activo y el rol tiene acceso SIGP.
   const mostrarSigp = sigpEnabled && !!user?.rol && accesoSIGP(user.rol as Rol)
+  // Proyectos (F2.1.a) exige además su propio flag + rol de gestión de proyectos.
+  const visibleSigpItems = sigpNavItems.filter(item =>
+    item.to !== '/sigp/proyectos' || (f2Enabled && puedeGestionarProyectosUI(user?.rol)))
   // "Obras" es canónicamente del flujo SIGP (F0.5.b): cuando el bloque SIGP está
   // visible, se oculta del bloque SST para no duplicar la entrada. Con el flag
   // apagado (producción hoy) sigue apareciendo una sola vez en el bloque SST.
@@ -275,7 +292,7 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
                   SIGP
                 </p>
               )}
-              {sigpNavItems.map(item => (
+              {visibleSigpItems.map(item => (
                 <NavLink
                   key={item.to}
                   to={item.to}

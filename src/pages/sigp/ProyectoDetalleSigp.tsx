@@ -1,0 +1,182 @@
+// Ficha de Proyecto (SIGP F2.1.a) — columna vertebral de Ejecución.
+// Muestra el snapshot pactado (copia de la versión aprobada), el estado y la
+// línea de tiempo. Las áreas de asignación/preliquidación/ejecución son
+// placeholders para F2.1.b/c/d.
+import { useState, useEffect, useCallback } from 'react'
+import { useParams, Link } from 'react-router-dom'
+import { doc, getDoc } from 'firebase/firestore'
+import { db } from '../../firebase/config'
+import { useFeatureFlag } from '../../hooks/useFeatureFlag'
+import { toast } from '../../components/shared/Toast'
+import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
+import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR } from '../../types/sigp/proyecto'
+import { TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR } from '../../types/sigp/cotizacion'
+import type { Proyecto } from '../../types/sigp/proyecto'
+
+const fFecha = (t?: { toDate?: () => Date }) =>
+  t?.toDate?.()?.toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) ?? '—'
+
+/** Tarjeta gris de módulo futuro (F2.1.b/c/d). */
+function Placeholder({ titulo, detalle }: { titulo: string; detalle: string }) {
+  return (
+    <div className="bg-gray-50 rounded-xl border border-dashed border-gray-200 p-4">
+      <p className="text-sm font-semibold text-gray-400">{titulo}</p>
+      <p className="text-xs text-gray-400 mt-1">{detalle}</p>
+    </div>
+  )
+}
+
+export default function ProyectoDetalleSigp() {
+  const { proyectoId } = useParams<{ proyectoId: string }>()
+  const f2Enabled = useFeatureFlag('sigp_f2_enabled', false)
+  const [proyecto, setProyecto] = useState<Proyecto | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    if (!proyectoId) return
+    setLoading(true)
+    try {
+      const snap = await getDoc(doc(db, 'proyectos', proyectoId))
+      setProyecto(snap.exists() ? ({ id: snap.id, ...snap.data() } as Proyecto) : null)
+    } catch {
+      toast('Error al cargar el proyecto', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [proyectoId])
+
+  useEffect(() => { if (f2Enabled) load() }, [f2Enabled, load])
+
+  if (!f2Enabled) {
+    return <div className="max-w-5xl mx-auto py-16 text-center text-sm text-gray-500">El módulo de Proyectos aún no está habilitado.</div>
+  }
+  if (loading) {
+    return <div className="max-w-5xl mx-auto py-16 text-center text-sm text-gray-400">Cargando…</div>
+  }
+  if (!proyecto) {
+    return (
+      <div className="max-w-5xl mx-auto py-16 text-center space-y-2">
+        <p className="text-sm text-gray-500">Proyecto no encontrado.</p>
+        <Link to="/sigp/proyectos" className="text-sm text-brand-700 hover:underline">← Volver a Proyectos</Link>
+      </div>
+    )
+  }
+
+  const s = proyecto.snapshot
+  const idxEstado = ESTADOS_PROYECTO.indexOf(proyecto.estado)
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-5 pb-16">
+      <Link to="/sigp/proyectos" className="text-sm text-gray-500 hover:text-brand-700 inline-flex items-center gap-1">← Proyectos</Link>
+
+      {/* Encabezado */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <h1 className="text-2xl font-bold text-gray-800 font-mono">{proyecto.consecutivo}</h1>
+        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${ESTADO_PRY_COLOR[proyecto.estado]}`}>
+          {ESTADO_PRY_LABEL[proyecto.estado]}
+        </span>
+        {s.tipo_inversion && (
+          <span className={`inline-flex px-1.5 py-0.5 rounded text-[11px] font-semibold ${TIPO_INVERSION_COLOR[s.tipo_inversion]}`}>
+            {TIPO_INVERSION_LABEL[s.tipo_inversion]}
+          </span>
+        )}
+        <Link to={`/sigp/cotizaciones/${proyecto.cotizacion_id}`}
+          className="ml-auto text-xs px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 font-medium">
+          📄 Origen: {proyecto.cotizacion_consecutivo}{etiquetaVersion(proyecto.cotizacion_version) ? ` ${etiquetaVersion(proyecto.cotizacion_version)}` : ''}
+        </Link>
+      </div>
+
+      {/* Progreso del ciclo de vida */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Ciclo de vida</p>
+        <div className="flex flex-wrap gap-1.5">
+          {ESTADOS_PROYECTO.map((e, i) => (
+            <span key={e}
+              className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                i < idxEstado ? 'bg-brand-50 text-brand-700'
+                : i === idxEstado ? ESTADO_PRY_COLOR[e] + ' ring-1 ring-brand-400'
+                : 'bg-gray-50 text-gray-300'
+              }`}>
+              {ESTADO_PRY_LABEL[e]}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Snapshot pactado */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+          Lo pactado <span className="normal-case font-normal">(copia de {proyecto.cotizacion_consecutivo}{etiquetaVersion(proyecto.cotizacion_version) ? ` ${etiquetaVersion(proyecto.cotizacion_version)}` : ''} aprobada)</span>
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+          <div>
+            <p className="text-xs text-gray-400">Cliente</p>
+            <p className="font-semibold text-gray-800">{s.cliente}</p>
+            {s.cliente_nit && <p className="text-xs text-gray-500">NIT {s.cliente_nit}</p>}
+          </div>
+          <div className="sm:col-span-2">
+            <p className="text-xs text-gray-400">Asunto</p>
+            <p className="text-gray-700">{s.asunto || '—'}</p>
+            {s.contacto && <p className="text-xs text-gray-500">Contacto: {s.contacto}</p>}
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">Valor de venta</p>
+            <p className="font-mono font-bold text-gray-800">{fmtMoney(s.valor_venta)}</p>
+            <p className="text-xs text-gray-500">{s.esquema_tributario === 'aiu' ? 'AIU' : 'IVA pleno'}</p>
+          </div>
+        </div>
+
+        {s.alcance.length > 0 && (
+          <div>
+            <p className="text-xs text-gray-400 mb-1.5">Alcance ({s.total_items} ítem{s.total_items === 1 ? '' : 's'})</p>
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
+                  <th className="py-1.5 pr-4 font-medium">Grupo</th>
+                  <th className="py-1.5 pr-4 font-medium text-center">Ítems</th>
+                  <th className="py-1.5 font-medium text-right">Subtotal (antes de impuestos)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {s.alcance.map(g => (
+                  <tr key={g.grupo} className="border-b border-gray-50">
+                    <td className="py-1.5 pr-4 text-gray-700">{g.grupo}</td>
+                    <td className="py-1.5 pr-4 text-center text-gray-500">{g.items}</td>
+                    <td className="py-1.5 text-right font-mono text-gray-700">{fmtMoney(g.subtotal)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Módulos futuros (F2.1.b/c/d) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Placeholder titulo="Asignación de contratista" detalle="Criterio, puntaje y gate SST — próximamente (F2.1.b)" />
+        <Placeholder titulo="Preliquidación" detalle="Valor contratista, utilidad y anticipo — próximamente (F2.1.c)" />
+        <Placeholder titulo="Ejecución" detalle="Permisos, avances y cierre — próximamente (F2.1.d)" />
+      </div>
+
+      {/* Línea de tiempo */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Línea de tiempo</p>
+        <ol className="space-y-2.5">
+          {[...(proyecto.historial ?? [])].reverse().map((h, i) => (
+            <li key={i} className="flex items-start gap-2.5 text-sm">
+              <span className="mt-1.5 w-2 h-2 rounded-full bg-brand-600 flex-shrink-0" />
+              <div>
+                <p className="text-gray-700">
+                  {h.de ? <>{ESTADO_PRY_LABEL[h.de]} → <span className="font-semibold">{ESTADO_PRY_LABEL[h.a]}</span></>
+                    : <span className="font-semibold">{ESTADO_PRY_LABEL[h.a]}</span>}
+                </p>
+                {h.motivo && <p className="text-xs text-gray-500">{h.motivo}</p>}
+                <p className="text-[11px] text-gray-400">{fFecha(h.fecha)}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  )
+}

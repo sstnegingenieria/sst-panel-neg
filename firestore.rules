@@ -274,6 +274,18 @@ service cloud.firestore {
     }
 
     // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: proyectos — SIGP, Ejecución, F2.1.a
+    // ────────────────────────────────────────────────────────────────
+    // Read: acceso SIGP. Write: gestión de proyectos. El doc nace al aprobar
+    // una cotización (id del proyecto = id de la cotización → 1:1 idempotente);
+    // el consecutivo PRY-YYYY-NNN lo genera la Cloud Function generarConsecutivo.
+
+    match /proyectos/{proyectoId} {
+      allow read: if accesoSIGP();
+      allow create, update, delete: if puedeGestionarProyectos();
+    }
+
+    // ────────────────────────────────────────────────────────────────
     // CATCH-ALL: denegar todo lo no especificado explícitamente
     // ────────────────────────────────────────────────────────────────
     // Incluye la colección `consecutivos` del SIGP: solo la Cloud
