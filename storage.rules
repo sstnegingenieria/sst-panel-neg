@@ -43,5 +43,12 @@ service firebase.storage {
     match /cotizaciones/{cotizacionId}/{allPaths=**} {
       allow read, write: if request.auth != null;
     }
+
+    // ── SIGP (F2.1.b): adjuntos del proyecto (permisos de ingreso, etc.) ─────
+    // Ruta: proyectos/{proyectoId}/**. Auth-only (patrón final de LPU, H-008).
+    // Deploy APARCADO con el go-live de F2.1.
+    match /proyectos/{proyectoId}/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
   }
 }

@@ -63,6 +63,96 @@ export const ESTADO_PRY_COLOR: Record<EstadoProyecto, string> = {
   cerrado: 'bg-gray-200 text-gray-800',
 }
 
+// ── Asignación de contratista (F2.1.b) ──
+//
+// Evidencia ISO (9001 §8.4 / 45001 §8.1.4): al asignar se CONGELA el estado
+// de habilitación del contratista (y su evaluación si el registro la tuviera)
+// → prueba de que era un proveedor calificado en ese momento. El registro
+// actual de `contratistas` solo tiene `estado: activo|inactivo` (la
+// habilitación la administra Gestión Administrativa sobre ese campo); la
+// evaluación formal vive en el SGI (FT Selección y Reevaluación de
+// Proveedores). `evaluacion_snapshot` queda previsto para cuando el registro
+// incorpore esos datos.
+
+export interface AsignacionProyecto {
+  contratista_id: string
+  contratista_nombre: string           // SNAPSHOT — no referencia viva
+  contratista_documento?: string       // NIT o cédula al momento de asignar
+  habilitacion_snapshot: {
+    estado: string                     // 'activo' = habilitado al asignar
+    fuente: string                     // de dónde se leyó (trazabilidad)
+    fecha_consulta: Timestamp
+  }
+  evaluacion_snapshot?: {
+    puntaje?: number
+    fecha?: Timestamp
+    detalle?: string
+  }
+  asignado_por: string
+  fecha: Timestamp
+  nota_criterio?: string
+}
+
+/** Gate de asignación: solo contratistas HABILITADOS (estado activo). */
+export const contratistaAsignable = (c: { estado?: string }) => c.estado === 'activo'
+
+/**
+ * Construye el snapshot de asignación (puro — testeable). Lanza si el
+ * contratista no está habilitado: el gate no es solo de UI.
+ */
+export function construirAsignacion(
+  contratista: { id: string; nombre: string; nit?: string; cedula?: string; estado: string },
+  uid: string,
+  fecha: Timestamp,
+  notaCriterio?: string,
+): AsignacionProyecto {
+  if (!contratistaAsignable(contratista))
+    throw new Error('Solo se pueden asignar contratistas habilitados (estado activo)')
+  const documento = contratista.nit || contratista.cedula
+  return {
+    contratista_id: contratista.id,
+    contratista_nombre: contratista.nombre,
+    ...(documento ? { contratista_documento: documento } : {}),
+    habilitacion_snapshot: {
+      estado: contratista.estado,
+      fuente: 'contratistas.estado — habilitación administrada por Gestión Administrativa',
+      fecha_consulta: fecha,
+    },
+    asignado_por: uid,
+    fecha,
+    ...(notaCriterio?.trim() ? { nota_criterio: notaCriterio.trim() } : {}),
+  }
+}
+
+// ── Permisos de ingreso (F2.1.b) ──
+
+export const ESTADOS_PERMISOS = ['solicitado', 'aprobado', 'negado', 'no_requiere'] as const
+export type EstadoPermisos = (typeof ESTADOS_PERMISOS)[number]
+
+export const PERMISOS_LABEL: Record<EstadoPermisos, string> = {
+  solicitado: 'Solicitado',
+  aprobado: 'Aprobado',
+  negado: 'Negado',
+  no_requiere: 'No requiere',
+}
+
+export const PERMISOS_COLOR: Record<EstadoPermisos, string> = {
+  solicitado: 'bg-amber-100 text-amber-800',
+  aprobado: 'bg-emerald-100 text-emerald-800',
+  negado: 'bg-red-100 text-red-700',
+  no_requiere: 'bg-gray-100 text-gray-600',
+}
+
+export interface PermisosProyecto {
+  estado: EstadoPermisos
+  fecha_solicitud?: Timestamp
+  fecha_respuesta?: Timestamp
+  entidad_responsable?: string
+  adjunto_url?: string
+  adjunto_nombre?: string
+  nota?: string
+}
+
 // ── Documento ──
 
 export interface EntradaHistorialProyecto {
@@ -104,6 +194,8 @@ export interface Proyecto {
   prospecto_nombre?: string
   snapshot: SnapshotProyecto
   estado: EstadoProyecto
+  asignacion?: AsignacionProyecto      // F2.1.b — congela la evidencia del proveedor
+  permisos?: PermisosProyecto          // F2.1.b — permisos de ingreso
   historial: EntradaHistorialProyecto[]
   creado_por: string
   fecha_creacion: Timestamp

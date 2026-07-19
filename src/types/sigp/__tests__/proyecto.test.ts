@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { construirSnapshotProyecto, ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR } from '../proyecto'
+import { Timestamp } from 'firebase/firestore'
+import {
+  construirSnapshotProyecto, ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR,
+  contratistaAsignable, construirAsignacion, ESTADOS_PERMISOS, PERMISOS_LABEL, PERMISOS_COLOR,
+} from '../proyecto'
 import type { ItemCotizacion, VersionCotizacion, Actividad } from '../cotizacion'
 
 // ── fixtures mínimos ──
@@ -95,6 +99,50 @@ describe('estados del proyecto', () => {
     for (const e of ESTADOS_PROYECTO) {
       expect(ESTADO_PRY_LABEL[e]).toBeTruthy()
       expect(ESTADO_PRY_COLOR[e]).toMatch(/bg-/)
+    }
+  })
+})
+
+describe('asignación de contratista (F2.1.b)', () => {
+  const habilitado = { id: 'c1', nombre: 'Redes y Alturas SAS', nit: '901.111.222-3', estado: 'activo' }
+  const ahora = Timestamp.fromMillis(1_760_000_000_000)
+
+  it('el gate solo deja pasar contratistas habilitados (estado activo)', () => {
+    expect(contratistaAsignable({ estado: 'activo' })).toBe(true)
+    expect(contratistaAsignable({ estado: 'inactivo' })).toBe(false)
+    expect(contratistaAsignable({})).toBe(false)
+  })
+
+  it('congela nombre, documento y habilitación como snapshot con trazabilidad', () => {
+    const a = construirAsignacion(habilitado, 'uid-1', ahora, '  Mejor tarifa en alturas  ')
+    expect(a.contratista_id).toBe('c1')
+    expect(a.contratista_nombre).toBe('Redes y Alturas SAS')
+    expect(a.contratista_documento).toBe('901.111.222-3')
+    expect(a.habilitacion_snapshot.estado).toBe('activo')
+    expect(a.habilitacion_snapshot.fuente).toContain('contratistas.estado')
+    expect(a.habilitacion_snapshot.fecha_consulta).toBe(ahora)
+    expect(a.asignado_por).toBe('uid-1')
+    expect(a.nota_criterio).toBe('Mejor tarifa en alturas')
+  })
+
+  it('usa la cédula como documento si no hay NIT y omite la nota vacía', () => {
+    const a = construirAsignacion({ id: 'c2', nombre: 'Juan Pérez', cedula: '1.234.567', estado: 'activo' }, 'uid-1', ahora, '   ')
+    expect(a.contratista_documento).toBe('1.234.567')
+    expect(a.nota_criterio).toBeUndefined()
+  })
+
+  it('LANZA si el contratista no está habilitado — el gate no es solo de UI', () => {
+    expect(() => construirAsignacion({ id: 'c3', nombre: 'X', estado: 'inactivo' }, 'uid-1', ahora))
+      .toThrow(/habilitados/)
+  })
+})
+
+describe('permisos de ingreso (F2.1.b)', () => {
+  it('los 4 estados tienen label y color', () => {
+    expect(ESTADOS_PERMISOS).toHaveLength(4)
+    for (const e of ESTADOS_PERMISOS) {
+      expect(PERMISOS_LABEL[e]).toBeTruthy()
+      expect(PERMISOS_COLOR[e]).toMatch(/bg-/)
     }
   })
 })
