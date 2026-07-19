@@ -6,7 +6,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../../firebase/config'
+import { useAuth } from '../../contexts/AuthContext'
 import { useFeatureFlag } from '../../hooks/useFeatureFlag'
+import { puedeGestionarProyectosUI } from '../../types/sigp/permisos'
+import AsignacionContratista from '../../components/sigp/proyectos/AsignacionContratista'
+import PermisosIngreso from '../../components/sigp/proyectos/PermisosIngreso'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR } from '../../types/sigp/proyecto'
@@ -28,7 +32,9 @@ function Placeholder({ titulo, detalle }: { titulo: string; detalle: string }) {
 
 export default function ProyectoDetalleSigp() {
   const { proyectoId } = useParams<{ proyectoId: string }>()
+  const { user } = useAuth()
   const f2Enabled = useFeatureFlag('sigp_f2_enabled', false)
+  const puedeGestionar = puedeGestionarProyectosUI(user?.rol)
   const [proyecto, setProyecto] = useState<Proyecto | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -151,11 +157,16 @@ export default function ProyectoDetalleSigp() {
         )}
       </div>
 
-      {/* Módulos futuros (F2.1.b/c/d) */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <Placeholder titulo="Asignación de contratista" detalle="Criterio, puntaje y gate SST — próximamente (F2.1.b)" />
+      {/* Asignación y permisos (F2.1.b) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <AsignacionContratista proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+        <PermisosIngreso proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+      </div>
+
+      {/* Módulos futuros (F2.1.c/d) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Placeholder titulo="Preliquidación" detalle="Valor contratista, utilidad y anticipo — próximamente (F2.1.c)" />
-        <Placeholder titulo="Ejecución" detalle="Permisos, avances y cierre — próximamente (F2.1.d)" />
+        <Placeholder titulo="Ejecución" detalle="Avances y cierre — próximamente (F2.1.d)" />
       </div>
 
       {/* Línea de tiempo */}
