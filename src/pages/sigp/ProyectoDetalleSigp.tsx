@@ -13,6 +13,7 @@ import AsignacionContratista from '../../components/sigp/proyectos/AsignacionCon
 import PermisosIngreso from '../../components/sigp/proyectos/PermisosIngreso'
 import PreliquidacionProyecto from '../../components/sigp/proyectos/PreliquidacionProyecto'
 import EjecucionProyecto from '../../components/sigp/proyectos/EjecucionProyecto'
+import EntregablesIhs from '../../components/sigp/proyectos/EntregablesIhs'
 import EvaluacionContratistaCard from '../../components/sigp/proyectos/EvaluacionContratistaCard'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
@@ -177,6 +178,9 @@ export default function ProyectoDetalleSigp() {
 
       {/* Preliquidación (F2.1.c) */}
       <PreliquidacionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} puedeAprobar={puedeAprobar} reload={load} />
+
+      {/* Entregables IHS (F2.3 — solo preventivos; requisito de la entrega) */}
+      <EntregablesIhs proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
 
       {/* Ejecución → entrega → soporte → handoff (F2.1.d) */}
       <EjecucionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />

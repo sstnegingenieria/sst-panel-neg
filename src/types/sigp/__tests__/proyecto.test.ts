@@ -7,6 +7,7 @@ import {
   contratistaDesdeMargen, claveItemAlcance,
   ESTADO_INICIO_ADMINISTRATIVA, TIPOS_SOPORTE, TIPO_SOPORTE_LABEL,
   CRITERIOS_EVALUACION, esPuntajeValido, promedioEvaluacion,
+  entregablesIhsFaltantes, entregablesIhsCompletos,
 } from '../proyecto'
 import { precioDesdeCosto, margenDesdePrecio } from '../cotizacion'
 import type { ItemCotizacion, VersionCotizacion, Actividad } from '../cotizacion'
@@ -196,6 +197,31 @@ describe('preliquidación (F2.1.c)', () => {
     // precioDesdeCosto(costo, margen) reconstruye la venta desde el contratista
     expect(precioDesdeCosto(contratista, 30)).toBeCloseTo(venta, 6)
     expect(margenDesdePrecio(contratista, venta)).toBeCloseTo(30, 10)
+  })
+})
+
+describe('entregables IHS (F2.3)', () => {
+  const hecho = { estado: 'diligenciado' as const }
+  it('reporta los faltantes por label y detecta el 3/3', () => {
+    expect(entregablesIhsFaltantes({ origen: 'preventivo' }))
+      .toEqual(['Inventario de antenas', 'Estado de línea de vida', 'Torque de torre'])
+    expect(entregablesIhsFaltantes({ origen: 'preventivo', entregables_ihs: { inventario_antenas: hecho } }))
+      .toEqual(['Estado de línea de vida', 'Torque de torre'])
+    const completo = { origen: 'preventivo' as const, entregables_ihs: { inventario_antenas: hecho, linea_vida: hecho, torque: hecho } }
+    expect(entregablesIhsFaltantes(completo)).toEqual([])
+    expect(entregablesIhsCompletos(completo)).toBe(true)
+  })
+
+  it('un entregable pendiente (adjunto sin marcar) NO cuenta', () => {
+    expect(entregablesIhsCompletos({
+      origen: 'preventivo',
+      entregables_ihs: { inventario_antenas: hecho, linea_vida: { estado: 'pendiente' }, torque: hecho },
+    })).toBe(false)
+  })
+
+  it('NO aplica a proyectos de origen cotización (siempre completos)', () => {
+    expect(entregablesIhsFaltantes({ origen: 'cotizacion' })).toEqual([])
+    expect(entregablesIhsCompletos({ origen: 'cotizacion' })).toBe(true)
   })
 })
 

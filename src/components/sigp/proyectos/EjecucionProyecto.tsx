@@ -13,7 +13,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
-import { TIPOS_SOPORTE, TIPO_SOPORTE_LABEL } from '../../../types/sigp/proyecto'
+import { TIPOS_SOPORTE, TIPO_SOPORTE_LABEL, entregablesIhsFaltantes } from '../../../types/sigp/proyecto'
 import type { Proyecto, TipoSoporte, FotoEvidencia, EstadoProyecto } from '../../../types/sigp/proyecto'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
@@ -215,18 +215,27 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
         </div>
       ))}
 
-      {/* 2 · Entrega al cliente */}
+      {/* 2 · Entrega al cliente — en preventivos exige los 3 entregables IHS */}
       {paso('2 · Entrega al cliente', !!proyecto.entrega, (
         <div className="space-y-2 text-xs text-gray-600">
           {proyecto.entrega && (
             <p>Entregado el {fFecha(proyecto.entrega.fecha)}{proyecto.entrega.nota && <> · {proyecto.entrega.nota}</>}</p>
           )}
-          {est === 'ejecutado' && puedeGestionar && !formEntrega && (
-            <button onClick={() => setFormEntrega(true)}
-              className="text-sm px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
-              📦 Registrar entrega
-            </button>
-          )}
+          {est === 'ejecutado' && puedeGestionar && !formEntrega && (() => {
+            const faltantes = entregablesIhsFaltantes(proyecto)
+            return faltantes.length > 0 ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-800">
+                <p className="font-semibold">Para registrar la entrega faltan los entregables IHS:</p>
+                <ul className="list-disc pl-4 mt-0.5">{faltantes.map(f => <li key={f}>{f}</li>)}</ul>
+                <p className="mt-1 text-[11px]">Adjúntalos en la sección "Entregables IHS" de esta ficha.</p>
+              </div>
+            ) : (
+              <button onClick={() => setFormEntrega(true)}
+                className="text-sm px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
+                📦 Registrar entrega
+              </button>
+            )
+          })()}
           {formEntrega && (
             <div className="space-y-2 bg-gray-50 rounded-lg p-3">
               <label className="block text-xs text-gray-500">
