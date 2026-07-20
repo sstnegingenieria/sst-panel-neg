@@ -333,12 +333,17 @@ export interface SnapshotProyecto {
 }
 
 export interface Proyecto {
-  id: string                   // = id de la cotización de origen (idempotencia 1:1)
+  /** = id del doc de origen (cotización o solicitud preventivo) — idempotencia 1:1 */
+  id: string
   consecutivo: string          // PRY-YYYY-NNN (server-side, Cloud Function)
-  origen: 'cotizacion'
-  cotizacion_id: string
-  cotizacion_consecutivo: string
-  cotizacion_version: number   // versión APROBADA de la que se copió el snapshot
+  origen: 'cotizacion' | 'preventivo'
+  // origen 'cotizacion' (F2.1.a):
+  cotizacion_id?: string
+  cotizacion_consecutivo?: string
+  cotizacion_version?: number  // versión APROBADA de la que se copió el snapshot
+  // origen 'preventivo' (F2.2 — IHS):
+  solicitud_id?: string
+  solicitud_consecutivo?: string
   cliente_id?: string
   prospecto_nombre?: string
   snapshot: SnapshotProyecto
