@@ -168,7 +168,9 @@ export default function SolicitudesSigp() {
       <SolicitudForm
         isOpen={formOpen}
         onClose={() => setFormOpen(false)}
-        onGuardado={reload}
+        // reload de clientes incluido: un contacto nuevo aparece en la
+        // siguiente solicitud sin refrescar la página
+        onGuardado={() => { reload(); loadClientes() }}
         clientes={clientes.filter(c => c.estado === 'activo')}
       />
     </div>

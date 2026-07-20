@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { collection, doc, setDoc, Timestamp } from 'firebase/firestore'
+import { collection, doc, setDoc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
 import Modal from '../../shared/Modal'
@@ -17,7 +17,7 @@ import {
 } from '../../../types/sigp/preventivos'
 import type { TipoSitio, IntensidadPreventivo } from '../../../types/sigp/preventivos'
 import type { Canal, Adjunto, TipoSolicitud } from '../../../types/sigp/solicitud'
-import type { Cliente } from '../../../types/sigp/cliente'
+import type { Cliente, Contacto } from '../../../types/sigp/cliente'
 
 interface SolicitudFormProps {
   isOpen: boolean
@@ -109,6 +109,34 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
       setPendiente(null)
     }
   }, [isOpen])
+
+  // ── Historial de contactos del cliente (UX jul-2026) ──
+  // Con cliente registrado, el contacto se ELIGE de clientes.contactos[]
+  // (prefill: el principal, índice 0); "nuevo" abre los campos libres y al
+  // guardar la solicitud el contacto se añade al cliente (sin duplicar).
+  // Prospecto: texto libre como siempre.
+  const [contactoSel, setContactoSel] = useState<string>('nuevo')
+  const contactosCliente: Contacto[] =
+    clientes.find(c => c.id === form.clienteId)?.contactos ?? []
+
+  const aplicarContacto = (v: string, lista: Contacto[]) => {
+    setContactoSel(v)
+    const ct = v === 'nuevo' ? null : lista[Number(v)]
+    setForm(f => ({
+      ...f,
+      contactoNombre: ct?.nombre ?? '',
+      contactoCargo: ct?.cargo ?? '',
+      contactoEmail: ct?.email ?? '',
+      contactoTelefono: ct?.telefono ?? '',
+    }))
+  }
+
+  useEffect(() => {
+    const lista = clientes.find(c => c.id === form.clienteId)?.contactos ?? []
+    if (form.clienteId && lista.length > 0) aplicarContacto('0', lista)   // prefill principal
+    else setContactoSel('nuevo')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.clienteId])
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => {
     setForm(f => ({ ...f, [k]: v }))
@@ -213,6 +241,30 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
       if (!consecutivo) consecutivo = await obtener('SOL')
 
       await setDoc(doc(db, 'solicitudes', solicitudId), construirDoc(consecutivo, adjuntos))
+
+      // Historial de contactos: si el contacto es NUEVO y hay cliente
+      // registrado, se añade a clientes.contactos[] para reutilizarlo
+      // (sin duplicar por nombre). No-fatal: la solicitud ya quedó guardada.
+      if (form.clienteId && contactoSel === 'nuevo') {
+        const nombreNuevo = normalizarNombre(form.contactoNombre.trim())
+        const yaExiste = contactosCliente.some(ct => normalizarNombre(ct.nombre) === nombreNuevo)
+        if (!yaExiste) {
+          try {
+            await updateDoc(doc(db, 'clientes', form.clienteId), {
+              contactos: arrayUnion({
+                nombre: form.contactoNombre.trim(),
+                ...(form.contactoCargo.trim() ? { cargo: form.contactoCargo.trim() } : {}),
+                ...(form.contactoEmail.trim() ? { email: form.contactoEmail.trim() } : {}),
+                ...(form.contactoTelefono.trim() ? { telefono: form.contactoTelefono.trim() } : {}),
+              }),
+              fecha_actualizacion: Timestamp.now(),
+            })
+          } catch {
+            toast('La solicitud se guardó, pero el contacto no se pudo añadir al cliente', 'error')
+          }
+        }
+      }
+
       setPendiente(null)
       toast(`Solicitud registrada — ${consecutivo}`)
       onGuardado()
@@ -318,15 +370,47 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
           )}
         </div>
 
-        {/* Contacto */}
+        {/* Contacto — con cliente registrado se elige del historial; prospecto: libre */}
         <div className="rounded-lg border border-gray-200 p-3 space-y-3">
           <p className="text-sm font-semibold text-gray-700">Contacto</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <TextField label="Nombre" value={form.contactoNombre} onChange={v => set('contactoNombre', v)} error={errores.contactoNombre} required />
-            <TextField label="Cargo" value={form.contactoCargo} onChange={v => set('contactoCargo', v)} />
-            <TextField label="Correo" value={form.contactoEmail} onChange={v => set('contactoEmail', v)} error={errores.contactoEmail} />
-            <TextField label="Teléfono" value={form.contactoTelefono} onChange={v => set('contactoTelefono', v)} />
-          </div>
+
+          {form.clienteId && contactosCliente.length > 0 && (
+            <SelectField
+              label="Contacto del cliente"
+              value={contactoSel}
+              onChange={v => aplicarContacto(v, contactosCliente)}
+              options={[
+                ...contactosCliente.map((ct, i) => ({
+                  value: String(i),
+                  label: `${ct.nombre}${ct.cargo ? ` — ${ct.cargo}` : ct.telefono ? ` · ${ct.telefono}` : ''}${i === 0 ? ' (principal)' : ''}`,
+                })),
+                { value: 'nuevo', label: '＋ Nuevo contacto…' },
+              ]}
+            />
+          )}
+
+          {form.clienteId && contactosCliente.length > 0 && contactoSel !== 'nuevo' ? (
+            <div className="bg-gray-50 rounded-lg px-3 py-2 text-sm">
+              <p className="font-medium text-gray-800">{form.contactoNombre}</p>
+              <p className="text-xs text-gray-500">
+                {[form.contactoCargo, form.contactoEmail, form.contactoTelefono].filter(Boolean).join(' · ') || '—'}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <TextField label="Nombre" value={form.contactoNombre} onChange={v => set('contactoNombre', v)} error={errores.contactoNombre} required />
+                <TextField label="Cargo" value={form.contactoCargo} onChange={v => set('contactoCargo', v)} />
+                <TextField label="Correo" value={form.contactoEmail} onChange={v => set('contactoEmail', v)} error={errores.contactoEmail} />
+                <TextField label="Teléfono" value={form.contactoTelefono} onChange={v => set('contactoTelefono', v)} />
+              </div>
+              {form.clienteId && (
+                <p className="text-[11px] text-gray-400">
+                  Este contacto se guardará en el cliente para reutilizarlo en próximas solicitudes.
+                </p>
+              )}
+            </>
+          )}
         </div>
 
         {/* Datos de la solicitud */}
