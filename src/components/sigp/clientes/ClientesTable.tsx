@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import type { Cliente } from '../../../types/sigp/cliente'
 
 interface ClientesTableProps {
@@ -80,7 +81,9 @@ export default function ClientesTable({
                       <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">
                         {initials(c.nombre)}
                       </div>
-                      <span className="font-medium text-gray-800">{c.nombre}</span>
+                      <Link to={`/sigp/clientes/${c.id}`} className="font-medium text-gray-800 hover:text-brand-700 hover:underline">
+                        {c.nombre}
+                      </Link>
                     </div>
                   </td>
                   <td className="py-3 px-4">
