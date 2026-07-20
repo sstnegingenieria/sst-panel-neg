@@ -14,6 +14,10 @@ import type { Cotizacion, VersionCotizacion, EsquemaTributario, TipoInversion } 
 
 // ── Estados (enum completo del ciclo de vida; ver capítulo 6 del CLAUDE.md) ──
 
+// Los estados desde 'facturado' pertenecen al MÓDULO FUTURO de Gerencia
+// Administrativa (facturación, pago del cliente, saldo al contratista con su
+// gate de pago-cliente-primero). Gerencia de Proyectos llega HASTA
+// 'enviado_a_facturacion' (handoff).
 export const ESTADOS_PROYECTO = [
   'creado',
   'contratista_asignado',
@@ -23,12 +27,17 @@ export const ESTADOS_PROYECTO = [
   'anticipo_girado',
   'en_ejecucion',
   'ejecutado',
-  'informe_entregado',
+  'entregado_cliente',
+  'soporte_recibido',
+  'enviado_a_facturacion',
   'facturado',
   'pagado_cliente',
   'liquidado_contratista',
   'cerrado',
 ] as const
+
+/** Primer estado del tramo de Gerencia Administrativa (módulo futuro). */
+export const ESTADO_INICIO_ADMINISTRATIVA: (typeof ESTADOS_PROYECTO)[number] = 'facturado'
 
 export type EstadoProyecto = (typeof ESTADOS_PROYECTO)[number]
 
@@ -41,7 +50,9 @@ export const ESTADO_PRY_LABEL: Record<EstadoProyecto, string> = {
   anticipo_girado: 'Anticipo girado',
   en_ejecucion: 'En ejecución',
   ejecutado: 'Ejecutado',
-  informe_entregado: 'Informe entregado',
+  entregado_cliente: 'Entregado al cliente',
+  soporte_recibido: 'Soporte recibido',
+  enviado_a_facturacion: 'Enviado a facturación',
   facturado: 'Facturado',
   pagado_cliente: 'Pagado por el cliente',
   liquidado_contratista: 'Liquidado al contratista',
@@ -59,7 +70,9 @@ export const ESTADO_PRY_COLOR: Record<EstadoProyecto, string> = {
   anticipo_girado: 'bg-emerald-50 text-emerald-700',
   en_ejecucion: 'bg-brand-50 text-brand-700',
   ejecutado: 'bg-green-100 text-green-800',
-  informe_entregado: 'bg-emerald-100 text-emerald-800',
+  entregado_cliente: 'bg-emerald-50 text-emerald-700',
+  soporte_recibido: 'bg-emerald-100 text-emerald-800',
+  enviado_a_facturacion: 'bg-gray-200 text-gray-700',
   facturado: 'bg-orange-100 text-orange-800',
   pagado_cliente: 'bg-emerald-200 text-emerald-900',
   liquidado_contratista: 'bg-lime-200 text-lime-900',
@@ -214,6 +227,81 @@ export const claveItemAlcance = (it: { instancia_id?: string; codigo?: string },
 export const saldoValorDe = (p: Pick<PreliquidacionProyecto, 'valor_contratista' | 'anticipo_pct'>) =>
   p.valor_contratista - anticipoValorDe(p)
 
+// ── Ejecución / entrega / soporte del cliente / handoff (F2.1.d) ──
+//
+// Registro SIMPLE (MVP) de la ejecución con evidencia fotográfica; el avance
+// por actividad y el informe fotográfico automático son futuros (F2.3).
+// El flujo de Proyectos termina en 'enviado_a_facturacion': facturar, cobrar
+// y pagar el saldo del contratista es del módulo futuro de Administrativa.
+
+export interface FotoEvidencia {
+  url: string
+  nombre: string
+}
+
+export interface EjecucionProyecto {
+  fecha_inicio: Timestamp
+  iniciada_por: string
+  fecha_ejecutado?: Timestamp
+  ejecutado_por?: string
+  nota?: string
+  fotos?: FotoEvidencia[]        // evidencia fotográfica del "ejecutado"
+}
+
+export interface EntregaProyecto {
+  fecha: Timestamp               // fecha de entrega al cliente
+  nota?: string
+  registrada_por: string
+}
+
+export const TIPOS_SOPORTE = ['orden_pago', 'orden_compra', 'liquidacion'] as const
+export type TipoSoporte = (typeof TIPOS_SOPORTE)[number]
+
+export const TIPO_SOPORTE_LABEL: Record<TipoSoporte, string> = {
+  orden_pago: 'Orden de pago',
+  orden_compra: 'Orden de compra',
+  liquidacion: 'Liquidación',
+}
+
+/** Soporte que emite el CLIENTE tras la entrega — la base del handoff a
+ *  facturación. `concuerda` = verificación de Proyectos de que el soporte
+ *  coincide con lo ejecutado (obligatoria para avanzar). */
+export interface SoporteCliente {
+  tipo: TipoSoporte
+  numero: string
+  fecha: Timestamp
+  adjunto_url?: string
+  adjunto_nombre?: string
+  concuerda: boolean
+  nota?: string
+  registrado_por: string
+}
+
+// ── Evaluación del contratista (F2.1.d — simple, ISO; extensible por GI) ──
+
+export const CRITERIOS_EVALUACION = [
+  { key: 'calidad', label: 'Calidad de los trabajos' },
+  { key: 'cumplimiento', label: 'Cumplimiento de plazos' },
+  { key: 'sst', label: 'SST / seguridad' },
+  { key: 'documentacion', label: 'Documentación' },
+] as const
+
+export type CriterioEvaluacion = (typeof CRITERIOS_EVALUACION)[number]['key']
+
+export interface EvaluacionContratista {
+  criterios: Record<CriterioEvaluacion, number>   // puntaje 1–5 por criterio
+  promedio: number                                // derivado, se guarda para reportes
+  comentario?: string
+  evaluado_por: string
+  fecha: Timestamp
+}
+
+export const esPuntajeValido = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 5
+
+export const promedioEvaluacion = (criterios: Record<CriterioEvaluacion, number>): number =>
+  CRITERIOS_EVALUACION.reduce((s, c) => s + (criterios[c.key] ?? 0), 0) / CRITERIOS_EVALUACION.length
+
 // ── Documento ──
 
 export interface EntradaHistorialProyecto {
@@ -258,6 +346,10 @@ export interface Proyecto {
   asignacion?: AsignacionProyecto      // F2.1.b — congela la evidencia del proveedor
   permisos?: PermisosProyecto          // F2.1.b — permisos de ingreso
   preliquidacion?: PreliquidacionProyecto  // F2.1.c — definir → aprobar → anticipo
+  ejecucion?: EjecucionProyecto        // F2.1.d — inicio + ejecutado con evidencia
+  entrega?: EntregaProyecto            // F2.1.d — entrega al cliente
+  soporte_cliente?: SoporteCliente     // F2.1.d — soporte emitido por el cliente
+  evaluacion_contratista?: EvaluacionContratista  // F2.1.d — evaluación ISO simple
   historial: EntradaHistorialProyecto[]
   creado_por: string
   fecha_creacion: Timestamp
