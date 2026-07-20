@@ -277,6 +277,44 @@ export interface SoporteCliente {
   registrado_por: string
 }
 
+// ── Entregables IHS (F2.3 ligero) — solo proyectos preventivos ──
+//
+// Los 3 formatos IHS los diligencia el equipo en los ARCHIVOS DEL CLIENTE y
+// se suben a la app de IHS. El panel solo TRAZA que se hicieron y guarda
+// copia (adjunto a Storage) — sin capturar datos ni generar los Excel
+// (evita saturar el panel y la doble digitación). Los 3 son requisito para
+// registrar la ENTREGA del proyecto preventivo.
+
+export const ENTREGABLES_IHS = [
+  { key: 'inventario_antenas', label: 'Inventario de antenas' },
+  { key: 'linea_vida', label: 'Estado de línea de vida' },
+  { key: 'torque', label: 'Torque de torre' },
+] as const
+
+export type EntregableIhsKey = (typeof ENTREGABLES_IHS)[number]['key']
+
+export interface EntregableIhs {
+  estado: 'pendiente' | 'diligenciado'
+  adjunto_url?: string
+  adjunto_nombre?: string
+  fecha?: Timestamp            // cuándo se diligenció
+  nota?: string
+  por?: string                 // uid
+}
+
+/** Entregables IHS que faltan (labels) — [] cuando está 3/3. */
+export const entregablesIhsFaltantes = (
+  p: Pick<Proyecto, 'origen' | 'entregables_ihs'>,
+): string[] =>
+  p.origen !== 'preventivo'
+    ? []
+    : ENTREGABLES_IHS
+        .filter(e => p.entregables_ihs?.[e.key]?.estado !== 'diligenciado')
+        .map(e => e.label)
+
+export const entregablesIhsCompletos = (p: Pick<Proyecto, 'origen' | 'entregables_ihs'>) =>
+  entregablesIhsFaltantes(p).length === 0
+
 // ── Evaluación del contratista (F2.1.d — simple, ISO; extensible por GI) ──
 
 export const CRITERIOS_EVALUACION = [
@@ -351,6 +389,7 @@ export interface Proyecto {
   asignacion?: AsignacionProyecto      // F2.1.b — congela la evidencia del proveedor
   permisos?: PermisosProyecto          // F2.1.b — permisos de ingreso
   preliquidacion?: PreliquidacionProyecto  // F2.1.c — definir → aprobar → anticipo
+  entregables_ihs?: Partial<Record<EntregableIhsKey, EntregableIhs>>  // F2.3 — solo preventivos
   ejecucion?: EjecucionProyecto        // F2.1.d — inicio + ejecutado con evidencia
   entrega?: EntregaProyecto            // F2.1.d — entrega al cliente
   soporte_cliente?: SoporteCliente     // F2.1.d — soporte emitido por el cliente
