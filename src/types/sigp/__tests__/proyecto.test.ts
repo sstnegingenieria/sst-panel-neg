@@ -3,7 +3,10 @@ import { Timestamp } from 'firebase/firestore'
 import {
   construirSnapshotProyecto, ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR,
   contratistaAsignable, construirAsignacion, ESTADOS_PERMISOS, PERMISOS_LABEL, PERMISOS_COLOR,
+  ANTICIPO_PCT_DEFAULT, utilidadDe, margenPctDe, anticipoValorDe, saldoValorDe,
+  contratistaDesdeMargen, claveItemAlcance,
 } from '../proyecto'
+import { precioDesdeCosto, margenDesdePrecio } from '../cotizacion'
 import type { ItemCotizacion, VersionCotizacion, Actividad } from '../cotizacion'
 
 // ── fixtures mínimos ──
@@ -88,11 +91,14 @@ describe('construirSnapshotProyecto', () => {
 })
 
 describe('estados del proyecto', () => {
-  it('el ciclo de vida tiene los 12 estados, empieza en creado y termina en cerrado', () => {
-    expect(ESTADOS_PROYECTO).toHaveLength(12)
+  it('el ciclo de vida tiene los 13 estados, empieza en creado y termina en cerrado', () => {
+    expect(ESTADOS_PROYECTO).toHaveLength(13)
     expect(ESTADOS_PROYECTO[0]).toBe('creado')
-    expect(ESTADOS_PROYECTO[11]).toBe('cerrado')
-    expect(new Set(ESTADOS_PROYECTO).size).toBe(12)
+    expect(ESTADOS_PROYECTO[ESTADOS_PROYECTO.length - 1]).toBe('cerrado')
+    expect(new Set(ESTADOS_PROYECTO).size).toBe(13)
+    // F2.1.c: definida entra justo antes de aprobada
+    expect(ESTADOS_PROYECTO.indexOf('preliquidacion_definida'))
+      .toBe(ESTADOS_PROYECTO.indexOf('preliquidacion_aprobada') - 1)
   })
 
   it('todo estado tiene label y color', () => {
@@ -134,6 +140,53 @@ describe('asignación de contratista (F2.1.b)', () => {
   it('LANZA si el contratista no está habilitado — el gate no es solo de UI', () => {
     expect(() => construirAsignacion({ id: 'c3', nombre: 'X', estado: 'inactivo' }, 'uid-1', ahora))
       .toThrow(/habilitados/)
+  })
+})
+
+describe('preliquidación (F2.1.c)', () => {
+  const pre = { valor_venta: 36_149_760, valor_contratista: 20_000_000, anticipo_pct: 50 }
+
+  it('deriva utilidad y margen con precisión completa', () => {
+    expect(utilidadDe(pre)).toBe(16_149_760)
+    expect(margenPctDe(pre)).toBeCloseTo(44.67, 2)
+  })
+
+  it('deriva anticipo y saldo del % configurable (default 50)', () => {
+    expect(ANTICIPO_PCT_DEFAULT).toBe(50)
+    expect(anticipoValorDe(pre)).toBe(10_000_000)
+    expect(saldoValorDe(pre)).toBe(10_000_000)
+    const pre65 = { ...pre, anticipo_pct: 65 }
+    expect(anticipoValorDe(pre65)).toBe(13_000_000)
+    expect(saldoValorDe(pre65)).toBe(7_000_000)
+    // anticipo + saldo = valor_contratista SIEMPRE (aritmética exacta)
+    expect(anticipoValorDe(pre65) + saldoValorDe(pre65)).toBe(pre65.valor_contratista)
+  })
+
+  it('utilidad negativa cuando el contratista supera la venta; margen 0 si venta 0', () => {
+    expect(utilidadDe({ valor_venta: 10, valor_contratista: 15 })).toBe(-5)
+    expect(margenPctDe({ valor_venta: 0, valor_contratista: 5 })).toBe(0)
+  })
+
+  it('claveItemAlcance es estable: instancia_id > código+índice > índice', () => {
+    expect(claveItemAlcance({ instancia_id: 'abc', codigo: 'INP-001' }, 3)).toBe('abc')
+    expect(claveItemAlcance({ codigo: 'INP-001' }, 3)).toBe('cod:INP-001:3')
+    expect(claveItemAlcance({ codigo: '  ' }, 5)).toBe('idx:5')
+    expect(claveItemAlcance({}, 0)).toBe('idx:0')
+    // dos ítems con el MISMO código no colisionan (índice en la clave)
+    expect(claveItemAlcance({ codigo: 'X' }, 1)).not.toBe(claveItemAlcance({ codigo: 'X' }, 2))
+  })
+
+  it('la palanca de margen usa EXACTAMENTE la convención del APU y es bidireccional', () => {
+    const venta = 36_149_760
+    // margen 30% → contratista = venta × 0.7
+    const contratista = contratistaDesdeMargen(venta, 30)
+    expect(contratista).toBeCloseTo(25_304_832, 6)
+    // ida y vuelta exacta con el derivado del proyecto…
+    expect(margenPctDe({ valor_venta: venta, valor_contratista: contratista })).toBeCloseTo(30, 10)
+    // …y con los helpers del APU del cotizador (misma fórmula):
+    // precioDesdeCosto(costo, margen) reconstruye la venta desde el contratista
+    expect(precioDesdeCosto(contratista, 30)).toBeCloseTo(venta, 6)
+    expect(margenDesdePrecio(contratista, venta)).toBeCloseTo(30, 10)
   })
 })
 

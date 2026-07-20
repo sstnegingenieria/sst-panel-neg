@@ -10,7 +10,7 @@ import {
   veTecnicos,
   veRegistros,
   veReportes,
-  puedeGestionarProyectosUI,
+  veProyectosUI,
 } from '../types/sigp/permisos'
 
 interface SidebarProps {
@@ -170,7 +170,7 @@ const sigpNavItems: {
       </svg>
     ),
   },
-  // F2.1.a — visible solo con sigp_f2_enabled + puedeGestionarProyectosUI
+  // F2.1 — visible con sigp_f2_enabled + veProyectosUI (gestión o aprobación)
   // (filtro en el render, no aquí).
   {
     to: '/sigp/proyectos',
@@ -193,7 +193,7 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   const mostrarSigp = sigpEnabled && !!user?.rol && accesoSIGP(user.rol as Rol)
   // Proyectos (F2.1.a) exige además su propio flag + rol de gestión de proyectos.
   const visibleSigpItems = sigpNavItems.filter(item =>
-    item.to !== '/sigp/proyectos' || (f2Enabled && puedeGestionarProyectosUI(user?.rol)))
+    item.to !== '/sigp/proyectos' || (f2Enabled && veProyectosUI(user?.rol)))
   // "Obras" es canónicamente del flujo SIGP (F0.5.b): cuando el bloque SIGP está
   // visible, se oculta del bloque SST para no duplicar la entrada. Con el flag
   // apagado (producción hoy) sigue apareciendo una sola vez en el bloque SST.

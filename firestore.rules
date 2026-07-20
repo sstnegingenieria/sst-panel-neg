@@ -283,6 +283,15 @@ service cloud.firestore {
     match /proyectos/{proyectoId} {
       allow read: if accesoSIGP();
       allow create, update, delete: if puedeGestionarProyectos();
+
+      // F2.1.c — SEGREGACIÓN DE FUNCIONES: gerencia_administrativa aprueba la
+      // preliquidación y registra el anticipo girado (quien define ≠ quien
+      // desembolsa). Solo puede tocar preliquidación + estado + historial
+      // (patrón hasOnly, como contratistas.estado). No crea ni elimina.
+      allow update: if isAuthed()
+                    && rolActual() == 'gerencia_administrativa'
+                    && request.resource.data.diff(resource.data)
+                        .affectedKeys().hasOnly(['preliquidacion', 'estado', 'historial', 'fecha_actualizacion']);
     }
 
     // ────────────────────────────────────────────────────────────────
