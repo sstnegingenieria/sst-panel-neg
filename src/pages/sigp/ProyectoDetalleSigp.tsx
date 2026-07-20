@@ -80,10 +80,17 @@ export default function ProyectoDetalleSigp() {
             {TIPO_INVERSION_LABEL[s.tipo_inversion]}
           </span>
         )}
-        <Link to={`/sigp/cotizaciones/${proyecto.cotizacion_id}`}
-          className="ml-auto text-xs px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 font-medium">
-          📄 Origen: {proyecto.cotizacion_consecutivo}{etiquetaVersion(proyecto.cotizacion_version) ? ` ${etiquetaVersion(proyecto.cotizacion_version)}` : ''}
-        </Link>
+        {proyecto.origen === 'preventivo' ? (
+          <Link to={`/sigp/solicitudes/${proyecto.solicitud_id}`}
+            className="ml-auto text-xs px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 font-medium">
+            🛠 Origen: preventivo {proyecto.solicitud_consecutivo}
+          </Link>
+        ) : (
+          <Link to={`/sigp/cotizaciones/${proyecto.cotizacion_id}`}
+            className="ml-auto text-xs px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 font-medium">
+            📄 Origen: {proyecto.cotizacion_consecutivo}{etiquetaVersion(proyecto.cotizacion_version ?? 1) ? ` ${etiquetaVersion(proyecto.cotizacion_version ?? 1)}` : ''}
+          </Link>
+        )}
       </div>
 
       {/* Progreso del ciclo de vida */}
@@ -113,7 +120,11 @@ export default function ProyectoDetalleSigp() {
       {/* Snapshot pactado */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-          Lo pactado <span className="normal-case font-normal">(copia de {proyecto.cotizacion_consecutivo}{etiquetaVersion(proyecto.cotizacion_version) ? ` ${etiquetaVersion(proyecto.cotizacion_version)}` : ''} aprobada)</span>
+          Lo pactado <span className="normal-case font-normal">
+            {proyecto.origen === 'preventivo'
+              ? `(precio de matriz IHS · ${proyecto.solicitud_consecutivo})`
+              : `(copia de ${proyecto.cotizacion_consecutivo}${etiquetaVersion(proyecto.cotizacion_version ?? 1) ? ` ${etiquetaVersion(proyecto.cotizacion_version ?? 1)}` : ''} aprobada)`}
+          </span>
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
           <div>

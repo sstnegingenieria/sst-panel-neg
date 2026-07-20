@@ -40,7 +40,8 @@ export default function ProyectosSigp() {
         p.consecutivo.toLowerCase().includes(q) ||
         p.snapshot.cliente.toLowerCase().includes(q) ||
         p.snapshot.asunto.toLowerCase().includes(q) ||
-        p.cotizacion_consecutivo.toLowerCase().includes(q)),
+        (p.cotizacion_consecutivo ?? '').toLowerCase().includes(q) ||
+        (p.solicitud_consecutivo ?? '').toLowerCase().includes(q)),
     )
   }, [proyectos, filtroEstado, busqueda])
 

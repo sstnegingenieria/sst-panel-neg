@@ -69,7 +69,12 @@ export default function SolicitudesTable({
                   filasClicables ? 'hover:bg-gray-50 cursor-pointer' : ''
                 }`}
               >
-                <td className="py-3 px-4 font-mono text-xs text-gray-700">{s.consecutivo}</td>
+                <td className="py-3 px-4 font-mono text-xs text-gray-700">
+                  {s.consecutivo}
+                  {s.tipo === 'preventivo' && (
+                    <span className="ml-1.5 inline-flex px-1.5 py-0.5 rounded text-[10px] font-sans font-semibold bg-brand-50 text-brand-700 align-middle">PREV</span>
+                  )}
+                </td>
                 <td className="py-3 px-4 font-medium text-gray-800">{origen(s, clienteNombres)}</td>
                 <td className="py-3 px-4 text-gray-600">{CANAL_LABEL[s.canal] ?? s.canal}</td>
                 <td className="py-3 px-4 text-gray-600 max-w-xs truncate">{s.descripcion}</td>

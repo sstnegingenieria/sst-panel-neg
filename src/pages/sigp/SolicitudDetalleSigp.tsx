@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { toast } from '../../components/shared/Toast'
 import Modal from '../../components/shared/Modal'
 import { puedeGestionarSolicitudesUI } from '../../types/sigp/permisos'
+import PreventivoPanel from '../../components/sigp/solicitudes/PreventivoPanel'
 import {
   ESTADO_LABEL, ESTADO_COLOR, CANAL_LABEL, TRANSICIONES,
 } from '../../types/sigp/solicitud'
@@ -47,7 +48,10 @@ export default function SolicitudDetalleSigp() {
     )
   }
 
-  const transicionesPosibles = TRANSICIONES[solicitud.estado]
+  // F2.2 — los preventivos tienen su propia decisión (aceptar/rechazar en el
+  // panel); las transiciones genéricas de la máquina comercial no aplican.
+  const esPreventivo = solicitud.tipo === 'preventivo'
+  const transicionesPosibles = esPreventivo ? [] : TRANSICIONES[solicitud.estado]
   const requiereMotivo = transicionA === 'descartada'
 
   const abrirTransicion = (a: EstadoSolicitud) => { setTransicionA(a); setMotivo('') }
@@ -102,8 +106,11 @@ export default function SolicitudDetalleSigp() {
         </div>
       </div>
 
-      {/* Acciones de transición */}
-      {puedeGestionar && (
+      {/* Panel del preventivo (F2.2) — decide aceptar/rechazar y muestra el precio */}
+      {esPreventivo && <PreventivoPanel solicitud={solicitud} puedeGestionar={puedeGestionar} reload={reload} />}
+
+      {/* Acciones de transición (solo flujo comercial) */}
+      {puedeGestionar && !esPreventivo && (
         <div className="flex flex-wrap items-center gap-2">
           {transicionesPosibles.length === 0 ? (
             <span className="text-xs text-gray-400">Estado terminal · sin acciones disponibles.</span>

@@ -63,9 +63,11 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
   const bloqueActivo = puedeDefinir || !!pre
 
   // La versión aprobada alimenta el desglose del esquema y el alcance interno.
+  // Los proyectos PREVENTIVOS (F2.2) no tienen cotización: su precio es de
+  // matriz y el alcance vive en el snapshot.
   useEffect(() => {
-    if (!bloqueActivo || version) return
-    getDoc(doc(db, 'cotizaciones', proyecto.cotizacion_id, 'versiones', String(proyecto.cotizacion_version)))
+    if (!bloqueActivo || version || !proyecto.cotizacion_id) return
+    getDoc(doc(db, 'cotizaciones', proyecto.cotizacion_id, 'versiones', String(proyecto.cotizacion_version ?? 1)))
       .then(s => { if (s.exists()) setVersion(s.data() as VersionCotizacion) })
       .catch(() => {})
   }, [bloqueActivo, version, proyecto.cotizacion_id, proyecto.cotizacion_version])
@@ -199,30 +201,42 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
     if (!pre) return
     setAplicando(true)
     try {
-      const [{ cargarAssetsPdf, generarPdfPreliquidacion }, vSnap] = await Promise.all([
-        import('../../../utils/sigp/preliquidacionPdf'),
-        getDoc(doc(db, 'cotizaciones', proyecto.cotizacion_id, 'versiones', String(proyecto.cotizacion_version))),
-      ])
-      if (!vSnap.exists()) throw new Error('versión de origen no encontrada')
-      const version = vSnap.data() as VersionCotizacion
-      const modo = modoAgrupacionDe(version)
-      const actividades = actividadesDe(version)
-      const nombres = new Map(subtotalesPorGrupo(version.items, modo, actividades).map(g => [g.grupo_id, g.grupo_nombre]))
+      const { cargarAssetsPdf, generarPdfPreliquidacion } = await import('../../../utils/sigp/preliquidacionPdf')
       const observaciones = obsLimpias(obs)
       const buckets = new Map<string, { nombre: string; items: { codigo?: string; descripcion: string; cantidad: number; unidad: string; observacion?: string }[] }>()
-      version.items.forEach((it, idx) => {
-        const id = modo === 'actividad'
-          ? (it.actividad_id && nombres.has(it.actividad_id) ? it.actividad_id : GRUPO_OTROS_ID)
-          : (it.capitulo?.trim() || GRUPO_OTROS_ID)
-        if (!buckets.has(id)) buckets.set(id, { nombre: nombres.get(id) ?? 'Otros', items: [] })
-        // SIN valores: solo alcance físico (descripción + cantidad + unidad + observación)
-        const observacion = observaciones[claveItemAlcance(it, idx)]
-        buckets.get(id)!.items.push({
-          ...(it.codigo ? { codigo: it.codigo } : {}),
-          descripcion: it.descripcion, cantidad: it.cantidad, unidad: it.unidad,
-          ...(observacion ? { observacion } : {}),
+
+      if (proyecto.cotizacion_id) {
+        // Origen cotización: el alcance sale de la versión aprobada.
+        const vSnap = await getDoc(doc(db, 'cotizaciones', proyecto.cotizacion_id, 'versiones', String(proyecto.cotizacion_version ?? 1)))
+        if (!vSnap.exists()) throw new Error('versión de origen no encontrada')
+        const version = vSnap.data() as VersionCotizacion
+        const modo = modoAgrupacionDe(version)
+        const actividades = actividadesDe(version)
+        const nombres = new Map(subtotalesPorGrupo(version.items, modo, actividades).map(g => [g.grupo_id, g.grupo_nombre]))
+        version.items.forEach((it, idx) => {
+          const id = modo === 'actividad'
+            ? (it.actividad_id && nombres.has(it.actividad_id) ? it.actividad_id : GRUPO_OTROS_ID)
+            : (it.capitulo?.trim() || GRUPO_OTROS_ID)
+          if (!buckets.has(id)) buckets.set(id, { nombre: nombres.get(id) ?? 'Otros', items: [] })
+          // SIN valores: solo alcance físico (descripción + cantidad + unidad + observación)
+          const observacion = observaciones[claveItemAlcance(it, idx)]
+          buckets.get(id)!.items.push({
+            ...(it.codigo ? { codigo: it.codigo } : {}),
+            descripcion: it.descripcion, cantidad: it.cantidad, unidad: it.unidad,
+            ...(observacion ? { observacion } : {}),
+          })
         })
-      })
+      } else {
+        // Origen preventivo (F2.2): el alcance vive en el snapshot (1 renglón).
+        proyecto.snapshot.alcance.forEach((g, idx) => {
+          const observacion = observaciones[`idx:${idx}`]
+          buckets.set(String(idx), {
+            nombre: 'Alcance',
+            items: [{ descripcion: g.grupo, cantidad: 1, unidad: 'glb', ...(observacion ? { observacion } : {}) }],
+          })
+        })
+      }
+
       const pdf = await generarPdfPreliquidacion({
         proyectoConsecutivo: proyecto.consecutivo,
         contratistaNombre: proyecto.asignacion?.contratista_nombre ?? '—',
@@ -295,6 +309,8 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
             ) : (
               filaDeriv('Subtotal (costos directos)', fmtMoney(version.totales.costos_directos))
             )
+          ) : proyecto.origen === 'preventivo' ? (
+            <p className="text-[11px] text-gray-400">Precio de matriz IHS — el IVA se aplica en la facturación (Administrativa, futuro).</p>
           ) : (
             <p className="text-[11px] text-gray-400">Cargando desglose…</p>
           )}
