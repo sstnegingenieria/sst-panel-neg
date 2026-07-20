@@ -53,7 +53,7 @@ export default function LpuDetalleSigp() {
     return (
       <div className="max-w-5xl mx-auto p-8">
         <p className="text-gray-500">La LPU no existe o fue eliminada.</p>
-        <Link to="/sigp/lpus" className="text-brand-700 text-sm hover:underline mt-2 inline-block">← Volver a listas de precios</Link>
+        <Link to="/sigp/clientes" className="text-brand-700 text-sm hover:underline mt-2 inline-block">← Volver a Clientes</Link>
       </div>
     )
   }
@@ -62,8 +62,9 @@ export default function LpuDetalleSigp() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <Link to="/sigp/lpus" className="text-sm text-gray-500 hover:text-brand-700 inline-flex items-center gap-1">
-        ← Listas de precios
+      {/* UX jul-2026: la gestión de LPU vive en el detalle del cliente */}
+      <Link to={`/sigp/clientes/${lpu.cliente_id}`} className="text-sm text-gray-500 hover:text-brand-700 inline-flex items-center gap-1">
+        ← LPU del cliente
       </Link>
 
       {/* Cabecera */}

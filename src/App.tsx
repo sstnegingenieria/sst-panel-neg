@@ -14,7 +14,7 @@ import { ToastContainer } from './components/shared/Toast'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import PanelSigp from './pages/sigp/PanelSigp'
 import ClientesSigp from './pages/sigp/ClientesSigp'
-import LpusSigp from './pages/sigp/LpusSigp'
+import ClienteDetalleSigp from './pages/sigp/ClienteDetalleSigp'
 import LpuDetalleSigp from './pages/sigp/LpuDetalleSigp'
 import SolicitudesSigp from './pages/sigp/SolicitudesSigp'
 import SolicitudDetalleSigp from './pages/sigp/SolicitudDetalleSigp'
@@ -93,7 +93,11 @@ function ProtectedRoutes() {
         <Route path="/sigp/panel" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><PanelSigp /></ProtectedRoute>} />
         <Route path="/sigp/obras" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><Obras /></ProtectedRoute>} />
         <Route path="/sigp/clientes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ClientesSigp /></ProtectedRoute>} />
-        <Route path="/sigp/lpus" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><LpusSigp /></ProtectedRoute>} />
+        {/* UX jul-2026: la gestión de LPU vive en el detalle del cliente; la
+            bandeja vieja redirige con gracia (enlaces guardados). El detalle
+            de una LPU específica sigue en su ruta. */}
+        <Route path="/sigp/clientes/:clienteId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ClienteDetalleSigp /></ProtectedRoute>} />
+        <Route path="/sigp/lpus" element={<Navigate to="/sigp/clientes" replace />} />
         <Route path="/sigp/lpus/:lpuId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><LpuDetalleSigp /></ProtectedRoute>} />
         <Route path="/sigp/solicitudes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><SolicitudesSigp /></ProtectedRoute>} />
         <Route path="/sigp/solicitudes/:solicitudId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><SolicitudDetalleSigp /></ProtectedRoute>} />
