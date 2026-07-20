@@ -5,6 +5,8 @@ import {
   contratistaAsignable, construirAsignacion, ESTADOS_PERMISOS, PERMISOS_LABEL, PERMISOS_COLOR,
   ANTICIPO_PCT_DEFAULT, utilidadDe, margenPctDe, anticipoValorDe, saldoValorDe,
   contratistaDesdeMargen, claveItemAlcance,
+  ESTADO_INICIO_ADMINISTRATIVA, TIPOS_SOPORTE, TIPO_SOPORTE_LABEL,
+  CRITERIOS_EVALUACION, esPuntajeValido, promedioEvaluacion,
 } from '../proyecto'
 import { precioDesdeCosto, margenDesdePrecio } from '../cotizacion'
 import type { ItemCotizacion, VersionCotizacion, Actividad } from '../cotizacion'
@@ -91,14 +93,21 @@ describe('construirSnapshotProyecto', () => {
 })
 
 describe('estados del proyecto', () => {
-  it('el ciclo de vida tiene los 13 estados, empieza en creado y termina en cerrado', () => {
-    expect(ESTADOS_PROYECTO).toHaveLength(13)
+  it('el ciclo de vida tiene los 15 estados, empieza en creado y termina en cerrado', () => {
+    expect(ESTADOS_PROYECTO).toHaveLength(15)
     expect(ESTADOS_PROYECTO[0]).toBe('creado')
     expect(ESTADOS_PROYECTO[ESTADOS_PROYECTO.length - 1]).toBe('cerrado')
-    expect(new Set(ESTADOS_PROYECTO).size).toBe(13)
+    expect(new Set(ESTADOS_PROYECTO).size).toBe(15)
     // F2.1.c: definida entra justo antes de aprobada
     expect(ESTADOS_PROYECTO.indexOf('preliquidacion_definida'))
       .toBe(ESTADOS_PROYECTO.indexOf('preliquidacion_aprobada') - 1)
+    // F2.1.d: la secuencia de ejecución hasta el handoff es contigua
+    const seq = ['en_ejecucion', 'ejecutado', 'entregado_cliente', 'soporte_recibido', 'enviado_a_facturacion']
+    const base = ESTADOS_PROYECTO.indexOf('en_ejecucion')
+    seq.forEach((e, i) => expect(ESTADOS_PROYECTO[base + i]).toBe(e))
+    // el tramo de Administrativa (futuro) arranca en facturado, justo tras el handoff
+    expect(ESTADO_INICIO_ADMINISTRATIVA).toBe('facturado')
+    expect(ESTADOS_PROYECTO.indexOf('facturado')).toBe(ESTADOS_PROYECTO.indexOf('enviado_a_facturacion') + 1)
   })
 
   it('todo estado tiene label y color', () => {
@@ -187,6 +196,28 @@ describe('preliquidación (F2.1.c)', () => {
     // precioDesdeCosto(costo, margen) reconstruye la venta desde el contratista
     expect(precioDesdeCosto(contratista, 30)).toBeCloseTo(venta, 6)
     expect(margenDesdePrecio(contratista, venta)).toBeCloseTo(30, 10)
+  })
+})
+
+describe('ejecución y evaluación (F2.1.d)', () => {
+  it('los tipos de soporte del cliente tienen label', () => {
+    expect(TIPOS_SOPORTE).toEqual(['orden_pago', 'orden_compra', 'liquidacion'])
+    for (const t of TIPOS_SOPORTE) expect(TIPO_SOPORTE_LABEL[t]).toBeTruthy()
+  })
+
+  it('esPuntajeValido acepta enteros 1–5 y rechaza el resto', () => {
+    expect(esPuntajeValido(1)).toBe(true)
+    expect(esPuntajeValido(5)).toBe(true)
+    expect(esPuntajeValido(0)).toBe(false)
+    expect(esPuntajeValido(6)).toBe(false)
+    expect(esPuntajeValido(3.5)).toBe(false)
+    expect(esPuntajeValido(undefined)).toBe(false)
+  })
+
+  it('promedioEvaluacion promedia los 4 criterios', () => {
+    expect(promedioEvaluacion({ calidad: 5, cumplimiento: 4, sst: 5, documentacion: 4 })).toBe(4.5)
+    expect(promedioEvaluacion({ calidad: 3, cumplimiento: 3, sst: 3, documentacion: 3 })).toBe(3)
+    expect(CRITERIOS_EVALUACION.map(c => c.key)).toEqual(['calidad', 'cumplimiento', 'sst', 'documentacion'])
   })
 })
 

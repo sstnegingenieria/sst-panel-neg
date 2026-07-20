@@ -12,24 +12,16 @@ import { puedeGestionarProyectosUI, puedeAprobarPreliquidacionUI } from '../../t
 import AsignacionContratista from '../../components/sigp/proyectos/AsignacionContratista'
 import PermisosIngreso from '../../components/sigp/proyectos/PermisosIngreso'
 import PreliquidacionProyecto from '../../components/sigp/proyectos/PreliquidacionProyecto'
+import EjecucionProyecto from '../../components/sigp/proyectos/EjecucionProyecto'
+import EvaluacionContratistaCard from '../../components/sigp/proyectos/EvaluacionContratistaCard'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
-import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR } from '../../types/sigp/proyecto'
+import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA } from '../../types/sigp/proyecto'
 import { TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR } from '../../types/sigp/cotizacion'
 import type { Proyecto } from '../../types/sigp/proyecto'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) ?? '—'
-
-/** Tarjeta gris de módulo futuro (F2.1.b/c/d). */
-function Placeholder({ titulo, detalle }: { titulo: string; detalle: string }) {
-  return (
-    <div className="bg-gray-50 rounded-xl border border-dashed border-gray-200 p-4">
-      <p className="text-sm font-semibold text-gray-400">{titulo}</p>
-      <p className="text-xs text-gray-400 mt-1">{detalle}</p>
-    </div>
-  )
-}
 
 export default function ProyectoDetalleSigp() {
   const { proyectoId } = useParams<{ proyectoId: string }>()
@@ -98,17 +90,24 @@ export default function ProyectoDetalleSigp() {
       <div className="bg-white rounded-xl border border-gray-200 p-4">
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Ciclo de vida</p>
         <div className="flex flex-wrap gap-1.5">
-          {ESTADOS_PROYECTO.map((e, i) => (
-            <span key={e}
-              className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                i < idxEstado ? 'bg-brand-50 text-brand-700'
-                : i === idxEstado ? ESTADO_PRY_COLOR[e] + ' ring-1 ring-brand-400'
-                : 'bg-gray-50 text-gray-300'
-              }`}>
-              {ESTADO_PRY_LABEL[e]}
-            </span>
-          ))}
+          {ESTADOS_PROYECTO.map((e, i) => {
+            const deAdministrativa = i >= ESTADOS_PROYECTO.indexOf(ESTADO_INICIO_ADMINISTRATIVA)
+            return (
+              <span key={e}
+                title={deAdministrativa ? 'Gerencia Administrativa (módulo futuro)' : undefined}
+                className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                  i < idxEstado ? 'bg-brand-50 text-brand-700'
+                  : i === idxEstado ? ESTADO_PRY_COLOR[e] + ' ring-1 ring-brand-400'
+                  : 'bg-gray-50 text-gray-300'
+                } ${deAdministrativa ? 'border border-dashed border-gray-200' : ''}`}>
+                {ESTADO_PRY_LABEL[e]}
+              </span>
+            )
+          })}
         </div>
+        <p className="mt-2 text-[11px] text-gray-400">
+          Desde «Facturado» el proyecto pasa a Gerencia Administrativa (módulo futuro): factura, pago del cliente y saldo del contratista.
+        </p>
       </div>
 
       {/* Snapshot pactado */}
@@ -168,8 +167,11 @@ export default function ProyectoDetalleSigp() {
       {/* Preliquidación (F2.1.c) */}
       <PreliquidacionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} puedeAprobar={puedeAprobar} reload={load} />
 
-      {/* Módulo futuro (F2.1.d) */}
-      <Placeholder titulo="Ejecución" detalle="Avances y cierre — próximamente (F2.1.d)" />
+      {/* Ejecución → entrega → soporte → handoff (F2.1.d) */}
+      <EjecucionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+
+      {/* Evaluación del contratista (F2.1.d) */}
+      <EvaluacionContratistaCard proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
 
       {/* Línea de tiempo */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
