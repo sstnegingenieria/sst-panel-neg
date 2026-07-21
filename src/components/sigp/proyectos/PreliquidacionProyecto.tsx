@@ -196,6 +196,17 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
     } catch { toast('Error al registrar el anticipo (verifica tu rol)', 'error') } finally { setAplicando(false) }
   }
 
+  /** ISO ind. 3 — persiste el costo ejecutado real (proyectado = valor venta). */
+  const guardarCostoEjecutado = async (v: number) => {
+    try {
+      await updateDoc(doc(db, 'proyectos', proyecto.id), {
+        'preliquidacion.costo_ejecutado': v,
+        fecha_actualizacion: Timestamp.now(),
+      })
+      await reload()
+    } catch { toast('Error al guardar el costo ejecutado', 'error') }
+  }
+
   /** Documento del contratista: alcance sin valores + total pactado + anticipo. */
   const generarDocContratista = async () => {
     if (!pre) return
@@ -430,6 +441,23 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
             {pre.fecha_aprobacion && <> · aprobada el {fFecha(pre.fecha_aprobacion)}</>}
             {pre.anticipo && <> · anticipo girado el {fFecha(pre.anticipo.fecha)} ({fmtMoney(pre.anticipo.valor)})</>}
           </p>
+
+          {/* ISO ind. 3 — costo ejecutado real (proyectado = valor de venta) */}
+          {puedeGestionar && (
+            <div className="flex items-center gap-2 pt-1 border-t border-gray-50">
+              <span className="text-xs text-gray-500">
+                Costo ejecutado real <span className="text-[10px] text-gray-400">(indicador ISO presupuestal)</span>
+              </span>
+              <InputExpresion valor={pre.costo_ejecutado} onValor={guardarCostoEjecutado}
+                placeholder="Al cierre de la ejecución"
+                className="w-44 text-sm px-3 py-1 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+              {(pre.costo_ejecutado ?? 0) > 0 && pre.valor_venta > 0 && (
+                <span className="text-xs font-mono text-gray-500">
+                  = {fmtNum((pre.costo_ejecutado! / pre.valor_venta) * 100)}% del proyectado
+                </span>
+              )}
+            </div>
+          )}
           {pre.anticipo?.evidencia_url && (
             <a href={pre.anticipo.evidencia_url} target="_blank" rel="noreferrer" className="text-xs text-brand-700 underline underline-offset-2">
               📎 {pre.anticipo.evidencia_nombre ?? 'Evidencia del giro'}
