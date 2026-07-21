@@ -15,6 +15,7 @@ import PreliquidacionProyecto from '../../components/sigp/proyectos/Preliquidaci
 import EjecucionProyecto from '../../components/sigp/proyectos/EjecucionProyecto'
 import EntregablesIhs from '../../components/sigp/proyectos/EntregablesIhs'
 import EvaluacionContratistaCard from '../../components/sigp/proyectos/EvaluacionContratistaCard'
+import SatisfaccionClienteCard from '../../components/sigp/proyectos/SatisfaccionClienteCard'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA } from '../../types/sigp/proyecto'
@@ -185,8 +186,11 @@ export default function ProyectoDetalleSigp() {
       {/* Ejecución → entrega → soporte → handoff (F2.1.d) */}
       <EjecucionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
 
-      {/* Evaluación del contratista (F2.1.d) */}
-      <EvaluacionContratistaCard proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+      {/* Evaluación del contratista (F2.1.d) + satisfacción del cliente (ISO 4) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <EvaluacionContratistaCard proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+        <SatisfaccionClienteCard proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+      </div>
 
       {/* Línea de tiempo */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">

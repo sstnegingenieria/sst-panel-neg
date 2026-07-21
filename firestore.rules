@@ -295,6 +295,18 @@ service cloud.firestore {
     }
 
     // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: indicadores — Panel SIGP (ISO 9.1)
+    // ────────────────────────────────────────────────────────────────
+    // Registro MANUAL de indicadores de proceso cruzado (hoy: ind. 5
+    // ambiental/SST, doc `sst_YYYY-MM`) mientras no exista integración
+    // automática. Read: acceso SIGP. Write: gestión de proyectos.
+
+    match /indicadores/{indicadorId} {
+      allow read: if accesoSIGP();
+      allow create, update: if puedeGestionarProyectos();
+    }
+
+    // ────────────────────────────────────────────────────────────────
     // CATCH-ALL: denegar todo lo no especificado explícitamente
     // ────────────────────────────────────────────────────────────────
     // Incluye la colección `consecutivos` del SIGP: solo la Cloud

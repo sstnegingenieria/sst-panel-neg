@@ -201,6 +201,10 @@ export interface PreliquidacionProyecto {
   aprobada_por?: string
   fecha_aprobacion?: Timestamp
   anticipo?: AnticipoGirado
+  /** Indicador ISO 3 (proyección presupuestal): costo EJECUTADO real del
+   *  proyecto (el proyectado es el valor de la cotización/matriz). Se captura
+   *  al cierre de la ejecución. Meta: ejecutado/proyectado en 90–110 %. */
+  costo_ejecutado?: number
 }
 
 export const ANTICIPO_PCT_DEFAULT = 50
@@ -252,6 +256,28 @@ export interface EntregaProyecto {
   fecha: Timestamp               // fecha de entrega al cliente
   nota?: string
   registrada_por: string
+  /** Indicador ISO 2 (características técnicas y calidad): calificación
+   *  1–5 del cumplimiento técnico del proyecto, capturada en el acta de
+   *  entrega. Meta: ≥4 en ≥90 % de los proyectos. */
+  calificacion_calidad?: number
+}
+
+// ── Panel SIGP (ISO 9.1 — seguimiento y medición) ──
+
+/** Indicador ISO 1 (cumplimiento del plan): plan de actividades del proyecto
+ *  con flag de ejecución. Se siembra desde snapshot.alcance al abrir la
+ *  ejecución; el indicador = ejecutadas/programadas × 100. */
+export interface ActividadPlan {
+  nombre: string
+  ejecutada: boolean
+}
+
+/** Indicador ISO 4 (satisfacción del cliente): encuesta simple al cierre. */
+export interface EvaluacionCliente {
+  satisfaccion: number           // entero 1–5; meta: ≥4 en ≥90 %
+  fecha: Timestamp
+  por: string                    // uid de quien registró la encuesta
+  nota?: string
 }
 
 export const TIPOS_SOPORTE = ['orden_pago', 'orden_compra', 'liquidacion'] as const
@@ -390,6 +416,8 @@ export interface Proyecto {
   permisos?: PermisosProyecto          // F2.1.b — permisos de ingreso
   preliquidacion?: PreliquidacionProyecto  // F2.1.c — definir → aprobar → anticipo
   entregables_ihs?: Partial<Record<EntregableIhsKey, EntregableIhs>>  // F2.3 — solo preventivos
+  actividades_plan?: ActividadPlan[]   // Panel ISO ind. 1 — plan con flag ejecutada
+  evaluacion_cliente?: EvaluacionCliente  // Panel ISO ind. 4 — encuesta al cierre
   ejecucion?: EjecucionProyecto        // F2.1.d — inicio + ejecutado con evidencia
   entrega?: EntregaProyecto            // F2.1.d — entrega al cliente
   soporte_cliente?: SoporteCliente     // F2.1.d — soporte emitido por el cliente

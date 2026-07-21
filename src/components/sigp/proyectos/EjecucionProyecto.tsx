@@ -35,6 +35,7 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
   // entrega
   const [fechaEntrega, setFechaEntrega] = useState('')
   const [notaEntrega, setNotaEntrega] = useState('')
+  const [calificacion, setCalificacion] = useState(0)   // ISO ind. 2 — 1–5, obligatoria
   const [formEntrega, setFormEntrega] = useState(false)
   // soporte del cliente
   const [tipoSoporte, setTipoSoporte] = useState<TipoSoporte>('orden_compra')
@@ -65,9 +66,26 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
     try {
       await transicion('anticipo_girado', 'en_ejecucion', 'Ejecución iniciada', {
         ejecucion: { fecha_inicio: Timestamp.now(), iniciada_por: user?.uid ?? '' },
+        // ISO ind. 1 — el plan de trabajo nace del alcance pactado (un renglón
+        // por grupo del snapshot); el checkbox `ejecutada` alimenta el indicador.
+        ...(proyecto.actividades_plan?.length ? {} : {
+          actividades_plan: proyecto.snapshot.alcance.map(g => ({ nombre: g.grupo, ejecutada: false })),
+        }),
       })
       toast('Ejecución iniciada')
     } catch { toast('Error al iniciar la ejecución', 'error') } finally { setAplicando(false) }
+  }
+
+  /** ISO ind. 1 — marca/desmarca una actividad del plan (persistencia inmediata). */
+  const toggleActividad = async (idx: number) => {
+    const plan = (proyecto.actividades_plan ?? []).map((a, i) =>
+      i === idx ? { ...a, ejecutada: !a.ejecutada } : a)
+    try {
+      await updateDoc(doc(db, 'proyectos', proyecto.id), {
+        actividades_plan: plan, fecha_actualizacion: Timestamp.now(),
+      })
+      await reload()
+    } catch { toast('Error al actualizar el plan', 'error') }
   }
 
   const marcarEjecutado = async () => {
@@ -94,13 +112,15 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
   }
 
   const registrarEntrega = async () => {
-    if (!fechaEntrega) return
+    if (!fechaEntrega || calificacion < 1 || calificacion > 5) return
     setAplicando(true)
     try {
-      await transicion('ejecutado', 'entregado_cliente', 'Trabajos entregados al cliente', {
+      await transicion('ejecutado', 'entregado_cliente',
+        `Trabajos entregados al cliente — calidad ${calificacion}/5`, {
         entrega: {
           fecha: Timestamp.fromDate(new Date(fechaEntrega + 'T12:00:00')),
           ...(notaEntrega.trim() ? { nota: notaEntrega.trim() } : {}),
+          calificacion_calidad: calificacion,   // ISO ind. 2
           registrada_por: user?.uid ?? '',
         },
       })
@@ -211,7 +231,24 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
               </div>
             </div>
           )}
-          <p className="text-[11px] text-gray-400">Registro simple — el avance por actividad y el informe fotográfico automático llegan en F2.3.</p>
+          {/* ISO ind. 1 — plan de trabajo con flag de ejecución */}
+          {!!proyecto.actividades_plan?.length && (
+            <div className="bg-gray-50 rounded-lg p-2.5 space-y-1">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+                Plan de trabajo · {proyecto.actividades_plan.filter(a => a.ejecutada).length}/{proyecto.actividades_plan.length} ejecutadas
+                <span className="ml-1.5 normal-case font-normal">(indicador ISO de cumplimiento)</span>
+              </p>
+              {proyecto.actividades_plan.map((a, i) => (
+                <label key={i} className="flex items-center gap-2 text-xs text-gray-700">
+                  <input type="checkbox" checked={a.ejecutada}
+                    onChange={() => toggleActividad(i)}
+                    disabled={!puedeGestionar || !['en_ejecucion', 'ejecutado'].includes(est)} />
+                  <span className={a.ejecutada ? 'line-through text-gray-400' : ''}>{a.nombre}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] text-gray-400">Registro simple — el informe fotográfico automático llega más adelante.</p>
         </div>
       ))}
 
@@ -219,7 +256,15 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
       {paso('2 · Entrega al cliente', !!proyecto.entrega, (
         <div className="space-y-2 text-xs text-gray-600">
           {proyecto.entrega && (
-            <p>Entregado el {fFecha(proyecto.entrega.fecha)}{proyecto.entrega.nota && <> · {proyecto.entrega.nota}</>}</p>
+            <p>
+              Entregado el {fFecha(proyecto.entrega.fecha)}
+              {proyecto.entrega.calificacion_calidad != null && (
+                <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
+                  Calidad {proyecto.entrega.calificacion_calidad}/5
+                </span>
+              )}
+              {proyecto.entrega.nota && <> · {proyecto.entrega.nota}</>}
+            </p>
           )}
           {est === 'ejecutado' && puedeGestionar && !formEntrega && (() => {
             const faltantes = entregablesIhsFaltantes(proyecto)
@@ -243,11 +288,29 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
                 <input type="date" value={fechaEntrega} onChange={ev => setFechaEntrega(ev.target.value)}
                   className="mt-1 w-full sm:w-56 text-sm px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300" />
               </label>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">
+                  Calificación de calidad técnica <span className="text-red-500">*</span>
+                  <span className="ml-1 text-[10px] text-gray-400">(indicador ISO — meta ≥4)</span>
+                </p>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <button key={n} onClick={() => setCalificacion(n)}
+                      className={`w-8 h-8 rounded-lg text-sm font-semibold border transition-colors ${
+                        calificacion === n ? 'bg-brand-700 border-brand-700 text-white'
+                        : calificacion >= n ? 'bg-brand-50 border-brand-200 text-brand-700'
+                        : 'border-gray-200 text-gray-400 hover:bg-gray-50'
+                      }`}>
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <textarea value={notaEntrega} onChange={ev => setNotaEntrega(ev.target.value)} rows={2}
                 placeholder="Nota de la entrega (opcional)"
                 className="w-full text-sm px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300" />
               <div className="flex gap-2">
-                <button onClick={registrarEntrega} disabled={!fechaEntrega || aplicando}
+                <button onClick={registrarEntrega} disabled={!fechaEntrega || calificacion < 1 || aplicando}
                   className="text-sm px-3 py-1.5 rounded-lg font-medium bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50">
                   {aplicando ? 'Registrando…' : 'Registrar'}
                 </button>
