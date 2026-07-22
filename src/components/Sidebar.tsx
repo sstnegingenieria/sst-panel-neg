@@ -108,16 +108,9 @@ const sigpNavItems: {
       </svg>
     ),
   },
-  {
-    to: '/sigp/obras',
-    label: 'Obras',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-      </svg>
-    ),
-  },
+  // Bloque 6 (22-jul-2026): "Obras" volvió al grupo SST del sidebar — la vista
+  // ya es informativa SST (las obras nacen de los proyectos); en SIGP basta
+  // "Proyectos". La ruta /sigp/obras sigue viva (enlaces guardados).
   {
     to: '/sigp/clientes',
     label: 'Clientes',
@@ -186,13 +179,9 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   // Proyectos (F2.1.a) exige además su propio flag + rol de gestión de proyectos.
   const visibleSigpItems = sigpNavItems.filter(item =>
     item.to !== '/sigp/proyectos' || (f2Enabled && veProyectosUI(user?.rol)))
-  // "Obras" es canónicamente del flujo SIGP (F0.5.b): cuando el bloque SIGP está
-  // visible, se oculta del bloque SST para no duplicar la entrada. Con el flag
-  // apagado (producción hoy) sigue apareciendo una sola vez en el bloque SST.
-  const visibleItems = navItems.filter(item => {
-    if (item.to === '/obras' && mostrarSigp) return false
-    return item.ve(user?.rol)
-  })
+  // Bloque 6: "Obras" vive SIEMPRE en el bloque SST (vista informativa; las
+  // obras nacen de los proyectos SIGP). Mismos roles de siempre (veObras).
+  const visibleItems = navItems.filter(item => item.ve(user?.rol))
 
   return (
     <aside
