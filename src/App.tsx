@@ -32,7 +32,9 @@ import {
   ROLES_VE_REPORTES,
   ROLES_VE_OBRAS,
   ROLES_VE_CONTRATISTAS,
+  ROLES_VE_FACTURACION,
 } from './types/sigp/permisos'
+import FacturacionPagos from './pages/administrativa/FacturacionPagos'
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth()
@@ -108,6 +110,8 @@ function ProtectedRoutes() {
         {/* F2.1.a — las páginas además se auto-gatean con sigp_f2_enabled */}
         <Route path="/sigp/proyectos" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ProyectosSigp /></ProtectedRoute>} />
         <Route path="/sigp/proyectos/:proyectoId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ProyectoDetalleSigp /></ProtectedRoute>} />
+        {/* Módulo Gerencia Administrativa (Bloque 1) — fuera del grupo SIGP */}
+        <Route path="/administrativa/facturacion" element={<ProtectedRoute rolesPermitidos={ROLES_VE_FACTURACION}><FacturacionPagos /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

@@ -117,6 +117,15 @@ export const puedeGestionarProyectosUI = (rol: string | undefined) => en(rol, RO
 // anticipo girado es de gerencia_administrativa (quien define ≠ quien
 // desembolsa). `admin` se incluye como rol de infraestructura, igual que en
 // ROLES_HABILITA_CONTRATISTAS. Respaldado por la regla hasOnly de `proyectos`.
+// ── Módulo Gerencia Administrativa · Bloque 1 (facturación) ──
+// La vista "Facturación y Pagos" la VEN gerencia_administrativa (opera),
+// admin y gerencia_general (lectura). REGISTRAR factura: SOLO
+// gerencia_administrativa (segregación: ni proyectos ni admin ejecutan la
+// acción desde la UI; la regla Firestore la respalda por hasOnly).
+export const ROLES_VE_FACTURACION: Rol[] = ['admin', 'gerencia_general', 'gerencia_administrativa']
+export const veFacturacionUI = (rol: string | undefined) => en(rol, ROLES_VE_FACTURACION)
+export const puedeRegistrarFacturaUI = (rol: string | undefined) => rol === 'gerencia_administrativa'
+
 export const ROLES_APRUEBA_PRELIQUIDACION: Rol[] = ['admin', 'gerencia_administrativa']
 export const puedeAprobarPreliquidacionUI = (rol: string | undefined) => en(rol, ROLES_APRUEBA_PRELIQUIDACION)
 // Visibilidad del módulo Proyectos: gestión O aprobación (gerencia_administrativa
