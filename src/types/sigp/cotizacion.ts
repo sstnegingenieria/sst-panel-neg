@@ -125,6 +125,12 @@ export interface ItemCotizacion {
    *  ausente → orden de aparición en items[]. */
   orden?: number
 
+  /** Línea de TRANSPORTE por zona (correctivos IHS, Bloque C): su cantidad se
+   *  CALCULA sola = Σ(valor_total de las demás líneas) / 100 y no se teclea.
+   *  Se marca al insertarla desde el selector/buscador; para líneas guardadas
+   *  antes del flag, `esItemTransporte()` la deriva (unidad % + "Zona N…"). */
+  es_transporte?: boolean
+
   // ── Análisis económico (INTERNO — jamás se pinta en el PDF) ────────────────
   costo_directo?: number       // costo interno UNITARIO (del APU o manual)
   /** % de utilidad sobre el PRECIO: precio = costo / (1 - margen/100).
@@ -383,6 +389,82 @@ export function valorTotalItem(valorUnitario: number, cantidad: number): number 
   return Math.round((valorUnitario || 0) * (cantidad || 0))
 }
 
+// ── Transporte automático por zona (Bloque C — correctivos IHS) ──────────────
+//
+// En el LPU real de IHS las filas de transporte NO viven en un grupo
+// "TRANSPORTE": están en ESTRUCTURAS (códigos 51-54) y OBRA CIVIL (163-166),
+// una por zona, con unidad "%" y el FACTOR como valor unitario (Z1 10,52 ·
+// Z2 15,78 · Z2 SAI/Chocó 21,04 · Z3 18,94). El reconocimiento robusto es
+// unidad '%' + descripción "Zona N…" (verificado contra el LPU vigente).
+
+/** ¿Es una fila de transporte por zona? (aplica a ítems del LPU y de la
+ *  cotización por igual — el criterio es del DATO, no de dónde vive). */
+export function esTransporteZona(x: { unidad?: string; descripcion?: string }): boolean {
+  return (x.unidad ?? '').trim() === '%' && /^\s*zona\s*\d/i.test(x.descripcion ?? '')
+}
+
+/** ¿Esta línea de la cotización es LA línea de transporte? */
+export function esItemTransporte(it: ItemCotizacion): boolean {
+  return it.es_transporte === true || esTransporteZona(it)
+}
+
+const redondear2 = (n: number) => Math.round(n * 100) / 100
+
+/**
+ * Recalcula la línea de transporte: cantidad = Σ(valor_total de TODAS las
+ * demás líneas) / 100 (redondeada a 2 decimales), de modo que
+ * total = cantidad × factor = (Σ demás) × factor / 100.
+ *
+ * Sin cálculo circular: las líneas de transporte SE EXCLUYEN de la base.
+ * Idempotente y estable: si nada cambia devuelve el MISMO array (permite
+ * usarla en un efecto de React sin bucles). Sin línea de transporte, es
+ * la identidad — no aplica a cotizaciones que no la tienen.
+ */
+export function aplicarTransporte(items: ItemCotizacion[]): ItemCotizacion[] {
+  if (!items.some(esItemTransporte)) return items
+  const base = items.reduce((s, it) => (esItemTransporte(it) ? s : s + (it.valor_total || 0)), 0)
+  const cantidad = redondear2(base / 100)
+  let cambio = false
+  const out = items.map(it => {
+    if (!esItemTransporte(it)) return it
+    const valor_total = valorTotalItem(it.valor_unitario, cantidad)
+    if (it.cantidad === cantidad && it.valor_total === valor_total) return it
+    cambio = true
+    return { ...it, cantidad, valor_total }
+  })
+  return cambio ? out : items
+}
+
+/** Quita tildes y baja a minúsculas (comparación de departamentos). */
+const normalizarTexto = (s: string) =>
+  s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+
+/**
+ * Sugerencia de zona por el sitio: busca qué fila de transporte menciona en
+ * su descripción algún departamento presente en el texto del sitio (los
+ * departamentos VIVEN en las descripciones del LPU — no se cablea
+ * zonificación). Devuelve el índice del candidato o -1.
+ */
+export function sugerirTransporteZona(
+  sitioTexto: string,
+  candidatos: { descripcion?: string }[],
+): number {
+  const sitio = normalizarTexto(sitioTexto || '')
+  if (!sitio.trim()) return -1
+  for (let i = 0; i < candidatos.length; i++) {
+    const desc = normalizarTexto(candidatos[i].descripcion ?? '')
+    // departamentos = lo que sigue a "Zona N:" separado por comas (sin paréntesis)
+    const m = desc.match(/^\s*zona\s*\d[^:]*:\s*([^(]*)/)
+    if (!m) continue
+    const departamentos = m[1].split(',').map(d => d.trim()).filter(d => d.length >= 4)
+    // Palabra completa (evita "metálica" ⊃ "meta")
+    const esta = (d: string) =>
+      new RegExp(`(^|[^a-zñ])${d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^a-zñ])`).test(sitio)
+    if (departamentos.some(esta)) return i
+  }
+  return -1
+}
+
 // ── Agrupación (F1.5.2) ───────────────────────────────────────────────────────
 
 /** id reservado del grupo de ítems sin capítulo / sin actividad asignada. */
@@ -597,6 +679,9 @@ export function patchInstancia(it: ItemCotizacion, patch: Partial<ItemCotizacion
     delete p.valor_unitario
     delete p.margen
   }
+  // Bloque C: la cantidad de la línea de transporte se CALCULA sola
+  // (aplicarTransporte) — defensa en profundidad contra edición manual.
+  if (esItemTransporte(it)) delete p.cantidad
   const m = { ...it, ...p }
   if (!bloqueado && 'margen' in p && m.margen !== undefined && m.costo_directo !== undefined) {
     const precio = precioDesdeCosto(m.costo_directo, m.margen)

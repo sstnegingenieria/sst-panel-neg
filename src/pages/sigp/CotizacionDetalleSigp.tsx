@@ -22,6 +22,7 @@ import {
   subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, GRUPO_OTROS_ID,
   conInstanciaIds, nuevaInstanciaId, sembrarActividadesDesdeCapitulos,
   PRESETS_FORMA_PAGO, PRESETS_TIEMPO_EJECUCION, PRESETS_GARANTIA, OBSERVACIONES_BASE,
+  esTransporteZona, esItemTransporte, aplicarTransporte, sugerirTransporteZona,
 } from '../../types/sigp/cotizacion'
 import type { ModoAgrupacion, Actividad, TipoInversion } from '../../types/sigp/cotizacion'
 import type { CatalogoItem } from '../../types/sigp/catalogo'
@@ -76,6 +77,7 @@ export default function CotizacionDetalleSigp() {
 
   // Datos auxiliares
   const [lpuItems, setLpuItems] = useState<ItemLPU[]>([])
+  const [sitioSolicitud, setSitioSolicitud] = useState('')   // Bloque C — sugerencia de zona
   const [lpuNombre, setLpuNombre] = useState<string | null>(null)
   const [lpuVigenteId, setLpuVigenteId] = useState<string | null>(null)
   const [catItems, setCatItems] = useState<CatalogoItem[]>([])
@@ -124,6 +126,11 @@ export default function CotizacionDetalleSigp() {
           const real = vis.docs.map(d => ({ id: d.id, ...d.data() })).find((v: any) => v.estado === 'realizada') as any
           if (real?.cantidades?.length) { setVisitaCant(real.cantidades); setVisitaCons(real.consecutivo) }
         } catch { /* opcional */ }
+        // Bloque C: sitio de la solicitud → sugerencia de zona de transporte
+        try {
+          const sol = await getDoc(doc(db, 'solicitudes', cotizacion.solicitud_id))
+          if (sol.exists()) setSitioSolicitud((sol.data().sitio as string) ?? '')
+        } catch { /* opcional */ }
       }
       // Catálogo NEG (activos) para el buscador dual — independiente del cliente.
       try {
@@ -132,6 +139,13 @@ export default function CotizacionDetalleSigp() {
       } catch { /* catálogo opcional */ }
     })()
   }, [cotizacion?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bloque C — la línea de transporte se recalcula sola al agregar/editar/quitar
+  // cualquier ítem: cantidad = Σ(valor_total demás)/100, excluyéndose a sí misma.
+  // aplicarTransporte devuelve el MISMO array si no hay cambios → sin bucles.
+  useEffect(() => {
+    setItems(prev => aplicarTransporte(prev))
+  }, [items])
 
   const aiuConfig = (): ConfigAIU | undefined =>
     esquema === 'aiu' ? { admin: Number(aiuAdmin), imprevistos: Number(aiuImprev), utilidad: Number(aiuUtil) } : undefined
@@ -165,6 +179,31 @@ export default function CotizacionDetalleSigp() {
     if (!q) return []
     return lpuItems.filter(i => i.codigo.toLowerCase().includes(q) || i.descripcion.toLowerCase().includes(q)).slice(0, 10)
   }, [busqueda, lpuItems])
+
+  // Bloque C — filas de transporte del LPU vigente (correctivos IHS): el
+  // selector solo existe si el LPU las trae; nada se cablea por cliente.
+  const transporteLpu = useMemo(() => lpuItems.filter(esTransporteZona), [lpuItems])
+  const idxTransporte = items.findIndex(esItemTransporte)
+  const sugerenciaTransporte = useMemo(
+    () => (idxTransporte >= 0 ? -1 : sugerirTransporteZona(sitioSolicitud, transporteLpu)),
+    [sitioSolicitud, transporteLpu, idxTransporte],
+  )
+
+  /** Elegir zona = poner ESA fila del LPU como la única línea de transporte
+   *  (null = quitarla). La cantidad la pone aplicarTransporte. */
+  const elegirTransporte = (li: ItemLPU | null) => {
+    setItems(prev => {
+      const sin = prev.filter(it => !esItemTransporte(it))
+      if (!li) return sin
+      return [...sin, {
+        origen: 'lpu' as const, codigo: li.codigo, descripcion: li.descripcion, unidad: li.unidad,
+        valor_unitario: li.valor_unitario, cantidad: 0, valor_total: 0,
+        ...(li.capitulo ? { capitulo: li.capitulo } : {}),
+        ...(lpuVigenteId ? { lpu_id: lpuVigenteId } : {}), lpu_item_id: li.id,
+        instancia_id: nuevaInstanciaId(), es_transporte: true,
+      }]
+    })
+  }
 
   // Buscador dual (1.4B.c): también busca en el catálogo NEG.
   const catFiltrado = useMemo(() => {
@@ -266,13 +305,21 @@ export default function CotizacionDetalleSigp() {
   // (b-fix) La duplicación de instancias ("Añadir a…") se retiró: repetir un
   // ítem en otra actividad se logra volviéndolo a buscar en el buscador dual.
 
-  const agregarLpu = (li: ItemLPU) => setItems(prev => [...prev, {
-    origen: 'lpu', codigo: li.codigo, descripcion: li.descripcion, unidad: li.unidad,
-    valor_unitario: li.valor_unitario, cantidad: 1, valor_total: valorTotalItem(li.valor_unitario, 1),
-    ...(li.capitulo ? { capitulo: li.capitulo } : {}),
-    ...(lpuVigenteId ? { lpu_id: lpuVigenteId } : {}), lpu_item_id: li.id,
-    instancia_id: nuevaInstanciaId(),
-  }])
+  const agregarLpu = (li: ItemLPU) => {
+    // Bloque C: solo UNA línea de transporte por cotización
+    if (esTransporteZona(li) && items.some(esItemTransporte)) {
+      toast('Solo una línea de transporte por cotización — cámbiala con el selector de zona', 'error')
+      return
+    }
+    setItems(prev => [...prev, {
+      origen: 'lpu', codigo: li.codigo, descripcion: li.descripcion, unidad: li.unidad,
+      valor_unitario: li.valor_unitario, cantidad: 1, valor_total: valorTotalItem(li.valor_unitario, 1),
+      ...(li.capitulo ? { capitulo: li.capitulo } : {}),
+      ...(lpuVigenteId ? { lpu_id: lpuVigenteId } : {}), lpu_item_id: li.id,
+      instancia_id: nuevaInstanciaId(),
+      ...(esTransporteZona(li) ? { es_transporte: true } : {}),
+    }])
+  }
 
   /** Agregar del catálogo NEG: snapshot completo + catalogo_id (trazabilidad). */
   const agregarCatalogo = (c: CatalogoItem) => setItems(prev => [...prev, {
@@ -295,6 +342,7 @@ export default function CotizacionDetalleSigp() {
 
   /** Persiste un array de ítems concreto (validaciones incluidas). */
   const persistir = async (its: ItemCotizacion[], silencioso: boolean): Promise<boolean> => {
+    its = aplicarTransporte(its)   // Bloque C: el recálculo corre SIEMPRE al final
     const margenesInvalidos = its.filter(it => it.margen !== undefined && (it.margen < 0 || it.margen >= 100)).length
     if (margenesInvalidos > 0) {
       toast(`${margenesInvalidos} ítem(s) con margen fuera de [0, 100). Corrígelos antes de guardar.`, 'error')
@@ -599,6 +647,37 @@ export default function CotizacionDetalleSigp() {
                   </button>
                 )}
               </div>
+              {/* Bloque C — transporte por zona (correctivos IHS): UNA sola línea,
+                  cantidad automática = Σ(demás actividades)/100, factor del LPU */}
+              {transporteLpu.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                  <span className="font-medium text-gray-600 flex-shrink-0">🚚 Transporte por zona</span>
+                  <select
+                    value={idxTransporte >= 0 ? (items[idxTransporte].lpu_item_id ?? '') : ''}
+                    onChange={e => elegirTransporte(transporteLpu.find(x => x.id === e.target.value) ?? null)}
+                    className="flex-1 min-w-[260px] px-2 py-1.5 border border-gray-300 rounded-lg bg-white">
+                    <option value="">— Sin transporte —</option>
+                    {transporteLpu.map(li => (
+                      <option key={li.id} value={li.id}>
+                        {li.codigo} · {li.descripcion.length > 80 ? li.descripcion.slice(0, 80) + '…' : li.descripcion} — {fmtNum(li.valor_unitario)}%
+                      </option>
+                    ))}
+                  </select>
+                  {idxTransporte >= 0 && (
+                    <span className="text-gray-400" title="La cantidad de la línea de transporte se recalcula sola al agregar, editar o quitar cualquier actividad">
+                      cantidad automática = Σ demás ÷ 100
+                    </span>
+                  )}
+                  {sugerenciaTransporte >= 0 && (
+                    <button onClick={() => elegirTransporte(transporteLpu[sugerenciaTransporte])}
+                      className="px-2 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 font-medium"
+                      title={`Sugerido por el sitio de la solicitud: "${sitioSolicitud}"`}>
+                      Sugerido por el sitio: {transporteLpu[sugerenciaTransporte].codigo} — aplicar
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Buscador dual: LPU del cliente + catálogo NEG (1.4B.c) */}
               {(lpuItems.length > 0 || catItems.length > 0) ? (
                 <div className="relative">
@@ -774,10 +853,13 @@ export default function CotizacionDetalleSigp() {
                               ? <InputExpresion valor={it.valor_unitario} onValor={n => setItem(idx, { valor_unitario: n })}
                                   placeholder="0" className={`w-24 px-1 py-1 border rounded text-right ${cero ? 'border-amber-300' : 'border-gray-200'}`} />
                               : <span className="font-mono" title={bloq ? 'Precio del LPU/catálogo — solo lectura' : undefined}>{fMoneda(it.valor_unitario)}</span>}</td>
-                            <td className="px-2 py-1 text-right">{editable
+                            <td className="px-2 py-1 text-right">{editable && !esItemTransporte(it)
                               ? <InputExpresion valor={it.cantidad} onValor={n => setItem(idx, { cantidad: n })}
                                   placeholder="0" className="w-14 px-1 py-1 border border-gray-200 rounded text-right" />
-                              : fmtNum(it.cantidad)}</td>
+                              : <span className="font-mono"
+                                  title={esItemTransporte(it) ? 'Cantidad automática: Σ(valor de las demás líneas) ÷ 100 — no se edita a mano' : undefined}>
+                                  {fmtNum(it.cantidad)}{esItemTransporte(it) && editable ? ' ⚙' : ''}
+                                </span>}</td>
                             <td className="px-2 py-1 text-right font-mono text-gray-700">{fMoneda(it.valor_total)}</td>
                             {analisis && <>
                               {/* Columnas internas (análisis económico) — jamás salen al PDF */}
