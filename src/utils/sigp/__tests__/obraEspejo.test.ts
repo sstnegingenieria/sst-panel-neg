@@ -21,23 +21,38 @@ describe('idObraEspejo — idempotencia por construcción', () => {
 })
 
 describe('construirObraEspejo — contrato exacto de la app Flutter', () => {
-  it('título = sitio + alcance corto + mes/año; código = PRY; cliente del snapshot', () => {
+  // Bloque 1: el snapshot trae la identificación del sitio capturada en origen
+  const conSitio = {
+    ...proyecto,
+    snapshot: { ...proyecto.snapshot, nombre_sitio: 'ALKARAWI', codigo_sitio_cliente: 'COCUN7002' },
+  } as typeof proyecto
+
+  it('Bloque 1: nombre LIMPIO del sitio + código del cliente; el PRY va aparte', () => {
+    const o = construirObraEspejo(conSitio, undefined, FECHA)
+    expect(o.nombre_sitio).toBe('ALKARAWI')
+    expect(o.codigo).toBe('COCUN7002')
+    expect(o.nombre_completo).toBe('ALKARAWI | COCUN7002 | IHS')
+    expect(o.proyecto_consecutivo).toBe('PRY-2026-007')   // referencia, no código
+  })
+  it("código del cliente vacío → 'N/A'", () => {
+    const sinCodigo = {
+      ...proyecto,
+      snapshot: { ...proyecto.snapshot, nombre_sitio: 'ALKARAWI', codigo_sitio_cliente: '  ' },
+    } as typeof proyecto
+    expect(construirObraEspejo(sinCodigo, undefined, FECHA).codigo).toBe('N/A')
+  })
+  it('LEGACY (snapshot sin nombre_sitio): título derivado + código = PRY', () => {
     const o = construirObraEspejo(proyecto, 'LA CEJA', FECHA)
     expect(o.nombre_sitio).toBe(`LA CEJA — Correctivo línea de vida (${mesAnio(FECHA)})`)
     expect(o.codigo).toBe('PRY-2026-007')
-    expect(o.cliente).toBe('IHS')
-    expect(o.alcance).toBe('Correctivo línea de vida')
-  })
-  it('nombre_completo con el formato EXACTO que la app calcula: "sitio | codigo | cliente"', () => {
-    const o = construirObraEspejo(proyecto, 'LA CEJA', FECHA)
     expect(o.nombre_completo).toBe(`${o.nombre_sitio} | PRY-2026-007 | IHS`)
   })
-  it('sin sitio conocido → título desde el asunto (fallback)', () => {
+  it('LEGACY sin sitio conocido → título desde el asunto', () => {
     const o = construirObraEspejo(proyecto, undefined, FECHA)
     expect(o.nombre_sitio).toBe(`Correctivo línea de vida (${mesAnio(FECHA)})`)
   })
   it('marca el espejo: origen sigp + referencia al proyecto', () => {
-    const o = construirObraEspejo(proyecto, 'X', FECHA)
+    const o = construirObraEspejo(conSitio, undefined, FECHA)
     expect(o.origen).toBe('sigp')
     expect(o.proyecto_id).toBe('abc123')
     expect(o.proyecto_consecutivo).toBe('PRY-2026-007')

@@ -143,6 +143,11 @@ export default function ProyectoDetalleSigp() {
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
           <div>
+            <p className="text-xs text-gray-400">Sitio</p>
+            <p className="font-semibold text-gray-800">{s.nombre_sitio || '—'}</p>
+            {s.codigo_sitio_cliente && <p className="text-xs text-gray-500 font-mono">{s.codigo_sitio_cliente}</p>}
+          </div>
+          <div>
             <p className="text-xs text-gray-400">Cliente</p>
             <p className="font-semibold text-gray-800">{s.cliente}</p>
             {s.cliente_nit && <p className="text-xs text-gray-500">NIT {s.cliente_nit}</p>}

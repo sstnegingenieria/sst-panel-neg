@@ -278,6 +278,11 @@ export interface Cotizacion {
   prospecto_nombre?: string
   solicitud_id?: string
 
+  /** Bloque 1 — identificación del sitio (heredada de la solicitud, editable
+   *  en borrador). Alimenta el snapshot del proyecto y la obra-espejo SST. */
+  nombre_sitio?: string
+  codigo_sitio_cliente?: string
+
   es_licitacion: boolean
   tipo_inversion?: TipoInversion   // OPEX/CAPEX (contratos tipo Claro) — opcional
   estado: EstadoCotizacion     // borrador|enviada|aprobada|rechazada (vencida = derivada)

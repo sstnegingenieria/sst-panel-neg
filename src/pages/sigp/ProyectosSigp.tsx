@@ -40,6 +40,8 @@ export default function ProyectosSigp() {
         p.consecutivo.toLowerCase().includes(q) ||
         p.snapshot.cliente.toLowerCase().includes(q) ||
         p.snapshot.asunto.toLowerCase().includes(q) ||
+        (p.snapshot.nombre_sitio ?? '').toLowerCase().includes(q) ||
+        (p.snapshot.codigo_sitio_cliente ?? '').toLowerCase().includes(q) ||
         (p.cotizacion_consecutivo ?? '').toLowerCase().includes(q) ||
         (p.solicitud_consecutivo ?? '').toLowerCase().includes(q)),
     )
@@ -94,6 +96,7 @@ export default function ProyectosSigp() {
               <thead>
                 <tr className="text-left text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100">
                   <th className="px-4 py-2 font-medium">Consecutivo</th>
+                  <th className="px-4 py-2 font-medium">Sitio</th>
                   <th className="px-4 py-2 font-medium">Cliente</th>
                   <th className="px-4 py-2 font-medium">Asunto</th>
                   <th className="px-4 py-2 font-medium text-right">Valor venta</th>
@@ -108,6 +111,12 @@ export default function ProyectosSigp() {
                       <Link to={`/sigp/proyectos/${p.id}`} className="font-mono text-brand-700 font-semibold hover:underline">
                         {p.consecutivo}
                       </Link>
+                    </td>
+                    <td className="px-4 py-2.5 font-medium text-gray-800">
+                      {p.snapshot.nombre_sitio || <span className="text-gray-300 font-normal">—</span>}
+                      {p.snapshot.codigo_sitio_cliente && p.snapshot.codigo_sitio_cliente !== 'N/A' && (
+                        <span className="ml-1.5 text-[11px] font-mono text-gray-400">{p.snapshot.codigo_sitio_cliente}</span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-gray-700">{p.snapshot.cliente}</td>
                     <td className="px-4 py-2.5 text-gray-500 max-w-xs truncate" title={p.snapshot.asunto}>

@@ -389,6 +389,11 @@ export interface SnapshotProyecto {
   cliente_nit?: string
   asunto: string
   contacto?: string
+  /** Bloque 1 — identificación del sitio (congelada al nacer, como todo el
+   *  snapshot). Alimenta la obra-espejo: nombre_sitio limpio + código del
+   *  cliente ('N/A' cuando no asigna). Ausentes en proyectos históricos. */
+  nombre_sitio?: string
+  codigo_sitio_cliente?: string
   valor_venta: number          // total de la versión aprobada (con impuestos)
   esquema_tributario: EsquemaTributario
   tipo_inversion?: TipoInversion
@@ -437,7 +442,7 @@ export interface Proyecto {
  * caen en 'Otros' igual que allá.
  */
 export function construirSnapshotProyecto(
-  cotizacion: Pick<Cotizacion, 'asunto' | 'contacto' | 'tipo_inversion' | 'prospecto_nombre'>,
+  cotizacion: Pick<Cotizacion, 'asunto' | 'contacto' | 'tipo_inversion' | 'prospecto_nombre' | 'nombre_sitio' | 'codigo_sitio_cliente'>,
   version: Pick<VersionCotizacion, 'items' | 'totales' | 'esquema' | 'modo_agrupacion' | 'actividades' | 'agrupador'>,
   clienteNombre?: string,
   clienteNit?: string,
@@ -460,6 +465,8 @@ export function construirSnapshotProyecto(
     ...(clienteNit ? { cliente_nit: clienteNit } : {}),
     asunto: cotizacion.asunto ?? '',
     ...(cotizacion.contacto ? { contacto: cotizacion.contacto } : {}),
+    ...(cotizacion.nombre_sitio?.trim() ? { nombre_sitio: cotizacion.nombre_sitio.trim() } : {}),
+    ...(cotizacion.codigo_sitio_cliente?.trim() ? { codigo_sitio_cliente: cotizacion.codigo_sitio_cliente.trim() } : {}),
     valor_venta: version.totales.total,
     esquema_tributario: version.esquema,
     ...(cotizacion.tipo_inversion ? { tipo_inversion: cotizacion.tipo_inversion } : {}),

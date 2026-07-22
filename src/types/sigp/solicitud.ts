@@ -75,6 +75,13 @@ export interface Solicitud {
   canal: Canal
   descripcion: string
   sitio?: string               // ubicación de la obra/servicio solicitado
+
+  /** Bloque 1 (22-jul) — identificación del sitio: las áreas se comunican por
+   *  el NOMBRE DEL SITIO. Requeridos al registrar solicitudes nuevas
+   *  (ausentes en documentos históricos). En preventivos IHS se autocompletan
+   *  del sitio capturado. `codigo_sitio_cliente` admite 'N/A'. */
+  nombre_sitio?: string
+  codigo_sitio_cliente?: string
   fecha_recepcion: Timestamp   // cuándo llegó (puede diferir del registro)
   responsable: string          // uid del comercial que la registra/gestiona
   estado: EstadoSolicitud
