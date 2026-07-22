@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   cambiosPreliquidacion, correccionRevierteAprobacion, saldoRealDe,
-  anticipoValorDe,
+  anticipoValorDe, enBandejaFacturacion,
 } from '../proyecto'
 import type { Timestamp } from 'firebase/firestore'
 
@@ -50,5 +50,16 @@ describe('saldoRealDe — el anticipo girado es un hecho consumado', () => {
       anticipo: { fecha: null as unknown as Timestamp, valor: 10_000_000, registrado_por: 'x' },
     }
     expect(saldoRealDe(sobreGiro)).toBe(-2_000_000)   // pagado de más — la UI lo alerta
+  })
+})
+
+describe('enBandejaFacturacion — territorio del módulo administrativo (B1)', () => {
+  it('desde el handoff en adelante', () => {
+    for (const e of ['enviado_a_facturacion', 'facturado', 'pagado_cliente', 'liquidado_contratista', 'cerrado'] as const)
+      expect(enBandejaFacturacion(e)).toBe(true)
+  })
+  it('el ciclo de Proyectos queda fuera', () => {
+    for (const e of ['creado', 'preliquidacion_definida', 'anticipo_girado', 'en_ejecucion', 'soporte_recibido'] as const)
+      expect(enBandejaFacturacion(e)).toBe(false)
   })
 })

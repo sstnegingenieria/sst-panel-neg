@@ -204,6 +204,30 @@ export default function ProyectoDetalleSigp() {
       {/* Ejecución → entrega → soporte → handoff (F2.1.d) */}
       <EjecucionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
 
+      {/* Administrativa B1 — factura registrada (lectura; se gestiona en
+          Facturación y Pagos) */}
+      {proyecto.facturacion && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-1.5">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Factura <span className="normal-case font-normal">(registrada por Gerencia Administrativa)</span>
+          </p>
+          <p className="text-sm text-gray-800">
+            <span className="font-mono font-semibold">{proyecto.facturacion.numero}</span>
+            <span className="text-gray-500"> · emitida el {fFecha(proyecto.facturacion.fecha)} · </span>
+            <span className="font-mono">{fmtMoney(proyecto.facturacion.valor)}</span>
+          </p>
+          {proyecto.facturacion.cufe && (
+            <p className="text-[11px] text-gray-400 font-mono break-all">CUFE: {proyecto.facturacion.cufe}</p>
+          )}
+          {proyecto.facturacion.adjunto_url && (
+            <a href={proyecto.facturacion.adjunto_url} target="_blank" rel="noreferrer"
+              className="text-xs text-brand-700 underline underline-offset-2">
+              📎 {proyecto.facturacion.adjunto_nombre ?? 'PDF de la factura'}
+            </a>
+          )}
+        </div>
+      )}
+
       {/* Evaluación del contratista (F2.1.d) + satisfacción del cliente (ISO 4) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <EvaluacionContratistaCard proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />

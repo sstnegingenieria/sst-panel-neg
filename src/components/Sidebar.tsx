@@ -11,6 +11,7 @@ import {
   veRegistros,
   veReportes,
   veProyectosUI,
+  veFacturacionUI,
 } from '../types/sigp/permisos'
 
 interface SidebarProps {
@@ -293,6 +294,39 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
             </div>
           )
         })()}
+
+        {/* Sección ADMINISTRATIVA (Bloque 1, 22-jul-2026) — grupo propio, fuera
+            de la gestión de proyectos SIGP: continuación del ciclo tras el
+            handoff. Mismos flags que Proyectos (F2); roles: gerencia
+            administrativa (opera), admin y gerencia general (lectura). */}
+        {sigpEnabled && f2Enabled && veFacturacionUI(user?.rol) && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            {!collapsed && (
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                Administrativa
+              </p>
+            )}
+            <NavLink
+              to="/administrativa/facturacion"
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  isActive
+                    ? 'bg-brand-50 text-brand-700 font-semibold'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                }`
+              }
+            >
+              <span className="flex-shrink-0">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
+                </svg>
+              </span>
+              {!collapsed && <span>Facturación y Pagos</span>}
+            </NavLink>
+          </div>
+        )}
       </nav>
 
       {/* Footer */}

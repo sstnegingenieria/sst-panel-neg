@@ -207,6 +207,31 @@ export interface PreliquidacionProyecto {
   costo_ejecutado?: number
 }
 
+// ── Módulo Gerencia Administrativa · Bloque 1 (22-jul-2026) ──────────────────
+//
+// El SIGP REGISTRA y controla — NO ejecuta dinero ni genera factura
+// electrónica (eso vive en los sistemas externos del área). La factura se
+// registra como evidencia y dispara enviado_a_facturacion → facturado.
+
+/** Registro de la factura emitida (en el sistema contable externo). */
+export interface FacturacionProyecto {
+  numero: string               // número de la factura (del sistema externo)
+  fecha: Timestamp             // fecha de emisión
+  valor: number                // valor facturado
+  cufe?: string                // CUFE de la factura electrónica (opcional)
+  adjunto_url?: string         // PDF de la factura (opcional, Storage)
+  adjunto_nombre?: string
+  registrado_por: string
+  fecha_registro: Timestamp
+}
+
+/** ¿El proyecto pertenece a la bandeja de Facturación y Pagos? (desde el
+ *  handoff en adelante — territorio del módulo administrativo). */
+export const enBandejaFacturacion = (estado: EstadoProyecto): boolean => {
+  const i = ESTADOS_PROYECTO.indexOf(estado)
+  return i >= 0 && i >= ESTADOS_PROYECTO.indexOf('enviado_a_facturacion')
+}
+
 export const ANTICIPO_PCT_DEFAULT = 50
 
 // Derivados (puros — precisión completa; el recorte a 2 decimales es solo de render)
@@ -461,6 +486,7 @@ export interface Proyecto {
   ejecucion?: EjecucionProyecto        // F2.1.d — inicio + ejecutado con evidencia
   entrega?: EntregaProyecto            // F2.1.d — entrega al cliente
   soporte_cliente?: SoporteCliente     // F2.1.d — soporte emitido por el cliente
+  facturacion?: FacturacionProyecto    // Administrativa B1 — factura registrada
   evaluacion_contratista?: EvaluacionContratista  // F2.1.d — evaluación ISO simple
   historial: EntradaHistorialProyecto[]
   creado_por: string
