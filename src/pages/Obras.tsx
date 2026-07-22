@@ -91,10 +91,13 @@ export default function Obras() {
             Los técnicos se asignan desde <span className="font-medium">Usuarios</span>.
           </p>
         </div>
-        {puedeGestionar && (
+        {/* Hotfix A: la creación manual es una ESCOTILLA de emergencia — solo
+            admin (respaldado por la regla de `obras`: create solo admin u
+            obra-espejo con origen:'sigp'). */}
+        {user?.rol === 'admin' && (
           <button
             onClick={openCreate}
-            title="Fallback para trabajos SST que no pasan por el flujo comercial (la vía normal es el proyecto SIGP)"
+            title="Escotilla de emergencia (solo admin): las obras nacen del flujo SIGP al entrar el proyecto en ejecución"
             className="flex items-center gap-2 border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm font-medium px-4 py-2 rounded-lg transition"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

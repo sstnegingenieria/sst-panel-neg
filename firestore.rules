@@ -99,11 +99,22 @@ service cloud.firestore {
 
     match /obras/{obraId} {
       // Read: cualquier usuario autenticado (comportamiento legacy). El panel
-      // SST (hub de registros) y la app Flutter necesitan listar obras.
+      // SST (hub de registros), la app Flutter y la sincronización de la
+      // obra-espejo necesitan listar/leer obras. NO se toca (Hotfix A).
       allow read: if isAuthed();
 
-      // Write: solo gestión de proyectos (incluye `sst` para retrocompat)
-      allow create, update, delete: if puedeGestionarProyectos();
+      // Hotfix A (23-jul-2026): las obras NACEN del flujo SIGP (obra-espejo
+      // con origen:'sigp' al entrar el proyecto en ejecución). La creación
+      // manual suelta queda restringida a admin (escotilla de emergencia):
+      // un gestor solo puede crear la espejo del flujo.
+      allow create: if isAuthed() && (
+        rolActual() == 'admin' ||
+        (puedeGestionarProyectos() && request.resource.data.get('origen', '') == 'sigp')
+      );
+
+      // Update/delete: gestión de proyectos (la sincronización de la espejo
+      // actualiza el estado en las transiciones del proyecto).
+      allow update, delete: if puedeGestionarProyectos();
     }
 
     // ────────────────────────────────────────────────────────────────
