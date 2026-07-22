@@ -329,7 +329,7 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     }
     pintar(izq, MARGEN)
     pintar(der, MARGEN + colW)
-    y -= hCaja + 20   // aire tras el cuadro informativo (pedido 21-jul)
+    y -= hCaja + 26   // aire tras el cuadro informativo (pedido 21-jul, ampliado)
   }
 
   // ════ 4b. Introducción institucional — saludo breve y genérico ════
