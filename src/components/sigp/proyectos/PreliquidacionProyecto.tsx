@@ -380,6 +380,17 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
         {pre?.anticipo && <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">Anticipo girado</span>}
         {pre && !pre.anticipo && pre.aprobada_por && <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-lime-100 text-lime-800">Aprobada</span>}
         {pre && !pre.aprobada_por && <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-yellow-100 text-yellow-800">Definida · pendiente de aprobación</span>}
+        {/* Hotfix B — la corrección es una acción de primer nivel de la sección
+            (antes vivía como botón pequeño al fondo y costaba encontrarla) */}
+        {puedeCorregir && !corrForm && (
+          <button onClick={abrirCorreccion} disabled={aplicando}
+            className="ml-auto text-xs px-3 py-1.5 rounded-lg font-semibold border border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+            title={correccionRevierteAprobacion(proyecto.estado)
+              ? 'Corregir valores con motivo y traza (ISO 7.5) — revierte la aprobación y exige re-aprobación de Gerencia Administrativa'
+              : 'Corregir valores con motivo y traza en el historial (ISO 7.5)'}>
+            ✎ Corregir preliquidación
+          </button>
+        )}
       </div>
 
       {/* ── Valor de venta aprobado — desglose según el esquema tributario ── */}
@@ -578,15 +589,6 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
             className="text-sm px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             title="Documento para el contratista: alcance sin valores por actividad + total pactado + anticipo">
             📄 Preliquidación del contratista
-          </button>
-        )}
-        {puedeCorregir && !corrForm && (
-          <button onClick={abrirCorreccion} disabled={aplicando}
-            className="text-sm px-3 py-1.5 rounded-lg font-medium border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-50"
-            title={correccionRevierteAprobacion(proyecto.estado)
-              ? 'Corregir con traza: revierte la aprobación y exige re-aprobación de Gerencia Administrativa (ISO 7.5)'
-              : 'Corregir con traza en el historial (motivo obligatorio — ISO 7.5)'}>
-            ✎ Corregir
           </button>
         )}
       </div>
