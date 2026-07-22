@@ -16,6 +16,7 @@ import InputExpresion from '../cotizaciones/InputExpresion'
 import { fmtMoney, fmtNum } from '../../../utils/sigp/formato'
 import {
   ANTICIPO_PCT_DEFAULT, utilidadDe, margenPctDe, anticipoValorDe, saldoValorDe,
+  cambiosPreliquidacion, correccionRevierteAprobacion, saldoRealDe,
   contratistaDesdeMargen, claveItemAlcance,
 } from '../../../types/sigp/proyecto'
 import { modoAgrupacionDe, actividadesDe, subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../../types/sigp/cotizacion'
@@ -45,6 +46,12 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
   const [antValor, setAntValor] = useState<number | undefined>(undefined)
   const [antEvidencia, setAntEvidencia] = useState<File | null>(null)
   const [antForm, setAntForm] = useState(false)
+  // Bloque 4 — corrección con trazabilidad (ISO 7.5)
+  const [corrForm, setCorrForm] = useState(false)
+  const [corrMargen, setCorrMargen] = useState('')
+  const [corrValor, setCorrValor] = useState<number | undefined>(undefined)
+  const [corrPct, setCorrPct] = useState('')
+  const [corrMotivo, setCorrMotivo] = useState('')
   // versión aprobada (desglose del valor de venta + alcance con valores)
   const [version, setVersion] = useState<VersionCotizacion | null>(null)
   const [verAlcance, setVerAlcance] = useState(false)
@@ -150,20 +157,93 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
 
   const aprobar = async () => {
     if (!pre) return
-    if (!window.confirm(`¿Aprobar la preliquidación? Contratista ${fmtMoney(pre.valor_contratista)} · anticipo ${fmtNum(pre.anticipo_pct)}% (${fmtMoney(anticipoValorDe(pre))}).`)) return
+    // Re-aprobación tras una corrección con anticipo YA girado: el giro es un
+    // hecho consumado — el proyecto vuelve directo a anticipo_girado y el
+    // saldo se calcula contra el valor girado (saldoRealDe).
+    const conGiro = !!pre.anticipo
+    const destino = conGiro ? 'anticipo_girado' : 'preliquidacion_aprobada'
+    const resumen = conGiro
+      ? `Contratista ${fmtMoney(pre.valor_contratista)} · anticipo YA girado ${fmtMoney(pre.anticipo!.valor)} · saldo ${fmtMoney(saldoRealDe(pre))}.`
+      : `Contratista ${fmtMoney(pre.valor_contratista)} · anticipo ${fmtNum(pre.anticipo_pct)}% (${fmtMoney(anticipoValorDe(pre))}).`
+    if (!window.confirm(`¿Aprobar la preliquidación? ${resumen}`)) return
     setAplicando(true)
     try {
       const ahora = Timestamp.now()
       await updateDoc(doc(db, 'proyectos', proyecto.id), {
         preliquidacion: { ...pre, aprobada_por: user?.uid ?? '', fecha_aprobacion: ahora },
-        estado: 'preliquidacion_aprobada',
+        estado: destino,
         fecha_actualizacion: ahora,
-        historial: arrayUnion(entrada('preliquidacion_definida', 'preliquidacion_aprobada',
-          'Preliquidación aprobada por Gerencia Administrativa')),
+        historial: arrayUnion(entrada(proyecto.estado, destino,
+          conGiro
+            ? `Preliquidación re-aprobada por Gerencia Administrativa — el anticipo girado (${fmtMoney(pre.anticipo!.valor)}) se mantiene; saldo ${fmtMoney(saldoRealDe(pre))}`
+            : 'Preliquidación aprobada por Gerencia Administrativa')),
       })
       toast('Preliquidación aprobada')
       await reload()
     } catch { toast('Error al aprobar (verifica tu rol)', 'error') } finally { setAplicando(false) }
+  }
+
+  // ── Bloque 4 — corrección con trazabilidad (ISO 7.5, cambios controlados) ──
+  // Proyectos define/corrige; si ya estaba aprobada, la corrección REVIERTE a
+  // preliquidacion_definida y exige re-aprobación. Nunca un cambio silencioso.
+  const puedeCorregir = puedeGestionar && !!pre &&
+    ['preliquidacion_definida', 'preliquidacion_aprobada', 'anticipo_girado'].includes(proyecto.estado)
+
+  const abrirCorreccion = () => {
+    if (!pre) return
+    setCorrValor(pre.valor_contratista)
+    setCorrMargen(fmtNum(margenPctDe(pre)))
+    setCorrPct(String(pre.anticipo_pct))
+    setCorrMotivo('')
+    setCorrForm(true)
+  }
+  const corrPctNum = Number(corrPct.replace(',', '.'))
+  const corrPctValido = Number.isFinite(corrPctNum) && corrPctNum >= 0 && corrPctNum <= 100
+  const corrCambios = pre && corrValor !== undefined && corrPctValido
+    ? cambiosPreliquidacion(pre, { valor_contratista: corrValor, anticipo_pct: corrPctNum })
+    : []
+  const cambiarCorrMargen = (texto: string) => {
+    setCorrMargen(texto)
+    const m = Number(texto.replace(',', '.'))
+    if (texto.trim() !== '' && Number.isFinite(m) && m >= 0 && m < 100)
+      setCorrValor(contratistaDesdeMargen(valorVenta, m))
+  }
+  const cambiarCorrValor = (v: number) => {
+    setCorrValor(v)
+    setCorrMargen(fmtNum(margenPctDe({ valor_venta: valorVenta, valor_contratista: v })))
+  }
+
+  const ETIQUETA_CAMPO: Record<string, string> = {
+    valor_contratista: 'valor contratista', anticipo_pct: '% de anticipo',
+  }
+  const corregir = async () => {
+    if (!pre || corrValor === undefined || !corrPctValido || !corrMotivo.trim() || corrCambios.length === 0) return
+    const revierte = correccionRevierteAprobacion(proyecto.estado)
+    const detalle = corrCambios.map(c =>
+      `${ETIQUETA_CAMPO[c.campo]}: ${c.campo === 'anticipo_pct' ? `${fmtNum(c.antes)}% → ${fmtNum(c.despues)}%` : `${fmtMoney(c.antes)} → ${fmtMoney(c.despues)}`}`).join(' · ')
+    if (revierte && !window.confirm(
+      `La preliquidación ya fue aprobada: corregirla la devuelve a "Definida" y EXIGE re-aprobación de Gerencia Administrativa.\n\n${detalle}\n\n¿Continuar?`)) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      // La aprobación anterior se retira del dato vivo (queda en el historial)
+      const { aprobada_por: _ap, fecha_aprobacion: _fa, ...base } = pre
+      const nueva = revierte
+        ? { ...base, valor_contratista: corrValor, anticipo_pct: corrPctNum }
+        : { ...pre, valor_contratista: corrValor, anticipo_pct: corrPctNum }
+      await updateDoc(doc(db, 'proyectos', proyecto.id), {
+        preliquidacion: nueva,
+        ...(revierte ? { estado: 'preliquidacion_definida' } : {}),
+        fecha_actualizacion: ahora,
+        historial: arrayUnion(entrada(proyecto.estado, revierte ? 'preliquidacion_definida' : proyecto.estado,
+          `Corrección de preliquidación — ${detalle} — Motivo: ${corrMotivo.trim()}` +
+          (revierte ? ' · REVIERTE la aprobación: requiere re-aprobación de Gerencia Administrativa' : '') +
+          (pre.anticipo ? ` · anticipo ya girado ${fmtMoney(pre.anticipo.valor)} se mantiene (saldo recalculado contra el giro)` : ''))),
+      })
+      toast(revierte ? 'Corregida — vuelve a "Definida", pendiente de re-aprobación' : 'Preliquidación corregida con traza')
+      setCorrForm(false)
+      await reload()
+    } catch { toast('Error al corregir la preliquidación', 'error') } finally { setAplicando(false) }
   }
 
   const registrarAnticipo = async () => {
@@ -257,8 +337,8 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
         grupos: [...buckets.values()].filter(g => g.items.length > 0),
         valorContratista: pre.valor_contratista,
         anticipoPct: pre.anticipo_pct,
-        anticipoValor: anticipoValorDe(pre),
-        saldoValor: saldoValorDe(pre),
+        anticipoValor: pre.anticipo?.valor ?? anticipoValorDe(pre),
+        saldoValor: saldoRealDe(pre),
       }, await cargarAssetsPdf())
       const url = URL.createObjectURL(new Blob([pdf as BlobPart], { type: 'application/pdf' }))
       const a = document.createElement('a')
@@ -434,8 +514,18 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
           {filaDeriv('Valor de venta', fmtMoney(pre.valor_venta))}
           {filaDeriv('Valor contratista', fmtMoney(pre.valor_contratista), true)}
           {filaDeriv('Utilidad esperada', `${fmtMoney(utilidadDe(pre))} (${fmtNum(margenPctDe(pre))}%)`)}
-          {filaDeriv(`Anticipo (${fmtNum(pre.anticipo_pct)}%)`, fmtMoney(anticipoValorDe(pre)))}
-          {filaDeriv('Saldo contra entrega', fmtMoney(saldoValorDe(pre)))}
+          {pre.anticipo
+            ? filaDeriv('Anticipo (girado)', fmtMoney(pre.anticipo.valor))
+            : filaDeriv(`Anticipo (${fmtNum(pre.anticipo_pct)}%)`, fmtMoney(anticipoValorDe(pre)))}
+          {filaDeriv(pre.anticipo ? 'Saldo contra entrega (contra el giro real)' : 'Saldo contra entrega',
+            fmtMoney(saldoRealDe(pre)))}
+          {pre.anticipo && saldoRealDe(pre) < 0 && (
+            <p className="text-xs text-red-800 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+              🚨 <strong>Sobre-giro:</strong> el anticipo girado ({fmtMoney(pre.anticipo.valor)}) supera el
+              valor del contratista — pagado de más por <strong>{fmtMoney(-saldoRealDe(pre))}</strong>.
+              Gestionar la devolución o compensación con Gerencia Administrativa.
+            </p>
+          )}
           <p className="text-[11px] text-gray-400">
             Definida el {fFecha(pre.fecha_definicion)}
             {pre.fecha_aprobacion && <> · aprobada el {fFecha(pre.fecha_aprobacion)}</>}
@@ -490,7 +580,82 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
             📄 Preliquidación del contratista
           </button>
         )}
+        {puedeCorregir && !corrForm && (
+          <button onClick={abrirCorreccion} disabled={aplicando}
+            className="text-sm px-3 py-1.5 rounded-lg font-medium border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+            title={correccionRevierteAprobacion(proyecto.estado)
+              ? 'Corregir con traza: revierte la aprobación y exige re-aprobación de Gerencia Administrativa (ISO 7.5)'
+              : 'Corregir con traza en el historial (motivo obligatorio — ISO 7.5)'}>
+            ✎ Corregir
+          </button>
+        )}
       </div>
+
+      {/* ── Bloque 4 — form de corrección (motivo OBLIGATORIO, ISO 7.5) ── */}
+      {corrForm && pre && (
+        <div className="bg-amber-50/60 border border-amber-200 rounded-lg p-3 space-y-2.5">
+          <p className="text-xs font-semibold text-amber-800">
+            Corrección de preliquidación
+            {correccionRevierteAprobacion(proyecto.estado) &&
+              <span className="font-normal"> — al guardar, vuelve a «Definida» y exige re-aprobación de Gerencia Administrativa</span>}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <label className="text-xs text-gray-500">
+              Margen (%)
+              <input value={corrMargen} onChange={e => cambiarCorrMargen(e.target.value)}
+                className="mt-1 w-full text-sm px-3 py-1.5 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+            <label className="text-xs text-gray-500">
+              Valor contratista
+              <InputExpresion valor={corrValor} onValor={cambiarCorrValor}
+                className="mt-1 w-full text-sm px-3 py-1.5 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+            <label className="text-xs text-gray-500">
+              Anticipo (%)
+              <input value={corrPct} onChange={e => setCorrPct(e.target.value)}
+                className={`mt-1 w-full text-sm px-3 py-1.5 border rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300 ${corrPctValido ? 'border-gray-300' : 'border-red-400'}`} />
+            </label>
+          </div>
+          {corrCambios.length > 0 && (
+            <p className="text-xs text-gray-600">
+              {corrCambios.map(c =>
+                `${c.campo === 'anticipo_pct' ? '% de anticipo' : 'Valor contratista'}: ${c.campo === 'anticipo_pct' ? `${fmtNum(c.antes)}% → ${fmtNum(c.despues)}%` : `${fmtMoney(c.antes)} → ${fmtMoney(c.despues)}`}`).join(' · ')}
+            </p>
+          )}
+          {pre.anticipo && corrValor !== undefined && corrValor !== pre.valor_contratista && (
+            corrValor - pre.anticipo.valor >= 0 ? (
+              <p className="text-xs text-amber-800 bg-amber-100 rounded px-2 py-1.5">
+                ⚠ Ya se giró un anticipo de <strong>{fmtMoney(pre.anticipo.valor)}</strong> — el giro no se toca.
+                Con el nuevo valor, el saldo contra entrega queda en <strong>{fmtMoney(corrValor - pre.anticipo.valor)}</strong>.
+              </p>
+            ) : (
+              <p className="text-xs text-red-800 bg-red-100 rounded px-2 py-1.5">
+                🚨 <strong>SOBRE-GIRO:</strong> el nuevo valor queda POR DEBAJO del anticipo ya girado
+                ({fmtMoney(pre.anticipo.valor)}) — el contratista quedaría pagado de más por{' '}
+                <strong>{fmtMoney(pre.anticipo.valor - corrValor)}</strong> (saldo {fmtMoney(corrValor - pre.anticipo.valor)}).
+              </p>
+            )
+          )}
+          <label className="block text-xs text-gray-500">
+            Motivo de la corrección <span className="text-red-500">*</span>
+            <textarea value={corrMotivo} onChange={e => setCorrMotivo(e.target.value)} rows={2}
+              placeholder="Por qué se corrige (queda en el historial — ISO 7.5)…"
+              className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300" />
+          </label>
+          <div className="flex gap-2">
+            <button onClick={corregir}
+              disabled={aplicando || corrValor === undefined || !corrPctValido || !corrMotivo.trim() || corrCambios.length === 0}
+              className="text-sm px-3 py-1.5 rounded-lg font-medium bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50">
+              {aplicando ? 'Guardando…' : 'Guardar corrección'}
+            </button>
+            <button onClick={() => setCorrForm(false)} disabled={aplicando}
+              className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">
+              Cancelar
+            </button>
+            {corrCambios.length === 0 && <span className="text-[11px] text-gray-400 self-center">Sin cambios aún.</span>}
+          </div>
+        </div>
+      )}
 
       {/* ── Form anticipo (gerencia administrativa) ── */}
       {antForm && pre && (

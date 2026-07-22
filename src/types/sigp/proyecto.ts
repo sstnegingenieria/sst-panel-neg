@@ -231,6 +231,41 @@ export const claveItemAlcance = (it: { instancia_id?: string; codigo?: string },
 export const saldoValorDe = (p: Pick<PreliquidacionProyecto, 'valor_contratista' | 'anticipo_pct'>) =>
   p.valor_contratista - anticipoValorDe(p)
 
+// ── Corrección de preliquidación (Bloque 4 — ISO 7.5, cambios controlados) ──
+
+/** Diferencia entre la preliquidación vigente y la corrección propuesta. */
+export interface CambioPreliquidacion {
+  campo: 'valor_contratista' | 'anticipo_pct'
+  antes: number
+  despues: number
+}
+
+/** Solo los campos corregibles; vacío = sin cambios (no se persiste nada). */
+export function cambiosPreliquidacion(
+  antes: Pick<PreliquidacionProyecto, 'valor_contratista' | 'anticipo_pct'>,
+  despues: { valor_contratista: number; anticipo_pct: number },
+): CambioPreliquidacion[] {
+  const out: CambioPreliquidacion[] = []
+  if (antes.valor_contratista !== despues.valor_contratista)
+    out.push({ campo: 'valor_contratista', antes: antes.valor_contratista, despues: despues.valor_contratista })
+  if (antes.anticipo_pct !== despues.anticipo_pct)
+    out.push({ campo: 'anticipo_pct', antes: antes.anticipo_pct, despues: despues.anticipo_pct })
+  return out
+}
+
+/** ¿Corregir desde este estado obliga a revertir la aprobación? (Nunca un
+ *  cambio silencioso después de aprobada: vuelve a `preliquidacion_definida`
+ *  y exige re-aprobación de Gerencia Administrativa.) */
+export const correccionRevierteAprobacion = (estado: EstadoProyecto): boolean =>
+  estado === 'preliquidacion_aprobada' || estado === 'anticipo_girado'
+
+/** Saldo REAL contra entrega: si ya se giró anticipo, el saldo se calcula
+ *  contra el valor GIRADO (hecho consumado) — una corrección del valor del
+ *  contratista no descuadra el giro ya registrado. Sin giro, usa el %. */
+export const saldoRealDe = (
+  p: Pick<PreliquidacionProyecto, 'valor_contratista' | 'anticipo_pct' | 'anticipo'>,
+): number => p.valor_contratista - (p.anticipo?.valor ?? anticipoValorDe(p))
+
 // ── Ejecución / entrega / soporte del cliente / handoff (F2.1.d) ──
 //
 // Registro SIMPLE (MVP) de la ejecución con evidencia fotográfica; el avance
