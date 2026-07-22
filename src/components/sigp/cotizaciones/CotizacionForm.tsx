@@ -171,7 +171,9 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
       // Bloque 1 — identificación del sitio heredada de la solicitud (editable en borrador)
       if (solVinculada?.nombre_sitio?.trim()) parentData.nombre_sitio = solVinculada.nombre_sitio.trim()
       if (solVinculada?.codigo_sitio_cliente?.trim()) parentData.codigo_sitio_cliente = solVinculada.codigo_sitio_cliente.trim()
-      if (form.tipoInversion) parentData.tipo_inversion = form.tipoInversion
+      // Bloque 2: el tipo de inversión solo aplica a clientes con el flag
+      if (form.tipoInversion && clientes.find(c => c.id === form.clienteId)?.usa_tipo_inversion)
+        parentData.tipo_inversion = form.tipoInversion
 
       const batch = writeBatch(db)
       batch.set(doc(db, 'cotizaciones', cotizacionId), parentData)
@@ -275,15 +277,19 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
             <input type="checkbox" checked={form.esLicitacion} onChange={e => set('esLicitacion', e.target.checked)} className="w-4 h-4 accent-brand-700" />
             Es licitación (el documento final es externo, se adjunta)
           </label>
-          <SelectField
-            label="Tipo de inversión (contratos tipo Claro — opcional)"
-            value={form.tipoInversion}
-            onChange={v => set('tipoInversion', v as TipoInversion | '')}
-            options={[
-              { value: '', label: '— Sin clasificar —' },
-              ...TIPOS_INVERSION.map(t => ({ value: t, label: TIPO_INVERSION_LABEL[t] })),
-            ]}
-          />
+          {/* Bloque 2 — solo para clientes que clasifican por tipo de inversión
+              (flag usa_tipo_inversion en el cliente, ej. Claro) */}
+          {clientes.find(c => c.id === form.clienteId)?.usa_tipo_inversion && (
+            <SelectField
+              label="Tipo de inversión (OPEX/CAPEX — opcional)"
+              value={form.tipoInversion}
+              onChange={v => set('tipoInversion', v as TipoInversion | '')}
+              options={[
+                { value: '', label: '— Sin clasificar —' },
+                ...TIPOS_INVERSION.map(t => ({ value: t, label: TIPO_INVERSION_LABEL[t] })),
+              ]}
+            />
+          )}
         </div>
 
         {/* Esquema tributario */}

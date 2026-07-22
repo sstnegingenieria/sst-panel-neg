@@ -765,12 +765,16 @@ export default function CotizacionDetalleSigp() {
                     <option value="capitulo">Capítulos</option>
                     <option value="actividad">Actividades</option>
                   </select>
-                  <label className="text-xs text-gray-500 ml-2">Inversión</label>
-                  <select value={tipoInversion} onChange={e => setTipoInversion(e.target.value as TipoInversion | '')}
-                    className="text-xs px-2 py-1.5 border border-gray-300 rounded-lg bg-white">
-                    <option value="">— Sin clasificar —</option>
-                    {TIPOS_INVERSION.map(t => <option key={t} value={t}>{TIPO_INVERSION_LABEL[t]}</option>)}
-                  </select>
+                  {/* Bloque 2 — solo clientes con el flag (o cotizaciones que ya
+                      traen el dato, para poder verlo/limpiarlo) */}
+                  {(cliente?.usa_tipo_inversion || cotizacion.tipo_inversion) && <>
+                    <label className="text-xs text-gray-500 ml-2">Inversión</label>
+                    <select value={tipoInversion} onChange={e => setTipoInversion(e.target.value as TipoInversion | '')}
+                      className="text-xs px-2 py-1.5 border border-gray-300 rounded-lg bg-white">
+                      <option value="">— Sin clasificar —</option>
+                      {TIPOS_INVERSION.map(t => <option key={t} value={t}>{TIPO_INVERSION_LABEL[t]}</option>)}
+                    </select>
+                  </>}
                 </>}
               </div>
               {puedeGestionar && <button onClick={() => setAnalisis(a => !a)}
