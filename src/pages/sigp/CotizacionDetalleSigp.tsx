@@ -7,6 +7,7 @@ import { ref as sRef, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../firebase/config'
 import { generarPdfCotizacion, cargarAssetsPdf, sha256Hex } from '../../utils/sigp/cotizacionPdf'
 import { etiquetaVersion, fmtNum, fmtMoney } from '../../utils/sigp/formato'
+import { propagarAsunto } from '../../utils/sigp/asunto'
 import type { VersionCotizacion } from '../../types/sigp/cotizacion'
 import { useCotizacionDetalle } from '../../hooks/sigp/useCotizacionDetalle'
 import { useAuth } from '../../contexts/AuthContext'
@@ -322,6 +323,11 @@ export default function CotizacionDetalleSigp() {
         tipo_inversion: tipoInversion || deleteField(),
         fecha_actualizacion: Timestamp.now(),
       })
+      // Bloque B — el asunto es canónico en la solicitud enlazada: si cambió,
+      // se propaga (solicitud + otras cotizaciones de la misma solicitud).
+      if (cotizacion.solicitud_id && (cotizacion.asunto ?? '').trim() !== asunto.trim()) {
+        await propagarAsunto({ solicitudId: cotizacion.solicitud_id, asunto })
+      }
       if (!silencioso) { toast('Cotización guardada'); await reload() }
       return true
     } catch { toast('Error al guardar', 'error'); return false } finally { setGuardando(false) }
@@ -518,14 +524,24 @@ export default function CotizacionDetalleSigp() {
             </a>
           </span>
         )}
+        {cotizacion.pdf_desactualizado && est === 'enviada' && (
+          <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800"
+            title="El asunto se editó después de generar el PDF enviado. El PDF es evidencia inmutable: para reenviar con el asunto nuevo, crea una nueva versión (regenera el PDF).">
+            ⚠ PDF desactualizado — el asunto cambió después de generarlo
+          </span>
+        )}
       </div>
 
       {/* Asunto + contacto (presentación): editables solo en borrador */}
       {editable ? (
         <div className="flex items-center gap-2 max-w-3xl">
-          <label className="text-xs text-gray-500 flex-shrink-0">Asunto</label>
+          <label className="text-xs text-gray-500 flex-shrink-0"
+            title={cotizacion.solicitud_id ? 'Asunto enlazado a la solicitud: al guardar se actualiza también allá' : undefined}>
+            Asunto{cotizacion.solicitud_id && <span className="ml-1 text-brand-600">🔗</span>}
+          </label>
           <input value={asunto} onChange={e => setAsunto(e.target.value)}
             placeholder="Ej: Adecuaciones estación Ráquira"
+            title={cotizacion.solicitud_id ? 'Enlazado a la solicitud de origen: editar aquí actualiza el asunto de la solicitud (y viceversa)' : undefined}
             className={`w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 ${asunto.trim() ? 'border-gray-300' : 'border-amber-300'}`} />
           <label className="text-xs text-gray-500 flex-shrink-0 ml-2">Contacto</label>
           <input value={contactoNombre} onChange={e => setContactoNombre(e.target.value)}

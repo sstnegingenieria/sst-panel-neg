@@ -41,6 +41,7 @@ interface FormState {
   contactoEmail: string
   contactoTelefono: string
   canal: Canal
+  asunto: string
   descripcion: string
   sitio: string
   fechaRecepcion: string
@@ -58,7 +59,7 @@ const inicial = (): FormState => ({
   tipo: 'comercial',
   clienteId: '', prospectoNombre: '',
   contactoNombre: '', contactoCargo: '', contactoEmail: '', contactoTelefono: '',
-  canal: 'correo', descripcion: '', sitio: '', fechaRecepcion: hoyISO(),
+  canal: 'correo', asunto: '', descripcion: '', sitio: '', fechaRecepcion: hoyISO(),
   sitioId: '', sitioNombre: '', tipoSitio: 'greenfield', intensidad: 'pesado',
   esJungle: false, departamento: '', fechaAsignacion: hoyISO(),
 })
@@ -205,6 +206,8 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
     if (form.clienteId) doc_.cliente_id = form.clienteId
     if (form.prospectoNombre.trim()) doc_.prospecto_nombre = form.prospectoNombre.trim()
     if (form.sitio.trim()) doc_.sitio = form.sitio.trim()
+    // Bloque B — asunto canónico (opcional al registrar; la cotización lo hereda)
+    if (form.asunto.trim()) doc_.asunto = form.asunto.trim()
     // F2.2 — preventivo IHS: tipo + datos del sitio con zona/SAI denormalizados
     if (esPreventivo && zona) {
       doc_.tipo = 'preventivo'
@@ -471,6 +474,16 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
               </div>
             )}
           </div>
+        )}
+
+        {!esPreventivo && (
+          <TextField
+            label="Asunto"
+            value={form.asunto}
+            onChange={v => set('asunto', v)}
+            placeholder="Ej: Adecuaciones estación Ráquira"
+            hint="Opcional — título comercial; la cotización lo hereda y queda enlazado (editar uno actualiza el otro)"
+          />
         )}
 
         <div className="flex flex-col gap-1">

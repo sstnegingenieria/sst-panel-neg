@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { toast } from '../../components/shared/Toast'
 import Modal from '../../components/shared/Modal'
 import { puedeGestionarSolicitudesUI } from '../../types/sigp/permisos'
+import { propagarAsunto } from '../../utils/sigp/asunto'
 import PreventivoPanel from '../../components/sigp/solicitudes/PreventivoPanel'
 import {
   ESTADO_LABEL, ESTADO_COLOR, CANAL_LABEL, TRANSICIONES,
@@ -35,6 +36,23 @@ export default function SolicitudDetalleSigp() {
   const [transicionA, setTransicionA] = useState<EstadoSolicitud | null>(null)
   const [motivo, setMotivo] = useState('')
   const [aplicando, setAplicando] = useState(false)
+  // Bloque B — edición inline del asunto canónico (se propaga a las cotizaciones)
+  const [editandoAsunto, setEditandoAsunto] = useState(false)
+  const [asuntoEdit, setAsuntoEdit] = useState('')
+  const [guardandoAsunto, setGuardandoAsunto] = useState(false)
+
+  const guardarAsunto = async () => {
+    if (!solicitud) return
+    setGuardandoAsunto(true)
+    try {
+      const n = await propagarAsunto({ solicitudId: solicitud.id, asunto: asuntoEdit })
+      toast(n > 0 ? `Asunto actualizado — ${n} cotización(es) sincronizada(s)` : 'Asunto actualizado')
+      setEditandoAsunto(false)
+      await reload()
+    } catch {
+      toast('Error al actualizar el asunto', 'error')
+    } finally { setGuardandoAsunto(false) }
+  }
 
   if (loading) {
     return <div className="max-w-4xl mx-auto p-8 text-sm text-gray-400">Cargando…</div>
@@ -137,6 +155,47 @@ export default function SolicitudDetalleSigp() {
         <div className="lg:col-span-2 space-y-4">
           <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
             <h2 className="font-semibold text-gray-800 text-sm">Solicitud</h2>
+
+            {/* Bloque B — asunto canónico, enlazado con la(s) cotización(es) */}
+            {!esPreventivo && (
+              <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+                {editandoAsunto ? (
+                  <div className="flex items-center gap-2">
+                    <input value={asuntoEdit} onChange={e => setAsuntoEdit(e.target.value)} autoFocus
+                      placeholder="Ej: Adecuaciones estación Ráquira"
+                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                    <button onClick={guardarAsunto} disabled={guardandoAsunto}
+                      className="text-xs px-2.5 py-1.5 rounded-lg font-medium bg-brand-700 text-white hover:bg-brand-800 disabled:opacity-50 flex-shrink-0">
+                      {guardandoAsunto ? 'Guardando…' : 'Guardar'}
+                    </button>
+                    <button onClick={() => setEditandoAsunto(false)} disabled={guardandoAsunto}
+                      className="text-xs px-2 py-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm text-gray-800">
+                      <span className="text-xs text-gray-400 mr-2">Asunto</span>
+                      {solicitud.asunto || <span className="text-gray-400">— sin asunto aún</span>}
+                    </p>
+                    {puedeGestionar && (
+                      <button onClick={() => { setAsuntoEdit(solicitud.asunto ?? ''); setEditandoAsunto(true) }}
+                        title="El asunto es compartido con la(s) cotización(es) de esta solicitud: editarlo aquí las actualiza"
+                        className="text-xs text-brand-700 hover:underline flex-shrink-0">
+                        ✎ Editar
+                      </button>
+                    )}
+                  </div>
+                )}
+                {solicitud.estado === 'cotizada' && (
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Enlazado con la cotización: editar el asunto aquí o allá actualiza ambos.
+                  </p>
+                )}
+              </div>
+            )}
+
             <p className="text-sm text-gray-700 whitespace-pre-wrap">{solicitud.descripcion}</p>
             <div className="grid grid-cols-2 gap-2 text-sm pt-1">
               <Dato k="Canal" v={CANAL_LABEL[solicitud.canal] ?? solicitud.canal} />

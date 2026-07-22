@@ -81,6 +81,11 @@ export interface Solicitud {
   historial: CambioEstado[]    // arranca con { de: null, a: 'recibida', ... }
   motivo_descarte?: string     // denormalizado para lista/detalle (= historial)
 
+  /** Asunto CANÓNICO (Bloque B): título comercial compartido con las
+   *  cotizaciones enlazadas. Se edita desde la solicitud o desde la
+   *  cotización — siempre vía `utils/sigp/asunto.ts` (batch atómico). */
+  asunto?: string
+
   // F2.2 — preventivos IHS (tras sigp_f2_enabled)
   tipo?: TipoSolicitud         // ausente → 'comercial'
   preventivo?: DatosPreventivo // solo si tipo === 'preventivo'

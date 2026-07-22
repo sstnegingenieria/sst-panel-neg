@@ -251,8 +251,16 @@ export interface Cotizacion {
   consecutivo: string          // COT-YYYY-NNN
 
   /** Campo "Asunto" de la plantilla real CM-FT-CT-19 (ej: "Adecuaciones estación
-   *  Ráquira"). Obligatorio al crear; editable mientras esté en borrador. */
+   *  Ráquira"). Obligatorio al crear; editable mientras esté en borrador.
+   *  Si la cotización está ENLAZADA a una solicitud (solicitud_id), este campo
+   *  es un ESPEJO del asunto canónico de la solicitud: solo se escribe vía
+   *  `utils/sigp/asunto.ts` (batch atómico solicitud + cotizaciones). */
   asunto: string
+
+  /** El asunto vivo cambió DESPUÉS de generar el PDF de la versión enviada
+   *  (Bloque B): el PDF quedó con el asunto anterior. Se limpia al generar
+   *  el siguiente PDF (envío) o al crear una nueva versión. */
+  pdf_desactualizado?: boolean
 
   /** Nombre del contacto del cliente para ESTA cotización (dato de
    *  presentación, PDF/meta): prellenado desde el contacto principal del
