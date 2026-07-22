@@ -37,6 +37,7 @@ export default function Obras() {
   }
 
   const openEdit = (obra: Obra) => {
+    if (obra.origen === 'sigp') return   // espejo: identidad gobernada por el proyecto
     setEditTarget(obra)
     modal.open()
   }
@@ -58,6 +59,7 @@ export default function Obras() {
   }
 
   const handleToggle = async (obra: Obra) => {
+    if (obra.origen === 'sigp') return   // espejo: el estado lo sincroniza el proyecto
     const nuevoEstado = obra.estado === 'activa' ? 'inactiva' : 'activa'
     const accion = nuevoEstado === 'inactiva' ? 'desactivar' : 'activar'
     if (!window.confirm(`¿Seguro que deseas ${accion} la obra "${obra.nombre_sitio}"?`)) return
@@ -79,21 +81,26 @@ export default function Obras() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      {/* Header */}
+      {/* Header — Bloque D: las obras nacen de los proyectos SIGP; la creación
+          manual queda como FALLBACK secundario para trabajos fuera del flujo */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Obras</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Gestión de sitios y proyectos</p>
+          <h1 className="text-2xl font-bold text-gray-800">Obras activas</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Las obras nacen de los proyectos del SIGP al entrar en ejecución.
+            Los técnicos se asignan desde <span className="font-medium">Usuarios</span>.
+          </p>
         </div>
         {puedeGestionar && (
           <button
             onClick={openCreate}
-            className="flex items-center gap-2 bg-brand-700 hover:bg-brand-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+            title="Fallback para trabajos SST que no pasan por el flujo comercial (la vía normal es el proyecto SIGP)"
+            className="flex items-center gap-2 border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm font-medium px-4 py-2 rounded-lg transition"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Nueva obra
+            Obra manual (fallback)
           </button>
         )}
       </div>

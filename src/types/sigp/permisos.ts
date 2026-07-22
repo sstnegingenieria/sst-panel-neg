@@ -41,13 +41,14 @@ export const ROLES_VE_TECNICOS: Rol[] = [
   'auxiliar_proyectos', 'director_proyectos',
   'residente_sst', 'gestion_integral',
 ]
-// `sst` (y `residente_sst`/`gestion_integral`, que lo espejan) NO ven
-// Obras/Contratistas: se preserva el comportamiento actual del panel SST
-// (Opción B — "sst igual que hoy"), aunque la matriz les daba "ver".
+// Bloque D (22-jul-2026): los roles SST ven Obras como VISTA INFORMATIVA
+// (las obras nacen de los proyectos SIGP; solo lectura — la edición sigue
+// gateada por ROLES_GESTIONA_OBRAS y las reglas Firestore no cambian).
 export const ROLES_VE_OBRAS: Rol[] = [
   'admin', 'gerencia_general',
   'auxiliar_proyectos', 'director_proyectos', 'operacion_comercial',
   'gerencia_administrativa',
+  'sst', 'residente_sst', 'gestion_integral',
 ]
 export const ROLES_VE_CONTRATISTAS: Rol[] = [
   'admin', 'gerencia_general',
