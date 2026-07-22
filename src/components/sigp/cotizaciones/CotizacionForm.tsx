@@ -94,6 +94,8 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
     const s = solicitudes.find(x => x.id === id)
     setForm(f => {
       let next: FormState = { ...f, solicitudId: id, clienteId: s?.cliente_id ?? '', prospectoNombre: s?.prospecto_nombre ?? '' }
+      // Bloque B — el asunto canónico de la solicitud precarga el de la cotización
+      if (s?.asunto?.trim()) next.asunto = s.asunto
       if (s?.cliente_id) next = aplicarDefaultsCliente(s.cliente_id, next)
       return next
     })
@@ -174,16 +176,25 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
       await batch.commit()
 
       // Transición cruzada: la solicitud vinculada en lista_para_cotizar → cotizada.
+      // Bloque B: el asunto tecleado aquí se escribe de vuelta en la solicitud
+      // (es el dato canónico) — si el usuario lo cambió o la solicitud no tenía.
       if (form.solicitudId) {
         const sSnap = await getDoc(doc(db, 'solicitudes', form.solicitudId))
-        if (sSnap.exists() && sSnap.data().estado === 'lista_para_cotizar') {
-          await update('solicitudes', form.solicitudId, {
-            estado: 'cotizada',
-            historial: arrayUnion({
-              de: 'lista_para_cotizar', a: 'cotizada', por: uid, fecha: ahora,
-              motivo: `Cotización ${consecutivo} creada`,
-            }),
-          })
+        if (sSnap.exists()) {
+          const transiciona = sSnap.data().estado === 'lista_para_cotizar'
+          const asuntoCambio = (sSnap.data().asunto ?? '').trim() !== form.asunto.trim()
+          if (transiciona || asuntoCambio) {
+            await update('solicitudes', form.solicitudId, {
+              ...(asuntoCambio ? { asunto: form.asunto.trim() } : {}),
+              ...(transiciona ? {
+                estado: 'cotizada',
+                historial: arrayUnion({
+                  de: 'lista_para_cotizar', a: 'cotizada', por: uid, fecha: ahora,
+                  motivo: `Cotización ${consecutivo} creada`,
+                }),
+              } : {}),
+            })
+          }
         }
       }
 

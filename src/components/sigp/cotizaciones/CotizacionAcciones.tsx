@@ -101,6 +101,7 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
       })
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id), {
         estado: 'enviada', fecha_envio: ahora, fecha_actualizacion: ahora,
+        pdf_desactualizado: deleteField(),   // el PDF recién generado trae el asunto vivo
         historial: arrayUnion(entrada('borrador', 'enviada')),
       })
       toast(`${cotizacion.consecutivo} enviada — PDF generado`)
@@ -132,6 +133,7 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
       const ahora = Timestamp.now()
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id), {
         estado: 'aprobada',
+        pdf_desactualizado: deleteField(),   // el PDF aprobado queda como evidencia histórica
         evidencia_aprobacion: {
           nombre: evidencia.name, url, categoria: 'evidencia',
           content_type: evidencia.type || 'application/octet-stream',
@@ -165,6 +167,7 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id), {
         estado: 'borrador', version_activa: n,
         fecha_envio: deleteField(), motivo_rechazo: deleteField(),
+        pdf_desactualizado: deleteField(),   // la nueva versión regenerará el PDF al enviar
         fecha_actualizacion: Timestamp.now(),
         historial: arrayUnion(entrada(efectivo, 'borrador', { motivo: `Nueva versión v${n}`, version: n })),
       })
