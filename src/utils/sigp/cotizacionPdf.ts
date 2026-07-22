@@ -43,7 +43,7 @@ const BLANCO = rgb(1, 1, 1)
 const ANCHO = 595.28
 const ALTO = 841.89
 const MARGEN = 46
-const MARGEN_INF = 118         // reserva del pie institucional
+const MARGEN_INF = 108         // reserva del pie institucional
 const CONTENIDO = ANCHO - MARGEN * 2
 
 // ── Iconografía de línea (paths SVG 24×24, trazo monocromo, legible en B/N) ──
@@ -256,12 +256,12 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     const esc = Math.min(maxW / logo.width, maxH / logo.height)
     const lw = logo.width * esc, lh = logo.height * esc
     page.drawImage(logo, { x: MARGEN + c1 + c2 + (c3 - lw) / 2, y: yIso + (hIso - lh) / 2, width: lw, height: lh })
-    y = yIso - 10
+    y = yIso - 8
   }
 
   // ════ 1. Regla de marca (degradado verde → lima) ════
   reglaMarca(y)
-  y -= 34
+  y -= 24
 
   // ════ 2. Encabezado comercial — el asunto ES el título del documento;
   //         debajo, un subtítulo discreto; consecutivo a la derecha ════
@@ -293,10 +293,10 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     t.lineas.forEach((l, i) => page.drawText(l, { x: MARGEN, y: y - i * (t.size + 3), size: t.size, font: fB, color: TINTA }))
     y -= (t.lineas.length - 1) * (t.size + 3)
     if (datos.asunto.trim()) {
-      y -= 14
+      y -= 12
       page.drawText('Propuesta económica', { x: MARGEN, y, size: 8.5, font: fS, color: GRIS_MEDIO })
     }
-    y -= 24
+    y -= 15
   }
 
   // ════ 4. META — caja redondeada, 2 columnas, iconos, sin filas vacías ════
@@ -313,12 +313,12 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
       { ico: ICO.reloj, etiqueta: 'VALIDEZ', valor: `${datos.validezDias} días · hasta el ${fFechaLarga(vence)}` },
       { ico: ICO.moneda, etiqueta: 'MONEDA', valor: datos.condiciones.moneda === 'COP' ? 'Pesos colombianos (COP)' : datos.condiciones.moneda },
     ]
-    const hFila = 25
-    const hCaja = Math.max(izq.length, der.length) * hFila + 14
+    const hFila = 20
+    const hCaja = Math.max(izq.length, der.length) * hFila + 10
     rectR(MARGEN, y, CONTENIDO, hCaja, 8, { borderColor: BORDE, borderWidth: 1 })
     const colW = CONTENIDO / 2
     const pintar = (filas: Fila[], x0: number) => {
-      let yy = y - 21
+      let yy = y - 18
       for (const f of filas) {
         icono(f.ico, x0 + 14, yy + 11, 10.5, f.destacada ? VERDE : GRIS_MEDIO, 1.2)
         page.drawText(f.etiqueta, { x: x0 + 32, y: yy + 3.5, size: 5.8, font: fS, color: GRIS_MEDIO })
@@ -329,7 +329,7 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     }
     pintar(izq, MARGEN)
     pintar(der, MARGEN + colW)
-    y -= hCaja + 22
+    y -= hCaja + 26   // aire tras el cuadro informativo (pedido 21-jul, ampliado)
   }
 
   // ════ 4b. Introducción institucional — saludo breve y genérico ════
@@ -339,19 +339,20 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     const cuerpo = `${nombre ? 'Reciba' : 'Reciban'} un cordial saludo. Atendiendo su solicitud, presentamos para su ` +
       'consideración la siguiente propuesta económica. Agradecemos la oportunidad y quedamos atentos a cualquier inquietud.'
     const lineas = partir(cuerpo, fR, 8.5, CONTENIDO)
-    asegurar(16 + lineas.length * 12.5)
+    asegurar(14 + lineas.length * 11.5)
     page.drawText(saludo, { x: MARGEN, y, size: 8.5, font: fS, color: TINTA })
-    y -= 15
+    y -= 13
     for (const l of lineas) {
       page.drawText(l, { x: MARGEN, y, size: 8.5, font: fR, color: GRIS })
-      y -= 12.5
+      y -= 11.5
     }
-    y -= 12
+    y -= 12   // aire tras la introducción, antes de la tabla
   }
 
   // ════ 5. TABLA de ítems ════
-  // CANT y VR. UNITARIO angostos a favor de DESCRIPCIÓN (es la columna que respira)
-  const col = { cod: 54, und: 40, cant: 36, vu: 70, vt: 92 }
+  // CÓDIGO, CANT y VR. UNITARIO angostos a favor de DESCRIPCIÓN (es la columna
+  // que respira — ajuste 21-jul a pedido de Giovanny)
+  const col = { cod: 40, und: 34, cant: 36, vu: 58, vt: 74 }
   const wDesc = CONTENIDO - col.cod - col.und - col.cant - col.vu - col.vt
   const xCod = MARGEN, xDesc = xCod + col.cod, xUnd = xDesc + wDesc,
     xCant = xUnd + col.und, xVu = xCant + col.cant, xVt = xVu + col.vu
@@ -360,13 +361,12 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     asegurar(24)
     page.drawRectangle({ x: MARGEN, y: y - 15, width: CONTENIDO, height: 19, color: VERDE })
     const yh = y - 7.8   // centrado óptico de las versales en la banda de 19pt
-    const h = (t: string, x: number) => page.drawText(t, { x, y: yh, size: 6.5, font: fS, color: BLANCO })
+    // Todos los títulos centrados sobre su columna (pedido 21-jul)
     const hc = (t: string, xc: number, wc: number) =>
       page.drawText(t, { x: xc + wc / 2 - fS.widthOfTextAtSize(t, 6.5) / 2, y: yh, size: 6.5, font: fS, color: BLANCO })
-    const hd = (t: string, xd: number) => page.drawText(t, { x: xd - fS.widthOfTextAtSize(t, 6.5), y: yh, size: 6.5, font: fS, color: BLANCO })
-    h('CÓDIGO', xCod + 13); h('DESCRIPCIÓN', xDesc + 4)
+    hc('CÓDIGO', xCod, col.cod); hc('DESCRIPCIÓN', xDesc, wDesc)
     hc('UND', xUnd, col.und); hc('CANT', xCant, col.cant)
-    hd('VR. UNITARIO', xVu + col.vu - 4); hd('VR. TOTAL', xVt + col.vt - 4)
+    hc('VR. UNITARIO', xVu, col.vu); hc('VR. TOTAL', xVt, col.vt)
     y -= 22
     trasEncabezadoTabla = true
   }
@@ -381,14 +381,21 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   }
   const grupos = [...buckets.values()].filter(b => b.items.length > 0)
 
+  // Métrica compacta del cuerpo (ajuste 21-jul: menos aire, más contenido por
+  // página — 3 actividades caben en 1 hoja sin perder legibilidad).
+  const FT_CUERPO = 7.4    // tamaño del cuerpo de la tabla (antes 8)
+  const LH_CUERPO = 9.2    // interlineado de la descripción (antes 11)
+  const PAD_FILA = 6       // padding vertical total de la fila (antes 10)
+
   // Una fila nunca se parte entre páginas: se mide completa antes de dibujar.
   // La descripción sale COMPLETA (es el alcance pactado con el cliente); el tope
-  // de 20 líneas es solo un seguro anti-desborde — una fila jamás supera la página.
+  // de 40 líneas es solo un seguro anti-desborde — una fila jamás supera la página
+  // (con la métrica compacta, 40 líneas ≈ 374pt, muy por debajo del alto útil).
   const filaDe = (it: ItemCotizacion) => {
-    const lineas = partirMax(it.descripcion, fR, 8, wDesc - 12, 20)
-    return { lineas, h: lineas.length * 11 + 10 }
+    const lineas = partirMax(it.descripcion, fR, FT_CUERPO, wDesc - 12, 40)
+    return { lineas, h: lineas.length * LH_CUERPO + PAD_FILA }
   }
-  const H_ENC_GRUPO = 37   // 16 de aire + 21 del renglón con regla
+  const H_ENC_GRUPO = 26   // 10 de aire + 16 del renglón con regla (antes 37)
 
   // encabezado de grupo — fondo blanco, icono + nombre en gris oscuro (sobriedad:
   // el verde queda para los acentos), subtotal en negro; sin acentos verticales.
@@ -396,19 +403,19 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   // El aire de 16 es ENTRE grupos; pegado a la banda del encabezado se reduce.
   let trasEncabezadoTabla = false
   const encabezadoGrupo = (g: { grupo_nombre: string; subtotal: number }, cont = false) => {
-    y -= trasEncabezadoTabla ? 0 : 16   // pegado a la banda; el aire va ENTRE grupos
+    y -= trasEncabezadoTabla ? 0 : 10   // pegado a la banda; el aire va ENTRE grupos
     trasEncabezadoTabla = false
-    icono(ICO.capas, MARGEN + 6, y - 1, 9, GRIS, 1.3)
+    icono(ICO.capas, MARGEN + 6, y - 0.5, 8, GRIS, 1.2)
     const nombre = g.grupo_nombre.toUpperCase()
-    page.drawText(nombre, { x: MARGEN + 20, y: y - 8, size: 7.7, font: fB, color: GRIS })
+    page.drawText(nombre, { x: MARGEN + 20, y: y - 7, size: 7.2, font: fB, color: GRIS })
     if (cont) {
-      const wN = fB.widthOfTextAtSize(nombre, 7.7)
-      page.drawText('(cont.)', { x: MARGEN + 20 + wN + 5, y: y - 8, size: 6.5, font: fR, color: GRIS_MEDIO })
+      const wN = fB.widthOfTextAtSize(nombre, 7.2)
+      page.drawText('(cont.)', { x: MARGEN + 20 + wN + 5, y: y - 7, size: 6.2, font: fR, color: GRIS_MEDIO })
     } else {
-      textoDer(fMoneda(g.subtotal), xVt + col.vt - 4, y - 8, 7.7, fS, TINTA)
+      textoDer(fMoneda(g.subtotal), xVt + col.vt - 4, y - 7, 7.2, fS, TINTA)
     }
-    page.drawLine({ start: { x: MARGEN, y: y - 14 }, end: { x: MARGEN + CONTENIDO, y: y - 14 }, color: BORDE, thickness: 1.1 })
-    y -= 21
+    page.drawLine({ start: { x: MARGEN, y: y - 11 }, end: { x: MARGEN + CONTENIDO, y: y - 11 }, color: BORDE, thickness: 1.1 })
+    y -= 16
   }
 
   encabezadoTabla()
@@ -424,15 +431,21 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
       if (y - hFila < MARGEN_INF) { nuevaPagina(); encabezadoTabla(); encabezadoGrupo(g, true) }
       if (fila % 2 === 1)
         page.drawRectangle({ x: MARGEN, y: y - hFila + 3, width: CONTENIDO, height: hFila, color: ZEBRA })
-      const yTop = y - 10
-      page.drawText(it.codigo || '—', { x: xCod + 13, y: yTop, size: 7.5, font: fS, color: GRIS_MEDIO })
-      lineas.forEach((l, i) => page.drawText(l, { x: xDesc + 4, y: yTop - i * 11, size: 8, font: fR, color: TINTA }))
+      // Centrado VERTICAL de todas las celdas: la fila visual va de y+3 a
+      // y-hFila+3; un bloque de n líneas se centra como bloque respecto del
+      // centro de la fila (baseline = centro − 0.35·size, mitad de la versal).
+      const cFila = y + 3 - hFila / 2
+      const base = (n: number, size: number) => cFila - 0.35 * size + ((n - 1) * LH_CUERPO) / 2
+      const cod = it.codigo || '—'
+      page.drawText(cod, { x: xCod + col.cod / 2 - fS.widthOfTextAtSize(cod, 7) / 2, y: base(1, 7), size: 7, font: fS, color: GRIS_MEDIO })
+      const yDesc = base(lineas.length, FT_CUERPO)
+      lineas.forEach((l, i) => page.drawText(l, { x: xDesc + 4, y: yDesc - i * LH_CUERPO, size: FT_CUERPO, font: fR, color: TINTA }))
       const centrado = (t: string, xc: number, wc: number) =>
-        page.drawText(t, { x: xc + wc / 2 - fR.widthOfTextAtSize(t, 8) / 2, y: yTop, size: 8, font: fR, color: GRIS })
+        page.drawText(t, { x: xc + wc / 2 - fR.widthOfTextAtSize(t, FT_CUERPO) / 2, y: base(1, FT_CUERPO), size: FT_CUERPO, font: fR, color: GRIS })
       centrado(it.unidad || '—', xUnd, col.und)
       centrado(fmtNum(it.cantidad), xCant, col.cant)
-      textoDer(fMoneda(it.valor_unitario), xVu + col.vu - 4, yTop, 8, fR, TINTA)
-      textoDer(fMoneda(it.valor_total), xVt + col.vt - 4, yTop, 8, fS, TINTA)
+      textoDer(fMoneda(it.valor_unitario), xVu + col.vu - 4, base(1, FT_CUERPO), FT_CUERPO, fR, TINTA)
+      textoDer(fMoneda(it.valor_total), xVt + col.vt - 4, base(1, FT_CUERPO), FT_CUERPO, fS, TINTA)
       y -= hFila
       fila++
     }
@@ -457,22 +470,22 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
         ]
     const wCard = CONTENIDO * 0.56
     const xCard = ANCHO - MARGEN - wCard
-    const hFila = 16.5, hTotal = 26, hCab = 24
+    const hFila = 14, hTotal = 23, hCab = 20
     const hCard = hCab + filas.length * hFila + hTotal + 6
-    asegurar(hCard + 24)
-    y -= 18
+    asegurar(hCard + 12)
+    y -= 6
     const yTop = y
     rectR(xCard, yTop, wCard, hCard, 8, { borderColor: BORDE, borderWidth: 1 })
-    icono(ICO.calculadora, xCard + 14, yTop - 8, 10, VERDE, 1.3)
-    page.drawText('RESUMEN ECONÓMICO', { x: xCard + 30, y: yTop - 16, size: 6.8, font: fS, color: VERDE_OSCURO })
+    icono(ICO.calculadora, xCard + 14, yTop - 6, 10, VERDE, 1.3)
+    page.drawText('RESUMEN ECONÓMICO', { x: xCard + 30, y: yTop - 14, size: 6.8, font: fS, color: VERDE_OSCURO })
     let yf = yTop - hCab
     filas.forEach(([k, v], i) => {
       const esIva = i === filas.length - 1
       if (i % 2 === 1)
         page.drawRectangle({ x: xCard + 1, y: yf - hFila + 3, width: wCard - 2, height: hFila, color: ZEBRA })
       if (esIva) page.drawLine({ start: { x: xCard + 12, y: yf + 3 }, end: { x: xCard + wCard - 12, y: yf + 3 }, color: DIVISOR, thickness: 0.8 })
-      page.drawText(k, { x: xCard + 16, y: yf - 9, size: 8.5, font: fR, color: GRIS })
-      textoDer(v, xCard + wCard - 16, yf - 9, 8.5, fS, GRIS)
+      page.drawText(k, { x: xCard + 16, y: yf - 8, size: 8.5, font: fR, color: GRIS })
+      textoDer(v, xCard + wCard - 16, yf - 8, 8.5, fS, GRIS)
       yf -= hFila
     })
     // barra TOTAL — protagonista sin estridencia
@@ -481,22 +494,22 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
       `M 0 0 H ${wCard} V ${hTotal - 8} Q ${wCard} ${hTotal} ${wCard - 8} ${hTotal} H 8 Q 0 ${hTotal} 0 ${hTotal - 8} Z`,
       { x: xCard, y: yBarra, color: VERDE },
     )
-    page.drawText('TOTAL', { x: xCard + 16, y: yBarra - 17.5, size: 11, font: fB, color: BLANCO })
-    page.drawText('COP', { x: xCard + 16 + fB.widthOfTextAtSize('TOTAL', 11) + 5, y: yBarra - 17, size: 6.5, font: fR, color: BLANCO })
-    textoDer(fMoneda(datos.totales.total), xCard + wCard - 16, yBarra - 18.5, 13, fB, BLANCO)
-    y = yBarra - hTotal - 8
+    page.drawText('TOTAL', { x: xCard + 16, y: yBarra - 15.5, size: 11, font: fB, color: BLANCO })
+    page.drawText('COP', { x: xCard + 16 + fB.widthOfTextAtSize('TOTAL', 11) + 5, y: yBarra - 15, size: 6.5, font: fR, color: BLANCO })
+    textoDer(fMoneda(datos.totales.total), xCard + wCard - 16, yBarra - 16.5, 13, fB, BLANCO)
+    y = yBarra - hTotal - 5
   }
 
   // ── encabezado de sección genérico (icono + versal verde-oscuro + regla) ──
   // `reserva`: alto del primer contenido — evita títulos huérfanos al pie de página
   const seccion = (icon: string, titulo: string, reserva = 0) => {
-    asegurar(36 + reserva)
-    y -= 20
+    asegurar(30 + reserva)
+    y -= 14
     icono(icon, MARGEN, y + 8.5, 11, VERDE, 1.3)   // centrado óptico con la versal
     page.drawText(titulo, { x: MARGEN + 17, y, size: 8.5, font: fS, color: VERDE_OSCURO })
     const wT = fS.widthOfTextAtSize(titulo, 8.5)
     page.drawLine({ start: { x: MARGEN + 17 + wT + 10, y: y + 3 }, end: { x: ANCHO - MARGEN, y: y + 3 }, color: DIVISOR, thickness: 0.8 })
-    y -= 15
+    y -= 12
   }
 
   // ════ 7. CONDICIONES COMERCIALES — rejilla 2 col, sin campos vacíos ════
@@ -510,15 +523,15 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     if (campos.length) {
       const colW = CONTENIDO / 2
       const filasN = Math.ceil(campos.length / 2)
-      seccion(ICO.clipboard, 'CONDICIONES COMERCIALES', filasN * 31)
+      seccion(ICO.clipboard, 'CONDICIONES COMERCIALES', filasN * 26)
       campos.forEach((f, i) => {
         const x0 = MARGEN + (i % 2) * colW
-        const yy = y - Math.floor(i / 2) * 31
+        const yy = y - Math.floor(i / 2) * 26
         icono(f.ico, x0, yy + 6.5, 9.5, GRIS_MEDIO, 1.2)   // centrado con el par etiqueta/valor
         page.drawText(f.etiqueta, { x: x0 + 15, y: yy, size: 5.8, font: fS, color: GRIS_MEDIO })
         page.drawText(partir(f.valor, fR, 8.5, colW - 26)[0], { x: x0 + 15, y: yy - 11.5, size: 8.5, font: fR, color: TINTA })
       })
-      y -= filasN * 31 + 4
+      y -= filasN * 26 + 1
     }
   }
 
@@ -527,27 +540,30 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     const clausulas = datos.observaciones!.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
     // keep-with: el título entra con al menos la primera cláusula completa
     const hPrimera = clausulas.length
-      ? partir(clausulas[0], fR, 8.8, CONTENIDO - 16).length * 12.5 + 6
-      : 18
+      ? partir(clausulas[0], fR, 8.8, CONTENIDO - 16).length * 11.5 + 5
+      : 16
     seccion(ICO.info, 'NOTAS IMPORTANTES', hPrimera)
     for (const cl of clausulas) {
       const lineas = partir(cl, fR, 8.8, CONTENIDO - 16)
-      asegurar(lineas.length * 12.5 + 5)
+      asegurar(lineas.length * 11.5 + 4)
       page.drawText('›', { x: MARGEN + 2, y: y - 4, size: 9.5, font: fB, color: VERDE })
-      lineas.forEach((l, i) => page.drawText(l, { x: MARGEN + 14, y: y - 4 - i * 12.5, size: 8.8, font: fR, color: GRIS }))
-      y -= lineas.length * 12.5 + 6
+      lineas.forEach((l, i) => page.drawText(l, { x: MARGEN + 14, y: y - 4 - i * 11.5, size: 8.8, font: fR, color: GRIS }))
+      y -= lineas.length * 11.5 + 3.5
     }
   }
 
   // ════ 9. COTIZADO POR — solo al cierre del contenido (última página) ════
   {
-    seccion(ICO.pluma, 'COTIZADO POR', 84)
-    y -= 48                       // área generosa para firma digital o manuscrita
+    // Piso especial: la firma puede acercarse al pie institucional (100 en vez
+    // de MARGEN_INF) — evita una hoja casi vacía solo para firmar.
+    if (y - 81 < 100) nuevaPagina()
+    seccion(ICO.pluma, 'COTIZADO POR', 0)
+    y -= 28                       // área para firma digital o manuscrita
     page.drawLine({ start: { x: MARGEN, y }, end: { x: MARGEN + 170, y }, color: GRIS_MEDIO, thickness: 0.8 })
-    page.drawText(datos.firmante.nombre, { x: MARGEN, y: y - 11, size: 9.5, font: fB, color: TINTA })
-    page.drawText('NEG Ingeniería S.A.S. BIC', { x: MARGEN, y: y - 22, size: 7.5, font: fR, color: GRIS })
+    page.drawText(datos.firmante.nombre, { x: MARGEN, y: y - 9, size: 9.5, font: fB, color: TINTA })
+    page.drawText('NEG Ingeniería S.A.S. BIC', { x: MARGEN, y: y - 18, size: 7.5, font: fR, color: GRIS })
     const lineaContacto = [datos.firmante.correo, datos.firmante.celular].filter(Boolean).join(' · ')
-    if (lineaContacto) page.drawText(lineaContacto, { x: MARGEN, y: y - 32, size: 7, font: fR, color: GRIS_MEDIO })
+    if (lineaContacto) page.drawText(lineaContacto, { x: MARGEN, y: y - 26, size: 7, font: fR, color: GRIS_MEDIO })
   }
 
   // ════ 10. PIE institucional — idéntico en todas las páginas ════
