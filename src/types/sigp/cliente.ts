@@ -37,6 +37,10 @@ export interface Cliente {
   nit: string
   contactos: Contacto[]
   estado: 'activo' | 'inactivo'   // soft-delete, coherente con contratistas SST
+  /** Bloque 2 (22-jul-2026): el cliente clasifica sus contratos por tipo de
+   *  inversión (OPEX/CAPEX — contratos tipo Claro). Solo con este flag el
+   *  cotizador muestra el selector. Ausente = false. */
+  usa_tipo_inversion?: boolean
   condiciones_comerciales: CondicionesComerciales
   /** Mapeos de columnas guardados para reutilizar al importar futuras LPU de este cliente. */
   mapeos_lpu_guardados: MapeoImportacion[]

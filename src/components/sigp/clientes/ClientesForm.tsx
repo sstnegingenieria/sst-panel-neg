@@ -9,6 +9,7 @@ export interface ClienteFormData {
   nombre: string
   nit: string
   estado: 'activo' | 'inactivo'
+  usa_tipo_inversion: boolean
   contactos: Contacto[]
   condiciones_comerciales: CondicionesComerciales
 }
@@ -35,6 +36,7 @@ interface FormState {
   nombre: string
   nit: string
   estado: 'activo' | 'inactivo'
+  usaTipoInversion: boolean
   contactos: ContactoRow[]
   esquema: 'iva_pleno' | 'aiu'
   aiu: { admin: string; imprevistos: string; utilidad: string }
@@ -45,7 +47,7 @@ const EMPTY_CONTACTO: ContactoRow = { nombre: '', cargo: '', email: '', telefono
 function toFormState(c: Cliente | null | undefined): FormState {
   if (!c) {
     return {
-      nombre: '', nit: '', estado: 'activo',
+      nombre: '', nit: '', estado: 'activo', usaTipoInversion: false,
       contactos: [{ ...EMPTY_CONTACTO }],
       esquema: 'iva_pleno',
       aiu: { admin: '', imprevistos: '', utilidad: '' },
@@ -56,6 +58,7 @@ function toFormState(c: Cliente | null | undefined): FormState {
     nombre: c.nombre,
     nit: c.nit,
     estado: c.estado,
+    usaTipoInversion: c.usa_tipo_inversion ?? false,
     contactos: c.contactos.length
       ? c.contactos.map(ct => ({
           nombre: ct.nombre,
@@ -99,6 +102,7 @@ function toFormData(s: FormState): ClienteFormData {
     nombre: s.nombre.trim(),
     nit: s.nit.trim(),
     estado: s.estado,
+    usa_tipo_inversion: s.usaTipoInversion,
     contactos,
     condiciones_comerciales,
   }
@@ -327,6 +331,13 @@ export default function ClientesForm({ isOpen, onClose, onSave, initial }: Clien
               </div>
             </div>
           )}
+          {/* Bloque 2 — solo con este flag el cotizador muestra el selector OPEX/CAPEX */}
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={form.usaTipoInversion}
+              onChange={e => set('usaTipoInversion', e.target.checked)}
+              className="w-4 h-4 accent-brand-700" />
+            Clasifica contratos por tipo de inversión (OPEX/CAPEX — contratos tipo Claro)
+          </label>
         </div>
 
         <SelectField
