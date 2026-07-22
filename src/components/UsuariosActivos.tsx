@@ -70,15 +70,34 @@ export default function UsuariosActivos({
 }: UsuariosActivosProps) {
   const obraMap = Object.fromEntries(obras.map(o => [o.id, o.nombre_sitio]))
 
+  // Bloque 3+5 — filtro/agrupación por contratista (empleador)
+  const [filtroContratista, setFiltroContratista] = useState('')
+  const contratistasDeTecnicos = [...new Set(tecnicos.map(t => t.contratista_nombre).filter(Boolean))].sort() as string[]
+  const filtrados = filtroContratista === ''
+    ? tecnicos
+    : filtroContratista === '__sin__'
+      ? tecnicos.filter(t => !t.contratista_nombre)
+      : tecnicos.filter(t => t.contratista_nombre === filtroContratista)
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-      <div className="px-6 py-4 border-b border-gray-100">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
         <h2 className="font-bold text-gray-800">
           Base de datos de técnicos
           {!loading && (
-            <span className="ml-2 text-xs font-normal text-gray-400">({tecnicos.length})</span>
+            <span className="ml-2 text-xs font-normal text-gray-400">
+              ({filtrados.length}{filtroContratista ? ` de ${tecnicos.length}` : ''})
+            </span>
           )}
         </h2>
+        {contratistasDeTecnicos.length > 0 && (
+          <select value={filtroContratista} onChange={e => setFiltroContratista(e.target.value)}
+            className="text-xs px-2 py-1.5 border border-gray-300 rounded-lg bg-white text-gray-700">
+            <option value="">Todos los contratistas</option>
+            {contratistasDeTecnicos.map(n => <option key={n} value={n}>{n}</option>)}
+            <option value="__sin__">— Sin contratista —</option>
+          </select>
+        )}
       </div>
 
       <div className="overflow-x-auto">
@@ -107,7 +126,7 @@ export default function UsuariosActivos({
                 </tr>
               ))}
 
-            {!loading && tecnicos.length === 0 && (
+            {!loading && filtrados.length === 0 && (
               <tr>
                 <td colSpan={8} className="py-12 text-center text-gray-400">
                   No hay técnicos registrados.
@@ -116,7 +135,7 @@ export default function UsuariosActivos({
             )}
 
             {!loading &&
-              tecnicos.map(t => (
+              filtrados.map(t => (
                 <tr key={t.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-3">

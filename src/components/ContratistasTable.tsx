@@ -5,6 +5,9 @@ export interface Contratista {
   nit?: string
   cedula?: string
   estado: 'activo' | 'inactivo'
+  /** Bloque 3+5 — usuario técnico de la app que ES el contratista principal
+   *  (mismo individuo). La obra-espejo se le auto-asigna. */
+  usuario_tecnico_id?: string
 }
 
 interface ContratistasTableProps {

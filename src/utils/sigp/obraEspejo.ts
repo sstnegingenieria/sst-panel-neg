@@ -32,6 +32,9 @@ export interface IdentidadObraEspejo {
   proyecto_id: string
   proyecto_consecutivo: string
   origen: 'sigp'
+  /** Bloque 3+5 — contratista PRINCIPAL (de la asignación del proyecto).
+   *  La app lo ignora; el panel filtra el aval de obras por él. */
+  contratista_id?: string
 }
 
 /** Identidad de la obra desde el snapshot del proyecto (pura, testeable).
@@ -43,7 +46,7 @@ export interface IdentidadObraEspejo {
  *  Fallback legacy (proyectos nacidos antes del Bloque 1): título derivado
  *  del asunto + mes/año y código = consecutivo PRY. */
 export function construirObraEspejo(
-  p: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot'>,
+  p: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot' | 'asignacion'>,
   sitio: string | undefined,
   fecha: Date,
 ): IdentidadObraEspejo {
@@ -72,6 +75,7 @@ export function construirObraEspejo(
     proyecto_id: p.id,
     proyecto_consecutivo: p.consecutivo,
     origen: 'sigp',
+    ...(p.asignacion?.contratista_id ? { contratista_id: p.asignacion.contratista_id } : {}),
   }
 }
 
@@ -109,8 +113,13 @@ export async function obtenerSitioProyecto(
  * congelada al crear — coherente con el principio de snapshot). NUNCA lanza
  * hacia el flujo del proyecto: devuelve false si falló y el caller avisa.
  */
+// Bloque 3+5 (#3a) — la auto-asignación de la obra al usuario técnico del
+// contratista PRINCIPAL corre en la Cloud Function `asignarObraAlPrincipal`
+// (functions/obraEspejo.js, trigger sobre obras/{obraId}): los gestores NO
+// tienen escritura sobre `users` — el sistema asigna, SST avala al resto.
+
 export async function sincronizarObraEspejo(
-  p: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot' | 'origen' | 'estado'>,
+  p: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot' | 'origen' | 'estado' | 'asignacion'>,
 ): Promise<boolean> {
   // Defensa en profundidad: antes de en_ejecucion NO existe trabajo de campo —
   // jamás crear una obra prematura (la UI ya gatea; esto lo garantiza).

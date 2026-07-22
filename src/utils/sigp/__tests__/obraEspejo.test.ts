@@ -57,6 +57,14 @@ describe('construirObraEspejo — contrato exacto de la app Flutter', () => {
     expect(o.proyecto_id).toBe('abc123')
     expect(o.proyecto_consecutivo).toBe('PRY-2026-007')
   })
+  it('Bloque 3+5: lleva el contratista PRINCIPAL de la asignación (la app lo ignora)', () => {
+    const conAsignacion = {
+      ...conSitio,
+      asignacion: { contratista_id: 'redes-alturas', contratista_nombre: 'Redes y Alturas' },
+    } as unknown as typeof conSitio
+    expect(construirObraEspejo(conAsignacion, undefined, FECHA).contratista_id).toBe('redes-alturas')
+    expect(construirObraEspejo(conSitio, undefined, FECHA).contratista_id).toBeUndefined()
+  })
 })
 
 describe('estadoObraSegunProyecto — inactiva desde el handoff (decisión 22-jul)', () => {

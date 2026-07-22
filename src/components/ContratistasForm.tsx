@@ -9,6 +9,11 @@ export interface ContratistaFormData {
   nit: string
   cedula: string
   estado: 'activo' | 'inactivo'
+  /** Bloque 3+5 — el contratista PRINCIPAL suele ser también un usuario
+   *  técnico de la app (mismo individuo, ej. David Bernal). Con este vínculo
+   *  la obra-espejo se le auto-asigna al entrar el proyecto en ejecución.
+   *  '' = sin vínculo. La app Flutter ignora el campo. */
+  usuario_tecnico_id: string
 }
 
 interface ContratistasFormProps {
@@ -17,6 +22,8 @@ interface ContratistasFormProps {
   onSave: (data: ContratistaFormData) => Promise<void>
   initial?: ContratistaFormData | null
   editId?: string | null
+  /** Técnicos activos para el vínculo (id + nombre). */
+  tecnicos?: { id: string; nombre: string }[]
 }
 
 // ── Estado interno simplificado (sin redundancia) ─────────────────────────────
@@ -25,17 +32,19 @@ interface FormState {
   tipoDoc:  'nit' | 'cedula'   // NIT → jurídica | Cédula → natural
   numero:   string
   estado:   'activo' | 'inactivo'
+  usuarioTecnicoId: string
 }
 
 const NIT_RE = /^\d{3}\.\d{3}\.\d{3}-\d$/
 
 function toFormState(data: ContratistaFormData | null | undefined): FormState {
-  if (!data) return { nombre: '', tipoDoc: 'nit', numero: '', estado: 'activo' }
+  if (!data) return { nombre: '', tipoDoc: 'nit', numero: '', estado: 'activo', usuarioTecnicoId: '' }
   return {
     nombre:  data.nombre,
     tipoDoc: data.tipo === 'natural' ? 'cedula' : 'nit',
     numero:  data.tipo === 'natural' ? (data.cedula ?? '') : (data.nit ?? ''),
     estado:  data.estado,
+    usuarioTecnicoId: data.usuario_tecnico_id ?? '',
   }
 }
 
@@ -47,13 +56,14 @@ function toFormData(state: FormState): ContratistaFormData {
     nit:     state.tipoDoc === 'nit'    ? num : '',
     cedula:  state.tipoDoc === 'cedula' ? num : '',
     estado:  state.estado,
+    usuario_tecnico_id: state.usuarioTecnicoId,
   }
 }
 
 type Errors = Partial<Record<keyof FormState, string>>
 
 export default function ContratistasForm({
-  isOpen, onClose, onSave, initial, editId,
+  isOpen, onClose, onSave, initial, editId, tecnicos = [],
 }: ContratistasFormProps) {
   const [form, setForm]     = useState<FormState>(toFormState(null))
   const [errors, setErrors] = useState<Errors>({})
@@ -166,6 +176,23 @@ export default function ContratistasForm({
           ]}
           required
         />
+
+        {/* Bloque 3+5 — vínculo con el usuario técnico de la app (mismo individuo) */}
+        <div className="space-y-1">
+          <SelectField
+            label="Usuario técnico vinculado (contratista principal)"
+            value={form.usuarioTecnicoId}
+            onChange={v => set('usuarioTecnicoId', v)}
+            options={[
+              { value: '', label: '— Sin vínculo —' },
+              ...tecnicos.map(t => ({ value: t.id, label: t.nombre })),
+            ]}
+          />
+          <p className="text-xs text-gray-400">
+            Si el contratista principal usa la app como técnico (mismo individuo), al entrar
+            un proyecto suyo en ejecución la obra se le asigna sola.
+          </p>
+        </div>
       </div>
     </Modal>
   )
