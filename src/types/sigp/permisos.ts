@@ -41,14 +41,15 @@ export const ROLES_VE_TECNICOS: Rol[] = [
   'auxiliar_proyectos', 'director_proyectos',
   'residente_sst', 'gestion_integral',
 ]
-// Bloque D (22-jul-2026): los roles SST ven Obras como VISTA INFORMATIVA
-// (las obras nacen de los proyectos SIGP; solo lectura — la edición sigue
-// gateada por ROLES_GESTIONA_OBRAS y las reglas Firestore no cambian).
+// Hotfix A (23-jul-2026): Obras es una vista SST/administrativa — los roles
+// de PROYECTOS (auxiliar/director/operacion_comercial) trabajan en Proyectos
+// y ya no la ven. `gerencia_general` queda DENTRO en lectura (alta dirección,
+// supervisión — decisión de Giovanny). La creación manual quedó restringida
+// a admin (escotilla) y respaldada por la regla de `obras` (create solo
+// admin, o gestor con origen:'sigp' — la obra-espejo del flujo).
 export const ROLES_VE_OBRAS: Rol[] = [
-  'admin', 'gerencia_general',
-  'auxiliar_proyectos', 'director_proyectos', 'operacion_comercial',
-  'gerencia_administrativa',
-  'sst', 'residente_sst', 'gestion_integral',
+  'admin', 'sst', 'residente_sst', 'gestion_integral', 'gerencia_administrativa',
+  'gerencia_general',
 ]
 export const ROLES_VE_CONTRATISTAS: Rol[] = [
   'admin', 'gerencia_general',

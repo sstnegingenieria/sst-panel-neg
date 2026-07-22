@@ -80,20 +80,22 @@ function ProtectedRoutes() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route path="/" element={<ProtectedRoute rolesPermitidos={ROLES_VE_DASHBOARD_SST} redirectTo="/obras"><Dashboard /></ProtectedRoute>} />
+        <Route path="/" element={<ProtectedRoute rolesPermitidos={ROLES_VE_DASHBOARD_SST} redirectTo="/sigp/panel"><Dashboard /></ProtectedRoute>} />
         <Route path="/obras" element={<ProtectedRoute rolesPermitidos={ROLES_VE_OBRAS}><Obras /></ProtectedRoute>} />
         <Route path="/contratistas" element={<ProtectedRoute rolesPermitidos={ROLES_VE_CONTRATISTAS}><Contratistas /></ProtectedRoute>} />
-        <Route path="/usuarios" element={<ProtectedRoute rolesPermitidos={ROLES_VE_TECNICOS} redirectTo="/obras"><Usuarios /></ProtectedRoute>} />
-        <Route path="/registros" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/obras"><ObrasHub /></ProtectedRoute>} />
-        <Route path="/registros/:obraId" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/obras"><ObraRegistros /></ProtectedRoute>} />
-        <Route path="/reportes" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REPORTES} redirectTo="/obras"><Reportes /></ProtectedRoute>} />
+        <Route path="/usuarios" element={<ProtectedRoute rolesPermitidos={ROLES_VE_TECNICOS} redirectTo="/sigp/panel"><Usuarios /></ProtectedRoute>} />
+        <Route path="/registros" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/sigp/panel"><ObrasHub /></ProtectedRoute>} />
+        <Route path="/registros/:obraId" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/sigp/panel"><ObraRegistros /></ProtectedRoute>} />
+        <Route path="/reportes" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REPORTES} redirectTo="/sigp/panel"><Reportes /></ProtectedRoute>} />
 
         {/* Rutas SIGP (placeholders F0). Protegidas por rol con ProtectedRoute
             ('admin' siempre incluido como fallback). La sección del Sidebar se
             oculta con el flag sigp_f1_enabled (Remote Config); responden por URL directa si el
             rol del usuario lo permite. */}
         <Route path="/sigp/panel" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><PanelSigp /></ProtectedRoute>} />
-        <Route path="/sigp/obras" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><Obras /></ProtectedRoute>} />
+        {/* Hotfix A: la ruta legacy /sigp/obras sigue viva pero con los MISMOS
+            roles de la vista (SST/administrativa) — los gestores van a Proyectos */}
+        <Route path="/sigp/obras" element={<ProtectedRoute rolesPermitidos={ROLES_VE_OBRAS}><Obras /></ProtectedRoute>} />
         <Route path="/sigp/clientes" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ClientesSigp /></ProtectedRoute>} />
         {/* UX jul-2026: la gestión de LPU vive en el detalle del cliente; la
             bandeja vieja redirige con gracia (enlaces guardados). El detalle
