@@ -10,6 +10,9 @@ export interface Obra {
   origen?: 'sigp'
   proyecto_id?: string
   proyecto_consecutivo?: string
+  /** Bloque 3+5 — contratista PRINCIPAL del proyecto (de la asignación).
+   *  La app lo ignora; el panel filtra el aval de obras por él. */
+  contratista_id?: string
 }
 
 /** ¿Es una obra-espejo gobernada por el SIGP? */

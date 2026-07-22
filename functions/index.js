@@ -31,5 +31,7 @@ if (!admin.apps.length) {
 }
 
 const { generarConsecutivo } = require('./consecutivos');
+const { asignarObraAlPrincipal } = require('./obraEspejo');
 
 exports.generarConsecutivo = generarConsecutivo;
+exports.asignarObraAlPrincipal = asignarObraAlPrincipal;

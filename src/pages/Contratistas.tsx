@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { collection, getDocs, query, where } from 'firebase/firestore'
+import { db } from '../firebase/config'
 import ContratistasTable, { Contratista } from '../components/ContratistasTable'
 import ContratistasForm, { ContratistaFormData } from '../components/ContratistasForm'
 import StatCard from '../components/StatCard'
@@ -10,6 +12,7 @@ import { puedeGestionarContratistasUI, puedeHabilitarContratistas } from '../typ
 
 export default function Contratistas() {
   const [contratistas, setContratistas] = useState<Contratista[]>([])
+  const [tecnicos, setTecnicos] = useState<{ id: string; nombre: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [editTarget, setEditTarget] = useState<Contratista | null>(null)
   const modal = useModal()
@@ -23,6 +26,13 @@ export default function Contratistas() {
     try {
       const data = await getAllOrdered('contratistas', 'nombre', 'asc')
       setContratistas(data as Contratista[])
+      // Bloque 3+5 — técnicos activos para el vínculo contratista ↔ usuario
+      const users = await getDocs(query(collection(db, 'users'), where('rol', '==', 'tecnico')))
+      setTecnicos(users.docs
+        .map(d => ({ id: d.id, nombre: (d.data().nombre as string) ?? d.id, estado: d.data().estado as string }))
+        .filter(t => t.estado !== 'pendiente')
+        .map(({ id, nombre }) => ({ id, nombre }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre)))
     } catch {
       toast('Error al cargar contratistas', 'error')
     } finally {
@@ -166,12 +176,14 @@ export default function Contratistas() {
         isOpen={modal.isOpen}
         onClose={modal.close}
         onSave={handleSave}
+        tecnicos={tecnicos}
         initial={editTarget ? {
           nombre: editTarget.nombre,
           tipo: editTarget.tipo,
           nit: editTarget.nit ?? '',
           cedula: editTarget.cedula ?? '',
           estado: editTarget.estado,
+          usuario_tecnico_id: editTarget.usuario_tecnico_id ?? '',
         } : null}
         editId={editTarget?.id}
       />

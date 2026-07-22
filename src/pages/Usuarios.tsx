@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { collection, getDocs, deleteDoc, doc, updateDoc, Timestamp } from 'firebase/firestore'
+import { collection, getDocs, deleteDoc, doc, updateDoc, deleteField, Timestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useAuth } from '../contexts/AuthContext'
 import { Tecnico } from '../components/UsuariosPendientes'
@@ -22,6 +22,7 @@ export default function Usuarios() {
   const [activos, setActivos] = useState<Tecnico[]>([])
   const [panelUsers, setPanelUsers] = useState<Tecnico[]>([])
   const [obras, setObras] = useState<Obra[]>([])
+  const [contratistas, setContratistas] = useState<{ id: string; nombre: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [asignarTarget, setAsignarTarget] = useState<Tecnico | null>(null)
   const [perfilTarget, setPerfilTarget] = useState<Tecnico | null>(null)
@@ -38,6 +39,10 @@ export default function Usuarios() {
       // Cargar obras (para chips y modal)
       const obrasData = await getAllOrdered('obras', 'nombre_sitio', 'asc')
       setObras(obrasData as Obra[])
+
+      // Bloque 3+5 — contratistas activos (empleador del técnico + aval de obras)
+      const contratistasData = await getAllOrdered('contratistas', 'nombre', 'asc') as { id: string; nombre: string; estado?: string }[]
+      setContratistas(contratistasData.filter(c => c.estado === 'activo').map(({ id, nombre }) => ({ id, nombre })))
 
       // Cargar todos los usuarios
       const snap = await getDocs(collection(db, 'users'))
@@ -125,9 +130,18 @@ export default function Usuarios() {
   // ── Asignar obras ──────────────────────────────────────────────────────────
   const openAsignar = (t: Tecnico) => { setAsignarTarget(t); modalAsignar.open() }
 
-  const handleGuardarObras = async (tecnicoId: string, obraIds: string[]) => {
+  const handleGuardarObras = async (
+    tecnicoId: string,
+    obraIds: string[],
+    contratista: { id: string; nombre: string } | null,
+  ) => {
     try {
-      await updateDoc(doc(db, 'users', tecnicoId), { obras_asignadas: obraIds })
+      await updateDoc(doc(db, 'users', tecnicoId), {
+        obras_asignadas: obraIds,
+        // Bloque 3+5 — empleador del técnico (base del aval de obras)
+        contratista_id: contratista?.id ?? deleteField(),
+        contratista_nombre: contratista?.nombre ?? deleteField(),
+      })
       toast('Obras asignadas correctamente')
       await load()
     } catch {
@@ -197,6 +211,7 @@ export default function Usuarios() {
         onClose={modalAsignar.close}
         tecnico={asignarTarget}
         obras={obras}
+        contratistas={contratistas}
         onSave={handleGuardarObras}
       />
 
