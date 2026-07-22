@@ -5,7 +5,15 @@ export interface Obra {
   cliente: string
   alcance?: string
   estado: 'activa' | 'inactiva'
+  // Bloque D — obra-espejo creada desde un proyecto SIGP: identidad y estado
+  // los gobierna el PROYECTO (un solo escritor); el panel no la edita.
+  origen?: 'sigp'
+  proyecto_id?: string
+  proyecto_consecutivo?: string
 }
+
+/** ¿Es una obra-espejo gobernada por el SIGP? */
+export const esObraEspejo = (o: Obra) => o.origen === 'sigp'
 
 interface ObrasTableProps {
   obras: Obra[]
@@ -57,7 +65,15 @@ export default function ObrasTable({ obras, loading, onEdit, onToggleEstado, pue
           {!loading &&
             obras.map(obra => (
               <tr key={obra.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                <td className="py-3 px-4 font-medium text-gray-800">{obra.nombre_sitio}</td>
+                <td className="py-3 px-4 font-medium text-gray-800">
+                  {obra.nombre_sitio}
+                  {esObraEspejo(obra) && (
+                    <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-brand-50 text-brand-700"
+                      title={`Obra-espejo del proyecto ${obra.proyecto_consecutivo ?? ''}: identidad y estado los gobierna el SIGP`}>
+                      SIGP
+                    </span>
+                  )}
+                </td>
                 <td className="py-3 px-4 text-gray-600 font-mono text-xs">{obra.codigo}</td>
                 <td className="py-3 px-4 text-gray-600">{obra.cliente}</td>
                 <td className="py-3 px-4 max-w-xs">
@@ -72,7 +88,12 @@ export default function ObrasTable({ obras, loading, onEdit, onToggleEstado, pue
                   </span>
                 </td>
                 <td className="py-3 px-4 text-right">
-                  {puedeGestionar ? (
+                  {esObraEspejo(obra) ? (
+                    <span className="text-xs text-gray-400"
+                      title="El estado de esta obra lo sincroniza su proyecto SIGP (activa en ejecución, inactiva al pasar a facturación)">
+                      gestionada por el proyecto
+                    </span>
+                  ) : puedeGestionar ? (
                     <div className="flex items-center justify-end gap-2">
                       <button
                         onClick={() => onEdit(obra)}

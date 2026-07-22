@@ -18,6 +18,7 @@ import EvaluacionContratistaCard from '../../components/sigp/proyectos/Evaluacio
 import SatisfaccionClienteCard from '../../components/sigp/proyectos/SatisfaccionClienteCard'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
+import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
 import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA } from '../../types/sigp/proyecto'
 import { TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR } from '../../types/sigp/cotizacion'
 import type { Proyecto } from '../../types/sigp/proyecto'
@@ -81,6 +82,18 @@ export default function ProyectoDetalleSigp() {
           <span className={`inline-flex px-1.5 py-0.5 rounded text-[11px] font-semibold ${TIPO_INVERSION_COLOR[s.tipo_inversion]}`}>
             {TIPO_INVERSION_LABEL[s.tipo_inversion]}
           </span>
+        )}
+        {/* Bloque D — reintento del espejo SST (upsert idempotente: no duplica) */}
+        {puedeGestionar && idxEstado >= ESTADOS_PROYECTO.indexOf('en_ejecucion') && (
+          <button
+            onClick={async () => {
+              const ok = await sincronizarObraEspejo(proyecto)
+              toast(ok ? 'Obra SST sincronizada' : 'No se pudo sincronizar la obra SST', ok ? undefined : 'error')
+            }}
+            title="Crea o actualiza la obra-espejo del panel SST (idempotente: reintentar no duplica)"
+            className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 font-medium">
+            🏗 Sincronizar obra SST
+          </button>
         )}
         {proyecto.origen === 'preventivo' ? (
           <Link to={`/sigp/solicitudes/${proyecto.solicitud_id}`}

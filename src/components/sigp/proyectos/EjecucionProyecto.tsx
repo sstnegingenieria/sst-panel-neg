@@ -15,6 +15,7 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
 import { TIPOS_SOPORTE, TIPO_SOPORTE_LABEL, entregablesIhsFaltantes } from '../../../types/sigp/proyecto'
 import type { Proyecto, TipoSoporte, FotoEvidencia, EstadoProyecto } from '../../../types/sigp/proyecto'
+import { sincronizarObraEspejo } from '../../../utils/sigp/obraEspejo'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
@@ -57,6 +58,14 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
       fecha_actualizacion: ahora,
       historial: arrayUnion({ de, a, por: user?.uid ?? '', fecha: ahora, motivo }),
     })
+    // Bloque D — obra-espejo SST: nace (upsert idempotente) al entrar en
+    // ejecución y pasa a inactiva en el handoff a facturación. Un fallo aquí
+    // NO revierte la transición del proyecto: se avisa y se reintenta desde
+    // la ficha ("Sincronizar obra SST").
+    if (a === 'en_ejecucion' || a === 'enviado_a_facturacion') {
+      const ok = await sincronizarObraEspejo({ ...proyecto, estado: a })
+      if (!ok) toast('El proyecto avanzó, pero la obra SST no se pudo sincronizar — reintenta desde la ficha', 'error')
+    }
     await reload()
   }
 
