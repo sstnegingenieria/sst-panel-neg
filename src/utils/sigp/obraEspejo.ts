@@ -35,24 +35,40 @@ export interface IdentidadObraEspejo {
 }
 
 /** Identidad de la obra desde el snapshot del proyecto (pura, testeable).
- *  Título = sitio + alcance corto (asunto) + mes/año; código = PRY-YYYY-NNN. */
+ *
+ *  Bloque 1 (22-jul): si el snapshot trae la identificación del sitio
+ *  capturada en el origen, la obra usa el NOMBRE LIMPIO del sitio y el
+ *  CÓDIGO del cliente ('N/A' cuando no asigna) — el consecutivo PRY va en
+ *  `proyecto_consecutivo` (chip de referencia en el panel), NO en `codigo`.
+ *  Fallback legacy (proyectos nacidos antes del Bloque 1): título derivado
+ *  del asunto + mes/año y código = consecutivo PRY. */
 export function construirObraEspejo(
   p: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot'>,
   sitio: string | undefined,
   fecha: Date,
 ): IdentidadObraEspejo {
   const asunto = (p.snapshot.asunto || '').trim()
-  const base = (sitio || '').trim()
-  const nombre_sitio = base
-    ? `${base} — ${asunto} (${mesAnio(fecha)})`
-    : `${asunto} (${mesAnio(fecha)})`
+  const sitioLimpio = (p.snapshot.nombre_sitio || '').trim()
+
+  let nombre_sitio: string
+  let codigo: string
+  if (sitioLimpio) {
+    nombre_sitio = sitioLimpio
+    codigo = (p.snapshot.codigo_sitio_cliente || '').trim() || 'N/A'
+  } else {
+    const base = (sitio || '').trim()
+    nombre_sitio = base
+      ? `${base} — ${asunto} (${mesAnio(fecha)})`
+      : `${asunto} (${mesAnio(fecha)})`
+    codigo = p.consecutivo
+  }
   return {
     nombre_sitio,
-    codigo: p.consecutivo,
+    codigo,
     cliente: p.snapshot.cliente,
     alcance: asunto,
     // Mismo formato que calcula/escribe la app: "sitio | codigo | cliente"
-    nombre_completo: `${nombre_sitio} | ${p.consecutivo} | ${p.snapshot.cliente}`,
+    nombre_completo: `${nombre_sitio} | ${codigo} | ${p.snapshot.cliente}`,
     proyecto_id: p.id,
     proyecto_consecutivo: p.consecutivo,
     origen: 'sigp',

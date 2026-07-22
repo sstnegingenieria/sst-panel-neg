@@ -44,6 +44,9 @@ interface FormState {
   asunto: string
   descripcion: string
   sitio: string
+  // Bloque 1 — identificación del sitio (las áreas se comunican por su nombre)
+  nombreSitio: string
+  codigoSitio: string
   fechaRecepcion: string
   // F2.2 — preventivo IHS
   sitioId: string
@@ -59,7 +62,7 @@ const inicial = (): FormState => ({
   tipo: 'comercial',
   clienteId: '', prospectoNombre: '',
   contactoNombre: '', contactoCargo: '', contactoEmail: '', contactoTelefono: '',
-  canal: 'correo', asunto: '', descripcion: '', sitio: '', fechaRecepcion: hoyISO(),
+  canal: 'correo', asunto: '', descripcion: '', sitio: '', nombreSitio: '', codigoSitio: '', fechaRecepcion: hoyISO(),
   sitioId: '', sitioNombre: '', tipoSitio: 'greenfield', intensidad: 'pesado',
   esJungle: false, departamento: '', fechaAsignacion: hoyISO(),
 })
@@ -173,6 +176,9 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
         e.origen = 'Indica un cliente o el nombre del prospecto'
       if (!form.descripcion.trim() || form.descripcion.trim().length < 5)
         e.descripcion = 'Describe la solicitud (mínimo 5 caracteres)'
+      // Bloque 1 — el sitio se identifica por su NOMBRE + código del cliente
+      if (!form.nombreSitio.trim()) e.nombreSitio = 'Requerido — nombre del sitio'
+      if (!form.codigoSitio.trim()) e.codigoSitio = "Requerido — escribe 'N/A' si el cliente no asigna código"
     }
     if (!form.contactoNombre.trim()) e.contactoNombre = 'Requerido'
     if (form.contactoEmail.trim() && !EMAIL_RE.test(form.contactoEmail.trim()))
@@ -208,6 +214,12 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
     if (form.sitio.trim()) doc_.sitio = form.sitio.trim()
     // Bloque B — asunto canónico (opcional al registrar; la cotización lo hereda)
     if (form.asunto.trim()) doc_.asunto = form.asunto.trim()
+    // Bloque 1 — identificación del sitio. En preventivos se autocompleta del
+    // sitio IHS capturado (editable si el usuario escribió otra cosa).
+    const nombreSitio = form.nombreSitio.trim() || (esPreventivo ? form.sitioNombre.trim() : '')
+    const codigoSitio = form.codigoSitio.trim() || (esPreventivo ? (form.sitioId.trim() || 'N/A') : '')
+    if (nombreSitio) doc_.nombre_sitio = nombreSitio
+    if (codigoSitio) doc_.codigo_sitio_cliente = codigoSitio
     // F2.2 — preventivo IHS: tipo + datos del sitio con zona/SAI denormalizados
     if (esPreventivo && zona) {
       doc_.tipo = 'preventivo'
@@ -502,12 +514,35 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
           {errores.descripcion && <p className="text-xs text-red-600">{errores.descripcion}</p>}
         </div>
 
+        {/* Bloque 1 — identificación del sitio: nombre limpio + código del
+            cliente. En preventivos se autocompletan del sitio IHS (editables). */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <TextField
+            label="Nombre del sitio"
+            value={form.nombreSitio}
+            onChange={v => set('nombreSitio', v)}
+            error={errores.nombreSitio}
+            required={!esPreventivo}
+            placeholder={esPreventivo ? (form.sitioNombre.trim() || 'auto: nombre del sitio IHS') : 'Ej: ALKARAWI'}
+            hint={esPreventivo ? 'Vacío → se toma del sitio IHS' : 'Con este nombre se identificará la obra'}
+          />
+          <TextField
+            label="Código del sitio (cliente)"
+            value={form.codigoSitio}
+            onChange={v => set('codigoSitio', v)}
+            error={errores.codigoSitio}
+            required={!esPreventivo}
+            placeholder={esPreventivo ? (form.sitioId.trim() || 'auto: id IHS · N/A') : 'Ej: COCUN7002 — N/A si no asigna'}
+            hint={esPreventivo ? 'Vacío → id del sitio IHS o N/A' : "'N/A' si el cliente no asigna código"}
+          />
+        </div>
+
         {!esPreventivo && (
           <TextField
             label="Sitio / ubicación"
             value={form.sitio}
             onChange={v => set('sitio', v)}
-            hint="Opcional — dónde se ejecutaría"
+            hint="Opcional — ubicación/dirección donde se ejecutaría"
           />
         )}
 

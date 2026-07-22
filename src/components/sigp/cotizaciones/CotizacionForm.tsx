@@ -168,6 +168,9 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
       }
       if (form.prospectoNombre.trim()) parentData.prospecto_nombre = form.prospectoNombre.trim()
       if (form.solicitudId) parentData.solicitud_id = form.solicitudId
+      // Bloque 1 — identificación del sitio heredada de la solicitud (editable en borrador)
+      if (solVinculada?.nombre_sitio?.trim()) parentData.nombre_sitio = solVinculada.nombre_sitio.trim()
+      if (solVinculada?.codigo_sitio_cliente?.trim()) parentData.codigo_sitio_cliente = solVinculada.codigo_sitio_cliente.trim()
       if (form.tipoInversion) parentData.tipo_inversion = form.tipoInversion
 
       const batch = writeBatch(db)

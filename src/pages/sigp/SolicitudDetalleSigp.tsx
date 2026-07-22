@@ -198,9 +198,11 @@ export default function SolicitudDetalleSigp() {
 
             <p className="text-sm text-gray-700 whitespace-pre-wrap">{solicitud.descripcion}</p>
             <div className="grid grid-cols-2 gap-2 text-sm pt-1">
+              <Dato k="Nombre del sitio" v={solicitud.nombre_sitio || '—'} />
+              <Dato k="Código del sitio (cliente)" v={solicitud.codigo_sitio_cliente || '—'} />
               <Dato k="Canal" v={CANAL_LABEL[solicitud.canal] ?? solicitud.canal} />
               <Dato k="Recepción" v={fFecha(solicitud.fecha_recepcion)} />
-              <Dato k="Sitio" v={solicitud.sitio || '—'} />
+              <Dato k="Ubicación" v={solicitud.sitio || '—'} />
               <Dato k="Registrada" v={fFecha(solicitud.fecha_creacion)} />
             </div>
             {solicitud.motivo_descarte && (

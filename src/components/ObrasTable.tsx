@@ -68,9 +68,9 @@ export default function ObrasTable({ obras, loading, onEdit, onToggleEstado, pue
                 <td className="py-3 px-4 font-medium text-gray-800">
                   {obra.nombre_sitio}
                   {esObraEspejo(obra) && (
-                    <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-brand-50 text-brand-700"
-                      title={`Obra-espejo del proyecto ${obra.proyecto_consecutivo ?? ''}: identidad y estado los gobierna el SIGP`}>
-                      SIGP
+                    <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-brand-50 text-brand-700 font-mono"
+                      title="Obra-espejo del proyecto SIGP: identidad y estado los gobierna el proyecto">
+                      {obra.proyecto_consecutivo ?? 'SIGP'}
                     </span>
                   )}
                 </td>

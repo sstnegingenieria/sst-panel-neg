@@ -65,6 +65,9 @@ export default function CotizacionDetalleSigp() {
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({})
   const [asunto, setAsunto] = useState('')
   const [contactoNombre, setContactoNombre] = useState('')
+  // Bloque 1 — identificación del sitio (heredada de la solicitud, editable en borrador)
+  const [nombreSitio, setNombreSitio] = useState('')
+  const [codigoSitio, setCodigoSitio] = useState('')
   // 1.4B.b — análisis económico interno (toggle apagado por defecto) + modal APU
   const [analisis, setAnalisis] = useState(false)
   const [apuIdx, setApuIdx] = useState<number | null>(null)
@@ -89,7 +92,9 @@ export default function CotizacionDetalleSigp() {
     setAsunto(cotizacion?.asunto ?? '')
     setContactoNombre(cotizacion?.contacto ?? '')
     setTipoInversion(cotizacion?.tipo_inversion ?? '')
-  }, [cotizacion?.id, cotizacion?.asunto, cotizacion?.contacto, cotizacion?.tipo_inversion]) // eslint-disable-line react-hooks/exhaustive-deps
+    setNombreSitio(cotizacion?.nombre_sitio ?? '')
+    setCodigoSitio(cotizacion?.codigo_sitio_cliente ?? '')
+  }, [cotizacion?.id, cotizacion?.asunto, cotizacion?.contacto, cotizacion?.tipo_inversion, cotizacion?.nombre_sitio, cotizacion?.codigo_sitio_cliente]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!version) return
@@ -368,6 +373,8 @@ export default function CotizacionDetalleSigp() {
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id), {
         total: tot.total, validez_dias: Number(cond.validez_dias) || 0,
         asunto: asunto.trim(), contacto: contactoNombre.trim() || deleteField(),
+        nombre_sitio: nombreSitio.trim() || deleteField(),
+        codigo_sitio_cliente: codigoSitio.trim() || deleteField(),
         tipo_inversion: tipoInversion || deleteField(),
         fecha_actualizacion: Timestamp.now(),
       })
@@ -602,6 +609,26 @@ export default function CotizacionDetalleSigp() {
           {cotizacion.contacto && <span className="ml-4"><span className="text-xs text-gray-400 mr-2">Contacto</span>{cotizacion.contacto}</span>}
         </p>
       )}
+
+      {/* Bloque 1 — identificación del sitio (alimenta el proyecto y la obra SST) */}
+      {editable ? (
+        <div className="flex items-center gap-2 max-w-3xl">
+          <label className="text-xs text-gray-500 flex-shrink-0">Sitio</label>
+          <input value={nombreSitio} onChange={e => setNombreSitio(e.target.value)}
+            placeholder="Nombre del sitio (ej: ALKARAWI)"
+            title="Nombre limpio del sitio — con él se identificará la obra en SST y en la app"
+            className={`w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 ${nombreSitio.trim() ? 'border-gray-300' : 'border-amber-300'}`} />
+          <label className="text-xs text-gray-500 flex-shrink-0 ml-2">Cód. sitio</label>
+          <input value={codigoSitio} onChange={e => setCodigoSitio(e.target.value)}
+            placeholder="COCUN7002 · N/A" title="Código del sitio asignado por el cliente — 'N/A' si no asigna"
+            className={`w-40 px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 ${codigoSitio.trim() ? 'border-gray-300' : 'border-amber-300'}`} />
+        </div>
+      ) : (cotizacion.nombre_sitio || cotizacion.codigo_sitio_cliente) ? (
+        <p className="text-sm text-gray-700">
+          <span className="text-xs text-gray-400 mr-2">Sitio</span>{cotizacion.nombre_sitio || '—'}
+          <span className="ml-4"><span className="text-xs text-gray-400 mr-2">Cód. sitio</span>{cotizacion.codigo_sitio_cliente || '—'}</span>
+        </p>
+      ) : null}
 
       {/* Acciones de estado */}
       <CotizacionAcciones
