@@ -18,6 +18,8 @@ import {
   ANTICIPO_PCT_DEFAULT, utilidadDe, margenPctDe, anticipoValorDe, saldoValorDe,
   cambiosPreliquidacion, correccionRevierteAprobacion, saldoRealDe,
   contratistaDesdeMargen, claveItemAlcance,
+  puedeCorregirPreliquidacionEn, correccionEsAjusteEnEjecucion,
+  ESTADO_PRY_LABEL,
 } from '../../../types/sigp/proyecto'
 import { modoAgrupacionDe, actividadesDe, subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../../types/sigp/cotizacion'
 import type { VersionCotizacion, ItemCotizacion } from '../../../types/sigp/cotizacion'
@@ -183,11 +185,13 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
     } catch { toast('Error al aprobar (verifica tu rol)', 'error') } finally { setAplicando(false) }
   }
 
-  // ── Bloque 4 — corrección con trazabilidad (ISO 7.5, cambios controlados) ──
-  // Proyectos define/corrige; si ya estaba aprobada, la corrección REVIERTE a
-  // preliquidacion_definida y exige re-aprobación. Nunca un cambio silencioso.
-  const puedeCorregir = puedeGestionar && !!pre &&
-    ['preliquidacion_definida', 'preliquidacion_aprobada', 'anticipo_girado'].includes(proyecto.estado)
+  // ── Bloque 4 + Hotfix 23-jul — corrección con trazabilidad (ISO 7.5) ──
+  // Proyectos define/corrige DESDE definida HASTA el handoff (el caso real:
+  // el error se descubre al digitar el costo real, al cierre de la
+  // ejecución). Aprobada/girado → revierte a definida; en ejecución o
+  // después → el proyecto NO regresa: re-aprobación in situ. Nunca un
+  // cambio silencioso.
+  const puedeCorregir = puedeGestionar && !!pre && puedeCorregirPreliquidacionEn(proyecto.estado)
 
   const abrirCorreccion = () => {
     if (!pre) return
@@ -218,7 +222,8 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
   }
   const corregir = async () => {
     if (!pre || corrValor === undefined || !corrPctValido || !corrMotivo.trim() || corrCambios.length === 0) return
-    const revierte = correccionRevierteAprobacion(proyecto.estado)
+    const revierte = correccionRevierteAprobacion(proyecto.estado)   // aprobada/girado → vuelve a definida (Bloque 4)
+    const ajuste = correccionEsAjusteEnEjecucion(proyecto.estado)    // en ejecución+ → SOLO traza + flag, sin frenar nada
     const detalle = corrCambios.map(c =>
       `${ETIQUETA_CAMPO[c.campo]}: ${c.campo === 'anticipo_pct' ? `${fmtNum(c.antes)}% → ${fmtNum(c.despues)}%` : `${fmtMoney(c.antes)} → ${fmtMoney(c.despues)}`}`).join(' · ')
     if (revierte && !window.confirm(
@@ -226,11 +231,16 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
     setAplicando(true)
     try {
       const ahora = Timestamp.now()
-      // La aprobación anterior se retira del dato vivo (queda en el historial)
+      // Solo la reversión pre-ejecución retira la aprobación del dato vivo
+      // (queda en el historial). El AJUSTE en ejecución la CONSERVA: siguió
+      // siendo válida para el anticipo — la reconciliación es de la liquidación.
       const { aprobada_por: _ap, fecha_aprobacion: _fa, ...base } = pre
       const nueva = revierte
         ? { ...base, valor_contratista: corrValor, anticipo_pct: corrPctNum }
-        : { ...pre, valor_contratista: corrValor, anticipo_pct: corrPctNum }
+        : {
+            ...pre, valor_contratista: corrValor, anticipo_pct: corrPctNum,
+            ...(ajuste ? { ajuste_pendiente_liquidacion: true } : {}),
+          }
       await updateDoc(doc(db, 'proyectos', proyecto.id), {
         preliquidacion: nueva,
         ...(revierte ? { estado: 'preliquidacion_definida' } : {}),
@@ -238,9 +248,14 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
         historial: arrayUnion(entrada(proyecto.estado, revierte ? 'preliquidacion_definida' : proyecto.estado,
           `Corrección de preliquidación — ${detalle} — Motivo: ${corrMotivo.trim()}` +
           (revierte ? ' · REVIERTE la aprobación: requiere re-aprobación de Gerencia Administrativa' : '') +
+          (ajuste ? ` · AJUSTE en ejecución (el proyecto continúa en «${ESTADO_PRY_LABEL[proyecto.estado]}») — pendiente de reconocer en la LIQUIDACIÓN por Gerencia Administrativa` : '') +
           (pre.anticipo ? ` · anticipo ya girado ${fmtMoney(pre.anticipo.valor)} se mantiene (saldo recalculado contra el giro)` : ''))),
       })
-      toast(revierte ? 'Corregida — vuelve a "Definida", pendiente de re-aprobación' : 'Preliquidación corregida con traza')
+      toast(revierte
+        ? 'Corregida — vuelve a "Definida", pendiente de re-aprobación'
+        : ajuste
+          ? 'Ajuste registrado con traza — se reconciliará en la liquidación'
+          : 'Preliquidación corregida con traza')
       setCorrForm(false)
       await reload()
     } catch { toast('Error al corregir la preliquidación', 'error') } finally { setAplicando(false) }
@@ -380,6 +395,14 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
         {pre?.anticipo && <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">Anticipo girado</span>}
         {pre && !pre.anticipo && pre.aprobada_por && <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-lime-100 text-lime-800">Aprobada</span>}
         {pre && !pre.aprobada_por && <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-yellow-100 text-yellow-800">Definida · pendiente de aprobación</span>}
+        {/* Ajuste hecho durante la ejecución: pura trazabilidad — lo reconcilia
+            Gerencia Administrativa en la LIQUIDACIÓN (no frena el proyecto) */}
+        {pre?.ajuste_pendiente_liquidacion && (
+          <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800"
+            title="Se corrigió la preliquidación durante la ejecución. El ajuste (con su motivo en el historial) se reconoce en la liquidación por Gerencia Administrativa. No frena el avance.">
+            Ajuste pendiente de reconocer en liquidación
+          </span>
+        )}
         {/* Hotfix B — la corrección es una acción de primer nivel de la sección
             (antes vivía como botón pequeño al fondo y costaba encontrarla) */}
         {puedeCorregir && !corrForm && (
@@ -387,7 +410,9 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
             className="ml-auto text-xs px-3 py-1.5 rounded-lg font-semibold border border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50"
             title={correccionRevierteAprobacion(proyecto.estado)
               ? 'Corregir valores con motivo y traza (ISO 7.5) — revierte la aprobación y exige re-aprobación de Gerencia Administrativa'
-              : 'Corregir valores con motivo y traza en el historial (ISO 7.5)'}>
+              : correccionEsAjusteEnEjecucion(proyecto.estado)
+                ? 'Ajuste con motivo y traza (ISO 7.5) — no frena el proyecto; se reconoce en la liquidación por Gerencia Administrativa'
+                : 'Corregir valores con motivo y traza en el historial (ISO 7.5)'}>
             ✎ Corregir preliquidación
           </button>
         )}
@@ -600,6 +625,8 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
             Corrección de preliquidación
             {correccionRevierteAprobacion(proyecto.estado) &&
               <span className="font-normal"> — al guardar, vuelve a «Definida» y exige re-aprobación de Gerencia Administrativa</span>}
+            {correccionEsAjusteEnEjecucion(proyecto.estado) &&
+              <span className="font-normal"> — ajuste en ejecución: no frena el proyecto; se reconoce en la LIQUIDACIÓN por Gerencia Administrativa</span>}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
             <label className="text-xs text-gray-500">
