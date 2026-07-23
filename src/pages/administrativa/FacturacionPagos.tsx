@@ -22,7 +22,7 @@ import {
   ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR,
   SECCIONES_ADMINISTRATIVA, enBandejaAdministrativa,
   enColaVerificacionSst, estadoSstGate, sstGateAlDia, SST_GATE_LABEL, SST_GATE_COLOR,
-  completitudCierre,
+  completitudCierre, pagoClientePendiente, puedeCerrarseProyecto,
   MEDIOS_PAGO, MEDIO_PAGO_LABEL,
 } from '../../types/sigp/proyecto'
 import { puedeRegistrarFacturaUI, puedeLiquidarUI, puedeCerrarProyectoUI, puedeAprobarPreliquidacionUI } from '../../types/sigp/permisos'
@@ -65,7 +65,9 @@ export default function FacturacionPagos() {
   const [notasCierre, setNotasCierre] = useState('')
 
   const cerrarProyecto = async () => {
-    if (!cierreTarget) return
+    // INTEGRIDAD (anticipada, 23-jul): no se cierra con cuenta por cobrar
+    // abierta — la regla de Firestore también lo exige.
+    if (!cierreTarget || !puedeCerrarseProyecto(cierreTarget)) return
     setAplicando(true)
     try {
       const ahora = Timestamp.now()
@@ -116,6 +118,11 @@ export default function FacturacionPagos() {
         diferencia: liq.diferencia,
         ajustesReconocidos: liq.ajustes_reconocidos,
         ...(liq.observaciones ? { observaciones: liq.observaciones } : {}),
+        ...(liq.liquidacion_anticipada ? { anticipada: {
+          justificacion: liq.justificacion_anticipada ?? '',
+          acuerdoCon: liq.acuerdo_con ?? '—',
+          acuerdoFecha: liq.acuerdo_fecha?.toDate() ?? liq.fecha.toDate(),
+        } } : {}),
       }, await cargarAssetsPdf())
       const url = URL.createObjectURL(new Blob([pdf as BlobPart], { type: 'application/pdf' }))
       const a = document.createElement('a')
@@ -150,10 +157,13 @@ export default function FacturacionPagos() {
 
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
-    // 'todas' = el ciclo activo (los cerrados solo en su sección/histórico)
+    // 'todas' = el ciclo activo (los cerrados solo en su sección/histórico).
+    // "Por cobrar" usa PREDICADO, no estado: incluye el liquidado ANTICIPADO
+    // cuyo pago sigue pendiente (23-jul).
     const estadoSeccion = SECCIONES_ADMINISTRATIVA.find(s => s.clave === seccion)?.estado
-    const base = proyectos.filter(p => estadoSeccion
-      ? p.estado === estadoSeccion
+    const base = proyectos.filter(p =>
+      seccion === 'por_cobrar' ? pagoClientePendiente(p)
+      : estadoSeccion ? p.estado === estadoSeccion
       : p.estado !== 'cerrado')
     const lista = q
       ? base.filter(p =>
@@ -170,7 +180,8 @@ export default function FacturacionPagos() {
   }, [proyectos, busqueda, seccion])
 
   const conteo = useMemo(() => Object.fromEntries(
-    SECCIONES_ADMINISTRATIVA.map(s => [s.clave, proyectos.filter(p => p.estado === s.estado).length]),
+    SECCIONES_ADMINISTRATIVA.map(s => [s.clave, proyectos.filter(p =>
+      s.clave === 'por_cobrar' ? pagoClientePendiente(p) : p.estado === s.estado).length]),
   ) as Record<string, number>, [proyectos])
 
   const abrirRegistro = (p: Proyecto) => {
@@ -238,6 +249,10 @@ export default function FacturacionPagos() {
         const snap = await uploadBytes(ref(storage, `proyectos/${pagoTarget.id}/pago/${nombre}`), pagoComprobante)
         comprobanteData = { comprobante_url: await getDownloadURL(snap.ref), comprobante_nombre: pagoComprobante.name }
       }
+      // Cobro POSTERIOR a una liquidación anticipada: llena pago_cliente SIN
+      // cambiar el estado (ya avanzó a liquidado_contratista) — y con eso el
+      // cierre queda desbloqueado.
+      const posterior = pagoTarget.estado === 'liquidado_contratista'
       await updateDoc(doc(db, 'proyectos', pagoTarget.id), {
         pago_cliente: {
           fecha: Timestamp.fromDate(new Date(pagoFecha + 'T12:00:00')),
@@ -247,14 +262,15 @@ export default function FacturacionPagos() {
           registrado_por: user?.uid ?? '',
           fecha_registro: ahora,
         },
-        estado: 'pagado_cliente',
+        ...(posterior ? {} : { estado: 'pagado_cliente' }),
         fecha_actualizacion: ahora,
         historial: arrayUnion({
-          de: 'facturado', a: 'pagado_cliente', por: user?.uid ?? '', fecha: ahora,
-          motivo: `Pago del cliente registrado — ${fmtMoney(pagoValor)} por ${MEDIO_PAGO_LABEL[pagoMedio].toLowerCase()}`,
+          de: pagoTarget.estado, a: posterior ? pagoTarget.estado : 'pagado_cliente', por: user?.uid ?? '', fecha: ahora,
+          motivo: `Pago del cliente registrado — ${fmtMoney(pagoValor)} por ${MEDIO_PAGO_LABEL[pagoMedio].toLowerCase()}` +
+            (posterior ? ' (posterior a la liquidación anticipada — cierra la cuenta por cobrar; el estado se mantiene)' : ''),
         }),
       })
-      toast('Pago del cliente registrado — proyecto pagado')
+      toast(posterior ? 'Cobro registrado — el proyecto ya puede cerrarse' : 'Pago del cliente registrado — proyecto pagado')
       setPagoTarget(null)
       await load()
     } catch {
@@ -388,10 +404,24 @@ export default function FacturacionPagos() {
                       🧾 Registrar factura
                     </button>
                   ) : p.estado === 'facturado' && puedeRegistrar ? (
-                    <button onClick={() => abrirPago(p)}
-                      className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
-                      💰 Registrar pago del cliente
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => abrirPago(p)}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                        💰 Registrar pago del cliente
+                      </button>
+                      {/* Anticipada (23-jul): pagar al contratista ANTES de
+                          cobrar, por acuerdo — gate SST innegociable */}
+                      {puedeLiquidar && (
+                        <button onClick={() => setLiquidacionTarget(p)}
+                          disabled={!sstGateAlDia(gates[p.id] ?? {})}
+                          title={sstGateAlDia(gates[p.id] ?? {})
+                            ? 'Liquidar al contratista ANTES del pago del cliente (requiere acuerdo con Gerencia de Proyectos)'
+                            : 'Bloqueada: falta el aval de SST (gate al día)'}
+                          className="text-xs px-3 py-1.5 rounded-lg font-medium border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                          ⏩ Liquidar anticipado
+                        </button>
+                      )}
+                    </div>
                   ) : p.estado === 'pagado_cliente' && puedeLiquidar ? (
                     // 3b — liquidar exige el gate SST al día (la regla también);
                     // sin aval el botón lo dice y el modal explica la novedad.
@@ -409,11 +439,22 @@ export default function FacturacionPagos() {
                           📄 Liquidación
                         </button>
                       )}
-                      {/* Bloque final: cerrar solo desde liquidado; un cerrado
-                          es SOLO LECTURA (queda únicamente el documento) */}
+                      {/* Anticipada: el cobro pendiente se registra DESPUÉS
+                          (llena pago_cliente sin cambiar el estado) */}
+                      {p.estado === 'liquidado_contratista' && !p.pago_cliente && puedeRegistrar && (
+                        <button onClick={() => abrirPago(p)}
+                          className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                          💰 Registrar cobro pendiente
+                        </button>
+                      )}
+                      {/* Bloque final: cerrar solo desde liquidado CON el pago
+                          registrado (no se cierra con cuenta por cobrar
+                          abierta); un cerrado es SOLO LECTURA */}
                       {p.estado === 'liquidado_contratista' && puedeCerrar && (
                         <button onClick={() => { setCierreTarget(p); setNotasCierre('') }}
-                          className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
+                          disabled={!puedeCerrarseProyecto(p)}
+                          title={puedeCerrarseProyecto(p) ? undefined : 'Bloqueado: el pago del cliente sigue pendiente (liquidación anticipada) — regístralo primero'}
+                          className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 disabled:opacity-40 disabled:cursor-not-allowed">
                           🏁 Cerrar proyecto
                         </button>
                       )}
@@ -543,7 +584,10 @@ export default function FacturacionPagos() {
         actions={[
           { label: 'Cancelar', onClick: () => setCierreTarget(null), variant: 'secondary' },
           {
-            label: aplicando ? 'Cerrando…' : 'Cerrar proyecto (queda de solo lectura)',
+            label: aplicando ? 'Cerrando…'
+              : cierreTarget && !puedeCerrarseProyecto(cierreTarget)
+                ? 'Bloqueado: cobro del cliente pendiente'
+                : 'Cerrar proyecto (queda de solo lectura)',
             onClick: cerrarProyecto, variant: 'primary', loading: aplicando,
           },
         ]}
@@ -552,8 +596,15 @@ export default function FacturacionPagos() {
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
               Cierre formal del ciclo. El resumen es <strong>informativo</strong> — un pendiente
-              no bloquea el cierre, pero conviene dejarlo capturado (evidencia ISO).
+              no bloquea el cierre, <strong>excepto el pago del cliente</strong>: no se cierra
+              con cuenta por cobrar abierta.
             </p>
+            {!puedeCerrarseProyecto(cierreTarget) && (
+              <p className="text-xs text-red-700 bg-red-50 rounded px-2 py-1.5">
+                ⛔ Este proyecto se liquidó ANTICIPADAMENTE y el cobro al cliente sigue
+                pendiente — registra el pago (sección "Por cobrar") y vuelve a cerrar.
+              </p>
+            )}
             <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
               {completitudCierre(cierreTarget).map(item => (
                 <div key={item.clave} className="flex items-center justify-between px-3 py-2 text-sm">

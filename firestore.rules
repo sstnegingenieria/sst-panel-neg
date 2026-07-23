@@ -323,16 +323,28 @@ service cloud.firestore {
       // la preliquidación (definir y aprobar en la misma área rompe la
       // segregación); admin y gerencia_general SÍ, como RESPALDO, y su
       // aprobación exige salvedad.
+      // Liquidación anticipada (23-jul) — MÁQUINA EXPLÍCITA hacia
+      // liquidado_contratista: normal desde pagado_cliente; ANTICIPADA solo
+      // desde facturado con marca + justificación (acuerdo con Gerencia de
+      // Proyectos); ningún otro origen. El gate SST al_dia es INNEGOCIABLE
+      // en ambas vías. El CIERRE exige el pago del cliente registrado (no
+      // se cierra con cuenta por cobrar abierta).
       allow update: if puedeGestionarProyectos()
                     && resource.data.get('estado', '') != 'cerrado'
                     && (!fijaAprobacionPreliq()
                         || (rolActual() in ['admin', 'gerencia_general']
                             && salvedadPreliq() != ''))
                     && (request.resource.data.get('estado', '') != 'cerrado'
-                        || resource.data.get('estado', '') == 'liquidado_contratista')
+                        || (resource.data.get('estado', '') == 'liquidado_contratista'
+                            && request.resource.data.get('pago_cliente', null) != null))
                     && (request.resource.data.get('estado', '') != 'liquidado_contratista'
-                        || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
-                            .data.sst_gate.estado == 'al_dia');
+                        || resource.data.get('estado', '') == 'liquidado_contratista'
+                        || (get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
+                              .data.sst_gate.estado == 'al_dia'
+                            && (resource.data.get('estado', '') == 'pagado_cliente'
+                                || (resource.data.get('estado', '') == 'facturado'
+                                    && request.resource.data.get('liquidacion', {}).get('liquidacion_anticipada', false) == true
+                                    && request.resource.data.get('liquidacion', {}).get('justificacion_anticipada', '') != ''))));
 
       // Respaldo de aprobación (23-jul): gestion_integral SOLO aprueba la
       // preliquidación (hasOnly acotado) y siempre con salvedad. La titular
@@ -359,13 +371,25 @@ service cloud.firestore {
                     && request.resource.data.diff(resource.data)
                         .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'pago_cliente', 'liquidacion', 'compras_reembolsos', 'cierre', 'estado', 'historial', 'fecha_actualizacion'])
                     // Bloque final: cerrado inmutable + solo desde liquidado
+                    // CON el pago del cliente registrado (no se cierra con
+                    // cuenta por cobrar abierta — anticipada, 23-jul)
                     && resource.data.get('estado', '') != 'cerrado'
                     && (request.resource.data.get('estado', '') != 'cerrado'
-                        || resource.data.get('estado', '') == 'liquidado_contratista')
-                    // Bloque 3a/3b: liquidar exige el aval SST (gate no esquivable)
+                        || (resource.data.get('estado', '') == 'liquidado_contratista'
+                            && request.resource.data.get('pago_cliente', null) != null))
+                    // Bloque 3a/3b + anticipada (23-jul): liquidar exige el
+                    // aval SST SIEMPRE; origen solo pagado_cliente (normal) o
+                    // facturado (anticipada: marca + justificación). Un doc
+                    // YA liquidado se puede seguir editando (p. ej. registrar
+                    // el pago posterior) sin re-evaluar la transición.
                     && (request.resource.data.get('estado', '') != 'liquidado_contratista'
-                        || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
-                            .data.sst_gate.estado == 'al_dia');
+                        || resource.data.get('estado', '') == 'liquidado_contratista'
+                        || (get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
+                              .data.sst_gate.estado == 'al_dia'
+                            && (resource.data.get('estado', '') == 'pagado_cliente'
+                                || (resource.data.get('estado', '') == 'facturado'
+                                    && request.resource.data.get('liquidacion', {}).get('liquidacion_anticipada', false) == true
+                                    && request.resource.data.get('liquidacion', {}).get('justificacion_anticipada', '') != ''))));
     }
 
     // ────────────────────────────────────────────────────────────────
