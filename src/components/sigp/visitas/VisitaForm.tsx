@@ -114,7 +114,7 @@ export default function VisitaForm({ isOpen, onClose, onGuardado, clientes, borr
       solicitudId: id,
       clienteId: s?.cliente_id ?? '',
       prospectoNombre: s?.prospecto_nombre ?? '',
-      sitio: s?.sitio ?? f.sitio,
+      sitio: s?.nombre_sitio ?? s?.sitio ?? f.sitio,   // Bloque 1: el canónico primero
     }))
     setErrores(e => ({ ...e, origen: '' }))
   }

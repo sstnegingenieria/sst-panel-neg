@@ -25,6 +25,7 @@ export default function VisitasSigp() {
   const [filtroEstado, setFiltroEstado] = useState(searchParams.get('pendientes') ? 'pendiente_agendar' : '')
   const [filtroTipo, setFiltroTipo] = useState('')
   const [filtroCliente, setFiltroCliente] = useState('')
+  const [busqueda, setBusqueda] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   // Borrador del pipeline a materializar (el form precarga y asigna el VIS)
   const [borradorAgendar, setBorradorAgendar] = useState<Visita | null>(null)
@@ -45,11 +46,17 @@ export default function VisitasSigp() {
     [clientes],
   )
 
-  const filtradas = useMemo(() => visitas.filter(v =>
-    (!filtroEstado || v.estado === filtroEstado) &&
-    (!filtroTipo || v.tipo === filtroTipo) &&
-    (!filtroCliente || v.cliente_id === filtroCliente),
-  ), [visitas, filtroEstado, filtroTipo, filtroCliente])
+  const filtradas = useMemo(() => {
+    const q = busqueda.trim().toLowerCase()
+    return visitas.filter(v =>
+      (!filtroEstado || v.estado === filtroEstado) &&
+      (!filtroTipo || v.tipo === filtroTipo) &&
+      (!filtroCliente || v.cliente_id === filtroCliente) &&
+      (!q ||
+        v.consecutivo.toLowerCase().includes(q) ||
+        (v.sitio ?? '').toLowerCase().includes(q) ||
+        (v.cliente_id ? (clienteNombres[v.cliente_id] ?? '') : (v.prospecto_nombre ?? '')).toLowerCase().includes(q)))
+  }, [visitas, filtroEstado, filtroTipo, filtroCliente, busqueda, clienteNombres])
 
   const stats = useMemo(() => ({
     total: visitas.length,
@@ -105,6 +112,9 @@ export default function VisitasSigp() {
             {!loading && <span className="ml-2 text-xs font-normal text-gray-400">({filtradas.length})</span>}
           </h2>
           <div className="flex gap-2 flex-wrap">
+            <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+              placeholder="Buscar por VIS, sitio o cliente…"
+              className="w-56 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
             <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}
               className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
               <option value="">Todos los estados</option>
