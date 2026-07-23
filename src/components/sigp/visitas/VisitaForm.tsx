@@ -11,7 +11,7 @@ import { useFirestore } from '../../../hooks/useFirestore'
 import {
   TIPOS_VISITA, TIPO_VISITA_LABEL, SUBTIPOS_ESTACION, SUBTIPO_LABEL,
 } from '../../../types/sigp/visita'
-import type { TipoVisita, SubtipoEstacion, Ejecutor } from '../../../types/sigp/visita'
+import type { TipoVisita, SubtipoEstacion, Ejecutor, Visita } from '../../../types/sigp/visita'
 import type { Cliente } from '../../../types/sigp/cliente'
 import type { Solicitud } from '../../../types/sigp/solicitud'
 
@@ -20,6 +20,10 @@ interface VisitaFormProps {
   onClose: () => void
   onGuardado: () => void
   clientes: Cliente[]
+  /** Pipeline (23-jul): borrador `pendiente_agendar` a MATERIALIZAR — el form
+   *  precarga sus datos y al Programar sobreescribe ESE doc (mismo id) con el
+   *  VIS recién asignado. Sin borrador: flujo manual clásico. */
+  borrador?: Visita | null
 }
 
 interface UsuarioNEG { id: string; nombre?: string; rol?: string; estado?: string }
@@ -49,7 +53,7 @@ const inicial = (uid: string): FormState => ({
 
 interface Pendiente { visitaId: string; consecutivo: string }
 
-export default function VisitaForm({ isOpen, onClose, onGuardado, clientes }: VisitaFormProps) {
+export default function VisitaForm({ isOpen, onClose, onGuardado, clientes, borrador = null }: VisitaFormProps) {
   const { user } = useAuth()
   const { obtener } = useConsecutivo()
   const { getAll } = useFirestore()
@@ -65,7 +69,15 @@ export default function VisitaForm({ isOpen, onClose, onGuardado, clientes }: Vi
 
   useEffect(() => {
     if (!isOpen) return
-    setForm(inicial(user?.uid ?? ''))
+    // Precarga: del borrador del pipeline (editable) o formulario limpio.
+    setForm(borrador ? {
+      ...inicial(user?.uid ?? ''),
+      tipo: borrador.tipo, subtipo: borrador.subtipo ?? 'greenfield',
+      solicitudId: borrador.solicitud_id ?? '',
+      clienteId: borrador.cliente_id ?? '',
+      prospectoNombre: borrador.prospecto_nombre ?? '',
+      sitio: borrador.sitio ?? '',
+    } : inicial(user?.uid ?? ''))
     setErrores({})
     setPendiente(null)
     ;(async () => {
@@ -75,7 +87,7 @@ export default function VisitaForm({ isOpen, onClose, onGuardado, clientes }: Vi
           getAll('contratistas'),
           getAll('users'),
         ])
-        setSolicitudes((sols as Solicitud[]).filter(s => s.estado === 'requiere_visita'))
+        setSolicitudes((sols as Solicitud[]).filter(s => s.estado === 'requiere_visita' || s.id === borrador?.solicitud_id))
         setContratistas((contr as ContratistaRef[]).filter(c => c.estado === 'activo'))
         setUsuariosNEG((users as UsuarioNEG[]).filter(
           u => u.rol && u.rol !== 'tecnico' && u.rol !== 'contratista' && u.estado === 'activo',
@@ -142,8 +154,10 @@ export default function VisitaForm({ isOpen, onClose, onGuardado, clientes }: Vi
       hallazgos: [],
       cantidades: [],
       adjuntos: [],
-      historial: [{ de: null, a: 'programada', por: user?.uid ?? '', fecha: ahora }],
-      fecha_creacion: ahora,
+      historial: borrador
+        ? [...borrador.historial, { de: 'pendiente_agendar', a: 'programada', por: user?.uid ?? '', fecha: ahora }]
+        : [{ de: null, a: 'programada', por: user?.uid ?? '', fecha: ahora }],
+      fecha_creacion: borrador?.fecha_creacion ?? ahora,
     }
     if (form.tipo === 'estacion_base') d.subtipo = form.subtipo
     if (form.solicitudId) d.solicitud_id = form.solicitudId
@@ -156,7 +170,7 @@ export default function VisitaForm({ isOpen, onClose, onGuardado, clientes }: Vi
   const handleGuardar = async () => {
     if (!validar()) return
     setGuardando(true)
-    let visitaId = pendiente?.visitaId
+    let visitaId = pendiente?.visitaId ?? borrador?.id
     let consecutivo = pendiente?.consecutivo
     try {
       if (!visitaId) visitaId = doc(collection(db, 'visitas')).id

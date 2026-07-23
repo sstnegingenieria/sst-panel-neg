@@ -14,7 +14,7 @@ export type TipoVisita =
 /** Subtipo solo aplica a estacion_base (define si va el ítem de impermeabilización). */
 export type SubtipoEstacion = 'greenfield' | 'rooftop'
 
-export type EstadoVisita = 'programada' | 'realizada' | 'cancelada'
+export type EstadoVisita = 'pendiente_agendar' | 'programada' | 'realizada' | 'cancelada'
 
 /** Estado de cada ítem del checklist. */
 export type EstadoItem = 'bueno' | 'regular' | 'malo' | 'no_aplica'
@@ -90,7 +90,8 @@ export interface Visita {
                            // requiere_visita → pasa a lista_para_cotizar
 
   sitio?: string
-  fecha_programada: Timestamp
+  /** Ausente mientras es borrador `pendiente_agendar` (se fija al agendar). */
+  fecha_programada?: Timestamp
   fecha_ejecucion?: Timestamp   // se setea al marcar realizada
 
   ejecutor: Ejecutor
@@ -147,7 +148,7 @@ export function plantillaChecklist(
 // ── Constantes de UI ──────────────────────────────────────────────────────────
 
 export const TIPOS_VISITA = ['estacion_base', 'datacenter', 'centro_comercial', 'remodelacion', 'otra'] as const
-export const ESTADOS_VISITA = ['programada', 'realizada', 'cancelada'] as const
+export const ESTADOS_VISITA = ['pendiente_agendar', 'programada', 'realizada', 'cancelada'] as const
 export const SUBTIPOS_ESTACION = ['greenfield', 'rooftop'] as const
 
 export const TIPO_VISITA_LABEL: Record<TipoVisita, string> = {
@@ -163,10 +164,12 @@ export const SUBTIPO_LABEL: Record<SubtipoEstacion, string> = {
 }
 
 export const ESTADO_VISITA_LABEL: Record<EstadoVisita, string> = {
+  pendiente_agendar: 'Pendiente de agendar',
   programada: 'Programada', realizada: 'Realizada', cancelada: 'Cancelada',
 }
 
 export const ESTADO_VISITA_COLOR: Record<EstadoVisita, string> = {
+  pendiente_agendar: 'bg-orange-100 text-orange-800',
   programada: 'bg-amber-100 text-amber-800',
   realizada:  'bg-emerald-100 text-emerald-800',
   cancelada:  'bg-gray-100 text-gray-500',
@@ -191,6 +194,10 @@ export const ESTADO_ITEM_COLOR: Record<EstadoItem, string> = {
  * con nuevo consecutivo VIS-.
  */
 export const TRANSICIONES: Record<EstadoVisita, EstadoVisita[]> = {
+  // Pipeline (23-jul): el BORRADOR nace de la solicitud SIN código; el
+  // consecutivo VIS se asigna al AGENDAR (contigüidad ISO — los pendientes
+  // cancelados no queman número).
+  pendiente_agendar: ['programada', 'cancelada'],
   programada: ['realizada', 'cancelada'],
   realizada:  [],   // terminal
   cancelada:  [],   // terminal (reagendar = nueva visita)

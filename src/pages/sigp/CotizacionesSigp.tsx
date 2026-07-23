@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import CotizacionesTable from '../../components/sigp/cotizaciones/CotizacionesTable'
 import CotizacionForm from '../../components/sigp/cotizaciones/CotizacionForm'
 import StatCard from '../../components/StatCard'
@@ -17,7 +18,10 @@ export default function CotizacionesSigp() {
   const puedeGestionar = puedeGestionarCotizacionesUI(user?.rol)
 
   const [clientes, setClientes] = useState<Cliente[]>([])
-  const [filtroEstado, setFiltroEstado] = useState('')
+  // Pipeline: el badge del sidebar llega con ?pendientes=1 → preseleccionar
+  // el filtro de pendientes de diligenciar.
+  const [searchParams] = useSearchParams()
+  const [filtroEstado, setFiltroEstado] = useState(searchParams.get('pendientes') ? 'pendiente_diligenciar' : '')
   const [filtroCliente, setFiltroCliente] = useState('')
   const [filtroInversion, setFiltroInversion] = useState('')
   const [formOpen, setFormOpen] = useState(false)
@@ -48,6 +52,7 @@ export default function CotizacionesSigp() {
     const efectivos = cotizaciones.map(estadoEfectivo)
     return {
       total: cotizaciones.length,
+      pendientes: efectivos.filter(e => e === 'pendiente_diligenciar').length,
       enviadas: efectivos.filter(e => e === 'enviada').length,
       aprobadas: efectivos.filter(e => e === 'aprobada').length,
       vencidas: efectivos.filter(e => e === 'vencida').length,

@@ -15,7 +15,7 @@ export type EsquemaTributario = 'iva_pleno' | 'aiu'
 export type OrigenItem = 'lpu' | 'manual' | 'apu'
 
 /** `vencida` es DERIVADA en UI (enviada + hoy > fecha_envio + validez); NO se guarda. */
-export type EstadoCotizacion = 'borrador' | 'enviada' | 'aprobada' | 'rechazada' | 'vencida'
+export type EstadoCotizacion = 'pendiente_diligenciar' | 'borrador' | 'enviada' | 'aprobada' | 'rechazada' | 'vencida'
 
 export type CategoriaAdjunto = 'licitacion' | 'evidencia' | 'otro'
 
@@ -268,7 +268,7 @@ export interface CambioEstadoCotizacion {
 
 export interface Cotizacion {
   id: string
-  consecutivo: string          // COT-YYYY-NNN
+  consecutivo: string          // COT-YYYY-NNN — '' mientras es pendiente_diligenciar (sin código)
 
   /** Campo "Asunto" de la plantilla real CM-FT-CT-19 (ej: "Adecuaciones estación
    *  Ráquira"). Obligatorio al crear; editable mientras esté en borrador.
@@ -291,6 +291,8 @@ export interface Cotizacion {
   cliente_id?: string
   prospecto_nombre?: string
   solicitud_id?: string
+  /** Pipeline (23-jul): visita realizada que originó este borrador (traza). */
+  visita_id?: string
 
   /** Bloque 1 — identificación del sitio (heredada de la solicitud, editable
    *  en borrador). Alimenta el snapshot del proyecto y la obra-espejo SST. */
@@ -327,10 +329,11 @@ export interface Cotizacion {
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
-export const ESTADOS_COTIZACION = ['borrador', 'enviada', 'aprobada', 'rechazada', 'vencida'] as const
+export const ESTADOS_COTIZACION = ['pendiente_diligenciar', 'borrador', 'enviada', 'aprobada', 'rechazada', 'vencida'] as const
 export const ESQUEMAS = ['iva_pleno', 'aiu'] as const
 
 export const ESTADO_COT_LABEL: Record<EstadoCotizacion, string> = {
+  pendiente_diligenciar: 'Pendiente de diligenciar',
   borrador: 'Borrador',
   enviada: 'Enviada',
   aprobada: 'Aprobada',
@@ -339,6 +342,7 @@ export const ESTADO_COT_LABEL: Record<EstadoCotizacion, string> = {
 }
 
 export const ESTADO_COT_COLOR: Record<EstadoCotizacion, string> = {
+  pendiente_diligenciar: 'bg-orange-100 text-orange-800',
   borrador:  'bg-gray-100 text-gray-600',
   enviada:   'bg-amber-100 text-amber-800',
   aprobada:  'bg-emerald-100 text-emerald-800',
@@ -385,6 +389,9 @@ export const TIPO_INVERSION_COLOR: Record<TipoInversion, string> = {
  * una entrada `<estado actual> → borrador` con motivo "Nueva versión vN".
  */
 export const TRANSICIONES: Record<EstadoCotizacion, EstadoCotizacion[]> = {
+  // Pipeline (23-jul): el BORRADOR automático nace SIN código; el COT se
+  // asigna al DILIGENCIAR (primer guardado con contenido) — contigüidad ISO.
+  pendiente_diligenciar: ['borrador'],
   borrador:  ['enviada'],
   enviada:   ['aprobada', 'rechazada'],
   aprobada:  [],   // terminal (cambios post-aprobación = proyecto, F2)

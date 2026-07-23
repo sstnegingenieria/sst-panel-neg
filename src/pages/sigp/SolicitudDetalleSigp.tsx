@@ -8,6 +8,7 @@ import { toast } from '../../components/shared/Toast'
 import Modal from '../../components/shared/Modal'
 import { puedeGestionarSolicitudesUI } from '../../types/sigp/permisos'
 import { propagarAsunto } from '../../utils/sigp/asunto'
+import { crearBorradorVisita, crearBorradorCotizacion } from '../../utils/sigp/pipeline'
 import PreventivoPanel from '../../components/sigp/solicitudes/PreventivoPanel'
 import {
   ESTADO_LABEL, ESTADO_COLOR, CANAL_LABEL, TRANSICIONES,
@@ -92,6 +93,16 @@ export default function SolicitudDetalleSigp() {
         ...(transicionA === 'descartada' ? { motivo_descarte: motivo.trim() } : {}),
       })
       toast(`Solicitud → ${ESTADO_LABEL[transicionA]}`)
+      // Pipeline (23-jul): la DECISIÓN crea sola el siguiente pendiente como
+      // borrador SIN código (el consecutivo se asigna al materializar).
+      // Idempotente: si ya existe visita/cotización enlazada, no duplica.
+      if (transicionA === 'requiere_visita') {
+        const creada = await crearBorradorVisita(solicitud, user?.uid ?? '')
+        if (creada) toast('Visita pendiente de agendar creada (sin código) — ver Visitas')
+      } else if (transicionA === 'lista_para_cotizar') {
+        const creada = await crearBorradorCotizacion(solicitud, user?.uid ?? '')
+        if (creada) toast('Cotización pendiente de diligenciar creada (sin código) — ver Cotizaciones')
+      }
       setTransicionA(null)
       setMotivo('')
       await reload()

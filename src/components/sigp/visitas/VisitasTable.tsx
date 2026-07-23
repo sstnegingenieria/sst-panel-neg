@@ -7,6 +7,9 @@ interface VisitasTableProps {
   loading: boolean
   clienteNombres: Record<string, string>
   filasClicables?: boolean
+  /** Pipeline: acción "Agendar" en filas `pendiente_agendar` (materializa el
+   *  borrador asignando el VIS). Ausente = sin botón (solo lectura). */
+  onAgendar?: (v: Visita) => void
 }
 
 function fFecha(ts: unknown): string {
@@ -20,7 +23,7 @@ function origen(v: Visita, clienteNombres: Record<string, string>): string {
   return '—'
 }
 
-export default function VisitasTable({ visitas, loading, clienteNombres, filasClicables }: VisitasTableProps) {
+export default function VisitasTable({ visitas, loading, clienteNombres, filasClicables, onAgendar }: VisitasTableProps) {
   const navigate = useNavigate()
   return (
     <div className="overflow-x-auto">
@@ -64,7 +67,9 @@ export default function VisitasTable({ visitas, loading, clienteNombres, filasCl
                   onClick={filasClicables ? () => navigate(`/sigp/visitas/${v.id}`) : undefined}
                   className={`border-b border-gray-100 transition-colors ${filasClicables ? 'hover:bg-gray-50 cursor-pointer' : ''}`}
                 >
-                  <td className="py-3 px-4 font-mono text-xs text-gray-700">{v.consecutivo}</td>
+                  <td className="py-3 px-4 font-mono text-xs text-gray-700">
+                    {v.consecutivo || <span className="text-gray-400 italic font-sans" title="El VIS se asigna al agendar (no se queman consecutivos en pendientes)">sin código · pendiente</span>}
+                  </td>
                   <td className="py-3 px-4 font-medium text-gray-800">{origen(v, clienteNombres)}</td>
                   <td className="py-3 px-4 text-gray-600">{TIPO_VISITA_LABEL[v.tipo] ?? v.tipo}</td>
                   <td className="py-3 px-4">
@@ -82,7 +87,14 @@ export default function VisitasTable({ visitas, loading, clienteNombres, filasCl
                       {ESTADO_VISITA_LABEL[v.estado]}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-gray-600">{fFecha(v.fecha_programada)}</td>
+                  <td className="py-3 px-4 text-gray-600">
+                    {v.estado === 'pendiente_agendar' && onAgendar ? (
+                      <button onClick={e => { e.stopPropagation(); onAgendar(v) }}
+                        className="text-xs px-3 py-1 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
+                        📅 Agendar (asigna VIS)
+                      </button>
+                    ) : fFecha(v.fecha_programada)}
+                  </td>
                 </tr>
               )
             })}

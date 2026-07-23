@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import VisitasTable from '../../components/sigp/visitas/VisitasTable'
 import VisitaForm from '../../components/sigp/visitas/VisitaForm'
 import StatCard from '../../components/StatCard'
@@ -9,6 +10,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { puedeGestionarVisitasUI } from '../../types/sigp/permisos'
 import { TIPOS_VISITA, TIPO_VISITA_LABEL, ESTADOS_VISITA, ESTADO_VISITA_LABEL } from '../../types/sigp/visita'
 import type { Cliente } from '../../types/sigp/cliente'
+import type { Visita } from '../../types/sigp/visita'
 
 export default function VisitasSigp() {
   const { visitas, loading, reload } = useVisitas()
@@ -17,10 +19,15 @@ export default function VisitasSigp() {
   const puedeGestionar = puedeGestionarVisitasUI(user?.rol)
 
   const [clientes, setClientes] = useState<Cliente[]>([])
-  const [filtroEstado, setFiltroEstado] = useState('')
+  // Pipeline: el badge del sidebar llega con ?pendientes=1 → preseleccionar
+  // el filtro de pendientes de agendar.
+  const [searchParams] = useSearchParams()
+  const [filtroEstado, setFiltroEstado] = useState(searchParams.get('pendientes') ? 'pendiente_agendar' : '')
   const [filtroTipo, setFiltroTipo] = useState('')
   const [filtroCliente, setFiltroCliente] = useState('')
   const [formOpen, setFormOpen] = useState(false)
+  // Borrador del pipeline a materializar (el form precarga y asigna el VIS)
+  const [borradorAgendar, setBorradorAgendar] = useState<Visita | null>(null)
 
   const loadClientes = useCallback(async () => {
     try {
@@ -46,6 +53,7 @@ export default function VisitasSigp() {
 
   const stats = useMemo(() => ({
     total: visitas.length,
+    pendientes: visitas.filter(v => v.estado === 'pendiente_agendar').length,
     programadas: visitas.filter(v => v.estado === 'programada').length,
     realizadas: visitas.filter(v => v.estado === 'realizada').length,
     canceladas: visitas.filter(v => v.estado === 'cancelada').length,
@@ -80,8 +88,8 @@ export default function VisitasSigp() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Total" value={loading ? '…' : stats.total} loading={loading} color="brand"
-          icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>} />
+        <StatCard title="Por agendar" value={loading ? '…' : stats.pendientes} loading={loading} color="brand"
+          icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} />
         <StatCard title="Programadas" value={loading ? '…' : stats.programadas} loading={loading} color="orange"
           icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>} />
         <StatCard title="Realizadas" value={loading ? '…' : stats.realizadas} loading={loading} color="green"
@@ -114,14 +122,16 @@ export default function VisitasSigp() {
             </select>
           </div>
         </div>
-        <VisitasTable visitas={filtradas} loading={loading} clienteNombres={clienteNombres} filasClicables />
+        <VisitasTable visitas={filtradas} loading={loading} clienteNombres={clienteNombres} filasClicables
+          onAgendar={puedeGestionar ? (v => { setBorradorAgendar(v); setFormOpen(true) }) : undefined} />
       </div>
 
       <VisitaForm
         isOpen={formOpen}
-        onClose={() => setFormOpen(false)}
+        onClose={() => { setFormOpen(false); setBorradorAgendar(null) }}
         onGuardado={reload}
         clientes={clientes.filter(c => c.estado === 'activo')}
+        borrador={borradorAgendar}
       />
     </div>
   )
