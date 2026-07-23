@@ -33,8 +33,10 @@ import {
   ROLES_VE_OBRAS,
   ROLES_VE_CONTRATISTAS,
   ROLES_VE_FACTURACION,
+  ROLES_VE_VERIFICACION_SST,
 } from './types/sigp/permisos'
 import FacturacionPagos from './pages/administrativa/FacturacionPagos'
+import VerificacionContratistas from './pages/VerificacionContratistas'
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth()
@@ -87,6 +89,8 @@ function ProtectedRoutes() {
         <Route path="/registros" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/sigp/panel"><ObrasHub /></ProtectedRoute>} />
         <Route path="/registros/:obraId" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/sigp/panel"><ObraRegistros /></ProtectedRoute>} />
         <Route path="/reportes" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REPORTES} redirectTo="/sigp/panel"><Reportes /></ProtectedRoute>} />
+        {/* Bloque 3a — Gate SST previo a la liquidación (vista del área SST) */}
+        <Route path="/verificacion-contratistas" element={<ProtectedRoute rolesPermitidos={ROLES_VE_VERIFICACION_SST} redirectTo="/sigp/panel"><VerificacionContratistas /></ProtectedRoute>} />
 
         {/* Rutas SIGP (placeholders F0). Protegidas por rol con ProtectedRoute
             ('admin' siempre incluido como fallback). La sección del Sidebar se

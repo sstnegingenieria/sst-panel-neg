@@ -32,6 +32,8 @@ if (!admin.apps.length) {
 
 const { generarConsecutivo } = require('./consecutivos');
 const { asignarObraAlPrincipal } = require('./obraEspejo');
+const { sincronizarVerificacionSst } = require('./verificacionesSst');
 
 exports.generarConsecutivo = generarConsecutivo;
 exports.asignarObraAlPrincipal = asignarObraAlPrincipal;
+exports.sincronizarVerificacionSst = sincronizarVerificacionSst;
