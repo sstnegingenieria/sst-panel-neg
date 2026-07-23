@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest'
 import {
   cambiosPreliquidacion, correccionRevierteAprobacion, saldoRealDe,
   anticipoValorDe, enBandejaFacturacion,
+  puedeCorregirPreliquidacionEn, correccionEsAjusteEnEjecucion,
 } from '../proyecto'
 import type { Timestamp } from 'firebase/firestore'
 
@@ -28,6 +29,28 @@ describe('correccionRevierteAprobacion — nunca un cambio silencioso tras aprob
   it('aprobada y anticipo girado → SÍ revierte (exige re-aprobación)', () => {
     expect(correccionRevierteAprobacion('preliquidacion_aprobada')).toBe(true)
     expect(correccionRevierteAprobacion('anticipo_girado')).toBe(true)
+  })
+})
+
+describe('Hotfix 23-jul — corrección durante la ejecución (el caso real del piloto)', () => {
+  it('se puede corregir desde definida HASTA el handoff inclusive', () => {
+    for (const e of ['preliquidacion_definida', 'preliquidacion_aprobada', 'anticipo_girado',
+      'en_ejecucion', 'ejecutado', 'entregado_cliente', 'soporte_recibido', 'enviado_a_facturacion'] as const)
+      expect(puedeCorregirPreliquidacionEn(e)).toBe(true)
+  })
+  it('antes de definida y desde facturado (territorio administrativo) NO', () => {
+    for (const e of ['creado', 'contratista_asignado', 'permisos_en_tramite', 'facturado', 'pagado_cliente', 'cerrado'] as const)
+      expect(puedeCorregirPreliquidacionEn(e)).toBe(false)
+  })
+  it('en ejecución o después: AJUSTE con flag — sin reversión, sin re-aprobación, sin freno', () => {
+    for (const e of ['en_ejecucion', 'ejecutado', 'entregado_cliente', 'soporte_recibido', 'enviado_a_facturacion'] as const) {
+      expect(correccionEsAjusteEnEjecucion(e)).toBe(true)
+      expect(correccionRevierteAprobacion(e)).toBe(false)   // no hay reversión de estado
+    }
+  })
+  it('aprobada/girado siguen con el comportamiento del Bloque 4 (no son ajuste)', () => {
+    expect(correccionEsAjusteEnEjecucion('preliquidacion_aprobada')).toBe(false)
+    expect(correccionEsAjusteEnEjecucion('anticipo_girado')).toBe(false)
   })
 })
 

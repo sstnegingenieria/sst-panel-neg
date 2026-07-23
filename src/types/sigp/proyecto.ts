@@ -205,6 +205,12 @@ export interface PreliquidacionProyecto {
    *  proyecto (el proyectado es el valor de la cotización/matriz). Se captura
    *  al cierre de la ejecución. Meta: ejecutado/proyectado en 90–110 %. */
   costo_ejecutado?: number
+  /** Hotfix 23-jul — una corrección hecha durante la EJECUCIÓN (tramo
+   *  en_ejecucion…enviado_a_facturacion) no exige re-aprobación ni frena el
+   *  proyecto: queda marcada aquí y la RECONCILIA Gerencia Administrativa en
+   *  la LIQUIDACIÓN (Bloque 3 del módulo administrativo), viendo la
+   *  preliquidación + los ajustes con su justificación + el costo real. */
+  ajuste_pendiente_liquidacion?: boolean
 }
 
 // ── Módulo Gerencia Administrativa · Bloque 1 (22-jul-2026) ──────────────────
@@ -278,11 +284,36 @@ export function cambiosPreliquidacion(
   return out
 }
 
-/** ¿Corregir desde este estado obliga a revertir la aprobación? (Nunca un
- *  cambio silencioso después de aprobada: vuelve a `preliquidacion_definida`
- *  y exige re-aprobación de Gerencia Administrativa.) */
+/** ¿En este estado se puede corregir la preliquidación? Desde que existe
+ *  (definida) hasta el handoff a facturación inclusive — el caso real del
+ *  piloto: el error se descubre al digitar el costo REAL, que ocurre al
+ *  cierre de la ejecución (Hotfix 23-jul). Desde `facturado` es territorio
+ *  administrativo y la corrección del contratista se verá allí si el área
+ *  la pide. */
+export const puedeCorregirPreliquidacionEn = (estado: EstadoProyecto): boolean => {
+  const i = ESTADOS_PROYECTO.indexOf(estado)
+  return i >= ESTADOS_PROYECTO.indexOf('preliquidacion_definida') &&
+         i <= ESTADOS_PROYECTO.indexOf('enviado_a_facturacion')
+}
+
+/** ¿Corregir desde este estado obliga a revertir el ESTADO a
+ *  `preliquidacion_definida` y re-aprobar? Solo aprobada/anticipo_girado
+ *  (aún no hay ejecución que perder) — comportamiento del Bloque 4. */
 export const correccionRevierteAprobacion = (estado: EstadoProyecto): boolean =>
   estado === 'preliquidacion_aprobada' || estado === 'anticipo_girado'
+
+/** ¿La corrección desde este estado es un AJUSTE EN EJECUCIÓN? (tramo
+ *  en_ejecucion…enviado_a_facturacion): pura trazabilidad — actualiza valores
+ *  con motivo, marca `ajuste_pendiente_liquidacion`, NO retira la aprobación
+ *  original (siguió siendo válida para el anticipo), NO exige re-aprobación y
+ *  NUNCA frena el avance del proyecto. La reconciliación es de Gerencia
+ *  Administrativa en la LIQUIDACIÓN (Bloque 3 del módulo administrativo). */
+export const correccionEsAjusteEnEjecucion = (estado: EstadoProyecto): boolean => {
+  const i = ESTADOS_PROYECTO.indexOf(estado)
+  return i >= ESTADOS_PROYECTO.indexOf('en_ejecucion') &&
+         i <= ESTADOS_PROYECTO.indexOf('enviado_a_facturacion')
+}
+
 
 /** Saldo REAL contra entrega: si ya se giró anticipo, el saldo se calcula
  *  contra el valor GIRADO (hecho consumado) — una corrección del valor del
