@@ -1,6 +1,7 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useNotificaciones } from '../contexts/NotificacionesContext'
+import { usePendientesSigp } from '../hooks/sigp/usePendientesSigp'
 import { useFeatureFlag } from '../hooks/useFeatureFlag'
 import { accesoSIGP, type Rol } from '../types/sigp/roles'
 import {
@@ -187,10 +188,16 @@ const sigpNavItems: {
 export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: SidebarProps) {
   const { user } = useAuth()
   const { pendientesRegistros, pendientesTecnicos } = useNotificaciones()
+  const navigate = useNavigate()
   const sigpEnabled = useFeatureFlag('sigp_f1_enabled', false)
   const f2Enabled = useFeatureFlag('sigp_f2_enabled', false)
   // El bloque SIGP se muestra si el flag está activo y el rol tiene acceso SIGP.
   const mostrarSigp = sigpEnabled && !!user?.rol && accesoSIGP(user.rol as Rol)
+  // Pipeline (23-jul): contadores vivos de pendientes sin código — badges
+  // clickeables en Visitas y Cotizaciones.
+  const { visitasPendientes, cotizacionesPendientes } = usePendientesSigp(mostrarSigp)
+  const badgeSigp = (to: string) =>
+    to === '/sigp/visitas' ? visitasPendientes : to === '/sigp/cotizaciones' ? cotizacionesPendientes : 0
   // Proyectos (F2.1.a) exige además su propio flag + rol de gestión de proyectos.
   const visibleSigpItems = sigpNavItems.filter(item =>
     item.to !== '/sigp/proyectos' || (f2Enabled && veProyectosUI(user?.rol)))
@@ -301,8 +308,30 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
                     }`
                   }
                 >
-                  <span className="flex-shrink-0">{item.icon}</span>
-                  {!collapsed && <span>{item.label}</span>}
+                  <span className="flex-shrink-0 relative">
+                    {item.icon}
+                    {/* Pipeline: badge compacto colapsado (pendientes sin código) */}
+                    {collapsed && badgeSigp(item.to) > 0 && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 text-white rounded-full text-[10px] font-bold flex items-center justify-center">
+                        {badgeSigp(item.to) > 9 ? '9+' : badgeSigp(item.to)}
+                      </span>
+                    )}
+                  </span>
+                  {!collapsed && (
+                    <span className="flex items-center justify-between flex-1">
+                      <span>{item.label}</span>
+                      {/* Pipeline: badge CLICKEABLE — lleva a la lista filtrada
+                          de pendientes (?pendientes=1) */}
+                      {badgeSigp(item.to) > 0 && (
+                        <span
+                          onClick={e => { e.preventDefault(); e.stopPropagation(); navigate(`${item.to}?pendientes=1`); onNavigate?.() }}
+                          title={item.to === '/sigp/visitas' ? 'Visitas pendientes de agendar — clic para verlas' : 'Cotizaciones pendientes de diligenciar — clic para verlas'}
+                          className="ml-auto bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center cursor-pointer">
+                          {badgeSigp(item.to) > 99 ? '99+' : badgeSigp(item.to)}
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </div>

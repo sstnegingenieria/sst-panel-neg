@@ -16,6 +16,8 @@ import {
 import type {
   ChecklistItem, Hallazgo, CantidadPreliminar, Adjunto, EstadoItem,
 } from '../../types/sigp/visita'
+import { crearBorradorCotizacion } from '../../utils/sigp/pipeline'
+import type { Solicitud } from '../../types/sigp/solicitud'
 
 const ESTADOS_ITEM: EstadoItem[] = ['bueno', 'regular', 'malo', 'no_aplica']
 
@@ -141,6 +143,14 @@ export default function VisitaDetalleSigp() {
             }),
           })
         }
+        // Pipeline (23-jul): la visita realizada crea sola la cotización
+        // pendiente de diligenciar (borrador SIN código, precargada con la
+        // solicitud + esta visita). Idempotente: una cotización por visita.
+        if (sSnap.exists()) {
+          const creada = await crearBorradorCotizacion(
+            { id: sSnap.id, ...sSnap.data() } as Solicitud, user?.uid ?? '', visita)
+          if (creada) toast('Cotización pendiente de diligenciar creada (sin código) — ver Cotizaciones')
+        }
       }
       toast(`Visita ${visita.consecutivo} realizada`)
       await reload()
@@ -174,7 +184,9 @@ export default function VisitaDetalleSigp() {
           {TIPO_VISITA_LABEL[visita.tipo]}{visita.subtipo ? ` · ${SUBTIPO_LABEL[visita.subtipo]}` : ''} · {origen}
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-2xl font-bold text-gray-800 font-mono">{visita.consecutivo}</h1>
+          <h1 className="text-2xl font-bold text-gray-800 font-mono">
+            {visita.consecutivo || <span className="text-gray-400 italic text-lg font-sans" title="El VIS se asigna al agendar (desde la bandeja de Visitas)">sin código · pendiente de agendar</span>}
+          </h1>
           <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${ESTADO_VISITA_COLOR[visita.estado]}`}>
             {ESTADO_VISITA_LABEL[visita.estado]}
           </span>

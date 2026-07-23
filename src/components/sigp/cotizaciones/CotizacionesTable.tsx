@@ -64,7 +64,7 @@ export default function CotizacionesTable({ cotizaciones, loading, clienteNombre
                   className={`border-b border-gray-100 transition-colors ${filasClicables ? 'hover:bg-gray-50 cursor-pointer' : ''}`}
                 >
                   <td className="py-3 px-4 font-mono text-xs text-gray-700">
-                    {c.consecutivo}
+                    {c.consecutivo || <span className="text-gray-400 italic font-sans" title="El COT se asigna al diligenciar (no se queman consecutivos en pendientes)">sin código · pendiente</span>}
                     {c.es_licitacion && <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-50 text-violet-700">LIC</span>}
                     {c.tipo_inversion && <span className={`ml-1 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold ${TIPO_INVERSION_COLOR[c.tipo_inversion]}`}>{TIPO_INVERSION_LABEL[c.tipo_inversion]}</span>}
                   </td>

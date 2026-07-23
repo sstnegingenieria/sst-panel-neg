@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, Fragment } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
-  doc, getDoc, getDocs, setDoc, collection, query, where, updateDoc, deleteField, Timestamp,
+  doc, getDoc, getDocs, setDoc, collection, query, where, updateDoc, deleteField, Timestamp, arrayUnion,
 } from 'firebase/firestore'
 import { ref as sRef, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../firebase/config'
@@ -61,6 +61,9 @@ export default function CotizacionDetalleSigp() {
   const [cond, setCond] = useState<CondicionesCotizacion>({ forma_pago: '', validez_dias: 30, tiempo_ejecucion: '', garantia: '', moneda: 'COP' })
   const [busqueda, setBusqueda] = useState('')
   const [guardando, setGuardando] = useState(false)
+  // Pipeline: COT generado pero aún no persistido (fallo del update) — se
+  // reintenta con el MISMO número (contigüidad ISO, sin quemar otro).
+  const [consecutivoPendiente, setConsecutivoPendiente] = useState<string | null>(null)
   // Filas con descripción expandida (por instancia_id del ítem)
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({})
   const [asunto, setAsunto] = useState('')
@@ -164,7 +167,11 @@ export default function CotizacionDetalleSigp() {
     [items, esquema, aiuAdmin, aiuImprev, aiuUtil, ivaPct, modoAgr, actividades], // eslint-disable-line react-hooks/exhaustive-deps
   )
 
-  const editable = cotizacion?.estado === 'borrador' && puedeGestionar
+  // Pipeline (23-jul): el borrador automático `pendiente_diligenciar` es
+  // editable como un borrador; el COT se asigna al PRIMER guardado (persistir
+  // lo materializa) — "al empezar a llenarla".
+  const esPendiente = cotizacion?.estado === 'pendiente_diligenciar'
+  const editable = (cotizacion?.estado === 'borrador' || esPendiente) && puedeGestionar
   const capitulos = useMemo(() => [...new Set(items.map(i => i.capitulo?.trim()).filter(Boolean))] as string[], [items])
   const itemsCero = items.filter(i => (i.valor_unitario || 0) <= 0).length
   const actividadesOrdenadas = useMemo(() => [...actividades].sort((a, b) => a.orden - b.orden), [actividades])
@@ -383,6 +390,15 @@ export default function CotizacionDetalleSigp() {
         modo_agrupacion: modoAgr, actividades: actividadesLimpias,
       })
       setActividades(actividadesLimpias)
+      // Pipeline: el primer guardado MATERIALIZA el pendiente — asigna el COT
+      // (server-side) y pasa a borrador. El número se preserva ante fallo del
+      // update (se reintenta sin quemar otro — contigüidad ISO).
+      let materializa: { consecutivo: string } | null = null
+      if (esPendiente) {
+        const consecutivo = consecutivoPendiente ?? await obtener('COT')
+        setConsecutivoPendiente(consecutivo)
+        materializa = { consecutivo }
+      }
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id), {
         total: tot.total, validez_dias: Number(cond.validez_dias) || 0,
         asunto: asunto.trim(), contacto: contactoNombre.trim() || deleteField(),
@@ -390,7 +406,16 @@ export default function CotizacionDetalleSigp() {
         codigo_sitio_cliente: codigoSitio.trim() || deleteField(),
         tipo_inversion: tipoInversion || deleteField(),
         fecha_actualizacion: Timestamp.now(),
+        ...(materializa ? {
+          consecutivo: materializa.consecutivo,
+          estado: 'borrador',
+          historial: arrayUnion({ de: 'pendiente_diligenciar', a: 'borrador', por: user?.uid ?? '', fecha: Timestamp.now(), motivo: `Diligenciada — ${materializa.consecutivo} asignado` }),
+        } : {}),
       })
+      if (materializa) {
+        setConsecutivoPendiente(null)
+        toast(`Cotización diligenciada — ${materializa.consecutivo} asignado`)
+      }
       // Bloque B — el asunto es canónico en la solicitud enlazada: si cambió,
       // se propaga (solicitud + otras cotizaciones de la misma solicitud).
       if (cotizacion.solicitud_id && (cotizacion.asunto ?? '').trim() !== asunto.trim()) {
@@ -570,7 +595,9 @@ export default function CotizacionDetalleSigp() {
       <Link to="/sigp/cotizaciones" className="text-sm text-gray-500 hover:text-brand-700 inline-flex items-center gap-1">← Cotizaciones</Link>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="text-2xl font-bold text-gray-800 font-mono">{cotizacion.consecutivo}</h1>
+        <h1 className="text-2xl font-bold text-gray-800 font-mono">
+          {cotizacion.consecutivo || <span className="text-gray-400 italic text-lg font-sans">sin código · pendiente</span>}
+        </h1>
         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${ESTADO_COT_COLOR[est]}`}>{ESTADO_COT_LABEL[est]}</span>
         {etiquetaVersion(cotizacion.version_activa) && <span className="text-sm text-gray-400">{etiquetaVersion(cotizacion.version_activa)}</span>}
         <span className="text-sm text-gray-600">· {origen}{cotizacion.es_licitacion && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 font-semibold">LICITACIÓN</span>}</span>
