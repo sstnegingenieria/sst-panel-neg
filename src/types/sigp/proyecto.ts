@@ -257,6 +257,95 @@ export interface PagoClienteProyecto {
   fecha_registro: Timestamp
 }
 
+// ── Liquidación del contratista (Administrativa · Bloque 3b, 23-jul-2026) ────
+//
+// Cierra el ciclo: tras el pago del cliente y con el gate SST en 'al_dia',
+// Gerencia Administrativa concilia lo pactado con la realidad y liquida.
+// MODELO NEG: la preliquidación (`valor_contratista`) es MANO DE OBRA (NEG
+// compra los materiales); las compras que hace el contratista y NEG le
+// reconoce van en LÍNEA PROPIA (`compras_reembolsos`), separada de la mano
+// de obra. El SIGP registra/controla — no ejecuta dinero.
+
+/** Compra/reembolso reconocido al contratista. La capturan los GESTORES
+ *  durante el proyecto (con traza en historial); la reconoce la liquidación. */
+export interface CompraReembolso {
+  concepto: string
+  valor: number
+  soporte_url?: string         // factura/recibo (opcional, Storage)
+  soporte_nombre?: string
+  registrado_por: string
+  fecha: Timestamp
+}
+
+/** Deducción de la liquidación. Estructura MOLDEABLE a propósito: los tipos
+ *  de retención (garantía, ReteICA, etc.) se definen con el área — por ahora
+ *  concepto libre + valor, lista normalmente vacía. NO cablear tipos aún. */
+export interface RetencionLiquidacion {
+  concepto: string
+  valor: number
+}
+
+/** Registro de la liquidación (evidencia del cierre financiero con el
+ *  contratista). `diferencia` = total_final − mano de obra VIGENTE: las
+ *  correcciones de ejecución ya viven dentro de la mano de obra con su traza
+ *  (se listan como `ajustes_reconocidos`); el delta restante son las
+ *  compras/reembolsos. */
+export interface LiquidacionProyecto {
+  /** Mano de obra vigente al liquidar (= preliquidacion.valor_contratista). */
+  mano_obra: number
+  /** Snapshot de las compras/reembolsos reconocidos. */
+  compras_reembolsos: CompraReembolso[]
+  /** Motivos de los ajustes en ejecución reconciliados aquí (del historial). */
+  ajustes_reconocidos: string[]
+  retenciones: RetencionLiquidacion[]
+  total_final: number          // mano_obra + Σ compras_reembolsos
+  diferencia: number           // total_final − mano_obra (Σ compras)
+  es_igual: boolean            // sin compras y sin ajustes → igual a la preliquidación
+  anticipo_girado: number      // el giro REAL descontado
+  saldo_final: number          // total_final − anticipo_girado − Σ retenciones
+  liquidada_por: string
+  fecha: Timestamp
+  observaciones?: string
+}
+
+export const totalComprasReembolsos = (compras?: CompraReembolso[]): number =>
+  (compras ?? []).reduce((s, c) => s + (c.valor || 0), 0)
+
+export const totalRetenciones = (retenciones?: RetencionLiquidacion[]): number =>
+  (retenciones ?? []).reduce((s, r) => s + (r.valor || 0), 0)
+
+/** Total contratista final = mano de obra + Σ compras/reembolsos. */
+export const totalContratistaFinal = (manoObra: number, compras?: CompraReembolso[]): number =>
+  manoObra + totalComprasReembolsos(compras)
+
+/** Saldo final = total final − anticipo GIRADO real − Σ retenciones.
+ *  Puede ser negativo (sobre-giro) — jamás se recorta en silencio. */
+export const saldoFinalLiquidacion = (
+  totalFinal: number, anticipoGirado: number, retenciones?: RetencionLiquidacion[],
+): number => totalFinal - anticipoGirado - totalRetenciones(retenciones)
+
+/** ¿Liquidable en este estado? Solo tras el pago del cliente (el gate SST
+ *  'al_dia' se exige aparte — regla viva en prod vía get(verificaciones_sst)). */
+export const puedeLiquidarseEn = (estado: EstadoProyecto): boolean =>
+  estado === 'pagado_cliente'
+
+/** Entradas del historial que son ajustes de ejecución pendientes de
+ *  reconocer (Hotfix 23-jul los marca con este texto en el motivo). */
+export const esAjusteEnEjecucion = (motivo: string): boolean =>
+  motivo.includes('AJUSTE en ejecución')
+
+/** Atribución del ORIGEN de la diferencia para el sello del documento y la
+ *  UI. La `diferencia` numérica son SOLO las compras (los ajustes de mano de
+ *  obra ya viven dentro del valor vigente con su traza) — el sello no debe
+ *  decir "por compras/reembolsos" cuando además (o solo) hubo un ajuste. */
+export const origenDiferenciaLiquidacion = (
+  diferenciaCompras: number, numAjustes: number,
+): 'igual' | 'compras' | 'ajustes' | 'compras_y_ajustes' => {
+  if (diferenciaCompras === 0 && numAjustes === 0) return 'igual'
+  if (diferenciaCompras !== 0 && numAjustes > 0) return 'compras_y_ajustes'
+  return diferenciaCompras !== 0 ? 'compras' : 'ajustes'
+}
+
 // ── Gate SST (Administrativa · Bloque 3a, 23-jul-2026) ───────────────────────
 //
 // Antes de LIQUIDAR (pagar el saldo al contratista), SST confirma que el
@@ -588,6 +677,8 @@ export interface Proyecto {
   soporte_cliente?: SoporteCliente     // F2.1.d — soporte emitido por el cliente
   facturacion?: FacturacionProyecto    // Administrativa B1 — factura registrada
   pago_cliente?: PagoClienteProyecto   // Administrativa B2 — pago del cliente
+  compras_reembolsos?: CompraReembolso[] // Administrativa B3b — línea propia, separada de la mano de obra
+  liquidacion?: LiquidacionProyecto    // Administrativa B3b — cierre con el contratista
   // El gate SST (Bloque 3a) NO vive aquí: vive en la proyección
   // `verificaciones_sst/{proyectoId}` (ver types/sigp/verificacionSst.ts) —
   // SST no tiene acceso a `proyectos` (confidencialidad financiera).

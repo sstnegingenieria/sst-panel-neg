@@ -126,6 +126,11 @@ export const puedeGestionarProyectosUI = (rol: string | undefined) => en(rol, RO
 export const ROLES_VE_FACTURACION: Rol[] = ['admin', 'gerencia_general', 'gerencia_administrativa']
 export const veFacturacionUI = (rol: string | undefined) => en(rol, ROLES_VE_FACTURACION)
 export const puedeRegistrarFacturaUI = (rol: string | undefined) => rol === 'gerencia_administrativa'
+// ── Bloque 3b — liquidación del contratista ──
+// LIQUIDAR: solo gerencia_administrativa (misma segregación que factura/pago).
+// Las compras/reembolsos las CAPTURAN los gestores durante el proyecto
+// (usa puedeGestionarProyectosUI en el call site).
+export const puedeLiquidarUI = (rol: string | undefined) => rol === 'gerencia_administrativa'
 
 // ── Gate SST (Administrativa · Bloque 3a) ──
 // La cola "Verificación de contratistas" la VEN sst/residente_sst (opera) y
