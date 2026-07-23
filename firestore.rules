@@ -310,14 +310,15 @@ service cloud.firestore {
       // F2.1.c — SEGREGACIÓN DE FUNCIONES: gerencia_administrativa aprueba la
       // preliquidación y registra el anticipo girado (quien define ≠ quien
       // desembolsa). Administrativa B1+B2 (22-jul-2026): además REGISTRA la
-      // factura ('facturacion') y el pago del cliente ('pago_cliente') — el
-      // SIGP registra, no ejecuta dinero. Sigue sin poder tocar snapshot,
-      // asignación, alcance ni el resto del proyecto (patrón hasOnly, como
-      // contratistas.estado). No crea ni elimina.
+      // factura ('facturacion') y el pago del cliente ('pago_cliente').
+      // B3b (23-jul-2026): + 'liquidacion' (cierre con el contratista) y
+      // 'compras_reembolsos' — el SIGP registra, no ejecuta dinero. Sigue sin
+      // poder tocar snapshot, asignación, alcance ni el resto del proyecto
+      // (patrón hasOnly, como contratistas.estado). No crea ni elimina.
       allow update: if isAuthed()
                     && rolActual() == 'gerencia_administrativa'
                     && request.resource.data.diff(resource.data)
-                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'pago_cliente', 'estado', 'historial', 'fecha_actualizacion'])
+                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'pago_cliente', 'liquidacion', 'compras_reembolsos', 'estado', 'historial', 'fecha_actualizacion'])
                     // Bloque 3a/3b: liquidar exige el aval SST (gate no esquivable)
                     && (request.resource.data.get('estado', '') != 'liquidado_contratista'
                         || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))

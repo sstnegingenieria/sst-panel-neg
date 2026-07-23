@@ -15,11 +15,12 @@ import PreliquidacionProyecto from '../../components/sigp/proyectos/Preliquidaci
 import EjecucionProyecto from '../../components/sigp/proyectos/EjecucionProyecto'
 import EntregablesIhs from '../../components/sigp/proyectos/EntregablesIhs'
 import EvaluacionContratistaCard from '../../components/sigp/proyectos/EvaluacionContratistaCard'
+import ComprasReembolsos from '../../components/sigp/proyectos/ComprasReembolsos'
 import SatisfaccionClienteCard from '../../components/sigp/proyectos/SatisfaccionClienteCard'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
-import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL } from '../../types/sigp/proyecto'
+import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion } from '../../types/sigp/proyecto'
 import { TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR } from '../../types/sigp/cotizacion'
 import type { Proyecto } from '../../types/sigp/proyecto'
 
@@ -198,6 +199,10 @@ export default function ProyectoDetalleSigp() {
       {/* Preliquidación (F2.1.c) */}
       <PreliquidacionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} puedeAprobar={puedeAprobar} reload={load} />
 
+      {/* Administrativa B3b — compras/reembolsos del contratista (línea
+          separada de la mano de obra; las capturan los gestores) */}
+      <ComprasReembolsos proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+
       {/* Entregables IHS (F2.3 — solo preventivos; requisito de la entrega) */}
       <EntregablesIhs proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
 
@@ -244,6 +249,40 @@ export default function ProyectoDetalleSigp() {
               📎 {proyecto.pago_cliente.comprobante_nombre ?? 'Comprobante del pago'}
             </a>
           )}
+        </div>
+      )}
+
+      {/* Administrativa B3b — liquidación del contratista (lectura; se
+          gestiona en Facturación y Pagos con el gate SST al día) */}
+      {proyecto.liquidacion && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-1.5">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Liquidación del contratista <span className="normal-case font-normal">(registrada por Gerencia Administrativa)</span>
+          </p>
+          <p className="text-sm text-gray-800">
+            Mano de obra <span className="font-mono">{fmtMoney(proyecto.liquidacion.mano_obra)}</span>
+            {proyecto.liquidacion.compras_reembolsos.length > 0 && (
+              <span className="text-gray-500"> + compras/reembolsos <span className="font-mono">{fmtMoney(proyecto.liquidacion.diferencia)}</span></span>
+            )}
+            <span className="text-gray-500"> = total </span>
+            <span className="font-mono font-semibold">{fmtMoney(proyecto.liquidacion.total_final)}</span>
+            <span className="text-gray-500"> · saldo pagado </span>
+            <span className={`font-mono font-semibold ${proyecto.liquidacion.saldo_final < 0 ? 'text-red-600' : ''}`}>
+              {fmtMoney(proyecto.liquidacion.saldo_final)}
+            </span>
+          </p>
+          <p className={`text-xs w-fit rounded px-2 py-0.5 ${proyecto.liquidacion.es_igual ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+            {(() => {
+              const liq = proyecto.liquidacion
+              switch (origenDiferenciaLiquidacion(liq.diferencia, liq.ajustes_reconocidos.length)) {
+                case 'igual': return '✓ Igual a la preliquidación'
+                case 'compras': return `Δ Diferencia vs. preliquidación: ${fmtMoney(liq.diferencia)} por compras/reembolsos`
+                case 'ajustes': return 'Δ Mano de obra ajustada en ejecución (reconocida en la liquidación)'
+                case 'compras_y_ajustes': return `Δ ${fmtMoney(liq.diferencia)} por compras/reembolsos · además mano de obra ajustada en ejecución`
+              }
+            })()}
+          </p>
+          <p className="text-[11px] text-gray-400">Liquidada el {fFecha(proyecto.liquidacion.fecha)}</p>
         </div>
       )}
 

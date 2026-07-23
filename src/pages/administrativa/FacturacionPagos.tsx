@@ -17,12 +17,13 @@ import { toast } from '../../components/shared/Toast'
 import Modal from '../../components/shared/Modal'
 import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
 import { fmtMoney } from '../../utils/sigp/formato'
+import LiquidacionModal from '../../components/administrativa/LiquidacionModal'
 import {
   ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, enBandejaFacturacion,
-  enColaVerificacionSst, estadoSstGate, SST_GATE_LABEL, SST_GATE_COLOR,
+  enColaVerificacionSst, estadoSstGate, sstGateAlDia, SST_GATE_LABEL, SST_GATE_COLOR,
   MEDIOS_PAGO, MEDIO_PAGO_LABEL,
 } from '../../types/sigp/proyecto'
-import { puedeRegistrarFacturaUI } from '../../types/sigp/permisos'
+import { puedeRegistrarFacturaUI, puedeLiquidarUI } from '../../types/sigp/permisos'
 import type { Proyecto, MedioPago } from '../../types/sigp/proyecto'
 import type { VerificacionSst } from '../../types/sigp/verificacionSst'
 
@@ -51,6 +52,47 @@ export default function FacturacionPagos() {
   const [pagoValor, setPagoValor] = useState<number | undefined>(undefined)
   const [pagoMedio, setPagoMedio] = useState<MedioPago>('transferencia')
   const [pagoComprobante, setPagoComprobante] = useState<File | null>(null)
+  // B3b — liquidación del contratista
+  const puedeLiquidar = puedeLiquidarUI(user?.rol)
+  const [liquidacionTarget, setLiquidacionTarget] = useState<Proyecto | null>(null)
+
+  /** PDF de liquidación (documento para el contratista) — desde el registro. */
+  const descargarPdfLiquidacion = async (p: Proyecto) => {
+    const liq = p.liquidacion
+    if (!liq) return
+    setAplicando(true)
+    try {
+      const { cargarAssetsPdf, generarPdfLiquidacion } = await import('../../utils/sigp/liquidacionPdf')
+      const pdf = await generarPdfLiquidacion({
+        proyectoConsecutivo: p.consecutivo,
+        contratistaNombre: p.asignacion?.contratista_nombre ?? '—',
+        clienteNombre: p.snapshot.nombre_sitio
+          ? `${p.snapshot.cliente} — ${p.snapshot.nombre_sitio}` : p.snapshot.cliente,
+        asunto: p.snapshot.asunto,
+        fecha: liq.fecha.toDate(),
+        gruposAlcance: p.snapshot.alcance.map(g => ({ nombre: g.grupo, items: g.items })),
+        manoObra: liq.mano_obra,
+        compras: liq.compras_reembolsos.map(c => ({ concepto: c.concepto, valor: c.valor })),
+        retenciones: liq.retenciones,
+        totalFinal: liq.total_final,
+        anticipoGirado: liq.anticipo_girado,
+        saldoFinal: liq.saldo_final,
+        esIgual: liq.es_igual,
+        diferencia: liq.diferencia,
+        ajustesReconocidos: liq.ajustes_reconocidos,
+        ...(liq.observaciones ? { observaciones: liq.observaciones } : {}),
+      }, await cargarAssetsPdf())
+      const url = URL.createObjectURL(new Blob([pdf as BlobPart], { type: 'application/pdf' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${p.consecutivo} - Liquidación ${p.asignacion?.contratista_nombre ?? 'contratista'}.pdf`.replace(/[\\/:*?"<>|]/g, '')
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    } catch (e) {
+      console.error('Error generando la liquidación:', e)
+      toast('No se pudo generar el documento', 'error')
+    } finally { setAplicando(false) }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -288,7 +330,21 @@ export default function FacturacionPagos() {
                       className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
                       💰 Registrar pago del cliente
                     </button>
-                  ) : (p.estado === 'enviado_a_facturacion' || p.estado === 'facturado') ? (
+                  ) : p.estado === 'pagado_cliente' && puedeLiquidar ? (
+                    // 3b — liquidar exige el gate SST al día (la regla también);
+                    // sin aval el botón lo dice y el modal explica la novedad.
+                    <button onClick={() => setLiquidacionTarget(p)}
+                      disabled={!sstGateAlDia(gates[p.id] ?? {})}
+                      title={sstGateAlDia(gates[p.id] ?? {}) ? undefined : 'Bloqueada: falta el aval de SST (gate al día)'}
+                      className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                      🧮 Liquidar contratista
+                    </button>
+                  ) : p.estado === 'liquidado_contratista' && p.liquidacion ? (
+                    <button onClick={() => descargarPdfLiquidacion(p)} disabled={aplicando}
+                      className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50">
+                      📄 Liquidación
+                    </button>
+                  ) : (p.estado === 'enviado_a_facturacion' || p.estado === 'facturado' || p.estado === 'pagado_cliente') ? (
                     <span className="text-[11px] text-gray-400">Pendiente de Gerencia Adm.</span>
                   ) : (
                     <span className="text-gray-300 text-xs">—</span>
@@ -404,6 +460,16 @@ export default function FacturacionPagos() {
           </label>
         </div>
       </Modal>
+
+      {/* B3b — liquidación del contratista (gate SST al día obligatorio) */}
+      {liquidacionTarget && (
+        <LiquidacionModal
+          proyecto={liquidacionTarget}
+          verificacion={gates[liquidacionTarget.id]}
+          onClose={() => setLiquidacionTarget(null)}
+          onDone={load}
+        />
+      )}
     </div>
   )
 }
