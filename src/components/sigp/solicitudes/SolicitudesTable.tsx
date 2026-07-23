@@ -34,6 +34,7 @@ export default function SolicitudesTable({
           <tr className="border-b border-gray-200 text-left">
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Consecutivo</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Cliente / Prospecto</th>
+            <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Nombre del sitio</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Canal</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Descripción</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Estado</th>
@@ -44,7 +45,7 @@ export default function SolicitudesTable({
           {loading &&
             Array.from({ length: 4 }).map((_, i) => (
               <tr key={i} className="border-b border-gray-100">
-                {Array.from({ length: 6 }).map((__, j) => (
+                {Array.from({ length: 7 }).map((__, j) => (
                   <td key={j} className="py-3 px-4">
                     <div className="h-4 bg-gray-200 rounded animate-pulse w-24" />
                   </td>
@@ -54,7 +55,7 @@ export default function SolicitudesTable({
 
           {!loading && solicitudes.length === 0 && (
             <tr>
-              <td colSpan={6} className="py-12 text-center text-gray-400">
+              <td colSpan={7} className="py-12 text-center text-gray-400">
                 No hay solicitudes registradas.
               </td>
             </tr>
@@ -76,8 +77,13 @@ export default function SolicitudesTable({
                   )}
                 </td>
                 <td className="py-3 px-4 font-medium text-gray-800">{origen(s, clienteNombres)}</td>
+                {/* Identificador interno principal de NEG (Bloque 1) — "—" en
+                    solicitudes previas a la captura */}
+                <td className="py-3 px-4 text-gray-700 max-w-[11rem] truncate" title={s.nombre_sitio || undefined}>
+                  {s.nombre_sitio || '—'}
+                </td>
                 <td className="py-3 px-4 text-gray-600">{CANAL_LABEL[s.canal] ?? s.canal}</td>
-                <td className="py-3 px-4 text-gray-600 max-w-xs truncate">{s.descripcion}</td>
+                <td className="py-3 px-4 text-gray-600 max-w-[14rem] truncate" title={s.descripcion}>{s.descripcion}</td>
                 <td className="py-3 px-4">
                   <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${ESTADO_COLOR[s.estado]}`}>
                     {ESTADO_LABEL[s.estado]}

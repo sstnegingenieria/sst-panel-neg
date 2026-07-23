@@ -19,6 +19,7 @@ export default function SolicitudesSigp() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [filtroEstado, setFiltroEstado] = useState('')
   const [filtroCliente, setFiltroCliente] = useState('')
+  const [busqueda, setBusqueda] = useState('')
   const [formOpen, setFormOpen] = useState(false)
 
   const loadClientes = useCallback(async () => {
@@ -38,11 +39,20 @@ export default function SolicitudesSigp() {
   )
 
   const filtradas = useMemo(() => {
+    const q = busqueda.trim().toLowerCase()
+    const matchQ = (s: (typeof solicitudes)[number]) => !q ||
+      s.consecutivo.toLowerCase().includes(q) ||
+      (s.nombre_sitio ?? '').toLowerCase().includes(q) ||
+      (s.codigo_sitio_cliente ?? '').toLowerCase().includes(q) ||
+      (s.asunto ?? '').toLowerCase().includes(q) ||
+      (s.descripcion ?? '').toLowerCase().includes(q) ||
+      (s.cliente_id ? (clienteNombres[s.cliente_id] ?? '') : (s.prospecto_nombre ?? '')).toLowerCase().includes(q)
     return solicitudes.filter(s =>
       (!filtroEstado || s.estado === filtroEstado) &&
-      (!filtroCliente || s.cliente_id === filtroCliente),
+      (!filtroCliente || s.cliente_id === filtroCliente) &&
+      matchQ(s),
     )
-  }, [solicitudes, filtroEstado, filtroCliente])
+  }, [solicitudes, filtroEstado, filtroCliente, busqueda, clienteNombres])
 
   const stats = useMemo(() => ({
     total: solicitudes.length,
@@ -134,7 +144,10 @@ export default function SolicitudesSigp() {
               <span className="ml-2 text-xs font-normal text-gray-400">({filtradas.length})</span>
             )}
           </h2>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+              placeholder="Buscar por SOL, sitio, cliente o asunto…"
+              className="w-64 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
             <select
               value={filtroEstado}
               onChange={e => setFiltroEstado(e.target.value)}

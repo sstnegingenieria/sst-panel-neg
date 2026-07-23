@@ -32,6 +32,7 @@ export default function VisitasTable({ visitas, loading, clienteNombres, filasCl
           <tr className="border-b border-gray-200 text-left">
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Consecutivo</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Cliente / Prospecto</th>
+            <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Nombre del sitio</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Tipo</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Ejecutor</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Estado</th>
@@ -42,7 +43,7 @@ export default function VisitasTable({ visitas, loading, clienteNombres, filasCl
           {loading &&
             Array.from({ length: 4 }).map((_, i) => (
               <tr key={i} className="border-b border-gray-100">
-                {Array.from({ length: 6 }).map((__, j) => (
+                {Array.from({ length: 7 }).map((__, j) => (
                   <td key={j} className="py-3 px-4">
                     <div className="h-4 bg-gray-200 rounded animate-pulse w-24" />
                   </td>
@@ -52,7 +53,7 @@ export default function VisitasTable({ visitas, loading, clienteNombres, filasCl
 
           {!loading && visitas.length === 0 && (
             <tr>
-              <td colSpan={6} className="py-12 text-center text-gray-400">
+              <td colSpan={7} className="py-12 text-center text-gray-400">
                 No hay visitas registradas.
               </td>
             </tr>
@@ -71,6 +72,10 @@ export default function VisitasTable({ visitas, loading, clienteNombres, filasCl
                     {v.consecutivo || <span className="text-gray-400 italic font-sans" title="El VIS se asigna al agendar (no se queman consecutivos en pendientes)">sin código · pendiente</span>}
                   </td>
                   <td className="py-3 px-4 font-medium text-gray-800">{origen(v, clienteNombres)}</td>
+                  {/* El sitio viaja de la solicitud a la visita (v.sitio) */}
+                  <td className="py-3 px-4 text-gray-700 max-w-[11rem] truncate" title={v.sitio || undefined}>
+                    {v.sitio || '—'}
+                  </td>
                   <td className="py-3 px-4 text-gray-600">{TIPO_VISITA_LABEL[v.tipo] ?? v.tipo}</td>
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-2">
