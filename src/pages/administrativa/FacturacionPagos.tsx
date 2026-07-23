@@ -19,11 +19,13 @@ import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
 import { fmtMoney } from '../../utils/sigp/formato'
 import LiquidacionModal from '../../components/administrativa/LiquidacionModal'
 import {
-  ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, enBandejaFacturacion,
+  ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR,
+  SECCIONES_ADMINISTRATIVA, enBandejaAdministrativa,
   enColaVerificacionSst, estadoSstGate, sstGateAlDia, SST_GATE_LABEL, SST_GATE_COLOR,
+  completitudCierre,
   MEDIOS_PAGO, MEDIO_PAGO_LABEL,
 } from '../../types/sigp/proyecto'
-import { puedeRegistrarFacturaUI, puedeLiquidarUI } from '../../types/sigp/permisos'
+import { puedeRegistrarFacturaUI, puedeLiquidarUI, puedeCerrarProyectoUI, puedeAprobarPreliquidacionUI } from '../../types/sigp/permisos'
 import type { Proyecto, MedioPago } from '../../types/sigp/proyecto'
 import type { VerificacionSst } from '../../types/sigp/verificacionSst'
 
@@ -55,6 +57,39 @@ export default function FacturacionPagos() {
   // B3b — liquidación del contratista
   const puedeLiquidar = puedeLiquidarUI(user?.rol)
   const [liquidacionTarget, setLiquidacionTarget] = useState<Proyecto | null>(null)
+  // Bloque final — cierre del proyecto
+  const puedeCerrar = puedeCerrarProyectoUI(user?.rol)
+  // Bandeja completa: 'todas' (activas) o una de las 7 secciones del ciclo
+  const [seccion, setSeccion] = useState<'todas' | (typeof SECCIONES_ADMINISTRATIVA)[number]['clave']>('todas')
+  const [cierreTarget, setCierreTarget] = useState<Proyecto | null>(null)
+  const [notasCierre, setNotasCierre] = useState('')
+
+  const cerrarProyecto = async () => {
+    if (!cierreTarget) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      await updateDoc(doc(db, 'proyectos', cierreTarget.id), {
+        cierre: {
+          fecha: ahora, cerrado_por: user?.uid ?? '',
+          ...(notasCierre.trim() ? { notas: notasCierre.trim() } : {}),
+        },
+        estado: 'cerrado',
+        fecha_actualizacion: ahora,
+        historial: arrayUnion({
+          de: 'liquidado_contratista', a: 'cerrado', por: user?.uid ?? '', fecha: ahora,
+          motivo: 'Cierre formal del proyecto — ciclo administrativo completo (factura · pago · gate SST · liquidación)' +
+            (notasCierre.trim() ? ` · Notas: ${notasCierre.trim()}` : ''),
+        }),
+      })
+      toast('Proyecto cerrado — pasa al histórico')
+      setCierreTarget(null)
+      setNotasCierre('')
+      await load()
+    } catch {
+      toast('Error al cerrar el proyecto', 'error')
+    } finally { setAplicando(false) }
+  }
 
   /** PDF de liquidación (documento para el contratista) — desde el registro. */
   const descargarPdfLiquidacion = async (p: Proyecto) => {
@@ -99,8 +134,10 @@ export default function FacturacionPagos() {
     try {
       const snap = await getDocs(collection(db, 'proyectos'))
       const todos = snap.docs.map(d => ({ id: d.id, ...d.data() }) as Proyecto)
-      // Defensivo: un doc malformado (sin snapshot) no debe tumbar la bandeja
-      setProyectos(todos.filter(p => p.snapshot && enBandejaFacturacion(p.estado)))
+      // Defensivo: un doc malformado (sin snapshot) no debe tumbar la bandeja.
+      // El ciclo COMPLETO de gerencia (7 momentos) — los estados de ejecución
+      // intermedios son del área de proyectos y no aparecen aquí.
+      setProyectos(todos.filter(p => p.snapshot && enBandejaAdministrativa(p.estado)))
       // Chip del gate SST (solo lectura — el gate lo marca SST en su cola)
       const gatesSnap = await getDocs(collection(db, 'verificaciones_sst'))
       setGates(Object.fromEntries(gatesSnap.docs.map(d => [d.id, d.data() as VerificacionSst])))
@@ -113,22 +150,28 @@ export default function FacturacionPagos() {
 
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
+    // 'todas' = el ciclo activo (los cerrados solo en su sección/histórico)
+    const estadoSeccion = SECCIONES_ADMINISTRATIVA.find(s => s.clave === seccion)?.estado
+    const base = proyectos.filter(p => estadoSeccion
+      ? p.estado === estadoSeccion
+      : p.estado !== 'cerrado')
     const lista = q
-      ? proyectos.filter(p =>
+      ? base.filter(p =>
           p.consecutivo.toLowerCase().includes(q) ||
           p.snapshot.cliente.toLowerCase().includes(q) ||
           (p.snapshot.nombre_sitio ?? '').toLowerCase().includes(q) ||
           (p.snapshot.codigo_sitio_cliente ?? '').toLowerCase().includes(q) ||
           p.snapshot.asunto.toLowerCase().includes(q) ||
           (p.facturacion?.numero ?? '').toLowerCase().includes(q))
-      : proyectos
+      : base
     // por facturar primero; luego por avance del ciclo
     return [...lista].sort((a, b) =>
       ESTADOS_PROYECTO.indexOf(a.estado) - ESTADOS_PROYECTO.indexOf(b.estado))
-  }, [proyectos, busqueda])
+  }, [proyectos, busqueda, seccion])
 
-  const porFacturar = proyectos.filter(p => p.estado === 'enviado_a_facturacion').length
-  const porCobrar = proyectos.filter(p => p.estado === 'facturado').length
+  const conteo = useMemo(() => Object.fromEntries(
+    SECCIONES_ADMINISTRATIVA.map(s => [s.clave, proyectos.filter(p => p.estado === s.estado).length]),
+  ) as Record<string, number>, [proyectos])
 
   const abrirRegistro = (p: Proyecto) => {
     setTarget(p)
@@ -222,21 +265,32 @@ export default function FacturacionPagos() {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-800">Facturación y Pagos</h1>
+        <h1 className="text-2xl font-bold text-gray-800">Gestión Administrativa</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Gerencia Administrativa — continuación del ciclo desde el handoff de Proyectos.
-          El SIGP registra y controla; la factura se emite en el sistema contable externo.
+          Todo el ciclo de Gerencia Administrativa en un solo lugar: aprobar, girar anticipo,
+          facturar, cobrar, liquidar y cerrar. El SIGP registra y controla; el dinero se mueve
+          en los sistemas externos del área.
         </p>
+      </div>
+
+      {/* Las 7 secciones del ciclo, con contador. 'Todo el ciclo' = activas. */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <button onClick={() => setSeccion('todas')}
+          className={`px-3 py-1.5 rounded-full text-xs font-medium border ${seccion === 'todas' ? 'bg-brand-700 border-brand-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
+          Todo el ciclo ({proyectos.filter(p => p.estado !== 'cerrado').length})
+        </button>
+        {SECCIONES_ADMINISTRATIVA.map(s => (
+          <button key={s.clave} onClick={() => setSeccion(s.clave)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium border ${seccion === s.clave ? 'bg-brand-700 border-brand-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'} ${conteo[s.clave] === 0 ? 'opacity-60' : ''}`}>
+            {s.etiqueta} ({conteo[s.clave]})
+          </button>
+        ))}
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
         <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
           placeholder="Buscar por PRY, sitio, código, cliente o N° de factura…"
           className="flex-1 min-w-[260px] px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
-        <span className="text-xs text-gray-500">
-          <span className="font-semibold text-amber-700">{porFacturar}</span> por facturar ·{' '}
-          <span className="font-semibold text-sky-700">{porCobrar}</span> por cobrar · {proyectos.length} en el ciclo
-        </span>
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-x-auto">
@@ -320,7 +374,15 @@ export default function FacturacionPagos() {
                   )}
                 </td>
                 <td className="py-3 px-4 text-right">
-                  {p.estado === 'enviado_a_facturacion' && puedeRegistrar ? (
+                  {/* Las acciones de preliquidación YA existen en la ficha del
+                      proyecto (F2.1.c) — aquí se SURFACEAN con enlace directo,
+                      no se reinventan. */}
+                  {(p.estado === 'preliquidacion_definida' || p.estado === 'preliquidacion_aprobada') && puedeAprobarPreliquidacionUI(user?.rol) ? (
+                    <Link to={`/sigp/proyectos/${p.id}`}
+                      className="inline-block text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
+                      {p.estado === 'preliquidacion_definida' ? '✓ Aprobar preliquidación →' : '💸 Registrar anticipo →'}
+                    </Link>
+                  ) : p.estado === 'enviado_a_facturacion' && puedeRegistrar ? (
                     <button onClick={() => abrirRegistro(p)}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
                       🧾 Registrar factura
@@ -339,15 +401,27 @@ export default function FacturacionPagos() {
                       className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 disabled:opacity-40 disabled:cursor-not-allowed">
                       🧮 Liquidar contratista
                     </button>
-                  ) : p.estado === 'liquidado_contratista' && p.liquidacion ? (
-                    <button onClick={() => descargarPdfLiquidacion(p)} disabled={aplicando}
-                      className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50">
-                      📄 Liquidación
-                    </button>
-                  ) : (p.estado === 'enviado_a_facturacion' || p.estado === 'facturado' || p.estado === 'pagado_cliente') ? (
-                    <span className="text-[11px] text-gray-400">Pendiente de Gerencia Adm.</span>
+                  ) : p.estado === 'liquidado_contratista' || p.estado === 'cerrado' ? (
+                    <div className="flex items-center justify-end gap-2">
+                      {p.liquidacion && (
+                        <button onClick={() => descargarPdfLiquidacion(p)} disabled={aplicando}
+                          className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50">
+                          📄 Liquidación
+                        </button>
+                      )}
+                      {/* Bloque final: cerrar solo desde liquidado; un cerrado
+                          es SOLO LECTURA (queda únicamente el documento) */}
+                      {p.estado === 'liquidado_contratista' && puedeCerrar && (
+                        <button onClick={() => { setCierreTarget(p); setNotasCierre('') }}
+                          className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
+                          🏁 Cerrar proyecto
+                        </button>
+                      )}
+                    </div>
                   ) : (
-                    <span className="text-gray-300 text-xs">—</span>
+                    // cerrado/liquidado ya salieron en la rama anterior — esto
+                    // es el resto del ciclo visto por roles de solo lectura
+                    <span className="text-[11px] text-gray-400">Pendiente de Gerencia Adm.</span>
                   )}
                 </td>
               </tr>
@@ -459,6 +533,55 @@ export default function FacturacionPagos() {
               className="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
           </label>
         </div>
+      </Modal>
+
+      {/* Bloque final — cierre del proyecto con resumen de completitud */}
+      <Modal
+        isOpen={cierreTarget !== null}
+        title={`Cerrar proyecto — ${cierreTarget?.consecutivo ?? ''}`}
+        onClose={() => setCierreTarget(null)}
+        actions={[
+          { label: 'Cancelar', onClick: () => setCierreTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Cerrando…' : 'Cerrar proyecto (queda de solo lectura)',
+            onClick: cerrarProyecto, variant: 'primary', loading: aplicando,
+          },
+        ]}
+      >
+        {cierreTarget && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Cierre formal del ciclo. El resumen es <strong>informativo</strong> — un pendiente
+              no bloquea el cierre, pero conviene dejarlo capturado (evidencia ISO).
+            </p>
+            <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+              {completitudCierre(cierreTarget).map(item => (
+                <div key={item.clave} className="flex items-center justify-between px-3 py-2 text-sm">
+                  <span className="text-gray-700">{item.etiqueta}</span>
+                  {item.ok ? (
+                    <span className="text-emerald-700 text-xs font-semibold">✓ capturada</span>
+                  ) : (
+                    <span className="text-amber-700 text-xs font-semibold">
+                      pendiente
+                      {item.clave === 'evaluacion_cliente' && (
+                        <Link to={`/sigp/proyectos/${cierreTarget.id}`}
+                          className="ml-2 text-brand-700 underline underline-offset-2 font-medium">
+                          capturarla en la ficha →
+                        </Link>
+                      )}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+            <label className="block text-xs text-gray-500">
+              Notas de cierre / lecciones aprendidas (opcional)
+              <textarea value={notasCierre} onChange={e => setNotasCierre(e.target.value)} rows={3}
+                placeholder="Ej: el soporte del cliente tardó 3 semanas — pactar fecha límite en la próxima OC…"
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+          </div>
+        )}
       </Modal>
 
       {/* B3b — liquidación del contratista (gate SST al día obligatorio) */}

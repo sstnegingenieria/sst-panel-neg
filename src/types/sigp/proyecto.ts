@@ -346,6 +346,54 @@ export const origenDiferenciaLiquidacion = (
   return diferenciaCompras !== 0 ? 'compras' : 'ajustes'
 }
 
+// ── Bandeja "Gestión Administrativa" (23-jul-2026) ───────────────────────────
+//
+// Gerencia ve TODO su ciclo en un solo lugar: los 7 momentos donde actúa (o
+// consulta). Los estados intermedios de EJECUCIÓN (anticipo_girado …
+// soporte_recibido) son del área de proyectos y NO aparecen en su bandeja.
+
+export const SECCIONES_ADMINISTRATIVA = [
+  { clave: 'por_aprobar', etiqueta: 'Por aprobar', estado: 'preliquidacion_definida' },
+  { clave: 'por_anticipo', etiqueta: 'Por girar anticipo', estado: 'preliquidacion_aprobada' },
+  { clave: 'por_facturar', etiqueta: 'Por facturar', estado: 'enviado_a_facturacion' },
+  { clave: 'por_cobrar', etiqueta: 'Por cobrar', estado: 'facturado' },
+  { clave: 'por_liquidar', etiqueta: 'Por liquidar', estado: 'pagado_cliente' },
+  { clave: 'por_cerrar', etiqueta: 'Por cerrar', estado: 'liquidado_contratista' },
+  { clave: 'cerrados', etiqueta: 'Cerrados / Histórico', estado: 'cerrado' },
+] as const satisfies readonly { clave: string; etiqueta: string; estado: EstadoProyecto }[]
+
+export const enBandejaAdministrativa = (estado: EstadoProyecto): boolean =>
+  SECCIONES_ADMINISTRATIVA.some(s => s.estado === estado)
+
+// ── Cierre del proyecto (Administrativa · Bloque final, 23-jul-2026) ─────────
+//
+// Último paso del ciclo: tras liquidar al contratista, gerencia formaliza el
+// cierre. Un proyecto `cerrado` es SOLO LECTURA (UI y reglas: inmutable).
+
+export interface CierreProyecto {
+  fecha: Timestamp
+  cerrado_por: string
+  /** Notas de cierre / lecciones aprendidas (opcional — buen gesto ISO). */
+  notas?: string
+}
+
+/** ¿Cerrable en este estado? Solo tras liquidar al contratista. */
+export const puedeCerrarseEn = (estado: EstadoProyecto): boolean =>
+  estado === 'liquidado_contratista'
+
+/** Resumen de COMPLETITUD del cierre (informativo, no bloquea): qué evidencia
+ *  del ciclo quedó capturada. La satisfacción del cliente pendiente se
+ *  ofrece capturar — jamás bloquea el cierre. */
+export const completitudCierre = (
+  p: Pick<Proyecto, 'facturacion' | 'pago_cliente' | 'liquidacion' | 'evaluacion_contratista' | 'evaluacion_cliente'>,
+): { clave: string; etiqueta: string; ok: boolean }[] => [
+  { clave: 'facturacion', etiqueta: 'Factura registrada', ok: !!p.facturacion },
+  { clave: 'pago_cliente', etiqueta: 'Pago del cliente registrado', ok: !!p.pago_cliente },
+  { clave: 'liquidacion', etiqueta: 'Contratista liquidado', ok: !!p.liquidacion },
+  { clave: 'evaluacion_contratista', etiqueta: 'Evaluación del contratista', ok: !!p.evaluacion_contratista },
+  { clave: 'evaluacion_cliente', etiqueta: 'Satisfacción del cliente', ok: !!p.evaluacion_cliente },
+]
+
 // ── Gate SST (Administrativa · Bloque 3a, 23-jul-2026) ───────────────────────
 //
 // Antes de LIQUIDAR (pagar el saldo al contratista), SST confirma que el
@@ -679,6 +727,7 @@ export interface Proyecto {
   pago_cliente?: PagoClienteProyecto   // Administrativa B2 — pago del cliente
   compras_reembolsos?: CompraReembolso[] // Administrativa B3b — línea propia, separada de la mano de obra
   liquidacion?: LiquidacionProyecto    // Administrativa B3b — cierre con el contratista
+  cierre?: CierreProyecto              // Administrativa Bfinal — cierre formal del proyecto
   // El gate SST (Bloque 3a) NO vive aquí: vive en la proyección
   // `verificaciones_sst/{proyectoId}` (ver types/sigp/verificacionSst.ts) —
   // SST no tiene acceso a `proyectos` (confidencialidad financiera).

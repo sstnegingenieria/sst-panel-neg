@@ -31,9 +31,13 @@ export default function ProyectoDetalleSigp() {
   const { proyectoId } = useParams<{ proyectoId: string }>()
   const { user } = useAuth()
   const f2Enabled = useFeatureFlag('sigp_f2_enabled', false)
-  const puedeGestionar = puedeGestionarProyectosUI(user?.rol)
-  const puedeAprobar = puedeAprobarPreliquidacionUI(user?.rol)
   const [proyecto, setProyecto] = useState<Proyecto | null>(null)
+  // Bloque final: un proyecto CERRADO es de SOLO LECTURA — todos los
+  // componentes de la ficha reciben puedeGestionar=false (respaldado por la
+  // regla de inmutabilidad en Firestore).
+  const cerrado = proyecto?.estado === 'cerrado'
+  const puedeGestionar = puedeGestionarProyectosUI(user?.rol) && !cerrado
+  const puedeAprobar = puedeAprobarPreliquidacionUI(user?.rol) && !cerrado
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
@@ -72,6 +76,20 @@ export default function ProyectoDetalleSigp() {
   return (
     <div className="max-w-5xl mx-auto space-y-5 pb-16">
       <Link to="/sigp/proyectos" className="text-sm text-gray-500 hover:text-brand-700 inline-flex items-center gap-1">← Proyectos</Link>
+
+      {/* Bloque final — cerrado = archivo de solo lectura */}
+      {cerrado && (
+        <div className="flex items-start gap-2 bg-gray-100 border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-600">
+          <span>🏁</span>
+          <div>
+            <p className="font-semibold text-gray-700">Proyecto cerrado — solo lectura.</p>
+            <p className="text-xs">
+              Cerrado el {fFecha(proyecto.cierre?.fecha)} · el ciclo administrativo quedó completo.
+              {proyecto.cierre?.notas && <> · Notas: {proyecto.cierre.notas}</>}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Encabezado */}
       <div className="flex items-center gap-3 flex-wrap">
