@@ -140,11 +140,25 @@ export interface ItemCotizacion {
 
   apu?: APU                    // solo origen 'apu' (embebido, snapshot)
 
+  // ── Esquema Matriz → NEG (23-jul, caso INGEMEC) ────────────────────────────
+  /** Precio FULL de la Matriz del LPU (ATC→INGEMEC). SOLO LECTURA — fidelidad
+   *  de snapshot, intocable (patchInstancia lo defiende). Presente ⇒ el ítem
+   *  usa el esquema de factor y `valor_unitario` = valor NEG DERIVADO. */
+  valor_matriz?: number
+  /** Factor Matriz→NEG elegible POR ÍTEM (0.72 default · 0.15 material del
+   *  cliente). Es lo ÚNICO editable del precio en estos ítems. */
+  factor?: number
+  factor_etiqueta?: string
+
   // Referencias de origen — SOLO trazabilidad, NUNCA lectura viva (es snapshot):
   lpu_id?: string
   lpu_item_id?: string
   catalogo_id?: string         // si vino del catálogo NEG o se incorporó a él
 }
+
+/** Valor NEG derivado: Matriz × factor, redondeado a peso. */
+export const valorNegDe = (valorMatriz: number, factor: number): number =>
+  Math.round(valorMatriz * factor)
 
 /** Porcentajes AIU (enteros). */
 export interface ConfigAIU {
@@ -677,6 +691,9 @@ export function esItemBloqueado(it: Pick<ItemCotizacion, 'origen' | 'catalogo_id
 export function patchInstancia(it: ItemCotizacion, patch: Partial<ItemCotizacion>): ItemCotizacion {
   const bloqueado = esItemBloqueado(it)
   const p: Partial<ItemCotizacion> = { ...patch }
+  // Esquema Matriz→NEG (INGEMEC): el valor_matriz es snapshot INTOCABLE —
+  // se fija al insertar del LPU y jamás se parcha.
+  delete p.valor_matriz
   if (bloqueado) {
     delete p.codigo
     delete p.descripcion
@@ -688,6 +705,16 @@ export function patchInstancia(it: ItemCotizacion, patch: Partial<ItemCotizacion
   // (aplicarTransporte) — defensa en profundidad contra edición manual.
   if (esItemTransporte(it)) delete p.cantidad
   const m = { ...it, ...p }
+  // Esquema Matriz→NEG: el FACTOR es lo único editable del precio — el valor
+  // operativo (valor_unitario) SIEMPRE se re-deriva de la Matriz congelada.
+  // Aplica aun en ítems bloqueados (el factor no muta el snapshot del LPU).
+  if (m.valor_matriz !== undefined && m.factor !== undefined) {
+    m.valor_unitario = valorNegDe(m.valor_matriz, m.factor)
+    if (m.costo_directo !== undefined) {
+      const mg = margenDesdePrecio(m.costo_directo, m.valor_unitario)
+      if (mg !== null) m.margen = Math.round(mg * 10) / 10
+    }
+  }
   if (!bloqueado && 'margen' in p && m.margen !== undefined && m.costo_directo !== undefined) {
     const precio = precioDesdeCosto(m.costo_directo, m.margen)
     if (precio !== null) m.valor_unitario = Math.round(precio)

@@ -25,6 +25,23 @@ export interface ItemLPU {
 }
 
 /**
+ * Esquema Matriz → NEG (23-jul-2026, caso INGEMEC): el LPU trae los precios
+ * de la MATRIZ del cliente final (ATC → INGEMEC), NO los de NEG. INGEMEC
+ * paga a NEG un FACTOR de la Matriz: 72 % normal, 15 % cuando INGEMEC
+ * suministra el material. Con este esquema presente, el cotizador congela
+ * `valor_matriz` (solo lectura), el factor es elegible POR ÍTEM y el valor
+ * OPERATIVO del ítem es `valor_matriz × factor` — así todo aguas abajo
+ * (totales, snapshot del proyecto, preliquidación, liquidación) hereda el
+ * valor NEG correcto sin tocarse. LPUs sin el campo: nada cambia.
+ */
+export interface EsquemaFactorLpu {
+  factor_default: number       // 0.72
+  factor_alt: number           // 0.15
+  etiqueta_default: string     // "72% · NEG suministra material"
+  etiqueta_alt: string         // "15% · INGEMEC suministra material"
+}
+
+/**
  * Documento de la colección `lpus`. Los ítems NO van aquí (subcolección).
  * `total_items` y `categorias` se denormalizan para poder listar/mostrar
  * sin leer la subcolección.
@@ -52,6 +69,9 @@ export interface LPU {
   fecha_importacion: Timestamp      // único sello de creación de la LPU
   total_items: number
   categorias: string[]       // categorías/hojas presentes en esta LPU
+
+  /** Esquema Matriz → NEG (solo INGEMEC hoy; ausente = LPU normal). */
+  esquema_factor?: EsquemaFactorLpu
 }
 
 export const LPU_ESTADOS = ['vigente', 'historica'] as const

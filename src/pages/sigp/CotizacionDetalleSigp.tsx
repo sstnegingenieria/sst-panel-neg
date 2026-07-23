@@ -15,7 +15,7 @@ import { useConsecutivo } from '../../hooks/sigp/useConsecutivo'
 import { toast } from '../../components/shared/Toast'
 import { puedeGestionarCotizacionesUI } from '../../types/sigp/permisos'
 import {
-  calcularTotales, valorTotalItem, estadoEfectivo,
+  calcularTotales, valorTotalItem, estadoEfectivo, valorNegDe,
   ESTADO_COT_LABEL, ESTADO_COT_COLOR, ESQUEMA_LABEL, ESQUEMAS,
   asignarCodigosINP, esItemBloqueado, patchInstancia,
   TIPOS_INVERSION, TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR,
@@ -29,7 +29,7 @@ import type { CatalogoItem } from '../../types/sigp/catalogo'
 import type { ItemCotizacion, EsquemaTributario, ConfigAIU, CondicionesCotizacion, APU } from '../../types/sigp/cotizacion'
 import ApuModal from '../../components/sigp/cotizaciones/ApuModal'
 import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
-import type { ItemLPU } from '../../types/sigp/lpu'
+import type { ItemLPU, EsquemaFactorLpu } from '../../types/sigp/lpu'
 import type { CantidadPreliminar } from '../../types/sigp/visita'
 import CotizacionAcciones from '../../components/sigp/cotizaciones/CotizacionAcciones'
 import VersionesCotizacion from '../../components/sigp/cotizaciones/VersionesCotizacion'
@@ -83,6 +83,8 @@ export default function CotizacionDetalleSigp() {
   const [sitioSolicitud, setSitioSolicitud] = useState('')   // Bloque C — sugerencia de zona
   const [lpuNombre, setLpuNombre] = useState<string | null>(null)
   const [lpuVigenteId, setLpuVigenteId] = useState<string | null>(null)
+  // Esquema Matriz→NEG del LPU vigente (solo INGEMEC hoy; null = LPU normal)
+  const [lpuEsquema, setLpuEsquema] = useState<EsquemaFactorLpu | null>(null)
   const [catItems, setCatItems] = useState<CatalogoItem[]>([])
   const [visitaCant, setVisitaCant] = useState<CantidadPreliminar[]>([])
   const [visitaCons, setVisitaCons] = useState<string | null>(null)
@@ -120,6 +122,8 @@ export default function CotizacionDetalleSigp() {
           if (vig) {
             setLpuNombre(vig.nombre)
             setLpuVigenteId(vig.id)
+            // Esquema Matriz→NEG (INGEMEC): factor por ítem sobre el precio full
+            setLpuEsquema(vig.esquema_factor ?? null)
             const its = await getDocs(collection(db, 'lpus', vig.id, 'items'))
             setLpuItems(its.docs.map(d => ({ id: d.id, ...d.data() }) as ItemLPU))
           }
@@ -316,9 +320,18 @@ export default function CotizacionDetalleSigp() {
       toast('Solo una línea de transporte por cotización — cámbiala con el selector de zona', 'error')
       return
     }
+    // Esquema Matriz→NEG (INGEMEC): el precio del LPU es la MATRIZ (referencia
+    // congelada); el valor OPERATIVO nace derivado con el factor default —
+    // así totales, snapshot y todo aguas abajo heredan el valor NEG.
+    const vNeg = lpuEsquema ? valorNegDe(li.valor_unitario, lpuEsquema.factor_default) : li.valor_unitario
     setItems(prev => [...prev, {
       origen: 'lpu', codigo: li.codigo, descripcion: li.descripcion, unidad: li.unidad,
-      valor_unitario: li.valor_unitario, cantidad: 1, valor_total: valorTotalItem(li.valor_unitario, 1),
+      valor_unitario: vNeg, cantidad: 1, valor_total: valorTotalItem(vNeg, 1),
+      ...(lpuEsquema ? {
+        valor_matriz: li.valor_unitario,
+        factor: lpuEsquema.factor_default,
+        factor_etiqueta: lpuEsquema.etiqueta_default,
+      } : {}),
       ...(li.capitulo ? { capitulo: li.capitulo } : {}),
       ...(lpuVigenteId ? { lpu_id: lpuVigenteId } : {}), lpu_item_id: li.id,
       instancia_id: nuevaInstanciaId(),
@@ -880,7 +893,39 @@ export default function CotizacionDetalleSigp() {
                                 ? <input value={it.unidad} onChange={e => setItem(idx, { unidad: e.target.value })} className="w-12 px-1 py-1 border border-gray-200 rounded" />
                                 : <span title={bloq ? 'Snapshot del LPU/catálogo — solo lectura' : undefined}>{it.unidad || '—'}</span>}
                             </td>
-                            <td className="px-2 py-1 text-right">{editable && !bloq
+                            <td className="px-2 py-1 text-right">
+                              {it.valor_matriz !== undefined ? (
+                                /* Esquema Matriz→NEG (INGEMEC): Matriz congelada
+                                   (referencia) + factor elegible + NEG derivado */
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <span className="text-[10px] text-gray-400 font-mono whitespace-nowrap"
+                                    title="Valor de la MATRIZ (precio full del LPU) — solo lectura">
+                                    Matriz {fMoneda(it.valor_matriz)}
+                                  </span>
+                                  {editable && lpuEsquema ? (
+                                    <select value={String(it.factor ?? lpuEsquema.factor_default)}
+                                      onChange={e => {
+                                        const f = Number(e.target.value)
+                                        setItem(idx, {
+                                          factor: f,
+                                          factor_etiqueta: f === lpuEsquema.factor_alt ? lpuEsquema.etiqueta_alt : lpuEsquema.etiqueta_default,
+                                        })
+                                      }}
+                                      title="Factor Matriz→NEG — lo único editable del precio"
+                                      className="text-[10px] px-1 py-0.5 border border-brand-200 rounded bg-brand-50/50 text-brand-800">
+                                      <option value={String(lpuEsquema.factor_default)}>{lpuEsquema.etiqueta_default}</option>
+                                      <option value={String(lpuEsquema.factor_alt)}>{lpuEsquema.etiqueta_alt}</option>
+                                    </select>
+                                  ) : (
+                                    <span className="text-[10px] text-gray-500" title="Factor Matriz→NEG aplicado">
+                                      {it.factor_etiqueta ?? `factor ${it.factor ?? ''}`}
+                                    </span>
+                                  )}
+                                  <span className="font-mono font-semibold" title="Valor NEG = Matriz × factor (derivado — es el valor operativo)">
+                                    {fMoneda(it.valor_unitario)}
+                                  </span>
+                                </div>
+                              ) : editable && !bloq
                               ? <InputExpresion valor={it.valor_unitario} onValor={n => setItem(idx, { valor_unitario: n })}
                                   placeholder="0" className={`w-24 px-1 py-1 border rounded text-right ${cero ? 'border-amber-300' : 'border-gray-200'}`} />
                               : <span className="font-mono" title={bloq ? 'Precio del LPU/catálogo — solo lectura' : undefined}>{fMoneda(it.valor_unitario)}</span>}</td>
