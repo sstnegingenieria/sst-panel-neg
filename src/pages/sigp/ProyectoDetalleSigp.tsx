@@ -19,7 +19,7 @@ import SatisfaccionClienteCard from '../../components/sigp/proyectos/Satisfaccio
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
-import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA } from '../../types/sigp/proyecto'
+import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL } from '../../types/sigp/proyecto'
 import { TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR } from '../../types/sigp/cotizacion'
 import type { Proyecto } from '../../types/sigp/proyecto'
 
@@ -223,6 +223,25 @@ export default function ProyectoDetalleSigp() {
             <a href={proyecto.facturacion.adjunto_url} target="_blank" rel="noreferrer"
               className="text-xs text-brand-700 underline underline-offset-2">
               📎 {proyecto.facturacion.adjunto_nombre ?? 'PDF de la factura'}
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* Administrativa B2 — pago del cliente (lectura) */}
+      {proyecto.pago_cliente && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-1.5">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Pago del cliente <span className="normal-case font-normal">(registrado por Gerencia Administrativa)</span>
+          </p>
+          <p className="text-sm text-gray-800">
+            <span className="font-mono font-semibold">{fmtMoney(proyecto.pago_cliente.valor)}</span>
+            <span className="text-gray-500"> · {MEDIO_PAGO_LABEL[proyecto.pago_cliente.medio]} · recibido el {fFecha(proyecto.pago_cliente.fecha)}</span>
+          </p>
+          {proyecto.pago_cliente.comprobante_url && (
+            <a href={proyecto.pago_cliente.comprobante_url} target="_blank" rel="noreferrer"
+              className="text-xs text-brand-700 underline underline-offset-2">
+              📎 {proyecto.pago_cliente.comprobante_nombre ?? 'Comprobante del pago'}
             </a>
           )}
         </div>

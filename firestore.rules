@@ -297,14 +297,15 @@ service cloud.firestore {
 
       // F2.1.c — SEGREGACIÓN DE FUNCIONES: gerencia_administrativa aprueba la
       // preliquidación y registra el anticipo girado (quien define ≠ quien
-      // desembolsa). Administrativa B1 (22-jul-2026): además REGISTRA la
-      // factura ('facturacion') — el SIGP registra, no ejecuta dinero.
-      // Sigue sin poder tocar snapshot, asignación, alcance ni el resto del
-      // proyecto (patrón hasOnly, como contratistas.estado). No crea ni elimina.
+      // desembolsa). Administrativa B1+B2 (22-jul-2026): además REGISTRA la
+      // factura ('facturacion') y el pago del cliente ('pago_cliente') — el
+      // SIGP registra, no ejecuta dinero. Sigue sin poder tocar snapshot,
+      // asignación, alcance ni el resto del proyecto (patrón hasOnly, como
+      // contratistas.estado). No crea ni elimina.
       allow update: if isAuthed()
                     && rolActual() == 'gerencia_administrativa'
                     && request.resource.data.diff(resource.data)
-                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'estado', 'historial', 'fecha_actualizacion']);
+                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'pago_cliente', 'estado', 'historial', 'fecha_actualizacion']);
     }
 
     // ────────────────────────────────────────────────────────────────

@@ -19,9 +19,10 @@ import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
 import { fmtMoney } from '../../utils/sigp/formato'
 import {
   ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, enBandejaFacturacion,
+  MEDIOS_PAGO, MEDIO_PAGO_LABEL,
 } from '../../types/sigp/proyecto'
 import { puedeRegistrarFacturaUI } from '../../types/sigp/permisos'
-import type { Proyecto } from '../../types/sigp/proyecto'
+import type { Proyecto, MedioPago } from '../../types/sigp/proyecto'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
@@ -40,6 +41,12 @@ export default function FacturacionPagos() {
   const [cufe, setCufe] = useState('')
   const [adjunto, setAdjunto] = useState<File | null>(null)
   const [aplicando, setAplicando] = useState(false)
+  // B2 — registro del pago del cliente
+  const [pagoTarget, setPagoTarget] = useState<Proyecto | null>(null)
+  const [pagoFecha, setPagoFecha] = useState('')
+  const [pagoValor, setPagoValor] = useState<number | undefined>(undefined)
+  const [pagoMedio, setPagoMedio] = useState<MedioPago>('transferencia')
+  const [pagoComprobante, setPagoComprobante] = useState<File | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -72,6 +79,7 @@ export default function FacturacionPagos() {
   }, [proyectos, busqueda])
 
   const porFacturar = proyectos.filter(p => p.estado === 'enviado_a_facturacion').length
+  const porCobrar = proyectos.filter(p => p.estado === 'facturado').length
 
   const abrirRegistro = (p: Proyecto) => {
     setTarget(p)
@@ -118,6 +126,50 @@ export default function FacturacionPagos() {
     } finally { setAplicando(false) }
   }
 
+  // ── B2 — pago del cliente (el dinero se mueve en bancos; aquí se REGISTRA) ──
+  const abrirPago = (p: Proyecto) => {
+    setPagoTarget(p)
+    setPagoFecha(new Date().toISOString().slice(0, 10))
+    setPagoValor(p.facturacion?.valor ?? p.snapshot.valor_venta)   // prellenado con lo facturado
+    setPagoMedio('transferencia')
+    setPagoComprobante(null)
+  }
+
+  const registrarPago = async () => {
+    if (!pagoTarget || !pagoFecha || pagoValor === undefined || pagoValor <= 0) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      let comprobanteData = {}
+      if (pagoComprobante) {
+        const nombre = `${Date.now()}_${pagoComprobante.name}`
+        const snap = await uploadBytes(ref(storage, `proyectos/${pagoTarget.id}/pago/${nombre}`), pagoComprobante)
+        comprobanteData = { comprobante_url: await getDownloadURL(snap.ref), comprobante_nombre: pagoComprobante.name }
+      }
+      await updateDoc(doc(db, 'proyectos', pagoTarget.id), {
+        pago_cliente: {
+          fecha: Timestamp.fromDate(new Date(pagoFecha + 'T12:00:00')),
+          valor: pagoValor,
+          medio: pagoMedio,
+          ...comprobanteData,
+          registrado_por: user?.uid ?? '',
+          fecha_registro: ahora,
+        },
+        estado: 'pagado_cliente',
+        fecha_actualizacion: ahora,
+        historial: arrayUnion({
+          de: 'facturado', a: 'pagado_cliente', por: user?.uid ?? '', fecha: ahora,
+          motivo: `Pago del cliente registrado — ${fmtMoney(pagoValor)} por ${MEDIO_PAGO_LABEL[pagoMedio].toLowerCase()}`,
+        }),
+      })
+      toast('Pago del cliente registrado — proyecto pagado')
+      setPagoTarget(null)
+      await load()
+    } catch {
+      toast('Error al registrar el pago (verifica tu rol)', 'error')
+    } finally { setAplicando(false) }
+  }
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div>
@@ -133,7 +185,8 @@ export default function FacturacionPagos() {
           placeholder="Buscar por PRY, sitio, código, cliente o N° de factura…"
           className="flex-1 min-w-[260px] px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
         <span className="text-xs text-gray-500">
-          <span className="font-semibold text-amber-700">{porFacturar}</span> por facturar · {proyectos.length} en el ciclo
+          <span className="font-semibold text-amber-700">{porFacturar}</span> por facturar ·{' '}
+          <span className="font-semibold text-sky-700">{porCobrar}</span> por cobrar · {proyectos.length} en el ciclo
         </span>
       </div>
 
@@ -146,16 +199,17 @@ export default function FacturacionPagos() {
               <th className="py-3 px-4 font-semibold">Cliente</th>
               <th className="py-3 px-4 font-semibold text-right">Valor pactado</th>
               <th className="py-3 px-4 font-semibold">Factura</th>
+              <th className="py-3 px-4 font-semibold">Pago</th>
               <th className="py-3 px-4 font-semibold">Estado</th>
               <th className="py-3 px-4 font-semibold text-right">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={7} className="py-10 text-center text-gray-400">Cargando…</td></tr>
+              <tr><td colSpan={8} className="py-10 text-center text-gray-400">Cargando…</td></tr>
             )}
             {!loading && filtrados.length === 0 && (
-              <tr><td colSpan={7} className="py-12 text-center text-gray-400">
+              <tr><td colSpan={8} className="py-12 text-center text-gray-400">
                 No hay proyectos en el ciclo de facturación{busqueda ? ' con esa búsqueda' : ''}.
               </td></tr>
             )}
@@ -187,6 +241,18 @@ export default function FacturacionPagos() {
                   ) : <span className="text-gray-300 text-xs">—</span>}
                 </td>
                 <td className="py-3 px-4">
+                  {p.pago_cliente ? (
+                    <span className="text-xs text-gray-700">
+                      <span className="font-mono">{fmtMoney(p.pago_cliente.valor)}</span>
+                      <span className="text-gray-400"> · {MEDIO_PAGO_LABEL[p.pago_cliente.medio]} · {fFecha(p.pago_cliente.fecha)}</span>
+                      {p.pago_cliente.comprobante_url && (
+                        <a href={p.pago_cliente.comprobante_url} target="_blank" rel="noreferrer"
+                          className="ml-1.5 text-brand-700 underline underline-offset-2">PDF</a>
+                      )}
+                    </span>
+                  ) : <span className="text-gray-300 text-xs">—</span>}
+                </td>
+                <td className="py-3 px-4">
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${ESTADO_PRY_COLOR[p.estado]}`}>
                     {ESTADO_PRY_LABEL[p.estado]}
                   </span>
@@ -197,7 +263,12 @@ export default function FacturacionPagos() {
                       className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
                       🧾 Registrar factura
                     </button>
-                  ) : p.estado === 'enviado_a_facturacion' ? (
+                  ) : p.estado === 'facturado' && puedeRegistrar ? (
+                    <button onClick={() => abrirPago(p)}
+                      className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                      💰 Registrar pago del cliente
+                    </button>
+                  ) : (p.estado === 'enviado_a_facturacion' || p.estado === 'facturado') ? (
                     <span className="text-[11px] text-gray-400">Pendiente de Gerencia Adm.</span>
                   ) : (
                     <span className="text-gray-300 text-xs">—</span>
@@ -257,6 +328,58 @@ export default function FacturacionPagos() {
           <label className="block text-xs text-gray-500">
             PDF de la factura (opcional)
             <input type="file" accept="application/pdf" onChange={e => setAdjunto(e.target.files?.[0] ?? null)}
+              className="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
+          </label>
+        </div>
+      </Modal>
+
+      {/* B2 — Modal de pago del cliente (se REGISTRA; el dinero se mueve en bancos) */}
+      <Modal
+        isOpen={pagoTarget !== null}
+        title={`Registrar pago del cliente — ${pagoTarget?.consecutivo ?? ''}`}
+        onClose={() => setPagoTarget(null)}
+        actions={[
+          { label: 'Cancelar', onClick: () => setPagoTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Registrando…' : 'Registrar y marcar pagado',
+            onClick: registrarPago, variant: 'primary', loading: aplicando,
+          },
+        ]}
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-gray-500">
+            {pagoTarget?.snapshot.nombre_sitio || pagoTarget?.snapshot.asunto} · {pagoTarget?.snapshot.cliente} ·
+            facturado <span className="font-mono">{fmtMoney(pagoTarget?.facturacion?.valor ?? 0)}</span>
+            {pagoTarget?.facturacion?.numero && <span className="font-mono"> ({pagoTarget.facturacion.numero})</span>}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="text-xs text-gray-500">
+              Fecha del pago <span className="text-red-500">*</span>
+              <input type="date" value={pagoFecha} onChange={e => setPagoFecha(e.target.value)}
+                className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+            <label className="text-xs text-gray-500">
+              Medio de pago <span className="text-red-500">*</span>
+              <select value={pagoMedio} onChange={e => setPagoMedio(e.target.value as MedioPago)}
+                className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+                {MEDIOS_PAGO.map(m => <option key={m} value={m}>{MEDIO_PAGO_LABEL[m]}</option>)}
+              </select>
+            </label>
+          </div>
+          <label className="block text-xs text-gray-500">
+            Valor recibido <span className="text-red-500">*</span>
+            <InputExpresion valor={pagoValor} onValor={setPagoValor}
+              className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+          </label>
+          {pagoValor !== undefined && pagoTarget?.facturacion && pagoValor !== pagoTarget.facturacion.valor && (
+            <p className="text-xs text-amber-800 bg-amber-50 rounded px-2 py-1.5">
+              ⚠ El valor recibido difiere del facturado ({fmtMoney(pagoTarget.facturacion.valor)}) — verifica antes de
+              registrar. (Pagos parciales/abonos: extensión futura si el área los confirma.)
+            </p>
+          )}
+          <label className="block text-xs text-gray-500">
+            Comprobante del pago (opcional)
+            <input type="file" accept="application/pdf" onChange={e => setPagoComprobante(e.target.files?.[0] ?? null)}
               className="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
           </label>
         </div>
