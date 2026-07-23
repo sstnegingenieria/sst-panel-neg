@@ -39,6 +39,18 @@ service cloud.firestore {
       ];
     }
 
+    // ── Aprobación de preliquidación con respaldo (23-jul-2026) ──
+    // ¿Este write FIJA una aprobación? (escribe un aprobador nuevo/distinto;
+    // RETIRARLA — la reversión de la corrección del Bloque 4 — no cuenta).
+    function fijaAprobacionPreliq() {
+      return request.resource.data.get('preliquidacion', {}).get('aprobada_por', '') != ''
+          && request.resource.data.get('preliquidacion', {}).get('aprobada_por', '')
+             != resource.data.get('preliquidacion', {}).get('aprobada_por', '');
+    }
+    function salvedadPreliq() {
+      return request.resource.data.get('preliquidacion', {}).get('salvedad', '');
+    }
+
     // 3. Administración del subsistema SST (aprobar/rechazar formularios,
     //    gestionar users). Reemplaza el viejo isSST() ampliado con
     //    gestion_integral.
@@ -307,13 +319,32 @@ service cloud.firestore {
       // Bloque final: cerrado = INMUTABLE (ni gestores ni gerencia editan un
       // proyecto cerrado) y a `cerrado` SOLO se llega desde
       // `liquidado_contratista`.
+      // Respaldo de aprobación (23-jul): los roles de PROYECTOS no aprueban
+      // la preliquidación (definir y aprobar en la misma área rompe la
+      // segregación); admin y gerencia_general SÍ, como RESPALDO, y su
+      // aprobación exige salvedad.
       allow update: if puedeGestionarProyectos()
                     && resource.data.get('estado', '') != 'cerrado'
+                    && (!fijaAprobacionPreliq()
+                        || (rolActual() in ['admin', 'gerencia_general']
+                            && salvedadPreliq() != ''))
                     && (request.resource.data.get('estado', '') != 'cerrado'
                         || resource.data.get('estado', '') == 'liquidado_contratista')
                     && (request.resource.data.get('estado', '') != 'liquidado_contratista'
                         || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
                             .data.sst_gate.estado == 'al_dia');
+
+      // Respaldo de aprobación (23-jul): gestion_integral SOLO aprueba la
+      // preliquidación (hasOnly acotado) y siempre con salvedad. La titular
+      // sigue siendo gerencia_administrativa (regla de abajo, sin salvedad).
+      allow update: if isAuthed()
+                    && rolActual() == 'gestion_integral'
+                    && resource.data.get('estado', '') != 'cerrado'
+                    && request.resource.data.diff(resource.data)
+                        .affectedKeys().hasOnly(['preliquidacion', 'estado', 'historial', 'fecha_actualizacion'])
+                    && fijaAprobacionPreliq()
+                    && salvedadPreliq() != ''
+                    && request.resource.data.get('estado', '') in ['preliquidacion_aprobada', 'anticipo_girado'];
 
       // F2.1.c — SEGREGACIÓN DE FUNCIONES: gerencia_administrativa aprueba la
       // preliquidación y registra el anticipo girado (quien define ≠ quien

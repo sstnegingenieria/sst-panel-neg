@@ -200,6 +200,11 @@ export interface PreliquidacionProyecto {
   fecha_definicion: Timestamp
   aprobada_por?: string
   fecha_aprobacion?: Timestamp
+  /** Respaldo controlado (23-jul): cuando aprueba alguien distinto de
+   *  gerencia_administrativa (gerencia_general/gestion_integral/admin), la
+   *  SALVEDAD es obligatoria — por qué no aprobó la titular. Ausente cuando
+   *  aprueba la titular. La regla de Firestore la exige. */
+  salvedad?: string
   anticipo?: AnticipoGirado
   /** Indicador ISO 3 (proyección presupuestal): costo EJECUTADO real del
    *  proyecto (el proyectado es el valor de la cotización/matriz). Se captura
