@@ -199,8 +199,15 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   const badgeSigp = (to: string) =>
     to === '/sigp/visitas' ? visitasPendientes : to === '/sigp/cotizaciones' ? cotizacionesPendientes : 0
   // Proyectos (F2.1.a) exige además su propio flag + rol de gestión de proyectos.
+  // Panel de Marcela (23-jul): el sidebar de gerencia_administrativa queda
+  // ENFOCADO en su ciclo — del grupo SIGP solo Clientes y Cotizaciones (esta
+  // en solo lectura); Panel/Solicitudes/Visitas/Proyectos no le aplican. Las
+  // RUTAS siguen vivas (la bandeja enlaza a la ficha del proyecto para
+  // aprobar preliquidación) — solo se despeja la navegación.
+  const ocultosParaGerenciaAdm = ['/sigp/panel', '/sigp/solicitudes', '/sigp/visitas', '/sigp/proyectos']
   const visibleSigpItems = sigpNavItems.filter(item =>
-    item.to !== '/sigp/proyectos' || (f2Enabled && veProyectosUI(user?.rol)))
+    (item.to !== '/sigp/proyectos' || (f2Enabled && veProyectosUI(user?.rol)))
+    && (user?.rol !== 'gerencia_administrativa' || !ocultosParaGerenciaAdm.includes(item.to)))
   // Bloque 6: "Obras" vive SIEMPRE en el bloque SST (vista informativa; las
   // obras nacen de los proyectos SIGP). Mismos roles de siempre (veObras).
   const visibleItems = navItems.filter(item => item.ve(user?.rol))

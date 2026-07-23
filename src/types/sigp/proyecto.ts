@@ -405,6 +405,42 @@ export const SECCIONES_ADMINISTRATIVA = [
 export const enBandejaAdministrativa = (estado: EstadoProyecto): boolean =>
   SECCIONES_ADMINISTRATIVA.some(s => s.estado === estado)
 
+// ── Mapa proactivo (23-jul): "En camino" — lo que AÚN no le toca a gerencia ──
+//
+// Proyectos vivos en preparación/ejecución (territorio de proyectos): se
+// muestran INFORMATIVOS en la bandeja para que el panel narre TODO el
+// pipeline desde la óptica de gerencia — sin botones (aún no le toca).
+
+export const ESTADOS_EN_CAMINO_ADMINISTRATIVA = [
+  'creado', 'contratista_asignado', 'permisos_en_tramite', 'anticipo_girado',
+  'en_ejecucion', 'ejecutado', 'entregado_cliente', 'soporte_recibido',
+] as const satisfies readonly EstadoProyecto[]
+
+export const enCaminoAdministrativa = (estado: EstadoProyecto): boolean =>
+  (ESTADOS_EN_CAMINO_ADMINISTRATIVA as readonly string[]).includes(estado)
+
+/** Etiqueta de etapa / qué espera — lenguaje de la bandeja, no del ciclo. */
+export const ETIQUETA_EN_CAMINO: Record<(typeof ESTADOS_EN_CAMINO_ADMINISTRATIVA)[number], string> = {
+  creado: 'Creado · pendiente de asignar contratista',
+  contratista_asignado: 'Contratista asignado · pendiente de permisos',
+  permisos_en_tramite: 'Permisos en trámite · pendiente de preliquidación',
+  anticipo_girado: 'Anticipo girado · pendiente de iniciar ejecución',
+  en_ejecucion: 'En ejecución',
+  ejecutado: 'Ejecutado · pendiente de entrega al cliente',
+  entregado_cliente: 'Entregado · pendiente de soporte del cliente',
+  soporte_recibido: 'Soporte recibido · pendiente de enviar a facturación',
+}
+
+/** Resumen NARRATIVO de la bandeja (una línea): qué hay por hacer ahora y
+ *  qué viene. Con todo en cero: "Todo al día · N en camino." */
+export function narrativaAdministrativa(conteo: Record<string, number>, enCamino: number): string {
+  const acciones = SECCIONES_ADMINISTRATIVA.filter(s => s.clave !== 'cerrados')
+  const total = acciones.reduce((sum, a) => sum + (conteo[a.clave] ?? 0), 0)
+  if (total === 0) return `Todo al día · ${enCamino} en camino.`
+  const partes = acciones.map(a => `${conteo[a.clave] ?? 0} ${a.etiqueta.toLowerCase()}`)
+  return `Por hacer ahora: ${partes.join(' · ')}. En camino: ${enCamino}.`
+}
+
 // ── Cierre del proyecto (Administrativa · Bloque final, 23-jul-2026) ─────────
 //
 // Último paso del ciclo: tras liquidar al contratista, gerencia formaliza el
