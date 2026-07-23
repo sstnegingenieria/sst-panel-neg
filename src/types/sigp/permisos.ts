@@ -144,8 +144,18 @@ export const ROLES_VE_VERIFICACION_SST: Rol[] = ['admin', 'sst', 'residente_sst'
 export const veVerificacionSstUI = (rol: string | undefined) => en(rol, ROLES_VE_VERIFICACION_SST)
 export const puedeMarcarSstGateUI = (rol: string | undefined) => rol === 'sst' || rol === 'residente_sst'
 
-export const ROLES_APRUEBA_PRELIQUIDACION: Rol[] = ['admin', 'gerencia_administrativa']
+// Aprobación de preliquidación (23-jul-2026, respaldo controlado): la titular
+// es gerencia_administrativa; gerencia_general, gestion_integral y admin son
+// APROBADORES DE RESPALDO — su aprobación exige `salvedad` (por qué no la
+// hizo la gerente administrativa). Los roles de PROYECTOS jamás aprueban
+// (proyectos define; que apruebe la misma área rompe la segregación).
+export const ROLES_APRUEBA_PRELIQUIDACION: Rol[] = [
+  'gerencia_administrativa', 'gerencia_general', 'gestion_integral', 'admin',
+]
 export const puedeAprobarPreliquidacionUI = (rol: string | undefined) => en(rol, ROLES_APRUEBA_PRELIQUIDACION)
+/** ¿La aprobación de este rol es de RESPALDO? (exige salvedad obligatoria). */
+export const aprobacionRequiereSalvedad = (rol: string | undefined) =>
+  puedeAprobarPreliquidacionUI(rol) && rol !== 'gerencia_administrativa'
 // Visibilidad del módulo Proyectos: gestión O aprobación (gerencia_administrativa
 // necesita entrar a la ficha para aprobar/girar).
 export const veProyectosUI = (rol: string | undefined) =>

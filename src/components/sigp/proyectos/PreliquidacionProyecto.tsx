@@ -21,6 +21,7 @@ import {
   puedeCorregirPreliquidacionEn, correccionEsAjusteEnEjecucion,
   ESTADO_PRY_LABEL,
 } from '../../../types/sigp/proyecto'
+import { aprobacionRequiereSalvedad } from '../../../types/sigp/permisos'
 import { modoAgrupacionDe, actividadesDe, subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../../types/sigp/cotizacion'
 import type { VersionCotizacion, ItemCotizacion } from '../../../types/sigp/cotizacion'
 import type { Proyecto } from '../../../types/sigp/proyecto'
@@ -48,6 +49,9 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
   const [antValor, setAntValor] = useState<number | undefined>(undefined)
   const [antEvidencia, setAntEvidencia] = useState<File | null>(null)
   const [antForm, setAntForm] = useState(false)
+  // respaldo de aprobación: salvedad obligatoria (aprobador ≠ titular)
+  const [salvedadForm, setSalvedadForm] = useState(false)
+  const [salvedad, setSalvedad] = useState('')
   // Bloque 4 — corrección con trazabilidad (ISO 7.5)
   const [corrForm, setCorrForm] = useState(false)
   const [corrMargen, setCorrMargen] = useState('')
@@ -157,7 +161,18 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
     } catch { toast('Error al definir la preliquidación', 'error') } finally { setAplicando(false) }
   }
 
+  // Respaldo controlado (23-jul): si aprueba alguien distinto de la titular
+  // (gerencia_administrativa), la SALVEDAD es obligatoria — aplica también a
+  // la re-aprobación tras corrección (Hotfix B). La regla la exige igual.
+  const esRespaldo = aprobacionRequiereSalvedad(user?.rol)
+
   const aprobar = async () => {
+    if (!pre) return
+    if (esRespaldo) { setSalvedad(''); setSalvedadForm(true); return }
+    await ejecutarAprobacion()
+  }
+
+  const ejecutarAprobacion = async (salvedadTexto?: string) => {
     if (!pre) return
     // Re-aprobación tras una corrección con anticipo YA girado: el giro es un
     // hecho consumado — el proyecto vuelve directo a anticipo_girado y el
@@ -167,20 +182,32 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
     const resumen = conGiro
       ? `Contratista ${fmtMoney(pre.valor_contratista)} · anticipo YA girado ${fmtMoney(pre.anticipo!.valor)} · saldo ${fmtMoney(saldoRealDe(pre))}.`
       : `Contratista ${fmtMoney(pre.valor_contratista)} · anticipo ${fmtNum(pre.anticipo_pct)}% (${fmtMoney(anticipoValorDe(pre))}).`
-    if (!window.confirm(`¿Aprobar la preliquidación? ${resumen}`)) return
+    if (!window.confirm(`¿Aprobar la preliquidación? ${resumen}` +
+      (salvedadTexto ? `\n\nAPROBACIÓN DE RESPALDO — salvedad: ${salvedadTexto}` : ''))) return
     setAplicando(true)
     try {
       const ahora = Timestamp.now()
+      // La titular aprueba SIN salvedad y limpia cualquier salvedad previa;
+      // el respaldo la escribe (obligatoria — la regla la exige).
+      const { salvedad: _salvedadVieja, ...base } = pre
+      const quien = salvedadTexto
+        ? `RESPALDO (${user?.rol ?? '?'}) — SALVEDAD: ${salvedadTexto}`
+        : 'Gerencia Administrativa'
       await updateDoc(doc(db, 'proyectos', proyecto.id), {
-        preliquidacion: { ...pre, aprobada_por: user?.uid ?? '', fecha_aprobacion: ahora },
+        preliquidacion: {
+          ...base, aprobada_por: user?.uid ?? '', fecha_aprobacion: ahora,
+          ...(salvedadTexto ? { salvedad: salvedadTexto } : {}),
+        },
         estado: destino,
         fecha_actualizacion: ahora,
         historial: arrayUnion(entrada(proyecto.estado, destino,
           conGiro
-            ? `Preliquidación re-aprobada por Gerencia Administrativa — el anticipo girado (${fmtMoney(pre.anticipo!.valor)}) se mantiene; saldo ${fmtMoney(saldoRealDe(pre))}`
-            : 'Preliquidación aprobada por Gerencia Administrativa')),
+            ? `Preliquidación re-aprobada por ${quien} — el anticipo girado (${fmtMoney(pre.anticipo!.valor)}) se mantiene; saldo ${fmtMoney(saldoRealDe(pre))}`
+            : `Preliquidación aprobada por ${quien}`)),
       })
       toast('Preliquidación aprobada')
+      setSalvedadForm(false)
+      setSalvedad('')
       await reload()
     } catch { toast('Error al aprobar (verifica tu rol)', 'error') } finally { setAplicando(false) }
   }
@@ -567,6 +594,12 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
             {pre.fecha_aprobacion && <> · aprobada el {fFecha(pre.fecha_aprobacion)}</>}
             {pre.anticipo && <> · anticipo girado el {fFecha(pre.anticipo.fecha)} ({fmtMoney(pre.anticipo.valor)})</>}
           </p>
+          {pre.salvedad && (
+            <p className="text-[11px] w-fit rounded px-2 py-1 bg-amber-50 text-amber-800"
+              title="Aprobó un rol de respaldo, no la titular (gerencia administrativa)">
+              ⚠ Aprobación de respaldo — salvedad: {pre.salvedad}
+            </p>
+          )}
 
           {/* ISO ind. 3 — costo ejecutado real (proyectado = valor de venta) */}
           {puedeGestionar && (
@@ -596,8 +629,9 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
       <div className="flex flex-wrap items-center gap-2">
         {pre && !pre.aprobada_por && puedeAprobar && proyecto.estado === 'preliquidacion_definida' && (
           <button onClick={aprobar} disabled={aplicando}
+            title={esRespaldo ? 'Aprobación de RESPALDO: exige salvedad (por qué no aprueba la gerente administrativa)' : undefined}
             className="text-sm px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
-            ✓ Aprobar (Gerencia Adm.)
+            {esRespaldo ? '✓ Aprobar como respaldo (con salvedad)' : '✓ Aprobar (Gerencia Adm.)'}
           </button>
         )}
         {pre && !pre.aprobada_por && !puedeAprobar && (
@@ -617,6 +651,32 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
           </button>
         )}
       </div>
+
+      {/* ── Respaldo de aprobación — SALVEDAD obligatoria (aprobador ≠ titular) ── */}
+      {salvedadForm && pre && (
+        <div className="bg-amber-50/60 border border-amber-200 rounded-lg p-3 space-y-2.5">
+          <p className="text-xs font-semibold text-amber-800">
+            Aprobación de respaldo — la titular es Gerencia Administrativa. Justifica por qué
+            apruebas tú (queda en la preliquidación y en el historial).
+          </p>
+          <label className="block text-xs text-gray-500">
+            Salvedad <span className="text-red-500">*</span>
+            <textarea value={salvedad} onChange={e => setSalvedad(e.target.value)} rows={2}
+              placeholder="Ej: la gerente administrativa está en licencia hasta el 30-jul; aprueba gerencia general para no frenar el anticipo…"
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+          </label>
+          {!salvedad.trim() && <p className="text-xs text-red-600">La salvedad es obligatoria para aprobar como respaldo.</p>}
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => { setSalvedadForm(false); setSalvedad('') }}
+              className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Cancelar</button>
+            <button onClick={() => { if (salvedad.trim()) ejecutarAprobacion(salvedad.trim()) }}
+              disabled={aplicando || !salvedad.trim()}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50">
+              {aplicando ? 'Aprobando…' : 'Aprobar con salvedad'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Bloque 4 — form de corrección (motivo OBLIGATORIO, ISO 7.5) ── */}
       {corrForm && pre && (
