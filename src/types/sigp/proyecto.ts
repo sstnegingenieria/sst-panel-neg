@@ -296,6 +296,16 @@ export interface RetencionLiquidacion {
  *  (se listan como `ajustes_reconocidos`); el delta restante son las
  *  compras/reembolsos. */
 export interface LiquidacionProyecto {
+  /** LIQUIDACIÓN ANTICIPADA (23-jul): por acuerdo entre Gerencia de
+   *  Proyectos y Administrativa se paga al contratista ANTES de cobrar
+   *  (desde `facturado`, saltando SOLO `pagado_cliente`). El gate SST
+   *  al_dia sigue siendo INNEGOCIABLE y el cierre exigirá el cobro. */
+  liquidacion_anticipada?: boolean
+  /** Motivo del acuerdo — obligatorio en la anticipada (la regla lo exige). */
+  justificacion_anticipada?: string
+  /** Constancia del acuerdo: con quién (Gerencia de Proyectos) y cuándo. */
+  acuerdo_con?: string
+  acuerdo_fecha?: Timestamp
   /** Mano de obra vigente al liquidar (= preliquidacion.valor_contratista). */
   mano_obra: number
   /** Snapshot de las compras/reembolsos reconocidos. */
@@ -333,6 +343,31 @@ export const saldoFinalLiquidacion = (
  *  'al_dia' se exige aparte — regla viva en prod vía get(verificaciones_sst)). */
 export const puedeLiquidarseEn = (estado: EstadoProyecto): boolean =>
   estado === 'pagado_cliente'
+
+/** MÁQUINA DE ESTADOS de la liquidación (explícita, 23-jul):
+ *   pagado_cliente → liquidado_contratista  (NORMAL, gate al_dia)
+ *   facturado → liquidado_contratista       (ANTICIPADA: gate al_dia +
+ *     marca + justificación + constancia del acuerdo)
+ *   cualquier otro origen → PROHIBIDO.
+ *  Innegociable: gate SIEMPRE; nunca antes de `facturado`; solo se salta
+ *  UN estado (pagado_cliente). */
+export const puedeLiquidarseAnticipadoEn = (estado: EstadoProyecto): boolean =>
+  estado === 'facturado'
+
+/** ¿El cobro al cliente sigue pendiente? Cubre el caso normal (`facturado`)
+ *  y el liquidado ANTICIPADO cuyo pago se registra después (sin cambiar el
+ *  estado — ya avanzó). Alimenta la sección "Por cobrar". */
+export const pagoClientePendiente = (
+  p: Pick<Proyecto, 'estado' | 'pago_cliente'>,
+): boolean =>
+  p.estado === 'facturado' ||
+  (p.estado === 'liquidado_contratista' && !p.pago_cliente)
+
+/** INTEGRIDAD del cierre: no se cierra con cuenta por cobrar abierta — un
+ *  liquidado anticipadamente exige el pago del cliente registrado. */
+export const puedeCerrarseProyecto = (
+  p: Pick<Proyecto, 'estado' | 'pago_cliente'>,
+): boolean => p.estado === 'liquidado_contratista' && !!p.pago_cliente
 
 /** Entradas del historial que son ajustes de ejecución pendientes de
  *  reconocer (Hotfix 23-jul los marca con este texto en el motivo). */

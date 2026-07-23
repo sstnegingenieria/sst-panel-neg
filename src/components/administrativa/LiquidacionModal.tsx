@@ -39,6 +39,13 @@ export default function LiquidacionModal({ proyecto, verificacion, onClose, onDo
   const [retValor, setRetValor] = useState<number | undefined>(undefined)
   const [observaciones, setObservaciones] = useState('')
   const [aplicando, setAplicando] = useState(false)
+  // Liquidación ANTICIPADA (desde facturado, cliente sin pagar): exige
+  // justificación + constancia del acuerdo con Gerencia de Proyectos.
+  const anticipada = proyecto.estado === 'facturado'
+  const [justificacion, setJustificacion] = useState('')
+  const [acuerdoCon, setAcuerdoCon] = useState('')
+  const [acuerdoFecha, setAcuerdoFecha] = useState(new Date().toISOString().slice(0, 10))
+  const anticipadaCompleta = !anticipada || (!!justificacion.trim() && !!acuerdoCon.trim() && !!acuerdoFecha)
 
   const gate = estadoSstGate(verificacion ?? {})
   const gateOk = sstGateAlDia(verificacion ?? {})
@@ -64,15 +71,22 @@ export default function LiquidacionModal({ proyecto, verificacion, onClose, onDo
   }
 
   const liquidar = async () => {
-    if (!pre || !gateOk) return
+    if (!pre || !gateOk || !anticipadaCompleta) return
     if (!window.confirm(
       `Liquidar al contratista por ${fmtMoney(totalFinal)} (saldo a pagar: ${fmtMoney(saldoFinal)}).\n\n` +
       (esIgual ? 'Liquidación IGUAL a la preliquidación.' : `Diferencia vs. preliquidación: ${fmtMoney(diferencia)} (compras/reembolsos).`) +
+      (anticipada ? '\n\n⚠ LIQUIDACIÓN ANTICIPADA: el cliente AÚN NO PAGA. El cobro queda pendiente y el proyecto no se podrá cerrar hasta registrarlo.' : '') +
       '\n\n¿Confirmar? El proyecto pasa a "Liquidado con el contratista".')) return
     setAplicando(true)
     try {
       const ahora = Timestamp.now()
       const liquidacion: LiquidacionProyecto = {
+        ...(anticipada ? {
+          liquidacion_anticipada: true,
+          justificacion_anticipada: justificacion.trim(),
+          acuerdo_con: acuerdoCon.trim(),
+          acuerdo_fecha: Timestamp.fromDate(new Date(acuerdoFecha + 'T12:00:00')),
+        } : {}),
         mano_obra: manoObra,
         compras_reembolsos: compras,
         ajustes_reconocidos: ajustes,
@@ -95,8 +109,11 @@ export default function LiquidacionModal({ proyecto, verificacion, onClose, onDo
         estado: 'liquidado_contratista',
         fecha_actualizacion: ahora,
         historial: arrayUnion({
-          de: 'pagado_cliente', a: 'liquidado_contratista', por: user?.uid ?? '', fecha: ahora,
-          motivo: `Liquidación del contratista — mano de obra ${fmtMoney(manoObra)} + compras/reembolsos ${fmtMoney(diferencia)} = total ${fmtMoney(totalFinal)} · anticipo girado ${fmtMoney(anticipoGirado)}` +
+          de: proyecto.estado, a: 'liquidado_contratista', por: user?.uid ?? '', fecha: ahora,
+          motivo: (anticipada
+            ? `Liquidación ANTICIPADA del contratista (cliente sin pagar — acuerdo con ${acuerdoCon.trim()} el ${acuerdoFecha}; justificación: ${justificacion.trim()}) — `
+            : 'Liquidación del contratista — ') +
+            `mano de obra ${fmtMoney(manoObra)} + compras/reembolsos ${fmtMoney(diferencia)} = total ${fmtMoney(totalFinal)} · anticipo girado ${fmtMoney(anticipoGirado)}` +
             (retenciones.length ? ` · retenciones ${fmtMoney(totalRetenciones(retenciones))}` : '') +
             ` · SALDO ${fmtMoney(saldoFinal)} · ` +
             (esIgual ? 'IGUAL a la preliquidación' : `diferencia ${fmtMoney(diferencia)} por compras/reembolsos`) +
@@ -120,11 +137,14 @@ export default function LiquidacionModal({ proyecto, verificacion, onClose, onDo
   )
 
   return (
-    <Modal isOpen title={`Liquidación — ${proyecto.consecutivo}`} onClose={onClose} size="lg"
+    <Modal isOpen title={`Liquidación ${anticipada ? 'ANTICIPADA ' : ''}— ${proyecto.consecutivo}`} onClose={onClose} size="lg"
       actions={[
         { label: 'Cancelar', onClick: onClose, variant: 'secondary' },
         {
-          label: aplicando ? 'Liquidando…' : gateOk ? `Liquidar (saldo ${fmtMoney(saldoFinal)})` : 'Bloqueada por el gate SST',
+          label: aplicando ? 'Liquidando…'
+            : !gateOk ? 'Bloqueada por el gate SST'
+            : !anticipadaCompleta ? 'Falta justificación del acuerdo'
+            : `Liquidar${anticipada ? ' ANTICIPADO' : ''} (saldo ${fmtMoney(saldoFinal)})`,
           onClick: liquidar, variant: 'primary', loading: aplicando,
         },
       ]}>
@@ -143,6 +163,37 @@ export default function LiquidacionModal({ proyecto, verificacion, onClose, onDo
         </div>
         {!gateOk && verificacion?.sst_gate?.observacion && (
           <p className="text-xs text-red-700 bg-red-50 rounded px-2 py-1.5">Novedad SST: {verificacion.sst_gate.observacion}</p>
+        )}
+
+        {/* ANTICIPADA: el cliente no ha pagado — acuerdo obligatorio */}
+        {anticipada && (
+          <div className="border border-amber-300 bg-amber-50/60 rounded-lg p-3 space-y-2">
+            <p className="text-xs font-semibold text-amber-800">
+              ⚠ Liquidación ANTICIPADA — el cliente aún no paga. Requiere el acuerdo entre
+              Gerencia de Proyectos y Administrativa; el cobro queda pendiente y el proyecto
+              NO se podrá cerrar hasta registrarlo.
+            </p>
+            <label className="block text-xs text-gray-600">
+              Justificación del acuerdo <span className="text-red-500">*</span>
+              <textarea value={justificacion} onChange={e => setJustificacion(e.target.value)} rows={2}
+                placeholder="Ej: el cliente confirmó el pago para el 15-ago; el contratista requiere el saldo para nómina…"
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <label className="block text-xs text-gray-600">
+                Acuerdo con (Gerencia de Proyectos) <span className="text-red-500">*</span>
+                <input value={acuerdoCon} onChange={e => setAcuerdoCon(e.target.value)}
+                  placeholder="Ej: director de proyectos"
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+              </label>
+              <label className="block text-xs text-gray-600">
+                Fecha del acuerdo <span className="text-red-500">*</span>
+                <input type="date" value={acuerdoFecha} onChange={e => setAcuerdoFecha(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+              </label>
+            </div>
+            {!anticipadaCompleta && <p className="text-xs text-red-600">Justificación, con quién y fecha del acuerdo son obligatorios.</p>}
+          </div>
         )}
 
         {/* Conciliación */}

@@ -53,6 +53,8 @@ export interface DatosPdfLiquidacion {
   /** Motivos de los ajustes en ejecución reconocidos (puede ir vacío). */
   ajustesReconocidos: string[]
   observaciones?: string
+  /** Liquidación ANTICIPADA (constancia del acuerdo — 23-jul). */
+  anticipada?: { justificacion: string; acuerdoCon: string; acuerdoFecha: Date }
 }
 
 export async function generarPdfLiquidacion(
@@ -147,6 +149,13 @@ export async function generarPdfLiquidacion(
     page.drawRectangle({ x: MARGEN, y: y - hSello + 5, width: wSello, height: hSello, borderColor: color, borderWidth: 1, color: BLANCO })
     lineasSello.forEach((l, i) => page.drawText(l, { x: MARGEN + 10, y: y - 7 - i * 11, size: 8, font: fS, color }))
     y -= hSello + 8
+    if (datos.anticipada) {
+      const nota = `LIQUIDACIÓN ANTICIPADA — acuerdo con ${datos.anticipada.acuerdoCon} (${fFechaLarga(datos.anticipada.acuerdoFecha)}): ${datos.anticipada.justificacion}`
+      const lineas = partir(nota, fS, 7.5, CONTENIDO - 8)
+      asegurar(lineas.length * 10 + 6)
+      lineas.forEach(l => { page.drawText(l, { x: MARGEN + 4, y: y - 6, size: 7.5, font: fS, color: AMBAR }); y -= 10 })
+      y -= 6
+    }
     for (const a of datos.ajustesReconocidos) {
       const lineas = partir(`Ajuste reconocido: ${a}`, fR, 7, CONTENIDO - 8)
       asegurar(lineas.length * 10 + 4)
