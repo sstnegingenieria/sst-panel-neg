@@ -286,11 +286,20 @@ export default function FacturacionPagos() {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-800">Gestión Administrativa</h1>
+        {/* Saludo personalizado (23-jul): primer nombre del perfil; sin
+            nombre real, saludo neutro — jamás rompe. OJO: AuthContext hace
+            fallback nombre=email cuando el perfil no lo trae — un '@' no es
+            un nombre. */}
+        <h1 className="text-2xl font-bold text-gray-800">
+          {user?.nombre?.trim() && !user.nombre.includes('@')
+            ? `Hola, ${user.nombre.trim().split(/\s+/)[0]} 👋`
+            : 'Hola 👋'}
+        </h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Todo el ciclo de Gerencia Administrativa en un solo lugar: aprobar, girar anticipo,
-          facturar, cobrar, liquidar y cerrar. El SIGP registra y controla; el dinero se mueve
-          en los sistemas externos del área.
+          Aquí tienes tu ciclo completo en un solo lugar: aprobar preliquidaciones, registrar
+          anticipos, recibir los soportes y dar luz verde a la facturación, registrar el cobro
+          del cliente, liquidar al contratista y cerrar. La factura la haces en Siigo; el SIGP
+          te va guiando etapa por etapa y deja la trazabilidad.
         </p>
       </div>
 
