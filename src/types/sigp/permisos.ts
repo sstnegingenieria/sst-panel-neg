@@ -131,6 +131,10 @@ export const puedeRegistrarFacturaUI = (rol: string | undefined) => rol === 'ger
 // Las compras/reembolsos las CAPTURAN los gestores durante el proyecto
 // (usa puedeGestionarProyectosUI en el call site).
 export const puedeLiquidarUI = (rol: string | undefined) => rol === 'gerencia_administrativa'
+// ── Bloque final — cierre del proyecto ──
+// CERRAR: gerencia_administrativa (formaliza el ciclo) + admin (infra).
+export const puedeCerrarProyectoUI = (rol: string | undefined) =>
+  rol === 'gerencia_administrativa' || rol === 'admin'
 
 // ── Gate SST (Administrativa · Bloque 3a) ──
 // La cola "Verificación de contratistas" la VEN sst/residente_sst (opera) y

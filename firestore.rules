@@ -296,13 +296,21 @@ service cloud.firestore {
       // contienen valor de venta, márgenes y preliquidación. Su cola vive
       // en la proyección delgada `verificaciones_sst` (más abajo).
       allow read: if accesoSIGP();
-      allow create, delete: if puedeGestionarProyectos();
+      allow create: if puedeGestionarProyectos();
+      // Bloque final: un proyecto CERRADO es inmutable — tampoco se borra.
+      allow delete: if puedeGestionarProyectos()
+                    && resource.data.get('estado', '') != 'cerrado';
 
       // Bloque 3a/3b: liquidar al contratista exige el aval SST leído de la
-      // PROYECCIÓN (gate NO esquivable — condición escrita para el 3b). El
-      // get() solo se evalúa al intentar 'liquidado_contratista'; si la
-      // proyección no existe, deniega.
+      // PROYECCIÓN (gate NO esquivable). El get() solo se evalúa al intentar
+      // 'liquidado_contratista'; si la proyección no existe, deniega.
+      // Bloque final: cerrado = INMUTABLE (ni gestores ni gerencia editan un
+      // proyecto cerrado) y a `cerrado` SOLO se llega desde
+      // `liquidado_contratista`.
       allow update: if puedeGestionarProyectos()
+                    && resource.data.get('estado', '') != 'cerrado'
+                    && (request.resource.data.get('estado', '') != 'cerrado'
+                        || resource.data.get('estado', '') == 'liquidado_contratista')
                     && (request.resource.data.get('estado', '') != 'liquidado_contratista'
                         || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
                             .data.sst_gate.estado == 'al_dia');
@@ -318,7 +326,11 @@ service cloud.firestore {
       allow update: if isAuthed()
                     && rolActual() == 'gerencia_administrativa'
                     && request.resource.data.diff(resource.data)
-                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'pago_cliente', 'liquidacion', 'compras_reembolsos', 'estado', 'historial', 'fecha_actualizacion'])
+                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'pago_cliente', 'liquidacion', 'compras_reembolsos', 'cierre', 'estado', 'historial', 'fecha_actualizacion'])
+                    // Bloque final: cerrado inmutable + solo desde liquidado
+                    && resource.data.get('estado', '') != 'cerrado'
+                    && (request.resource.data.get('estado', '') != 'cerrado'
+                        || resource.data.get('estado', '') == 'liquidado_contratista')
                     // Bloque 3a/3b: liquidar exige el aval SST (gate no esquivable)
                     && (request.resource.data.get('estado', '') != 'liquidado_contratista'
                         || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
