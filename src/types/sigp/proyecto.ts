@@ -231,6 +231,32 @@ export interface FacturacionProyecto {
   fecha_registro: Timestamp
 }
 
+// Administrativa · Bloque 2 (22-jul-2026) — pago del cliente.
+// Supuesto ACTUAL (moldeable): UN pago total. Si el área confirma pagos
+// parciales, un bloque futuro agrega `abonos[]` y este registro pasa a ser
+// el consolidado — la forma de objeto único no estorba esa extensión.
+
+export const MEDIOS_PAGO = ['transferencia', 'cheque', 'consignacion', 'otro'] as const
+export type MedioPago = (typeof MEDIOS_PAGO)[number]
+export const MEDIO_PAGO_LABEL: Record<MedioPago, string> = {
+  transferencia: 'Transferencia',
+  cheque: 'Cheque',
+  consignacion: 'Consignación',
+  otro: 'Otro',
+}
+
+/** Registro del pago recibido del cliente (el dinero se mueve en bancos —
+ *  el SIGP solo REGISTRA la evidencia). */
+export interface PagoClienteProyecto {
+  fecha: Timestamp             // fecha del pago
+  valor: number
+  medio: MedioPago
+  comprobante_url?: string     // comprobante (opcional, Storage)
+  comprobante_nombre?: string
+  registrado_por: string
+  fecha_registro: Timestamp
+}
+
 /** ¿El proyecto pertenece a la bandeja de Facturación y Pagos? (desde el
  *  handoff en adelante — territorio del módulo administrativo). */
 export const enBandejaFacturacion = (estado: EstadoProyecto): boolean => {
@@ -518,6 +544,7 @@ export interface Proyecto {
   entrega?: EntregaProyecto            // F2.1.d — entrega al cliente
   soporte_cliente?: SoporteCliente     // F2.1.d — soporte emitido por el cliente
   facturacion?: FacturacionProyecto    // Administrativa B1 — factura registrada
+  pago_cliente?: PagoClienteProyecto   // Administrativa B2 — pago del cliente
   evaluacion_contratista?: EvaluacionContratista  // F2.1.d — evaluación ISO simple
   historial: EntradaHistorialProyecto[]
   creado_por: string
