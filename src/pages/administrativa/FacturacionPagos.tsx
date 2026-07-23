@@ -19,10 +19,12 @@ import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
 import { fmtMoney } from '../../utils/sigp/formato'
 import {
   ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, enBandejaFacturacion,
+  enColaVerificacionSst, estadoSstGate, SST_GATE_LABEL, SST_GATE_COLOR,
   MEDIOS_PAGO, MEDIO_PAGO_LABEL,
 } from '../../types/sigp/proyecto'
 import { puedeRegistrarFacturaUI } from '../../types/sigp/permisos'
 import type { Proyecto, MedioPago } from '../../types/sigp/proyecto'
+import type { VerificacionSst } from '../../types/sigp/verificacionSst'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
@@ -31,6 +33,8 @@ export default function FacturacionPagos() {
   const { user } = useAuth()
   const puedeRegistrar = puedeRegistrarFacturaUI(user?.rol)
   const [proyectos, setProyectos] = useState<Proyecto[]>([])
+  // Bloque 3a: gate SST por proyecto, leído de la proyección verificaciones_sst
+  const [gates, setGates] = useState<Record<string, VerificacionSst>>({})
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState('')
   // registro de factura
@@ -55,6 +59,9 @@ export default function FacturacionPagos() {
       const todos = snap.docs.map(d => ({ id: d.id, ...d.data() }) as Proyecto)
       // Defensivo: un doc malformado (sin snapshot) no debe tumbar la bandeja
       setProyectos(todos.filter(p => p.snapshot && enBandejaFacturacion(p.estado)))
+      // Chip del gate SST (solo lectura — el gate lo marca SST en su cola)
+      const gatesSnap = await getDocs(collection(db, 'verificaciones_sst'))
+      setGates(Object.fromEntries(gatesSnap.docs.map(d => [d.id, d.data() as VerificacionSst])))
     } catch {
       toast('Error al cargar la bandeja', 'error')
     } finally { setLoading(false) }
@@ -256,6 +263,19 @@ export default function FacturacionPagos() {
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${ESTADO_PRY_COLOR[p.estado]}`}>
                     {ESTADO_PRY_LABEL[p.estado]}
                   </span>
+                  {/* Bloque 3a: estado del gate SST — SOLO LECTURA para gerencia,
+                      leído de la proyección verificaciones_sst (el gate lo marca
+                      SST en /verificacion-contratistas); sin 'al_dia' la
+                      liquidación queda bloqueada (Bloque 3b). */}
+                  {enColaVerificacionSst(p.estado) && (
+                    <span
+                      className={`block w-fit mt-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${SST_GATE_COLOR[estadoSstGate(gates[p.id] ?? {})]}`}
+                      title={gates[p.id]?.sst_gate?.observacion
+                        ? `Gate SST — observación: ${gates[p.id].sst_gate!.observacion}`
+                        : 'Gate SST: verificación del contratista, previa a la liquidación'}>
+                      {SST_GATE_LABEL[estadoSstGate(gates[p.id] ?? {})]}
+                    </span>
+                  )}
                 </td>
                 <td className="py-3 px-4 text-right">
                   {p.estado === 'enviado_a_facturacion' && puedeRegistrar ? (

@@ -292,8 +292,20 @@ service cloud.firestore {
     // el consecutivo PRY-YYYY-NNN lo genera la Cloud Function generarConsecutivo.
 
     match /proyectos/{proyectoId} {
+      // Bloque 3a (ajuste de confidencialidad): SST NO lee proyectos —
+      // contienen valor de venta, márgenes y preliquidación. Su cola vive
+      // en la proyección delgada `verificaciones_sst` (más abajo).
       allow read: if accesoSIGP();
-      allow create, update, delete: if puedeGestionarProyectos();
+      allow create, delete: if puedeGestionarProyectos();
+
+      // Bloque 3a/3b: liquidar al contratista exige el aval SST leído de la
+      // PROYECCIÓN (gate NO esquivable — condición escrita para el 3b). El
+      // get() solo se evalúa al intentar 'liquidado_contratista'; si la
+      // proyección no existe, deniega.
+      allow update: if puedeGestionarProyectos()
+                    && (request.resource.data.get('estado', '') != 'liquidado_contratista'
+                        || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
+                            .data.sst_gate.estado == 'al_dia');
 
       // F2.1.c — SEGREGACIÓN DE FUNCIONES: gerencia_administrativa aprueba la
       // preliquidación y registra el anticipo girado (quien define ≠ quien
@@ -305,7 +317,34 @@ service cloud.firestore {
       allow update: if isAuthed()
                     && rolActual() == 'gerencia_administrativa'
                     && request.resource.data.diff(resource.data)
-                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'pago_cliente', 'estado', 'historial', 'fecha_actualizacion']);
+                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'pago_cliente', 'estado', 'historial', 'fecha_actualizacion'])
+                    // Bloque 3a/3b: liquidar exige el aval SST (gate no esquivable)
+                    && (request.resource.data.get('estado', '') != 'liquidado_contratista'
+                        || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
+                            .data.sst_gate.estado == 'al_dia');
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: verificaciones_sst — Gate SST (Administrativa · Bloque 3a)
+    // ────────────────────────────────────────────────────────────────
+    // Proyección DELGADA del proyecto para el área SST: identidad + estado,
+    // SIN datos financieros (SST no tiene acceso a `proyectos`). La escribe
+    // la Cloud Function sincronizarVerificacionSst (Admin SDK — bypassa
+    // reglas); el gate `sst_gate` lo posee SST. Gerencia/alta dirección la
+    // leen para el chip del gate en su bandeja.
+
+    match /verificaciones_sst/{proyectoId} {
+      allow read: if isAuthed() && rolActual() in [
+        'sst', 'residente_sst', 'admin',
+        'gerencia_administrativa', 'gerencia_general'
+      ];
+      // sst/residente_sst marcan el gate — su ÚNICO campo de escritura
+      // (patrón hasOnly, como contratistas.estado). Nadie más escribe el
+      // gate; create/delete solo la Cloud Function.
+      allow update: if isAuthed()
+                    && rolActual() in ['sst', 'residente_sst']
+                    && request.resource.data.diff(resource.data)
+                        .affectedKeys().hasOnly(['sst_gate', 'historial', 'fecha_actualizacion']);
     }
 
     // ────────────────────────────────────────────────────────────────

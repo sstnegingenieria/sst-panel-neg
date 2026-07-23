@@ -127,6 +127,14 @@ export const ROLES_VE_FACTURACION: Rol[] = ['admin', 'gerencia_general', 'gerenc
 export const veFacturacionUI = (rol: string | undefined) => en(rol, ROLES_VE_FACTURACION)
 export const puedeRegistrarFacturaUI = (rol: string | undefined) => rol === 'gerencia_administrativa'
 
+// ── Gate SST (Administrativa · Bloque 3a) ──
+// La cola "Verificación de contratistas" la VEN sst/residente_sst (opera) y
+// admin (lectura de infraestructura). MARCAR el gate: SOLO sst/residente_sst
+// (respaldado por reglas: su único campo de escritura en proyectos).
+export const ROLES_VE_VERIFICACION_SST: Rol[] = ['admin', 'sst', 'residente_sst']
+export const veVerificacionSstUI = (rol: string | undefined) => en(rol, ROLES_VE_VERIFICACION_SST)
+export const puedeMarcarSstGateUI = (rol: string | undefined) => rol === 'sst' || rol === 'residente_sst'
+
 export const ROLES_APRUEBA_PRELIQUIDACION: Rol[] = ['admin', 'gerencia_administrativa']
 export const puedeAprobarPreliquidacionUI = (rol: string | undefined) => en(rol, ROLES_APRUEBA_PRELIQUIDACION)
 // Visibilidad del módulo Proyectos: gestión O aprobación (gerencia_administrativa

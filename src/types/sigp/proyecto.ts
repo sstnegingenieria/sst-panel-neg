@@ -257,6 +257,49 @@ export interface PagoClienteProyecto {
   fecha_registro: Timestamp
 }
 
+// ── Gate SST (Administrativa · Bloque 3a, 23-jul-2026) ───────────────────────
+//
+// Antes de LIQUIDAR (pagar el saldo al contratista), SST confirma que el
+// contratista está "al día en formatos" de esa obra. El criterio de "al día"
+// es MANUAL de SST (no se cablea). Gate NO esquivable: la regla de Firestore
+// (escrita para el Bloque 3b) impide pasar a `liquidado_contratista` sin
+// `sst_gate.estado == 'al_dia'`.
+
+export const ESTADOS_SST_GATE = ['pendiente', 'al_dia', 'con_novedad'] as const
+export type EstadoSstGate = (typeof ESTADOS_SST_GATE)[number]
+
+export const SST_GATE_LABEL: Record<EstadoSstGate, string> = {
+  pendiente: 'Pendiente de SST',
+  al_dia: 'Al día (SST)',
+  con_novedad: 'Con novedad (SST)',
+}
+export const SST_GATE_COLOR: Record<EstadoSstGate, string> = {
+  pendiente: 'bg-gray-100 text-gray-600',
+  al_dia: 'bg-emerald-100 text-emerald-800',
+  con_novedad: 'bg-red-100 text-red-700',
+}
+
+export interface SstGateProyecto {
+  estado: EstadoSstGate
+  verificado_por: string
+  fecha: Timestamp
+  observacion?: string         // obligatoria cuando hay novedad
+}
+
+/** Estado efectivo del gate (ausente = pendiente). Opera sobre cualquier
+ *  portador del gate — hoy, la proyección `verificaciones_sst`. */
+export const estadoSstGate = (p: { sst_gate?: SstGateProyecto }): EstadoSstGate =>
+  p.sst_gate?.estado ?? 'pendiente'
+
+/** ¿SST avaló? — condición para liquidar al contratista (Bloque 3b). */
+export const sstGateAlDia = (p: { sst_gate?: SstGateProyecto }): boolean =>
+  estadoSstGate(p) === 'al_dia'
+
+/** Cola de verificación SST: proyectos ejecutados que ya están en el tramo
+ *  administrativo previo a la liquidación. */
+export const enColaVerificacionSst = (estado: EstadoProyecto): boolean =>
+  estado === 'facturado' || estado === 'pagado_cliente'
+
 /** ¿El proyecto pertenece a la bandeja de Facturación y Pagos? (desde el
  *  handoff en adelante — territorio del módulo administrativo). */
 export const enBandejaFacturacion = (estado: EstadoProyecto): boolean => {
@@ -545,6 +588,9 @@ export interface Proyecto {
   soporte_cliente?: SoporteCliente     // F2.1.d — soporte emitido por el cliente
   facturacion?: FacturacionProyecto    // Administrativa B1 — factura registrada
   pago_cliente?: PagoClienteProyecto   // Administrativa B2 — pago del cliente
+  // El gate SST (Bloque 3a) NO vive aquí: vive en la proyección
+  // `verificaciones_sst/{proyectoId}` (ver types/sigp/verificacionSst.ts) —
+  // SST no tiene acceso a `proyectos` (confidencialidad financiera).
   evaluacion_contratista?: EvaluacionContratista  // F2.1.d — evaluación ISO simple
   historial: EntradaHistorialProyecto[]
   creado_por: string
