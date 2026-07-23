@@ -352,10 +352,14 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   // ════ 5. TABLA de ítems ════
   // CÓDIGO, CANT y VR. UNITARIO angostos a favor de DESCRIPCIÓN (es la columna
   // que respira — ajuste 21-jul a pedido de Giovanny)
-  const col = { cod: 40, und: 34, cant: 36, vu: 58, vt: 74 }
-  const wDesc = CONTENIDO - col.cod - col.und - col.cant - col.vu - col.vt
+  // Esquema Matriz→NEG (23-jul, solo INGEMEC): columna extra VR. MATRIZ en
+  // gris (referencia) y VR. UNITARIO se rotula VR. NEG; la Matriz le resta a
+  // DESCRIPCIÓN — los PDF de los demás clientes quedan IDÉNTICOS.
+  const conMatriz = datos.items.some(it => it.valor_matriz !== undefined)
+  const col = { cod: 40, und: 34, cant: 36, vm: conMatriz ? 54 : 0, vu: 58, vt: 74 }
+  const wDesc = CONTENIDO - col.cod - col.und - col.cant - col.vm - col.vu - col.vt
   const xCod = MARGEN, xDesc = xCod + col.cod, xUnd = xDesc + wDesc,
-    xCant = xUnd + col.und, xVu = xCant + col.cant, xVt = xVu + col.vu
+    xCant = xUnd + col.und, xVm = xCant + col.cant, xVu = xVm + col.vm, xVt = xVu + col.vu
 
   const encabezadoTabla = () => {
     asegurar(24)
@@ -366,7 +370,8 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
       page.drawText(t, { x: xc + wc / 2 - fS.widthOfTextAtSize(t, 6.5) / 2, y: yh, size: 6.5, font: fS, color: BLANCO })
     hc('CÓDIGO', xCod, col.cod); hc('DESCRIPCIÓN', xDesc, wDesc)
     hc('UND', xUnd, col.und); hc('CANT', xCant, col.cant)
-    hc('VR. UNITARIO', xVu, col.vu); hc('VR. TOTAL', xVt, col.vt)
+    if (conMatriz) hc('VR. MATRIZ', xVm, col.vm)
+    hc(conMatriz ? 'VR. NEG' : 'VR. UNITARIO', xVu, col.vu); hc('VR. TOTAL', xVt, col.vt)
     y -= 22
     trasEncabezadoTabla = true
   }
@@ -393,7 +398,9 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
   // (con la métrica compacta, 40 líneas ≈ 374pt, muy por debajo del alto útil).
   const filaDe = (it: ItemCotizacion) => {
     const lineas = partirMax(it.descripcion, fR, FT_CUERPO, wDesc - 12, 40)
-    return { lineas, h: lineas.length * LH_CUERPO + PAD_FILA }
+    // Matriz→NEG: la etiqueta del factor ocupa un renglón extra bajo la descripción
+    const hFactor = it.valor_matriz !== undefined && it.factor_etiqueta ? 8.5 : 0
+    return { lineas, hFactor, h: lineas.length * LH_CUERPO + hFactor + PAD_FILA }
   }
   const H_ENC_GRUPO = 26   // 10 de aire + 16 del renglón con regla (antes 37)
 
@@ -427,7 +434,7 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
 
     let fila = 0
     for (const it of itemsG) {
-      const { lineas, h: hFila } = filaDe(it)
+      const { lineas, hFactor, h: hFila } = filaDe(it)
       if (y - hFila < MARGEN_INF) { nuevaPagina(); encabezadoTabla(); encabezadoGrupo(g, true) }
       if (fila % 2 === 1)
         page.drawRectangle({ x: MARGEN, y: y - hFila + 3, width: CONTENIDO, height: hFila, color: ZEBRA })
@@ -435,15 +442,23 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
       // y-hFila+3; un bloque de n líneas se centra como bloque respecto del
       // centro de la fila (baseline = centro − 0.35·size, mitad de la versal).
       const cFila = y + 3 - hFila / 2
-      const base = (n: number, size: number) => cFila - 0.35 * size + ((n - 1) * LH_CUERPO) / 2
+      const base = (n: number, size: number) => cFila - 0.35 * size + ((n - 1) * LH_CUERPO + hFactor) / 2
       const cod = it.codigo || '—'
       page.drawText(cod, { x: xCod + col.cod / 2 - fS.widthOfTextAtSize(cod, 7) / 2, y: base(1, 7), size: 7, font: fS, color: GRIS_MEDIO })
       const yDesc = base(lineas.length, FT_CUERPO)
       lineas.forEach((l, i) => page.drawText(l, { x: xDesc + 4, y: yDesc - i * LH_CUERPO, size: FT_CUERPO, font: fR, color: TINTA }))
+      // Matriz→NEG: factor aplicado, en gris bajo la descripción (referencia)
+      if (it.valor_matriz !== undefined && it.factor_etiqueta) {
+        page.drawText(`Factor ${it.factor_etiqueta}`, {
+          x: xDesc + 4, y: yDesc - lineas.length * LH_CUERPO, size: 6.2, font: fR, color: GRIS_MEDIO,
+        })
+      }
       const centrado = (t: string, xc: number, wc: number) =>
         page.drawText(t, { x: xc + wc / 2 - fR.widthOfTextAtSize(t, FT_CUERPO) / 2, y: base(1, FT_CUERPO), size: FT_CUERPO, font: fR, color: GRIS })
       centrado(it.unidad || '—', xUnd, col.und)
       centrado(fmtNum(it.cantidad), xCant, col.cant)
+      if (conMatriz && it.valor_matriz !== undefined)
+        textoDer(fMoneda(it.valor_matriz), xVm + col.vm - 4, base(1, FT_CUERPO), FT_CUERPO, fR, GRIS_MEDIO)
       textoDer(fMoneda(it.valor_unitario), xVu + col.vu - 4, base(1, FT_CUERPO), FT_CUERPO, fR, TINTA)
       textoDer(fMoneda(it.valor_total), xVt + col.vt - 4, base(1, FT_CUERPO), FT_CUERPO, fS, TINTA)
       y -= hFila
