@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest'
 import {
   puedeCerrarseEn, completitudCierre, ESTADOS_PROYECTO,
   SECCIONES_ADMINISTRATIVA, enBandejaAdministrativa,
+  enCaminoAdministrativa, ETIQUETA_EN_CAMINO, narrativaAdministrativa,
 } from '../proyecto'
 import type { EstadoProyecto } from '../proyecto'
 
@@ -55,5 +56,33 @@ describe('completitudCierre — resumen informativo de los 5 hitos', () => {
       facturacion: true, pago_cliente: false, liquidacion: true,
       evaluacion_contratista: false, evaluacion_cliente: false,
     })
+  })
+})
+
+describe('mapa proactivo — "En camino" + narrativa (23-jul)', () => {
+  it('en camino = preparación/ejecución; acción y cerrado quedan fuera', () => {
+    for (const e of ['creado', 'contratista_asignado', 'permisos_en_tramite', 'anticipo_girado',
+      'en_ejecucion', 'ejecutado', 'entregado_cliente', 'soporte_recibido'] as EstadoProyecto[]) {
+      expect(enCaminoAdministrativa(e), e).toBe(true)
+      expect(ETIQUETA_EN_CAMINO[e as keyof typeof ETIQUETA_EN_CAMINO], e).toBeTruthy()
+    }
+    for (const e of ['preliquidacion_definida', 'preliquidacion_aprobada', 'enviado_a_facturacion',
+      'facturado', 'pagado_cliente', 'liquidado_contratista', 'cerrado'] as EstadoProyecto[]) {
+      expect(enCaminoAdministrativa(e), e).toBe(false)
+    }
+    // todo estado vivo del ciclo aparece en acción O en camino (cobertura total)
+    for (const e of ESTADOS_PROYECTO) {
+      expect(enBandejaAdministrativa(e) || enCaminoAdministrativa(e), e).toBe(true)
+    }
+  })
+
+  it('narrativa con pendientes: formato del spec', () => {
+    expect(narrativaAdministrativa(
+      { por_aprobar: 2, por_anticipo: 1, por_facturar: 0, por_cobrar: 0, por_liquidar: 0, por_cerrar: 0 }, 3,
+    )).toBe('Por hacer ahora: 2 por aprobar · 1 por girar anticipo · 0 por facturar · 0 por cobrar · 0 por liquidar · 0 por cerrar. En camino: 3.')
+  })
+
+  it('narrativa sin pendientes: "Todo al día"', () => {
+    expect(narrativaAdministrativa({}, 5)).toBe('Todo al día · 5 en camino.')
   })
 })

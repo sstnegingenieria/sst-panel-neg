@@ -21,6 +21,7 @@ import LiquidacionModal from '../../components/administrativa/LiquidacionModal'
 import {
   ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR,
   SECCIONES_ADMINISTRATIVA, enBandejaAdministrativa,
+  enCaminoAdministrativa, ETIQUETA_EN_CAMINO, narrativaAdministrativa,
   enColaVerificacionSst, estadoSstGate, sstGateAlDia, SST_GATE_LABEL, SST_GATE_COLOR,
   completitudCierre, pagoClientePendiente, puedeCerrarseProyecto,
   MEDIOS_PAGO, MEDIO_PAGO_LABEL,
@@ -60,7 +61,7 @@ export default function FacturacionPagos() {
   // Bloque final — cierre del proyecto
   const puedeCerrar = puedeCerrarProyectoUI(user?.rol)
   // Bandeja completa: 'todas' (activas) o una de las 7 secciones del ciclo
-  const [seccion, setSeccion] = useState<'todas' | (typeof SECCIONES_ADMINISTRATIVA)[number]['clave']>('todas')
+  const [seccion, setSeccion] = useState<'todas' | 'en_camino' | (typeof SECCIONES_ADMINISTRATIVA)[number]['clave']>('todas')
   const [cierreTarget, setCierreTarget] = useState<Proyecto | null>(null)
   const [notasCierre, setNotasCierre] = useState('')
 
@@ -142,9 +143,11 @@ export default function FacturacionPagos() {
       const snap = await getDocs(collection(db, 'proyectos'))
       const todos = snap.docs.map(d => ({ id: d.id, ...d.data() }) as Proyecto)
       // Defensivo: un doc malformado (sin snapshot) no debe tumbar la bandeja.
-      // El ciclo COMPLETO de gerencia (7 momentos) — los estados de ejecución
-      // intermedios son del área de proyectos y no aparecen aquí.
-      setProyectos(todos.filter(p => p.snapshot && enBandejaAdministrativa(p.estado)))
+      // Mapa proactivo (23-jul): además de los 7 momentos de acción, se cargan
+      // los proyectos EN CAMINO (preparación/ejecución) como sección
+      // informativa — el panel narra TODO el pipeline.
+      setProyectos(todos.filter(p => p.snapshot &&
+        (enBandejaAdministrativa(p.estado) || enCaminoAdministrativa(p.estado))))
       // Chip del gate SST (solo lectura — el gate lo marca SST en su cola)
       const gatesSnap = await getDocs(collection(db, 'verificaciones_sst'))
       setGates(Object.fromEntries(gatesSnap.docs.map(d => [d.id, d.data() as VerificacionSst])))
@@ -163,6 +166,7 @@ export default function FacturacionPagos() {
     const estadoSeccion = SECCIONES_ADMINISTRATIVA.find(s => s.clave === seccion)?.estado
     const base = proyectos.filter(p =>
       seccion === 'por_cobrar' ? pagoClientePendiente(p)
+      : seccion === 'en_camino' ? enCaminoAdministrativa(p.estado)
       : estadoSeccion ? p.estado === estadoSeccion
       : p.estado !== 'cerrado')
     const lista = q
@@ -183,6 +187,7 @@ export default function FacturacionPagos() {
     SECCIONES_ADMINISTRATIVA.map(s => [s.clave, proyectos.filter(p =>
       s.clave === 'por_cobrar' ? pagoClientePendiente(p) : p.estado === s.estado).length]),
   ) as Record<string, number>, [proyectos])
+  const enCamino = useMemo(() => proyectos.filter(p => enCaminoAdministrativa(p.estado)).length, [proyectos])
 
   const abrirRegistro = (p: Proyecto) => {
     setTarget(p)
@@ -289,7 +294,15 @@ export default function FacturacionPagos() {
         </p>
       </div>
 
-      {/* Las 7 secciones del ciclo, con contador. 'Todo el ciclo' = activas. */}
+      {/* Resumen NARRATIVO: qué hay por hacer ahora y qué viene */}
+      {!loading && (
+        <p className="text-sm text-gray-700 bg-brand-50/60 border border-brand-100 rounded-lg px-3 py-2">
+          {narrativaAdministrativa(conteo, enCamino)}
+        </p>
+      )}
+
+      {/* Las 7 secciones del ciclo, con contador. 'Todo el ciclo' = todo lo
+          vivo (acción + en camino); 'En camino' = informativa. */}
       <div className="flex items-center gap-1.5 flex-wrap">
         <button onClick={() => setSeccion('todas')}
           className={`px-3 py-1.5 rounded-full text-xs font-medium border ${seccion === 'todas' ? 'bg-brand-700 border-brand-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
@@ -301,6 +314,11 @@ export default function FacturacionPagos() {
             {s.etiqueta} ({conteo[s.clave]})
           </button>
         ))}
+        <button onClick={() => setSeccion('en_camino')}
+          title="Proyectos en preparación/ejecución — informativa, aún no le tocan a Gerencia Administrativa"
+          className={`px-3 py-1.5 rounded-full text-xs font-medium border border-dashed ${seccion === 'en_camino' ? 'bg-gray-700 border-gray-700 text-white' : 'bg-white border-gray-400 text-gray-500 hover:bg-gray-50'} ${enCamino === 0 ? 'opacity-60' : ''}`}>
+          En camino ({enCamino})
+        </button>
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
@@ -459,6 +477,11 @@ export default function FacturacionPagos() {
                         </button>
                       )}
                     </div>
+                  ) : enCaminoAdministrativa(p.estado) ? (
+                    // Mapa proactivo: etapa clara de lo que AÚN no le toca
+                    <span className="text-[11px] text-gray-500 italic">
+                      {ETIQUETA_EN_CAMINO[p.estado as keyof typeof ETIQUETA_EN_CAMINO]}
+                    </span>
                   ) : (
                     // cerrado/liquidado ya salieron en la rama anterior — esto
                     // es el resto del ciclo visto por roles de solo lectura
