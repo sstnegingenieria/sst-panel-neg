@@ -102,6 +102,22 @@ export function parseNumero(v: CeldaCruda | undefined): number | null {
 
 const KEYWORDS_HEADER = /c[oó]digo|c[oó]d\b|descrip|concepto|actividad|unidad|und\b|valor|precio|vr\.?|item|cantidad|medida/i
 
+/** Encabezados CORTOS de unidad ("UN", "UND", "UM", "U.M.", "U/M", "UNID"):
+ *  match EXACTO ANCLADO sobre el encabezado NORMALIZADO (mayúsculas, sin
+ *  puntos ni espacios) — jamás por substring, para no confundir con
+ *  "VALOR UNITARIO" / "UNIT PRICE". Las formas largas siguen por regex
+ *  (incluye el fix H-009 para plantillas en inglés). Caso real que motivó
+ *  esto: la hoja "4. OBRAS CIVILES" de la Matriz ATC titula "UN" a secas y
+ *  el regex viejo no la veía → 153 ítems importados con unidad vacía. */
+const UNIDAD_CORTA = new Set(['UN', 'UND', 'UM', 'U/M', 'UNID'])
+const UNIDAD_LARGA = /unidad|medida|unit of meas|measurement/i
+
+export function esEncabezadoUnidad(v: string): boolean {
+  if (UNIDAD_LARGA.test(v)) return true
+  const normalizado = v.trim().toUpperCase().replace(/[.\s]/g, '')
+  return UNIDAD_CORTA.has(normalizado)
+}
+
 /** Sugiere el índice (0-based) de la fila de encabezado escaneando las primeras filas. */
 export function detectarFilaEncabezado(hoja: HojaCruda): number {
   const limite = Math.min(hoja.filas.length, 15)
@@ -162,9 +178,14 @@ export function sugerirMapeoColumnas(hoja: HojaCruda, filaEncabezado: number): M
 
   const codigo = buscar(/c[oó]digo|c[oó]d\b|item|referencia|ref\b/i)
   const capitulo = buscar(/cap[ií]tulo|grupo|secci[oó]n/i)
-  // Cubre también plantillas en inglés (ej. IHS: "UNIT OF MEASUREMENT").
-  // Se evita el genérico /unit/ para no capturar "UNIT PRICE" (valor).
-  const unidad = buscar(/unidad|und\b|u\.?m|medida|unit of meas|measurement|u\/m/i)
+  // Predicado dedicado (esEncabezadoUnidad): formas largas por regex +
+  // cortas por match exacto anclado — sustituye las alternativas frágiles
+  // del regex viejo (und\b, u.?m, u/m) con semántica más estricta.
+  let unidad: number | null = null
+  for (let c = 0; c < header.length; c++) {
+    const v = header[c]
+    if (typeof v === 'string' && esEncabezadoUnidad(v)) { unidad = c; break }
+  }
   let valor = buscar(/valor|precio|vr\.?|v\/u|unitario/i)
   let descripcion = buscar(/descrip|concepto|actividad|detalle/i)
 
@@ -277,6 +298,14 @@ export interface Consolidado {
   totalCapitulos: number
   categorias: string[]
   codigosDuplicados: string[]
+  /** Guardia post-import (27-jul): ítems que entrarían con unidad vacía —
+   *  el caso silencioso que dejó 153 ítems "" en la Matriz ATC. */
+  itemsSinUnidad: number
+  /** Muestra para el panel (hasta 6): "4.1.1 — Limpieza de terreno… [HOJA]". */
+  ejemplosSinUnidad: string[]
+  /** true si hay unidades vacías O códigos duplicados → el wizard exige el
+   *  "forzar" consciente antes de importar. */
+  requiereConfirmacion: boolean
 }
 
 export function consolidar(resultados: ResultadoHoja[]): Consolidado {
@@ -297,6 +326,12 @@ export function consolidar(resultados: ResultadoHoja[]): Consolidado {
 
   const conteoCodigo: Record<string, number> = {}
   for (const it of items) if (it.codigo) conteoCodigo[it.codigo] = (conteoCodigo[it.codigo] ?? 0) + 1
+  const codigosDuplicados = Object.keys(conteoCodigo).filter(k => conteoCodigo[k] > 1)
+
+  // Guardia post-import: unidades vacías jamás pasan silenciosas.
+  const sinUnidad = items.filter(it => !it.unidad.trim())
+  const ejemplosSinUnidad = sinUnidad.slice(0, 6).map(it =>
+    `${it.codigo || '(sin código)'} — ${it.descripcion.slice(0, 50).trimEnd()} [${it.categoria}]`)
 
   return {
     items,
@@ -306,6 +341,9 @@ export function consolidar(resultados: ResultadoHoja[]): Consolidado {
     descartadasPorMotivo,
     totalCapitulos,
     categorias: [...new Set(items.map(i => i.categoria))],
-    codigosDuplicados: Object.keys(conteoCodigo).filter(k => conteoCodigo[k] > 1),
+    codigosDuplicados,
+    itemsSinUnidad: sinUnidad.length,
+    ejemplosSinUnidad,
+    requiereConfirmacion: sinUnidad.length > 0 || codigosDuplicados.length > 0,
   }
 }

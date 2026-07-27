@@ -5,10 +5,13 @@ import {
   parseNumero,
   letraColumna,
   detectarFilaEncabezado,
+  esEncabezadoUnidad,
   sugerirMapeoColumnas,
   sugerirOrigenCapitulo,
   procesarHoja,
   consolidar,
+  type ItemParseado,
+  type ResultadoHoja,
 } from '../lpuMapeo'
 
 function hoja(nombre: string, filas: CeldaCruda[][]): HojaCruda {
@@ -54,6 +57,34 @@ describe('detectarFilaEncabezado', () => {
   })
 })
 
+describe('esEncabezadoUnidad', () => {
+  it('acepta las formas cortas por match exacto anclado (normalizando caso, puntos y espacios)', () => {
+    expect(esEncabezadoUnidad('UN')).toBe(true)     // el caso real de la hoja "4. OBRAS CIVILES"
+    expect(esEncabezadoUnidad('UND')).toBe(true)
+    expect(esEncabezadoUnidad('UM')).toBe(true)
+    expect(esEncabezadoUnidad('U.M.')).toBe(true)
+    expect(esEncabezadoUnidad('un')).toBe(true)
+    expect(esEncabezadoUnidad(' UN ')).toBe(true)
+    expect(esEncabezadoUnidad('U M')).toBe(true)
+  })
+
+  it('acepta las formas largas por regex (incluye plantillas en inglés — H-009)', () => {
+    expect(esEncabezadoUnidad('UNIDAD')).toBe(true)
+    expect(esEncabezadoUnidad('Unidad de medida')).toBe(true)
+    expect(esEncabezadoUnidad('UNIT OF MEASUREMENT')).toBe(true)
+  })
+
+  it('rechaza los falsos positivos clásicos', () => {
+    expect(esEncabezadoUnidad('VALOR UNITARIO')).toBe(false) // el crítico
+    expect(esEncabezadoUnidad('UNITARIO')).toBe(false)
+    expect(esEncabezadoUnidad('UNIT PRICE')).toBe(false)
+    expect(esEncabezadoUnidad('CANT')).toBe(false)
+    expect(esEncabezadoUnidad('CANTIDAD')).toBe(false)
+    expect(esEncabezadoUnidad('COMUN')).toBe(false)
+    expect(esEncabezadoUnidad('')).toBe(false)
+  })
+})
+
 describe('sugerirMapeoColumnas', () => {
   it('mapea por nombre de encabezado', () => {
     const h = hoja('LPU', [
@@ -75,6 +106,20 @@ describe('sugerirMapeoColumnas', () => {
     expect(m.descripcion).toBe(2)     // DESCRIPTION…
     expect(m.unidad).toBe(4)          // UNIT OF MEASUREMENT (bug real: antes quedaba null)
     expect(m.valor_unitario).toBe(5)  // PRECIOS FIJOS 2026
+  })
+
+  it('mapea el encabezado real de la hoja "4. OBRAS CIVILES" de la Matriz ATC (bug de los 153 ítems sin unidad)', () => {
+    // Fila 14 real: la unidad se titula "UN" a secas — el regex viejo no la veía
+    // y 153 ítems entraron a producción con unidad vacía.
+    const h = hoja('4. OBRAS CIVILES', [
+      ['', 'ITEM', 'ACTIVIDAD', 'UN', 'VALOR UNITARIO'],
+      ['', '4.1.1', 'Limpieza de terreno - Poda - Descapote', 'm2', 4587],
+    ])
+    const m = sugerirMapeoColumnas(h, 0)
+    expect(m.codigo).toBe(1)          // ITEM
+    expect(m.descripcion).toBe(2)     // ACTIVIDAD
+    expect(m.unidad).toBe(3)          // UN (antes: null)
+    expect(m.valor_unitario).toBe(4)  // VALOR UNITARIO (no confundido con unidad)
   })
 
   it('no captura "UNIT PRICE" como unidad', () => {
@@ -199,5 +244,58 @@ describe('consolidar', () => {
     expect(c.categorias).toEqual(['H1', 'H2'])
     expect(c.codigosDuplicados).toEqual(['A-1'])
     expect(c.items.map(i => i.orden)).toEqual([0, 1, 2])
+  })
+})
+
+// ── Guardia post-import (27-jul): unidades vacías y duplicados exigen "forzar" ──
+
+const item = (parcial: Partial<ItemParseado>): ItemParseado => ({
+  codigo: 'X-1', descripcion: 'Ítem', unidad: 'm', valor_unitario: 100,
+  categoria: 'HOJA', orden: 0, ...parcial,
+})
+const resultado = (items: ItemParseado[]): ResultadoHoja =>
+  ({ items, descartadas: [], capitulos: [] })
+
+describe('consolidar — guardia de unidades vacías', () => {
+  it('cuenta las unidades vacías, arma ejemplos y exige confirmación', () => {
+    const c = consolidar([resultado([
+      item({ codigo: '4.1.1', descripcion: 'Limpieza de terreno', unidad: '', categoria: '4. OBRAS CIVILES' }),
+      item({ codigo: '', descripcion: 'Descripción larguísima que definitivamente supera los cincuenta caracteres del truncado', unidad: '  ', categoria: '9. AIU' }),
+      item({ codigo: 'OK-1', unidad: 'm2' }),
+    ])])
+    expect(c.itemsSinUnidad).toBe(2) // la unidad "  " (solo espacios) también cuenta
+    expect(c.ejemplosSinUnidad).toEqual([
+      '4.1.1 — Limpieza de terreno [4. OBRAS CIVILES]',
+      '(sin código) — Descripción larguísima que definitivamente supera [9. AIU]',
+    ])
+    expect(c.requiereConfirmacion).toBe(true)
+  })
+
+  it('capa los ejemplos a 6 aunque haya más sin unidad', () => {
+    const muchos = Array.from({ length: 10 }, (_, i) =>
+      item({ codigo: `S-${i}`, unidad: '' }))
+    const c = consolidar([resultado(muchos)])
+    expect(c.itemsSinUnidad).toBe(10)
+    expect(c.ejemplosSinUnidad).toHaveLength(6)
+  })
+
+  it('solo duplicados (unidades OK) también exige confirmación', () => {
+    const c = consolidar([resultado([
+      item({ codigo: 'A-1' }),
+      item({ codigo: 'A-1', descripcion: 'Repetido' }),
+    ])])
+    expect(c.itemsSinUnidad).toBe(0)
+    expect(c.codigosDuplicados).toEqual(['A-1'])
+    expect(c.requiereConfirmacion).toBe(true)
+  })
+
+  it('caso limpio: sin unidades vacías ni duplicados → no exige confirmación', () => {
+    const c = consolidar([resultado([
+      item({ codigo: 'A-1' }),
+      item({ codigo: 'A-2', unidad: 'und' }),
+    ])])
+    expect(c.itemsSinUnidad).toBe(0)
+    expect(c.ejemplosSinUnidad).toEqual([])
+    expect(c.requiereConfirmacion).toBe(false)
   })
 })

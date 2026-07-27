@@ -48,6 +48,10 @@ const estadoInicial = {
   vigenciaHasta: '',
   moneda: 'COP',
   importando: false,
+  // Guardia post-import (27-jul): confirmación consciente para importar con
+  // unidades vacías o códigos duplicados. Se RESETEA al recalcular el
+  // consolidado (cambio de mapeos/hojas).
+  forzar: false,
 }
 
 /** Construye los mapeos iniciales por hoja: reutiliza mapeo guardado del cliente
@@ -111,6 +115,12 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
     return consolidar(hojasSel.map(h => procesarHoja(h, st.mapeos[h.nombre])))
   }, [st.paso, hojasSel, st.mapeos])
 
+  // Una decisión de "forzar" vieja no puede autorizar datos nuevos: al
+  // cambiar mapeos u hojas seleccionadas, la confirmación se retira.
+  useEffect(() => {
+    setSt(s => (s.forzar ? { ...s, forzar: false } : s))
+  }, [st.mapeos, st.seleccion])  // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!isOpen) return null
 
   const cargarArchivo = async (file: File) => {
@@ -148,7 +158,8 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
     st.paso === 1 ? !!st.clienteId && st.hojas.length > 0 && !st.parseando :
     st.paso === 2 ? hojasSel.length > 0 :
     st.paso === 3 ? hojasSel.every(h => mapeoOk(st.mapeos[h.nombre])) :
-    st.paso === 4 ? !!consolidado && consolidado.totalItems > 0 :
+    st.paso === 4 ? !!consolidado && consolidado.totalItems > 0
+      && (!consolidado.requiereConfirmacion || st.forzar) :
     false
 
   const avanzar = () => setSt(s => {
@@ -437,6 +448,32 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
                 </div>
               )}
 
+              {/* Guardia post-import (27-jul): las unidades vacías jamás pasan
+                  silenciosas (153 ítems "" en la Matriz ATC motivaron esto) */}
+              {consolidado.itemsSinUnidad > 0 && (
+                <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 space-y-1">
+                  <p className="font-semibold">⛔ {consolidado.itemsSinUnidad} ítem(s) quedarían SIN UNIDAD:</p>
+                  {consolidado.ejemplosSinUnidad.map((e, i) => <p key={i} className="text-red-600/90">· {e}</p>)}
+                  {consolidado.itemsSinUnidad > consolidado.ejemplosSinUnidad.length && (
+                    <p className="text-red-500">… y {consolidado.itemsSinUnidad - consolidado.ejemplosSinUnidad.length} más.</p>
+                  )}
+                  <p className="text-red-600">Revisa el mapeo de la columna de unidad de la(s) hoja(s) en el paso anterior.</p>
+                </div>
+              )}
+              {consolidado.requiereConfirmacion && (
+                <label className="flex items-start gap-2 text-xs text-gray-700 cursor-pointer rounded-lg border border-gray-300 px-3 py-2">
+                  <input type="checkbox" checked={st.forzar}
+                    onChange={e => setSt(s => ({ ...s, forzar: e.target.checked }))}
+                    className="mt-0.5 accent-brand-700" />
+                  <span>
+                    <span className="font-medium">Forzar importación</span> — entiendo que quedarán
+                    {consolidado.itemsSinUnidad > 0 && <> {consolidado.itemsSinUnidad} ítem(s) sin unidad</>}
+                    {consolidado.itemsSinUnidad > 0 && consolidado.codigosDuplicados.length > 0 && <> y</>}
+                    {consolidado.codigosDuplicados.length > 0 && <> {consolidado.codigosDuplicados.length} código(s) duplicado(s)</>}.
+                  </span>
+                </label>
+              )}
+
               {/* Tabla de ítems (primeros 50) */}
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <div className="max-h-72 overflow-y-auto">
@@ -542,7 +579,8 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
               <button onClick={avanzar} disabled={!puedeAvanzar}
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-brand-700 hover:bg-brand-800 text-white transition disabled:opacity-40">Siguiente</button>
             ) : (
-              <button onClick={handleImportar} disabled={st.importando || !st.nombre.trim()}
+              <button onClick={handleImportar}
+                disabled={st.importando || !st.nombre.trim() || (!!consolidado?.requiereConfirmacion && !st.forzar)}
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-brand-700 hover:bg-brand-800 text-white transition disabled:opacity-40">
                 {st.importando ? 'Importando…' : 'Importar'}
               </button>
