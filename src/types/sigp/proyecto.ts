@@ -185,6 +185,18 @@ export interface AnticipoGirado {
   registrado_por: string
 }
 
+// ── Modalidad de contratación (24-jul) ──
+export const MODALIDADES_CONTRATISTA = ['todo_costo', 'solo_mano_obra'] as const
+export type ModalidadContratista = (typeof MODALIDADES_CONTRATISTA)[number]
+export const MODALIDAD_CONTRATISTA_LABEL: Record<ModalidadContratista, string> = {
+  todo_costo: 'Todo costo (el contratista incluye materiales)',
+  solo_mano_obra: 'Solo mano de obra (NEG compra los materiales)',
+}
+/** Modalidad efectiva: ausente (históricos) = 'todo_costo'. */
+export const modalidadDe = (
+  p: Pick<PreliquidacionProyecto, 'modalidad_contratista'>,
+): ModalidadContratista => p.modalidad_contratista ?? 'todo_costo'
+
 export interface PreliquidacionProyecto {
   /** Copiado del snapshot al definir (evidencia congelada, no editable). */
   valor_venta: number
@@ -192,6 +204,14 @@ export interface PreliquidacionProyecto {
   valor_contratista: number
   /** % de anticipo configurable por proyecto (default 50). */
   anticipo_pct: number
+  /** Modalidad de contratación (24-jul): se fija al DEFINIR y se CONGELA con
+   *  la aprobación — la línea base del presupuesto no se mueve después (NO
+   *  entra al path de corrección del Hotfix B). Ausente en históricos =
+   *  'todo_costo'. */
+  modalidad_contratista?: ModalidadContratista
+  /** Presupuesto de MATERIALES que compra NEG — solo en 'solo_mano_obra'
+   *  (requerido al definir en esa modalidad; ausente en 'todo_costo'). */
+  valor_materiales?: number
   /** Observación por ítem del alcance (keyed por claveItemAlcance). Opcional.
    *  Precisa de qué trata la actividad y dónde ejecutarla — SALE en el
    *  documento del contratista. */
@@ -525,6 +545,25 @@ export const ANTICIPO_PCT_DEFAULT = 50
 // Derivados (puros — precisión completa; el recorte a 2 decimales es solo de render)
 export const utilidadDe = (p: Pick<PreliquidacionProyecto, 'valor_venta' | 'valor_contratista'>) =>
   p.valor_venta - p.valor_contratista
+
+/** Costo PRESUPUESTADO total según la modalidad (24-jul) — línea base del
+ *  indicador ISO #3 y de la utilidad esperada: mano de obra + materiales NEG
+ *  si la modalidad es 'solo_mano_obra'. Históricos (sin modalidad) =
+ *  'todo_costo', donde la mano de obra ES el costo completo. */
+export const costoPresupuestadoDe = (
+  p: Pick<PreliquidacionProyecto, 'valor_contratista' | 'modalidad_contratista' | 'valor_materiales'>,
+): number =>
+  p.valor_contratista + (modalidadDe(p) === 'solo_mano_obra' ? (p.valor_materiales ?? 0) : 0)
+
+/** Utilidad esperada REAL (24-jul) = venta − costo presupuestado total.
+ *  NO alimenta la palanca margen↔valor: esa conserva utilidadDe/margenPctDe
+ *  (margen sobre el contratista, convención APU). */
+export const utilidadEsperadaDe = (
+  p: Pick<PreliquidacionProyecto, 'valor_venta' | 'valor_contratista' | 'modalidad_contratista' | 'valor_materiales'>,
+): number => p.valor_venta - costoPresupuestadoDe(p)
+export const margenEsperadoPctDe = (
+  p: Pick<PreliquidacionProyecto, 'valor_venta' | 'valor_contratista' | 'modalidad_contratista' | 'valor_materiales'>,
+): number => (p.valor_venta > 0 ? (utilidadEsperadaDe(p) / p.valor_venta) * 100 : 0)
 export const margenPctDe = (p: Pick<PreliquidacionProyecto, 'valor_venta' | 'valor_contratista'>) =>
   p.valor_venta > 0 ? (utilidadDe(p) / p.valor_venta) * 100 : 0
 export const anticipoValorDe = (p: Pick<PreliquidacionProyecto, 'valor_contratista' | 'anticipo_pct'>) =>

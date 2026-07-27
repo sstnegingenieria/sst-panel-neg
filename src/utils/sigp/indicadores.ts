@@ -6,6 +6,7 @@
 // Todo es cálculo PURO client-side sobre las colecciones existentes; los
 // componentes solo pintan lo que sale de aquí.
 
+import { costoPresupuestadoDe } from '../../types/sigp/proyecto'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import type { Solicitud } from '../../types/sigp/solicitud'
 
@@ -107,14 +108,17 @@ export function indCalidad(proyectos: Proyecto[], p: Periodo): ValorIndicador {
   return { valor: v, semaforo: semaforoCalidad(v), numerador: ok, denominador: entregados.length }
 }
 
-/** Ind. 3 — Proyección presupuestal (corte actual sobre proyectos con costo
- *  ejecutado capturado): Σ ejecutado / Σ proyectado × 100. El proyectado es
- *  el valor de la cotización/matriz (snapshot.valor_venta). */
+/** Ind. 3 — Cumplimiento presupuestal de costos (corte actual sobre proyectos
+ *  con costo ejecutado capturado): Σ ejecutado / Σ costo PRESUPUESTADO total
+ *  × 100 — misma canasta según la modalidad (mano de obra + materiales NEG en
+ *  'solo_mano_obra'). 24-jul: antes se dividía por la VENTA, que incluye la
+ *  utilidad y dejaba bajo meta a todo proyecto rentable. */
 export function indPresupuesto(proyectos: Proyecto[]): ValorIndicador {
-  const con = proyectos.filter(p => (p.preliquidacion?.costo_ejecutado ?? 0) > 0 && p.snapshot.valor_venta > 0)
+  const con = proyectos.filter(p => (p.preliquidacion?.costo_ejecutado ?? 0) > 0
+    && costoPresupuestadoDe(p.preliquidacion!) > 0)
   if (con.length === 0) return sinDatos
   const ejecutado = con.reduce((s, p) => s + (p.preliquidacion!.costo_ejecutado ?? 0), 0)
-  const proyectado = con.reduce((s, p) => s + p.snapshot.valor_venta, 0)
+  const proyectado = con.reduce((s, p) => s + costoPresupuestadoDe(p.preliquidacion!), 0)
   const v = pct(ejecutado, proyectado)
   return { valor: v, semaforo: semaforoPresupuesto(v), numerador: ejecutado, denominador: proyectado }
 }

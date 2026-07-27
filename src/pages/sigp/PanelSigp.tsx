@@ -332,8 +332,8 @@ export default function PanelSigp() {
                 subtitulo={ind2.valor != null ? `${ind2.numerador} / ${ind2.denominador} entregas con calif. ≥ 4` : 'Entregas del periodo con calificación de calidad'} />
 
               <TarjetaKpi numero={3} nombre="Proyección presupuestal"
-                meta="90–110 %" frecuencia="Mensual" fuente="preliquidación · costo/valor" ind={ind3}
-                subtitulo={ind3.valor != null ? 'Σ ejecutado / Σ proyectado (corte)' : 'Requiere el costo ejecutado en la preliquidación'} />
+                meta="90–110 %" frecuencia="Mensual" fuente="preliquidación · costo/presupuesto" ind={ind3}
+                subtitulo={ind3.valor != null ? 'Σ ejecutado / Σ presupuestado (corte)' : 'Requiere el costo ejecutado en la preliquidación'} />
 
               <TarjetaKpi numero={4} nombre="Satisfacción del cliente"
                 meta="≥ 90 %" frecuencia="Por proyecto" fuente="encuesta al cierre · 1–5" ind={ind4} tendencia={tend4}
