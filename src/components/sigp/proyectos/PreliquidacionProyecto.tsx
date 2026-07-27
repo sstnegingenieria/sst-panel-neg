@@ -15,16 +15,18 @@ import { toast } from '../../shared/Toast'
 import InputExpresion from '../cotizaciones/InputExpresion'
 import { fmtMoney, fmtNum } from '../../../utils/sigp/formato'
 import {
-  ANTICIPO_PCT_DEFAULT, utilidadDe, margenPctDe, anticipoValorDe, saldoValorDe,
+  ANTICIPO_PCT_DEFAULT, margenPctDe, anticipoValorDe, saldoValorDe,
   cambiosPreliquidacion, correccionRevierteAprobacion, saldoRealDe,
   contratistaDesdeMargen, claveItemAlcance,
   puedeCorregirPreliquidacionEn, correccionEsAjusteEnEjecucion,
   ESTADO_PRY_LABEL,
+  MODALIDADES_CONTRATISTA, MODALIDAD_CONTRATISTA_LABEL, modalidadDe,
+  costoPresupuestadoDe, utilidadEsperadaDe, margenEsperadoPctDe,
 } from '../../../types/sigp/proyecto'
 import { aprobacionRequiereSalvedad } from '../../../types/sigp/permisos'
 import { modoAgrupacionDe, actividadesDe, subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../../types/sigp/cotizacion'
 import type { VersionCotizacion, ItemCotizacion } from '../../../types/sigp/cotizacion'
-import type { Proyecto } from '../../../types/sigp/proyecto'
+import type { Proyecto, ModalidadContratista } from '../../../types/sigp/proyecto'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
@@ -48,6 +50,11 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
   const [antFecha, setAntFecha] = useState('')
   const [antValor, setAntValor] = useState<number | undefined>(undefined)
   const [antEvidencia, setAntEvidencia] = useState<File | null>(null)
+  // Modalidad de contratación (24-jul): línea base del presupuesto — se fija
+  // al definir y se congela con la aprobación.
+  const [modalidad, setModalidad] = useState<ModalidadContratista>('todo_costo')
+  const [valorMateriales, setValorMateriales] = useState<number | undefined>(undefined)
+  const materialesOk = modalidad === 'todo_costo' || (valorMateriales !== undefined && valorMateriales > 0)
   const [antForm, setAntForm] = useState(false)
   // respaldo de aprobación: salvedad obligatoria (aprobador ≠ titular)
   const [salvedadForm, setSalvedadForm] = useState(false)
@@ -147,6 +154,9 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
           valor_venta: valorVenta,
           valor_contratista: valorContratista,
           anticipo_pct: pctNum,
+          modalidad_contratista: modalidad,
+          // Al alternar de vuelta a todo_costo, valor_materiales NO se persiste
+          ...(modalidad === 'solo_mano_obra' ? { valor_materiales: valorMateriales } : {}),
           ...(Object.keys(observaciones).length ? { observaciones } : {}),
           definida_por: user?.uid ?? '',
           fecha_definicion: ahora,
@@ -154,7 +164,9 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
         estado: 'preliquidacion_definida',
         fecha_actualizacion: ahora,
         historial: arrayUnion(entrada('permisos_en_tramite', 'preliquidacion_definida',
-          `Preliquidación definida — contratista ${fmtMoney(valorContratista)}, anticipo ${fmtNum(pctNum)}%`)),
+          `Preliquidación definida — contratista ${fmtMoney(valorContratista)}, anticipo ${fmtNum(pctNum)}%` +
+          ` · modalidad: ${MODALIDAD_CONTRATISTA_LABEL[modalidad]}` +
+          (modalidad === 'solo_mano_obra' ? ` · materiales NEG ${fmtMoney(valorMateriales!)}` : ''))),
       })
       toast('Preliquidación definida — pendiente de aprobación de Gerencia Administrativa')
       await reload()
@@ -201,9 +213,11 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
         estado: destino,
         fecha_actualizacion: ahora,
         historial: arrayUnion(entrada(proyecto.estado, destino,
-          conGiro
+          (conGiro
             ? `Preliquidación re-aprobada por ${quien} — el anticipo girado (${fmtMoney(pre.anticipo!.valor)}) se mantiene; saldo ${fmtMoney(saldoRealDe(pre))}`
-            : `Preliquidación aprobada por ${quien}`)),
+            : `Preliquidación aprobada por ${quien}`) +
+          ` · modalidad: ${MODALIDAD_CONTRATISTA_LABEL[modalidadDe(pre)]}` +
+          (pre.valor_materiales !== undefined ? ` · materiales NEG ${fmtMoney(pre.valor_materiales)}` : ''))),
       })
       toast('Preliquidación aprobada')
       setSalvedadForm(false)
@@ -378,6 +392,7 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
         fecha: new Date(),
         grupos: [...buckets.values()].filter(g => g.items.length > 0),
         valorContratista: pre.valor_contratista,
+        modalidad: modalidadDe(pre),
         anticipoPct: pre.anticipo_pct,
         anticipoValor: pre.anticipo?.valor ?? anticipoValorDe(pre),
         saldoValor: saldoRealDe(pre),
@@ -475,14 +490,25 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
       {/* ── DEFINIR (área de proyectos): palanca de margen tipo APU ── */}
       {puedeDefinir && (
         <div className="space-y-2.5">
+          {/* Modalidad de contratación — fija la línea base del presupuesto */}
+          <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
+            <span className="font-medium text-gray-500">Modalidad:</span>
+            {MODALIDADES_CONTRATISTA.map(m => (
+              <label key={m} className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="modalidad-contratista" checked={modalidad === m}
+                  onChange={() => setModalidad(m)} className="accent-brand-700" />
+                {MODALIDAD_CONTRATISTA_LABEL[m]}
+              </label>
+            ))}
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
             <label className="text-xs text-gray-500">
-              Margen % (convención APU)
+              Margen % sobre el contratista (convención APU — no es la utilidad real)
               <input value={margen} onChange={e => cambiarMargen(e.target.value)} placeholder="Ej: 30"
                 className={`mt-1 w-full text-sm px-3 py-1.5 border rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300 ${margen.trim() === '' || margenValido ? 'border-gray-300' : 'border-red-400'}`} />
             </label>
             <label className="text-xs text-gray-500">
-              Valor contratista (derivado · editable)
+              Valor contratista — mano de obra (derivado · editable)
               <InputExpresion valor={valorContratista} onValor={cambiarContratista}
                 placeholder="Se deriva del margen"
                 className="mt-1 w-full text-sm px-3 py-1.5 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
@@ -493,18 +519,35 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
                 className={`mt-1 w-full text-sm px-3 py-1.5 border rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300 ${pctValido ? 'border-gray-300' : 'border-red-400'}`} />
             </label>
           </div>
+          {modalidad === 'solo_mano_obra' && (
+            <label className="block text-xs text-gray-500 sm:w-1/3">
+              Presupuesto de materiales (los compra NEG) <span className="text-red-500">*</span>
+              <InputExpresion valor={valorMateriales} onValor={setValorMateriales}
+                onVacio={() => setValorMateriales(undefined)} placeholder="Requerido en esta modalidad"
+                className="mt-1 w-full text-sm px-3 py-1.5 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+              {!materialesOk && <span className="block mt-1 text-red-600">El presupuesto de materiales es obligatorio en "solo mano de obra".</span>}
+            </label>
+          )}
           {preview && (
             <div className="bg-gray-50 rounded-lg p-3 space-y-1">
               {filaDeriv('Valor contratista (NEG paga)', fmtMoney(preview.valor_contratista), true)}
-              {filaDeriv('Utilidad esperada', `${fmtMoney(utilidadDe(preview))} (${fmtNum(margenPctDe(preview))}%)`)}
+              {modalidad === 'solo_mano_obra' && valorMateriales !== undefined &&
+                filaDeriv('Presupuesto materiales (NEG)', fmtMoney(valorMateriales))}
+              {(() => {
+                // Utilidad esperada REAL: venta − costo presupuestado total
+                // (con la modalidad del form, aún no persistida). La palanca
+                // de margen conserva su semántica APU aparte.
+                const base = { ...preview, modalidad_contratista: modalidad, valor_materiales: valorMateriales }
+                return filaDeriv('Utilidad esperada', `${fmtMoney(utilidadEsperadaDe(base))} (${fmtNum(margenEsperadoPctDe(base))}%)`)
+              })()}
               {filaDeriv(`Anticipo (${fmtNum(pctNum)}%)`, fmtMoney(anticipoValorDe(preview)))}
               {filaDeriv('Saldo contra entrega', fmtMoney(saldoValorDe(preview)))}
-              {utilidadDe(preview) < 0 && (
-                <p className="text-xs text-red-600 font-medium">⚠ El valor del contratista supera el valor de venta — utilidad negativa.</p>
+              {utilidadEsperadaDe({ ...preview, modalidad_contratista: modalidad, valor_materiales: valorMateriales }) < 0 && (
+                <p className="text-xs text-red-600 font-medium">⚠ El costo presupuestado (contratista + materiales) supera el valor de venta — utilidad negativa.</p>
               )}
             </div>
           )}
-          <button onClick={definir} disabled={!preview || aplicando}
+          <button onClick={definir} disabled={!preview || aplicando || !materialesOk}
             className="text-sm px-3 py-1.5 rounded-lg font-medium bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50">
             {aplicando ? 'Definiendo…' : 'Definir preliquidación'}
           </button>
@@ -575,8 +618,10 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
       {pre && (
         <div className="space-y-1.5">
           {filaDeriv('Valor de venta', fmtMoney(pre.valor_venta))}
-          {filaDeriv('Valor contratista', fmtMoney(pre.valor_contratista), true)}
-          {filaDeriv('Utilidad esperada', `${fmtMoney(utilidadDe(pre))} (${fmtNum(margenPctDe(pre))}%)`)}
+          {filaDeriv('Modalidad', MODALIDAD_CONTRATISTA_LABEL[modalidadDe(pre)])}
+          {filaDeriv('Valor contratista — mano de obra', fmtMoney(pre.valor_contratista), true)}
+          {pre.valor_materiales !== undefined && filaDeriv('Presupuesto materiales (NEG)', fmtMoney(pre.valor_materiales))}
+          {filaDeriv('Utilidad esperada', `${fmtMoney(utilidadEsperadaDe(pre))} (${fmtNum(margenEsperadoPctDe(pre))}%)`)}
           {pre.anticipo
             ? filaDeriv('Anticipo (girado)', fmtMoney(pre.anticipo.valor))
             : filaDeriv(`Anticipo (${fmtNum(pre.anticipo_pct)}%)`, fmtMoney(anticipoValorDe(pre)))}
@@ -604,15 +649,16 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
           {/* ISO ind. 3 — costo ejecutado real (proyectado = valor de venta) */}
           {puedeGestionar && (
             <div className="flex items-center gap-2 pt-1 border-t border-gray-50">
-              <span className="text-xs text-gray-500">
-                Costo ejecutado real <span className="text-[10px] text-gray-400">(indicador ISO presupuestal)</span>
+              <span className="text-xs text-gray-500"
+                title="Digita el costo TOTAL realmente gastado en la canasta presupuestada: en 'todo costo', lo pagado al contratista; en 'solo mano de obra', mano de obra + materiales comprados por NEG.">
+                Costo ejecutado real <span className="text-[10px] text-gray-400">(total de la canasta presupuestada · indicador ISO)</span>
               </span>
               <InputExpresion valor={pre.costo_ejecutado} onValor={guardarCostoEjecutado}
                 placeholder="Al cierre de la ejecución"
                 className="w-44 text-sm px-3 py-1 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
-              {(pre.costo_ejecutado ?? 0) > 0 && pre.valor_venta > 0 && (
+              {(pre.costo_ejecutado ?? 0) > 0 && costoPresupuestadoDe(pre) > 0 && (
                 <span className="text-xs font-mono text-gray-500">
-                  = {fmtNum((pre.costo_ejecutado! / pre.valor_venta) * 100)}% del proyectado
+                  = {fmtNum((pre.costo_ejecutado! / costoPresupuestadoDe(pre)) * 100)}% del presupuesto
                 </span>
               )}
             </div>

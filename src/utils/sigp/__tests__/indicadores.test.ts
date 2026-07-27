@@ -73,11 +73,13 @@ describe('indicadores oficiales', () => {
     expect(indCalidad(ps, { anio: 2026, mes: 6 }).valor).toBe(100)
   })
 
-  it('ind3 — Σ ejecutado / Σ proyectado', () => {
+  it('ind3 — caso limpio todo_costo: 665/700 = 95 % verde (la VENTA no entra)', () => {
+    // La venta (1000) está presente y demostradamente NO participa: el
+    // presupuesto es el costo pactado (valor_contratista en todo_costo).
     const ps = [
       proyecto({
         snapshot: { cliente: 'C', asunto: 'A', valor_venta: 1000, esquema_tributario: 'iva_pleno', alcance: [], total_items: 0 },
-        preliquidacion: { valor_venta: 1000, valor_contratista: 700, anticipo_pct: 50, definida_por: 'u', fecha_definicion: tsJul, costo_ejecutado: 950 },
+        preliquidacion: { valor_venta: 1000, valor_contratista: 700, anticipo_pct: 50, definida_por: 'u', fecha_definicion: tsJul, costo_ejecutado: 665 },
       }),
     ]
     const r = indPresupuesto(ps)
@@ -85,6 +87,57 @@ describe('indicadores oficiales', () => {
     expect(r.semaforo).toBe('verde')
     // sin costo ejecutado → sin datos
     expect(indPresupuesto([proyecto({})]).valor).toBeNull()
+  })
+
+  it('ind3 — solo_mano_obra suma los materiales al presupuesto: 950/(700+300) = 95 % verde', () => {
+    const ps = [
+      proyecto({
+        snapshot: { cliente: 'C', asunto: 'A', valor_venta: 1500, esquema_tributario: 'iva_pleno', alcance: [], total_items: 0 },
+        preliquidacion: {
+          valor_venta: 1500, valor_contratista: 700, anticipo_pct: 50,
+          modalidad_contratista: 'solo_mano_obra', valor_materiales: 300,
+          definida_por: 'u', fecha_definicion: tsJul, costo_ejecutado: 950,
+        },
+      }),
+    ]
+    const r = indPresupuesto(ps)
+    expect(r.valor).toBe(95)
+    expect(r.semaforo).toBe('verde')
+  })
+
+  it('ind3 — >100 % es un resultado de negocio LEGÍTIMO (sobrecosto real), no un bug', () => {
+    const conEjecutado = (costo: number) => [
+      proyecto({
+        snapshot: { cliente: 'C', asunto: 'A', valor_venta: 1000, esquema_tributario: 'iva_pleno', alcance: [], total_items: 0 },
+        preliquidacion: { valor_venta: 1000, valor_contratista: 700, anticipo_pct: 50, definida_por: 'u', fecha_definicion: tsJul, costo_ejecutado: costo },
+      }),
+    ]
+    // 840/700 = 120 % → ámbar (110–120]; 910/700 = 130 % → rojo
+    expect(indPresupuesto(conEjecutado(840))).toMatchObject({ valor: 120, semaforo: 'ambar' })
+    expect(indPresupuesto(conEjecutado(910))).toMatchObject({ valor: 130, semaforo: 'rojo' })
+  })
+
+  it('ind3 — agregado mixto de modalidades: (950+1050)/(1000+1000) = 100 % verde', () => {
+    const ps = [
+      proyecto({
+        snapshot: { cliente: 'C', asunto: 'A', valor_venta: 1400, esquema_tributario: 'iva_pleno', alcance: [], total_items: 0 },
+        preliquidacion: { valor_venta: 1400, valor_contratista: 1000, anticipo_pct: 50, definida_por: 'u', fecha_definicion: tsJul, costo_ejecutado: 950 },
+      }),
+      proyecto({
+        id: 'y',
+        snapshot: { cliente: 'C', asunto: 'B', valor_venta: 1500, esquema_tributario: 'iva_pleno', alcance: [], total_items: 0 },
+        preliquidacion: {
+          valor_venta: 1500, valor_contratista: 700, anticipo_pct: 50,
+          modalidad_contratista: 'solo_mano_obra', valor_materiales: 300,
+          definida_por: 'u', fecha_definicion: tsJul, costo_ejecutado: 1050,
+        },
+      }),
+    ]
+    const r = indPresupuesto(ps)
+    expect(r.valor).toBe(100)
+    expect(r.semaforo).toBe('verde')
+    expect(r.numerador).toBe(2000)
+    expect(r.denominador).toBe(2000)
   })
 
   it('ind4 — encuestas del periodo ≥4', () => {

@@ -9,6 +9,7 @@ import { PDFDocument, PDFFont, PDFPage, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { partir, cargarAssetsPdf } from './cotizacionPdf'
 import { fmtNum } from './formato'
+import type { ModalidadContratista } from '../../types/sigp/proyecto'
 
 export { cargarAssetsPdf }
 
@@ -48,6 +49,11 @@ export interface DatosPdfPreliquidacion {
   fecha: Date
   grupos: { nombre: string; items: ItemPreliquidacion[] }[]
   valorContratista: number
+  /** Modalidad (24-jul): en 'solo_mano_obra' la barra se rotula MANO DE OBRA
+   *  y se aclara que los materiales los suministra NEG. El presupuesto de
+   *  materiales JAMÁS entra a este tipo (garantía por construcción — este
+   *  documento es la cara al contratista). */
+  modalidad?: ModalidadContratista
   anticipoPct: number
   anticipoValor: number
   saldoValor: number
@@ -198,7 +204,8 @@ export async function generarPdfPreliquidacion(
       `M 0 0 H ${wCard} V ${hTotal - 8} Q ${wCard} ${hTotal} ${wCard - 8} ${hTotal} H 8 Q 0 ${hTotal} 0 ${hTotal - 8} Z`,
       { x: xCard, y: yBarra, color: VERDE },
     )
-    page.drawText('TOTAL CONTRATISTA', { x: xCard + 16, y: yBarra - 17.5, size: 10, font: fB, color: BLANCO })
+    page.drawText(datos.modalidad === 'solo_mano_obra' ? 'TOTAL MANO DE OBRA' : 'TOTAL CONTRATISTA',
+      { x: xCard + 16, y: yBarra - 17.5, size: 10, font: fB, color: BLANCO })
     textoDer(fMoneda(datos.valorContratista), xCard + wCard - 16, yBarra - 18, 12.5, fB, BLANCO)
     y = yBarra - hTotal - 8
 
@@ -206,6 +213,12 @@ export async function generarPdfPreliquidacion(
       x: MARGEN, y: y - 6, size: 7.5, font: fR, color: GRIS_MEDIO,
     })
     y -= 20
+    if (datos.modalidad === 'solo_mano_obra') {
+      page.drawText('Modalidad solo mano de obra: los materiales los suministra NEG y no hacen parte de los valores de este documento.', {
+        x: MARGEN, y: y - 6, size: 7.5, font: fR, color: GRIS_MEDIO,
+      })
+      y -= 14
+    }
   }
 
   // ── Pie institucional (todas las páginas) ──
