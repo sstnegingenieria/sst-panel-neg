@@ -33,6 +33,9 @@ import type { VerificacionSst } from '../../types/sigp/verificacionSst'
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
 
+type OrdenBandeja = 'reciente' | 'antiguo' | 'cliente'
+const ORDEN_KEY = 'sigp.admin.orden'
+
 export default function FacturacionPagos() {
   const { user } = useAuth()
   const puedeRegistrar = puedeRegistrarFacturaUI(user?.rol)
@@ -64,6 +67,16 @@ export default function FacturacionPagos() {
   const [seccion, setSeccion] = useState<'todas' | 'en_camino' | (typeof SECCIONES_ADMINISTRATIVA)[number]['clave']>('todas')
   const [cierreTarget, setCierreTarget] = useState<Proyecto | null>(null)
   const [notasCierre, setNotasCierre] = useState('')
+  const [orden, setOrden] = useState<OrdenBandeja>(() => {
+    try {
+      const v = localStorage.getItem(ORDEN_KEY)
+      return v === 'antiguo' || v === 'cliente' ? v : 'reciente'
+    } catch { return 'reciente' }
+  })
+  const cambiarOrden = (v: OrdenBandeja) => {
+    setOrden(v)
+    try { localStorage.setItem(ORDEN_KEY, v) } catch { /* preferencia no persistida */ }
+  }
 
   const cerrarProyecto = async () => {
     // INTEGRIDAD (anticipada, 23-jul): no se cierra con cuenta por cobrar
@@ -178,10 +191,19 @@ export default function FacturacionPagos() {
           p.snapshot.asunto.toLowerCase().includes(q) ||
           (p.facturacion?.numero ?? '').toLowerCase().includes(q))
       : base
-    // por facturar primero; luego por avance del ciclo
+    // Orden elegido por el usuario (27-jul): fecha con fallback a creación;
+    // cliente insensible a mayúsculas/tildes con desempate por reciente.
+    const millis = (p: Proyecto) => (p.fecha_actualizacion ?? p.fecha_creacion).toMillis()
+    const porOrden = (a: Proyecto, b: Proyecto) =>
+      orden === 'cliente'
+        ? (a.snapshot.cliente.localeCompare(b.snapshot.cliente, 'es', { sensitivity: 'base' }) || millis(b) - millis(a))
+        : orden === 'antiguo' ? millis(a) - millis(b) : millis(b) - millis(a)
+    // En vistas multi-etapa (todas / en_camino) el agrupado por etapa se mantiene
+    // como criterio primario; en una sección concreta el orden va directo.
+    const multiEtapa = seccion === 'todas' || seccion === 'en_camino'
     return [...lista].sort((a, b) =>
-      ESTADOS_PROYECTO.indexOf(a.estado) - ESTADOS_PROYECTO.indexOf(b.estado))
-  }, [proyectos, busqueda, seccion])
+      (multiEtapa ? ESTADOS_PROYECTO.indexOf(a.estado) - ESTADOS_PROYECTO.indexOf(b.estado) : 0) || porOrden(a, b))
+  }, [proyectos, busqueda, seccion, orden])
 
   const conteo = useMemo(() => Object.fromEntries(
     SECCIONES_ADMINISTRATIVA.map(s => [s.clave, proyectos.filter(p =>
@@ -334,6 +356,13 @@ export default function FacturacionPagos() {
         <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
           placeholder="Buscar por PRY, sitio, código, cliente o N° de factura…"
           className="flex-1 min-w-[260px] px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+        <select value={orden} onChange={e => cambiarOrden(e.target.value as OrdenBandeja)}
+          title="Orden de los proyectos dentro de la sección"
+          className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+          <option value="reciente">Más reciente</option>
+          <option value="antiguo">Más antiguo</option>
+          <option value="cliente">Cliente (A–Z)</option>
+        </select>
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-x-auto">
