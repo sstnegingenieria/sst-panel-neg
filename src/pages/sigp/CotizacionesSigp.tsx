@@ -123,6 +123,7 @@ export default function CotizacionesSigp() {
         onClose={() => setFormOpen(false)}
         onGuardado={reload}
         clientes={clientes.filter(c => c.estado === 'activo')}
+        cotizaciones={cotizaciones}
       />
     </div>
   )

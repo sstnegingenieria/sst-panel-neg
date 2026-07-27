@@ -9,6 +9,7 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { useFeatureFlag } from '../../../hooks/useFeatureFlag'
 import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
 import { crearProyectoDesdeCotizacion } from '../../../utils/sigp/proyectos'
+import { patchSolicitudCotizada } from '../../../utils/sigp/pipeline'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import { puedeNuevaVersion } from '../../../types/sigp/cotizacion'
@@ -104,6 +105,26 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
         pdf_desactualizado: deleteField(),   // el PDF recién generado trae el asunto vivo
         historial: arrayUnion(entrada('borrador', 'enviada')),
       })
+      // 4. Regla unificada (27-jul): la solicitud enlazada pasa a `cotizada`
+      // aquí — cuando la cotización queda EN FIRME —, no al crear el borrador.
+      // No-fatal: el envío ya ocurrió; si esto falla se avisa sin revertir.
+      if (cotizacion.solicitud_id) {
+        try {
+          const sSnap = await getDoc(doc(db, 'solicitudes', cotizacion.solicitud_id))
+          const patch = sSnap.exists()
+            ? patchSolicitudCotizada(sSnap.data().estado, cotizacion.consecutivo, user?.uid ?? '', ahora)
+            : null
+          if (patch) {
+            await updateDoc(doc(db, 'solicitudes', cotizacion.solicitud_id), {
+              estado: patch.estado, fecha_actualizacion: ahora,
+              historial: arrayUnion(patch.entradaHistorial),
+            })
+          }
+        } catch (e) {
+          console.error('Cotización enviada, pero la solicitud no pudo pasar a cotizada:', e)
+          toast('Enviada — pero la solicitud enlazada no se pudo marcar como «cotizada»', 'error')
+        }
+      }
       toast(`${cotizacion.consecutivo} enviada — PDF generado`)
       await reload()
     } catch { toast('Error al enviar', 'error') } finally { setAplicando(false) }

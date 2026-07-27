@@ -4,7 +4,7 @@
 // nuevos entran a las máquinas sin romper las existentes.
 import { describe, it, expect } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
-import { docBorradorVisita, docBorradorCotizacion } from '../../../utils/sigp/pipeline'
+import { docBorradorVisita, docBorradorCotizacion, patchSolicitudCotizada } from '../../../utils/sigp/pipeline'
 import { ESTADOS_VISITA, TRANSICIONES as TRANS_VISITA } from '../visita'
 import { ESTADOS_COTIZACION, TRANSICIONES as TRANS_COT, estadoEfectivo } from '../cotizacion'
 import type { Solicitud } from '../solicitud'
@@ -86,5 +86,34 @@ describe('docBorradorCotizacion — borrador SIN código, precargado', () => {
   it('sin asunto en la solicitud: fallback al consecutivo SOL', () => {
     const { padre: p3 } = docBorradorCotizacion({ ...solicitud, asunto: undefined } as never, 'uid1', ahora, null)
     expect(p3.asunto).toBe('Solicitud SOL-2026-009')
+  })
+})
+
+// ── Regla unificada (27-jul): la solicitud pasa a «cotizada» al ENVIAR ────────
+// El bug real: SOL-2026-016 quedó en lista_para_cotizar con su cotización
+// aprobada y el proyecto en ejecución, porque la materialización del pipeline
+// jamás transicionaba la solicitud (solo lo hacía el formulario manual, y
+// demasiado pronto: al crear el borrador).
+describe('patchSolicitudCotizada — transición cruzada al enviar', () => {
+  const ahora = Timestamp.fromMillis(1_700_000_000_000)
+
+  it('lista_para_cotizar → patch a cotizada con historial que referencia el COT', () => {
+    const p = patchSolicitudCotizada('lista_para_cotizar', 'COT-2026-018', 'uid1', ahora)
+    expect(p).not.toBeNull()
+    expect(p!.estado).toBe('cotizada')
+    expect(p!.entradaHistorial).toMatchObject({
+      de: 'lista_para_cotizar', a: 'cotizada', por: 'uid1', fecha: ahora,
+      motivo: 'Cotización COT-2026-018 enviada',
+    })
+  })
+
+  it('ya cotizada → null (reenvíos y nuevas versiones no duplican la transición)', () => {
+    expect(patchSolicitudCotizada('cotizada', 'COT-2026-018', 'uid1', ahora)).toBeNull()
+  })
+
+  it('cualquier otro estado → null (descartada, requiere_visita, en_estudio…)', () => {
+    for (const e of ['recibida', 'en_estudio', 'requiere_visita', 'descartada', 'aceptada']) {
+      expect(patchSolicitudCotizada(e, 'COT-2026-018', 'uid1', ahora)).toBeNull()
+    }
   })
 })
