@@ -15,7 +15,8 @@ export type EstadoSolicitud =
   | 'lista_para_cotizar'
   | 'requiere_visita'
   | 'cotizada'
-  | 'aceptada'      // F2.2 — terminal, SOLO preventivos (aceptar crea el proyecto)
+  | 'aceptada'      // terminal — el proyecto existe: preventivos al aceptar (F2.2)
+                    // y comerciales al aprobar la cotización (27-jul)
   | 'descartada'
 
 /** F2.2 — tipo de solicitud. Ausente en docs existentes → 'comercial'
@@ -156,7 +157,7 @@ export const TRANSICIONES: Record<EstadoSolicitud, EstadoSolicitud[]> = {
   en_estudio:          ['lista_para_cotizar', 'requiere_visita', 'recibida', 'descartada'],
   lista_para_cotizar:  ['en_estudio', 'descartada'],                    // ← corrección; cotizada ← F1.4
   requiere_visita:     ['lista_para_cotizar', 'en_estudio', 'descartada'], // lista ← F1.3; en_estudio = corrección
-  cotizada:            [],                                   // terminal (F1.4)
-  aceptada:            [],                                   // terminal (F2.2, solo preventivos — la escribe el ACEPTAR, no un clic genérico)
+  cotizada:            [],                                   // → aceptada, pero SOLO programática (aprobar cotización) — sin clic genérico
+  aceptada:            [],                                   // terminal — la escriben ACEPTAR preventivo (F2.2) o APROBAR cotización (27-jul), no un clic genérico
   descartada:          [],                                   // terminal (no reactivable)
 }

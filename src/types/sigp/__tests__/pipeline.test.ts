@@ -4,7 +4,7 @@
 // nuevos entran a las máquinas sin romper las existentes.
 import { describe, it, expect } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
-import { docBorradorVisita, docBorradorCotizacion, patchSolicitudCotizada } from '../../../utils/sigp/pipeline'
+import { docBorradorVisita, docBorradorCotizacion, patchSolicitudCotizada, patchSolicitudAceptada } from '../../../utils/sigp/pipeline'
 import { ESTADOS_VISITA, TRANSICIONES as TRANS_VISITA } from '../visita'
 import { ESTADOS_COTIZACION, TRANSICIONES as TRANS_COT, estadoEfectivo } from '../cotizacion'
 import type { Solicitud } from '../solicitud'
@@ -114,6 +114,35 @@ describe('patchSolicitudCotizada — transición cruzada al enviar', () => {
   it('cualquier otro estado → null (descartada, requiere_visita, en_estudio…)', () => {
     for (const e of ['recibida', 'en_estudio', 'requiere_visita', 'descartada', 'aceptada']) {
       expect(patchSolicitudCotizada(e, 'COT-2026-018', 'uid1', ahora)).toBeNull()
+    }
+  })
+})
+
+describe('patchSolicitudAceptada — transición cruzada al aprobar (proyecto creado)', () => {
+  const ahora = Timestamp.fromMillis(1_700_000_000_000)
+
+  it('cotizada → patch a aceptada con COT y PRY en el historial', () => {
+    const p = patchSolicitudAceptada('cotizada', 'COT-2026-018', 'PRY-2026-011', 'uid1', ahora)
+    expect(p).not.toBeNull()
+    expect(p!.estado).toBe('aceptada')
+    expect(p!.entradaHistorial).toMatchObject({
+      de: 'cotizada', a: 'aceptada', por: 'uid1', fecha: ahora,
+      motivo: 'Cotización COT-2026-018 aprobada — proyecto PRY-2026-011 creado',
+    })
+  })
+
+  it('lista_para_cotizar (datos pre-PR #54) → también acepta, con el `de` real', () => {
+    const p = patchSolicitudAceptada('lista_para_cotizar', 'COT-2026-018', 'PRY-2026-011', 'uid1', ahora)
+    expect(p!.entradaHistorial).toMatchObject({ de: 'lista_para_cotizar', a: 'aceptada' })
+  })
+
+  it('ya aceptada → null (reintentos de "Crear proyecto" idempotentes)', () => {
+    expect(patchSolicitudAceptada('aceptada', 'COT-2026-018', 'PRY-2026-011', 'uid1', ahora)).toBeNull()
+  })
+
+  it('otros estados → null (descartada, en_estudio…)', () => {
+    for (const e of ['recibida', 'en_estudio', 'requiere_visita', 'descartada']) {
+      expect(patchSolicitudAceptada(e, 'COT-X', 'PRY-X', 'uid1', ahora)).toBeNull()
     }
   })
 })
