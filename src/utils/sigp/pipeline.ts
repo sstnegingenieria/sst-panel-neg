@@ -96,6 +96,24 @@ export function patchSolicitudCotizada(
   }
 }
 
+/** Transición cruzada al APROBAR (27-jul): con la cotización aprobada y el
+ *  proyecto creado, la solicitud pasa a `aceptada` («Aceptada · proyecto
+ *  creado» — el mismo estado terminal que ya usaban los preventivos). Se
+ *  admite también desde `lista_para_cotizar` por robustez con datos previos
+ *  al PR #54; null en el resto (ya aceptada → reintentos idempotentes). */
+export function patchSolicitudAceptada(
+  estadoSolicitud: string, consecutivoCot: string, consecutivoPry: string, uid: string, ahora: Timestamp,
+): { estado: 'aceptada'; entradaHistorial: Record<string, unknown> } | null {
+  if (estadoSolicitud !== 'cotizada' && estadoSolicitud !== 'lista_para_cotizar') return null
+  return {
+    estado: 'aceptada',
+    entradaHistorial: {
+      de: estadoSolicitud, a: 'aceptada', por: uid, fecha: ahora,
+      motivo: `Cotización ${consecutivoCot} aprobada — proyecto ${consecutivoPry} creado`,
+    },
+  }
+}
+
 /** ¿Ya existe una visita enlazada a la solicitud? (cualquiera, incluso manual). */
 async function hayVisitaDeSolicitud(solicitudId: string): Promise<boolean> {
   const q = await getDocs(query(collection(db, 'visitas'), where('solicitud_id', '==', solicitudId), limit(1)))

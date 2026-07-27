@@ -9,7 +9,7 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { useFeatureFlag } from '../../../hooks/useFeatureFlag'
 import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
 import { crearProyectoDesdeCotizacion } from '../../../utils/sigp/proyectos'
-import { patchSolicitudCotizada } from '../../../utils/sigp/pipeline'
+import { patchSolicitudCotizada, patchSolicitudAceptada } from '../../../utils/sigp/pipeline'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import { puedeNuevaVersion } from '../../../types/sigp/cotizacion'
@@ -62,6 +62,26 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
       })
       pryPendiente.current = null
       if (r.creado) toast(`Proyecto ${r.consecutivo} creado`)
+      // Transición cruzada (27-jul): con el proyecto creado, la solicitud
+      // enlazada pasa a «aceptada · proyecto creado». También en el reintento
+      // (repara enlaces viejos). No-fatal: el proyecto ya existe.
+      if (cotizacion.solicitud_id) {
+        try {
+          const ahora = Timestamp.now()
+          const sSnap = await getDoc(doc(db, 'solicitudes', cotizacion.solicitud_id))
+          const patch = sSnap.exists()
+            ? patchSolicitudAceptada(sSnap.data().estado, cotizacion.consecutivo, r.consecutivo, user?.uid ?? '', ahora)
+            : null
+          if (patch) {
+            await updateDoc(doc(db, 'solicitudes', cotizacion.solicitud_id), {
+              estado: patch.estado, fecha_actualizacion: ahora,
+              historial: arrayUnion(patch.entradaHistorial),
+            })
+          }
+        } catch (e) {
+          console.error('Proyecto creado, pero la solicitud no pudo pasar a aceptada:', e)
+        }
+      }
       return true
     } catch (e) {
       console.error('Error creando el proyecto desde la cotización:', e)
