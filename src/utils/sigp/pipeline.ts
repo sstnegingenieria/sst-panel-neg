@@ -76,6 +76,26 @@ export function docBorradorCotizacion(
   }
 }
 
+/** Transición cruzada al ENVIAR (regla unificada 27-jul): la solicitud
+ *  enlazada pasa a `cotizada` SOLO cuando la cotización queda EN FIRME
+ *  (enviada) — ni al crear el borrador manual ni al materializar el
+ *  pendiente del pipeline (el bug que dejó SOL-2026-016 congelada en
+ *  `lista_para_cotizar` con su proyecto ya en ejecución). Devuelve el patch
+ *  o null si no aplica (ya cotizada, descartada, etc.) — jamás doble
+ *  transición ni doble entrada de historial en reenvíos/nuevas versiones. */
+export function patchSolicitudCotizada(
+  estadoSolicitud: string, consecutivoCot: string, uid: string, ahora: Timestamp,
+): { estado: 'cotizada'; entradaHistorial: Record<string, unknown> } | null {
+  if (estadoSolicitud !== 'lista_para_cotizar') return null
+  return {
+    estado: 'cotizada',
+    entradaHistorial: {
+      de: 'lista_para_cotizar', a: 'cotizada', por: uid, fecha: ahora,
+      motivo: `Cotización ${consecutivoCot} enviada`,
+    },
+  }
+}
+
 /** ¿Ya existe una visita enlazada a la solicitud? (cualquiera, incluso manual). */
 async function hayVisitaDeSolicitud(solicitudId: string): Promise<boolean> {
   const q = await getDocs(query(collection(db, 'visitas'), where('solicitud_id', '==', solicitudId), limit(1)))

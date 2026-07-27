@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { collection, doc, writeBatch, getDoc, arrayUnion, Timestamp } from 'firebase/firestore'
+import { collection, doc, writeBatch, getDoc, Timestamp } from 'firebase/firestore'
 import { db } from '../../../firebase/config'
 import Modal from '../../shared/Modal'
 import TextField from '../../shared/TextField'
@@ -14,6 +14,7 @@ import {
 } from '../../../types/sigp/cotizacion'
 import type { EsquemaTributario, ConfigAIU, CondicionesCotizacion, TipoInversion } from '../../../types/sigp/cotizacion'
 import type { Cliente } from '../../../types/sigp/cliente'
+import type { Cotizacion } from '../../../types/sigp/cotizacion'
 import type { Solicitud } from '../../../types/sigp/solicitud'
 
 interface CotizacionFormProps {
@@ -21,6 +22,11 @@ interface CotizacionFormProps {
   onClose: () => void
   onGuardado: () => void
   clientes: Cliente[]
+  /** Cotizaciones existentes (de la bandeja): con la regla unificada la
+   *  solicitud sigue en «lista para cotizar» mientras su cotización es
+   *  borrador — el selector excluye las que ya tienen una enlazada para no
+   *  crear duplicadas por descuido. */
+  cotizaciones: Cotizacion[]
 }
 
 interface FormState {
@@ -50,7 +56,7 @@ const inicial = (): FormState => ({
 
 interface Pendiente { id: string; consecutivo: string }
 
-export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }: CotizacionFormProps) {
+export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes, cotizaciones }: CotizacionFormProps) {
   const { user } = useAuth()
   const { obtener } = useConsecutivo()
   const { getAll, update } = useFirestore()
@@ -60,11 +66,21 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
   const [pendiente, setPendiente] = useState<Pendiente | null>(null)
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([])
 
+  // Con la regla unificada, «lista para cotizar» + cotización enlazada = hay
+  // una en curso (borrador/pendiente): se excluye del selector — la continuación
+  // es esa cotización (o una nueva versión), no una segunda desde cero.
+  const [excluidas, setExcluidas] = useState(0)
+
   useEffect(() => {
     if (!isOpen) return
     setForm(inicial()); setErrores({}); setPendiente(null)
+    const conCotizacion = new Set(cotizaciones.map(c => c.solicitud_id).filter(Boolean))
     getAll('solicitudes')
-      .then(s => setSolicitudes((s as Solicitud[]).filter(x => x.estado === 'lista_para_cotizar')))
+      .then(s => {
+        const listas = (s as Solicitud[]).filter(x => x.estado === 'lista_para_cotizar')
+        setSolicitudes(listas.filter(x => !conCotizacion.has(x.id)))
+        setExcluidas(listas.filter(x => conCotizacion.has(x.id)).length)
+      })
       .catch(() => toast('Error al cargar solicitudes', 'error'))
   }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -180,26 +196,14 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
       batch.set(doc(db, 'cotizaciones', cotizacionId, 'versiones', '1'), versionData)
       await batch.commit()
 
-      // Transición cruzada: la solicitud vinculada en lista_para_cotizar → cotizada.
       // Bloque B: el asunto tecleado aquí se escribe de vuelta en la solicitud
       // (es el dato canónico) — si el usuario lo cambió o la solicitud no tenía.
+      // La transición a «cotizada» ya NO ocurre aquí — regla unificada (27-jul):
+      // la solicitud transiciona cuando la cotización se ENVÍA (queda en firme).
       if (form.solicitudId) {
         const sSnap = await getDoc(doc(db, 'solicitudes', form.solicitudId))
-        if (sSnap.exists()) {
-          const transiciona = sSnap.data().estado === 'lista_para_cotizar'
-          const asuntoCambio = (sSnap.data().asunto ?? '').trim() !== form.asunto.trim()
-          if (transiciona || asuntoCambio) {
-            await update('solicitudes', form.solicitudId, {
-              ...(asuntoCambio ? { asunto: form.asunto.trim() } : {}),
-              ...(transiciona ? {
-                estado: 'cotizada',
-                historial: arrayUnion({
-                  de: 'lista_para_cotizar', a: 'cotizada', por: uid, fecha: ahora,
-                  motivo: `Cotización ${consecutivo} creada`,
-                }),
-              } : {}),
-            })
-          }
+        if (sSnap.exists() && (sSnap.data().asunto ?? '').trim() !== form.asunto.trim()) {
+          await update('solicitudes', form.solicitudId, { asunto: form.asunto.trim() })
         }
       }
 
@@ -261,7 +265,12 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes }
               ...solicitudes.map(s => ({ value: s.id, label: `${s.consecutivo} · ${s.cliente_id ? (clienteNombres[s.cliente_id] ?? 'cliente') : (s.prospecto_nombre ?? '—')}` })),
             ]}
           />
-          {solVinculada && <p className="text-xs text-brand-700">Cliente/prospecto se toman de {solVinculada.consecutivo}. Al crear, pasará a «cotizada».</p>}
+          {solVinculada && <p className="text-xs text-brand-700">Cliente/prospecto se toman de {solVinculada.consecutivo}. Pasará a «cotizada» cuando la cotización se envíe.</p>}
+          {excluidas > 0 && (
+            <p className="text-xs text-gray-500">
+              {excluidas} solicitud(es) en «lista para cotizar» ya tienen una cotización en curso y no se listan — continúa en esa cotización.
+            </p>
+          )}
           <SelectField
             label="Cliente"
             value={form.clienteId}
