@@ -2,11 +2,14 @@
 import { useState, useMemo } from 'react'
 import { useObrasConRegistros, type ObraConStats } from '../hooks/useObrasConRegistros'
 import ObraCard from '../components/ObraCard'
+import RegistrosLista from '../components/RegistrosLista'
+import { ordenarObras, type SortBy } from '../utils/ordenObras'
 
 type EstadoFilter = 'activas' | 'inactivas' | 'todas'
-type SortBy = 'recientes' | 'pendientes' | 'alfabetico'
+type Vista = 'tarjetas' | 'lista'
 
 const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000
+const VISTA_KEY = 'sst_registros_vista'
 
 export default function ObrasHub() {
   const { obrasConStats, loading, error, reload } = useObrasConRegistros()
@@ -15,6 +18,21 @@ export default function ObrasHub() {
   const [estadoFilter, setEstadoFilter] = useState<EstadoFilter>('activas')
   const [conPendientes, setConPendientes] = useState(false)
   const [sortBy, setSortBy] = useState<SortBy>('recientes')
+  const [vista, setVistaState] = useState<Vista>(() => {
+    try {
+      return localStorage.getItem(VISTA_KEY) === 'tarjetas' ? 'tarjetas' : 'lista'
+    } catch {
+      return 'lista'
+    }
+  })
+  const cambiarVista = (v: Vista) => {
+    setVistaState(v)
+    try {
+      localStorage.setItem(VISTA_KEY, v)
+    } catch {
+      /* preferencia no persistida */
+    }
+  }
 
   // ── Filtros + sort ─────────────────────────────────────────────────────────
 
@@ -35,15 +53,7 @@ export default function ObrasHub() {
       )
     }
 
-    const sorted = [...result]
-    if (sortBy === 'recientes') {
-      sorted.sort((a, b) => b.ultimoTimestamp.localeCompare(a.ultimoTimestamp))
-    } else if (sortBy === 'pendientes') {
-      sorted.sort((a, b) => b.pendientes - a.pendientes)
-    } else {
-      sorted.sort((a, b) => a.nombre_sitio.localeCompare(b.nombre_sitio))
-    }
-    return sorted
+    return ordenarObras(result, sortBy)
   }, [obrasConStats, estadoFilter, conPendientes, search, sortBy])
 
   // ── Auto-secciones (recientes vs otras) ────────────────────────────────────
@@ -122,6 +132,7 @@ export default function ObrasHub() {
           <option value="recientes">↓ Más recientes</option>
           <option value="pendientes">↓ Con más pendientes</option>
           <option value="alfabetico">↓ Alfabético</option>
+          <option value="cliente">↓ Cliente</option>
         </select>
 
         {/* Estado chips (mutuamente excluyentes) */}
@@ -150,6 +161,30 @@ export default function ObrasHub() {
         >
           Con pendientes
         </button>
+
+        {/* Toggle Tarjetas / Lista */}
+        <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5 ml-auto">
+          <button
+            type="button"
+            aria-pressed={vista === 'tarjetas'}
+            onClick={() => cambiarVista('tarjetas')}
+            className={`text-xs px-3 py-1.5 rounded-md transition ${
+              vista === 'tarjetas' ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Tarjetas
+          </button>
+          <button
+            type="button"
+            aria-pressed={vista === 'lista'}
+            onClick={() => cambiarVista('lista')}
+            className={`text-xs px-3 py-1.5 rounded-md transition ${
+              vista === 'lista' ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Lista
+          </button>
+        </div>
       </div>
 
       {/* Error */}
@@ -160,10 +195,17 @@ export default function ObrasHub() {
       )}
 
       {/* Loading skeleton */}
-      {loading && (
+      {loading && vista === 'tarjetas' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="h-44 bg-gray-100 rounded-lg animate-pulse" />
+          ))}
+        </div>
+      )}
+      {loading && vista === 'lista' && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-10 border-b border-gray-100 bg-gray-50 animate-pulse" />
           ))}
         </div>
       )}
@@ -179,36 +221,44 @@ export default function ObrasHub() {
         </div>
       )}
 
-      {/* Sección 1: Actividad reciente */}
-      {!loading && recientes.length > 0 && (
-        <section>
-          <div className="flex items-center gap-2 mb-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            <span className="text-[10px] uppercase tracking-wider font-bold text-gray-500">
-              Actividad reciente · esta semana
-            </span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {recientes.map(o => <ObraCard key={o.id} obra={o} />)}
-          </div>
-        </section>
+      {/* Vista Lista */}
+      {!loading && filtradas.length > 0 && vista === 'lista' && (
+        <RegistrosLista obras={filtradas} sortBy={sortBy} onSort={setSortBy} />
       )}
 
-      {/* Sección 2: Otras obras */}
-      {!loading && otras.length > 0 && (
-        <section>
-          <div className="flex items-center gap-2 mb-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
-            <span className="text-[10px] uppercase tracking-wider font-bold text-gray-500">
-              {recientes.length > 0
-                ? `Otras obras (${otras.length})`
-                : `Obras (${otras.length})`}
-            </span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {otras.map(o => <ObraCard key={o.id} obra={o} />)}
-          </div>
-        </section>
+      {/* Vista Tarjetas */}
+      {!loading && filtradas.length > 0 && vista === 'tarjetas' && (
+        <>
+          {/* Sección 1: Actividad reciente */}
+          {recientes.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span className="text-[10px] uppercase tracking-wider font-bold text-gray-500">
+                  Actividad reciente · esta semana
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {recientes.map(o => <ObraCard key={o.id} obra={o} />)}
+              </div>
+            </section>
+          )}
+
+          {/* Sección 2: Otras obras */}
+          {otras.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
+                <span className="text-[10px] uppercase tracking-wider font-bold text-gray-500">
+                  {recientes.length > 0 ? `Otras obras (${otras.length})` : `Obras (${otras.length})`}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {otras.map(o => <ObraCard key={o.id} obra={o} />)}
+              </div>
+            </section>
+          )}
+        </>
       )}
     </div>
   )
