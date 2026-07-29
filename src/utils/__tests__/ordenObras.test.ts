@@ -1,12 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { ordenarObras, DIRECCION_ORDEN } from '../ordenObras'
+import { ordenarObras, DIRECCION_ORDEN, ObraOrdenable } from '../ordenObras'
 
-interface ObraDeTest {
-  nombre_sitio: string
-  cliente: string
-  pendientes: number
-  ultimoTimestamp: string
-}
+type ObraDeTest = ObraOrdenable
 
 function obra(overrides: Partial<ObraDeTest>): ObraDeTest {
   return {

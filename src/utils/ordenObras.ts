@@ -7,7 +7,7 @@ export const DIRECCION_ORDEN: Record<SortBy, 'ascending' | 'descending'> = {
   cliente: 'ascending',
 }
 
-interface ObraOrdenable {
+export interface ObraOrdenable {
   nombre_sitio: string
   cliente: string
   pendientes: number
@@ -45,6 +45,10 @@ export function ordenarObras<T extends ObraOrdenable>(obras: T[], sortBy: SortBy
         return a.cliente.localeCompare(b.cliente)
       })
       break
+    default: {
+      const _exhaustive: never = sortBy
+      return _exhaustive
+    }
   }
 
   return sorted
