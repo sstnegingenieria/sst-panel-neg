@@ -25,7 +25,7 @@ export default function ObrasHub() {
       return 'lista'
     }
   })
-  const setVista = (v: Vista) => {
+  const cambiarVista = (v: Vista) => {
     setVistaState(v)
     try {
       localStorage.setItem(VISTA_KEY, v)
@@ -167,7 +167,7 @@ export default function ObrasHub() {
           <button
             type="button"
             aria-pressed={vista === 'tarjetas'}
-            onClick={() => setVista('tarjetas')}
+            onClick={() => cambiarVista('tarjetas')}
             className={`text-xs px-3 py-1.5 rounded-md transition ${
               vista === 'tarjetas' ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'
             }`}
@@ -177,7 +177,7 @@ export default function ObrasHub() {
           <button
             type="button"
             aria-pressed={vista === 'lista'}
-            onClick={() => setVista('lista')}
+            onClick={() => cambiarVista('lista')}
             className={`text-xs px-3 py-1.5 rounded-md transition ${
               vista === 'lista' ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'
             }`}
