@@ -108,12 +108,14 @@ service cloud.firestore {
       // Create/update/delete administrativo: solo puedeAdministrarSST
       allow create, update, delete: if puedeAdministrarSST();
 
-      // Create self: al registrarse en la app, no puede autoasignarse
-      // rol sst/admin
+      // Create self: al registrarse en la app, SOLO puede crear su propio doc
+      // con rol 'tecnico' (allowlist, no denylist — cierra el hueco de
+      // auto-asignarse cualquier rol privilegiado nuevo sin depender de listar
+      // cada uno a mano cada vez que se agrega un rol al sistema).
       allow create: if isAuthed()
                     && request.auth.uid == userId
-                    && !(request.resource.data.get('rol', '') in ['sst', 'admin'])
-                    && !(request.resource.data.get('role', '') in ['sst', 'admin']);
+                    && request.resource.data.get('rol', 'tecnico') == 'tecnico'
+                    && request.resource.data.get('role', 'tecnico') == 'tecnico';
     }
 
     // ────────────────────────────────────────────────────────────────
