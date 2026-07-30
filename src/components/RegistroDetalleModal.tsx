@@ -205,8 +205,8 @@ export default function RegistroDetalleModal({ formulario: f, onClose, onVistobu
             )}
 
             {/* Controles de revisión: solo roles con permiso de aprobar/rechazar
-                (admin, sst, gestion_integral). Los demás (p. ej. gerencia_general)
-                ven el estado de revisión, pero no lo editan. */}
+                (admin, sst, gestion_integral, residente_sst). Los demás (p. ej.
+                gerencia_general) ven el estado de revisión, pero no lo editan. */}
             {puedeAprobarRegistros(user?.rol) && (
               <>
             {/* Toggle aprobar / rechazar */}
