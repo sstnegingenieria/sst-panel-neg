@@ -66,6 +66,16 @@ service cloud.firestore {
       return isAuthed() && rolActual() in ['gerencia_general'];
     }
 
+    // 4.5. Revisión de la cola SST (read/update de `formularios` y
+    //    `notificaciones`) ÚNICAMENTE. Deliberadamente separado de
+    //    puedeAdministrarSST(), que queda acotado a la gestión de `users`:
+    //    residente_sst revisa formularios sin ganar poder sobre usuarios.
+    function puedeRevisarFormularios() {
+      return isAuthed() && rolActual() in [
+        'sst', 'admin', 'gestion_integral', 'residente_sst'
+      ];
+    }
+
     // 5. Acceso al módulo SIGP (lectura de colecciones comerciales/proyectos).
     //    Espeja ROLES_CON_ACCESO_SIGP de types/sigp/roles.ts.
     function accesoSIGP() {
@@ -175,7 +185,7 @@ service cloud.firestore {
 
     match /formularios/{formularioId} {
       allow read: if isAuthed() && (
-        puedeAdministrarSST() ||
+        puedeRevisarFormularios() ||
         puedeVerSSTSoloLectura() ||
         resource.data.get('user_id', '') == request.auth.uid
       );
@@ -184,7 +194,7 @@ service cloud.firestore {
         request.resource.data.get('user_id', '') == request.auth.uid;
 
       allow update: if isAuthed() && (
-        puedeAdministrarSST() ||
+        puedeRevisarFormularios() ||
         resource.data.get('user_id', '') == request.auth.uid
       );
 
@@ -207,7 +217,7 @@ service cloud.firestore {
 
     match /notificaciones/{notifId} {
       allow read: if isAuthed() && (
-        puedeAdministrarSST() ||
+        puedeRevisarFormularios() ||
         puedeVerSSTSoloLectura() ||
         resource.data.get('user_id', '') == request.auth.uid
       );
@@ -215,7 +225,7 @@ service cloud.firestore {
       allow create: if isAuthed();
 
       allow update: if isAuthed() && (
-        puedeAdministrarSST() ||
+        puedeRevisarFormularios() ||
         resource.data.get('user_id', '') == request.auth.uid
       );
 

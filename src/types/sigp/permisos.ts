@@ -68,9 +68,10 @@ export const veContratistas = (rol: string | undefined) => en(rol, ROLES_VE_CONT
 // ACCIONES (mostrar/ocultar botones)
 // ────────────────────────────────────────────────────────────────────────────
 
-// Aprobar/rechazar formularios. Incluye gestion_integral (ya tiene escritura
-// vía puedeAdministrarSST en las reglas Firestore).
-export const ROLES_APROBAR_REGISTROS: Rol[] = ['admin', 'sst', 'gestion_integral']
+// Aprobar/rechazar formularios. Incluye gestion_integral y residente_sst
+// (escritura respaldada por puedeRevisarFormularios() en las reglas Firestore,
+// separado de puedeAdministrarSST() para no otorgar gestión de users).
+export const ROLES_APROBAR_REGISTROS: Rol[] = ['admin', 'sst', 'gestion_integral', 'residente_sst']
 
 // Crear/editar/eliminar obras. Alineado con `puedeGestionarProyectos()` de
 // firestore.rules (mismos 5 roles).
