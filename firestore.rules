@@ -51,8 +51,9 @@ service cloud.firestore {
       return request.resource.data.get('preliquidacion', {}).get('salvedad', '');
     }
 
-    // 3. Administración del subsistema SST (aprobar/rechazar formularios,
-    //    gestionar users). Reemplaza el viejo isSST() ampliado con
+    // 3. Administración de `users` (invitar, cambiar rol, aprobar cuentas).
+    //    Ya NO gobierna `formularios`/`notificaciones` — ver
+    //    puedeRevisarFormularios(). Reemplaza el viejo isSST() ampliado con
     //    gestion_integral.
     function puedeAdministrarSST() {
       return isAuthed() && rolActual() in [
