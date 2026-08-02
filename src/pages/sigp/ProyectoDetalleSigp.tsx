@@ -16,6 +16,7 @@ import EjecucionProyecto from '../../components/sigp/proyectos/EjecucionProyecto
 import EntregablesIhs from '../../components/sigp/proyectos/EntregablesIhs'
 import EvaluacionContratistaCard from '../../components/sigp/proyectos/EvaluacionContratistaCard'
 import ComprasReembolsos from '../../components/sigp/proyectos/ComprasReembolsos'
+import OrdenesCompraProyecto from '../../components/sigp/proyectos/OrdenesCompraProyecto'
 import SatisfaccionClienteCard from '../../components/sigp/proyectos/SatisfaccionClienteCard'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
@@ -220,6 +221,9 @@ export default function ProyectoDetalleSigp() {
       {/* Administrativa B3b — compras/reembolsos del contratista (línea
           separada de la mano de obra; las capturan los gestores) */}
       <ComprasReembolsos proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+
+      {/* Compras · C2 — órdenes de compra con proveedor (se autogatea con veOcUI) */}
+      <OrdenesCompraProyecto proyecto={proyecto} reload={load} />
 
       {/* Entregables IHS (F2.3 — solo preventivos; requisito de la entrega) */}
       <EntregablesIhs proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />

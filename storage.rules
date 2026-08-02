@@ -65,5 +65,15 @@ service firebase.storage {
                    && (request.resource.contentType == 'application/pdf'
                        || request.resource.contentType.matches('image/.*'));
     }
+
+    // ── Compras C2: cotización del proveedor adjunta a la OC ─────────────────
+    // Ruta: ordenes_compra/{ocId}/cotizacion/{fileName} (UUID — patrón C1, H-008)
+    match /ordenes_compra/{ocId}/cotizacion/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (request.resource.contentType == 'application/pdf'
+                       || request.resource.contentType.matches('image/.*'));
+    }
   }
 }
