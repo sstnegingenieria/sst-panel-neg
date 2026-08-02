@@ -24,6 +24,7 @@ import CotizacionesSigp from './pages/sigp/CotizacionesSigp'
 import CotizacionDetalleSigp from './pages/sigp/CotizacionDetalleSigp'
 import ProyectosSigp from './pages/sigp/ProyectosSigp'
 import ProyectoDetalleSigp from './pages/sigp/ProyectoDetalleSigp'
+import OrdenesCompraSigp from './pages/sigp/OrdenesCompraSigp'
 import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, type Rol } from './types/sigp/roles'
 import {
   ROLES_VE_DASHBOARD_SST,
@@ -35,6 +36,7 @@ import {
   ROLES_VE_FACTURACION,
   ROLES_VE_VERIFICACION_SST,
   ROLES_GESTIONA_COMPRAS,
+  ROLES_VEN_OC,
 } from './types/sigp/permisos'
 import FacturacionPagos from './pages/administrativa/FacturacionPagos'
 import Proveedores from './pages/administrativa/Proveedores'
@@ -118,6 +120,8 @@ function ProtectedRoutes() {
         {/* F2.1.a — las páginas además se auto-gatean con sigp_f2_enabled */}
         <Route path="/sigp/proyectos" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ProyectosSigp /></ProtectedRoute>} />
         <Route path="/sigp/proyectos/:proyectoId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ProyectoDetalleSigp /></ProtectedRoute>} />
+        {/* Compras · C2 — bandeja de órdenes de compra (acciones en la ficha del proyecto) */}
+        <Route path="/sigp/ordenes-compra" element={<ProtectedRoute rolesPermitidos={ROLES_VEN_OC}><OrdenesCompraSigp /></ProtectedRoute>} />
         {/* Módulo Gerencia Administrativa (Bloque 1) — fuera del grupo SIGP */}
         <Route path="/administrativa/facturacion" element={<ProtectedRoute rolesPermitidos={ROLES_VE_FACTURACION}><FacturacionPagos /></ProtectedRoute>} />
         {/* Módulo Compras (C1) — proveedores; solo gerencia_administrativa/admin */}

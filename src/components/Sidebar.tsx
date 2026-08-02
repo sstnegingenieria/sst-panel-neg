@@ -15,6 +15,7 @@ import {
   veFacturacionUI,
   veVerificacionSstUI,
   puedeGestionarComprasUI,
+  veOcUI,
 } from '../types/sigp/permisos'
 
 interface SidebarProps {
@@ -184,6 +185,18 @@ const sigpNavItems: {
       </svg>
     ),
   },
+  // Compras · C2 (02-ago-2026): órdenes de compra con proveedor — visible si
+  // veOcUI(rol) (filtro en el render, junto al de Proyectos).
+  {
+    to: '/sigp/ordenes-compra',
+    label: 'Órdenes de compra',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M3 3h1.5l1.5 12.75h12l1.5-9H6.75M8.25 19.5a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm9 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+      </svg>
+    ),
+  },
 ]
 
 export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: SidebarProps) {
@@ -208,6 +221,7 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   const ocultosParaGerenciaAdm = ['/sigp/panel', '/sigp/solicitudes', '/sigp/visitas', '/sigp/proyectos']
   const visibleSigpItems = sigpNavItems.filter(item =>
     (item.to !== '/sigp/proyectos' || (f2Enabled && veProyectosUI(user?.rol)))
+    && (item.to !== '/sigp/ordenes-compra' || veOcUI(user?.rol))
     && (user?.rol !== 'gerencia_administrativa' || !ocultosParaGerenciaAdm.includes(item.to)))
   // Bloque 6: "Obras" vive SIEMPRE en el bloque SST (vista informativa; las
   // obras nacen de los proyectos SIGP). Mismos roles de siempre (veObras).

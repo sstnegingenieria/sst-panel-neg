@@ -168,3 +168,20 @@ export const veProyectosUI = (rol: string | undefined) =>
 // gestionaCompras() de firestore.rules.
 export const ROLES_GESTIONA_COMPRAS: Rol[] = ['gerencia_administrativa', 'admin']
 export const puedeGestionarComprasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_COMPRAS)
+
+// ── Módulo Compras (C2) — órdenes de compra ──
+// Alineado con puedeCrearOC()/apruebaOC()/puedeVerOC() de firestore.rules:
+// crea el operativo de proyectos (mínimo privilegio, sin comercial ni sst);
+// aprueba GP/GG/admin (aprobador ≠ creador, o salvedad); ve además
+// gerencia_administrativa y gestion_integral (lectura, sin escritura).
+export const ROLES_CREA_OC: Rol[] = [
+  'auxiliar_proyectos', 'director_proyectos', 'gerencia_general', 'admin',
+]
+export const puedeCrearOcUI = (rol: string | undefined) => en(rol, ROLES_CREA_OC)
+export const ROLES_APRUEBA_OC: Rol[] = ['director_proyectos', 'gerencia_general', 'admin']
+export const apruebaOcUI = (rol: string | undefined) => en(rol, ROLES_APRUEBA_OC)
+export const ROLES_VEN_OC: Rol[] = [
+  'auxiliar_proyectos', 'director_proyectos', 'gerencia_general',
+  'gerencia_administrativa', 'gestion_integral', 'admin',
+]
+export const veOcUI = (rol: string | undefined) => en(rol, ROLES_VEN_OC)

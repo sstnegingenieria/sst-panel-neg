@@ -93,6 +93,31 @@ service cloud.firestore {
       return isAuthed() && rolActual() in ['gerencia_administrativa', 'admin'];
     }
 
+    // 7. Módulo Compras (C2): órdenes de compra — documento de EJECUCIÓN
+    //    (costo operativo: jamás venta/utilidad). Lectura por lista explícita
+    //    (mínimo privilegio): sin operacion_comercial ni sst — la OC no es
+    //    comercial. `residente_obra` se sumará a crear/ver cuando exista el rol.
+    function puedeCrearOC() {
+      return isAuthed() && rolActual() in [
+        'auxiliar_proyectos', 'director_proyectos', 'gerencia_general', 'admin'
+      ];
+    }
+    function apruebaOC() {
+      return isAuthed() && rolActual() in ['director_proyectos', 'gerencia_general', 'admin'];
+    }
+    function puedeVerOC() {
+      return isAuthed() && rolActual() in [
+        'auxiliar_proyectos', 'director_proyectos', 'gerencia_general',
+        'gerencia_administrativa', 'gestion_integral', 'admin'
+      ];
+    }
+    // ¿Este write FIJA la aprobación de la OC? (patrón fijaAprobacionPreliq:
+    // escribir un aprobador nuevo/distinto; retirarlo no cuenta)
+    function fijaAprobacionOC() {
+      return request.resource.data.get('aprobada_por', '') != ''
+          && request.resource.data.get('aprobada_por', '') != resource.data.get('aprobada_por', '');
+    }
+
     // ────────────────────────────────────────────────────────────────
     // COLECCIÓN: users
     // ────────────────────────────────────────────────────────────────
@@ -290,6 +315,40 @@ service cloud.firestore {
     // (el seed por script se retiró del alcance de C1).
     match /contactos_lookup/{contactoId} {
       allow read: if gestionaCompras();
+    }
+
+    // ── Compras C2: órdenes de compra ────────────────────────────────
+    // El consecutivo OC-YYYY-NNN se asigna al EMITIR (los borradores no
+    // queman número — contigüidad ISO). La aprobación está blindada
+    // por-campo: rol aprobador + aprobador ≠ creador (o salvedad
+    // obligatoria — el escape GG-crea/GG-aprueba, con traza).
+    match /ordenes_compra/{ocId} {
+      allow read: if puedeVerOC();
+      // Nace SIEMPRE como borrador y con el creador real (no suplantable).
+      allow create: if puedeCrearOC()
+                    && request.resource.data.get('estado', '') == 'borrador'
+                    && request.resource.data.get('creada_por', '') == request.auth.uid;
+      allow update: if puedeCrearOC()
+                    // aprobada = inmutable, salvo ANULARLA (solo aprobadores)
+                    && (resource.data.get('estado', '') != 'aprobada'
+                        || (apruebaOC() && request.resource.data.get('estado', '') == 'anulada'))
+                    // anulada = terminal
+                    && resource.data.get('estado', '') != 'anulada'
+                    // EMITIR exige la cotización del proveedor ya adjunta
+                    && (request.resource.data.get('estado', '') != 'emitida'
+                        || resource.data.get('estado', '') == 'emitida'
+                        || request.resource.data.get('cotizacion_proveedor_url', '') != '')
+                    // APROBAR blindado por-campo
+                    && (!fijaAprobacionOC()
+                        || (apruebaOC()
+                            && (request.auth.uid != resource.data.get('creada_por', '')
+                                || request.resource.data.get('salvedad_aprobacion', '') != '')))
+                    // a 'aprobada' SOLO desde 'emitida' y siempre fijando aprobador
+                    && (request.resource.data.get('estado', '') != 'aprobada'
+                        || resource.data.get('estado', '') == 'aprobada'
+                        || (resource.data.get('estado', '') == 'emitida'
+                            && request.resource.data.get('aprobada_por', '') != ''));
+      // sin delete — 'anulada' es el terminal suave (restricción 5.1)
     }
 
     // ────────────────────────────────────────────────────────────────
