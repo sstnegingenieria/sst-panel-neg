@@ -5,6 +5,8 @@ interface ModalAction {
   onClick: () => void
   variant?: 'primary' | 'danger' | 'secondary'
   loading?: boolean
+  /** Deshabilita el botón SIN mostrar el spinner de "Guardando..." (p. ej. mientras el formulario tiene errores de validación). */
+  disabled?: boolean
 }
 
 interface ModalProps {
@@ -73,7 +75,7 @@ export default function Modal({ isOpen, title, onClose, children, actions, size 
               <button
                 key={i}
                 onClick={action.onClick}
-                disabled={action.loading}
+                disabled={action.loading || action.disabled}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50 ${
                   btnClass[action.variant ?? 'secondary']
                 }`}

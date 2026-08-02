@@ -161,3 +161,10 @@ export const aprobacionRequiereSalvedad = (rol: string | undefined) =>
 // necesita entrar a la ficha para aprobar/girar).
 export const veProyectosUI = (rol: string | undefined) =>
   puedeGestionarProyectosUI(rol) || puedeAprobarPreliquidacionUI(rol)
+
+// ── Módulo Compras (C1) — proveedores ──
+// Registrar/editar proveedores y su información bancaria: gerencia_administrativa
+// OPERA (Marcela); admin respalda (infraestructura). Alineado con
+// gestionaCompras() de firestore.rules.
+export const ROLES_GESTIONA_COMPRAS: Rol[] = ['gerencia_administrativa', 'admin']
+export const puedeGestionarComprasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_COMPRAS)

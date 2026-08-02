@@ -13,6 +13,8 @@ export default defineConfig({
     // Los tests que dependen de la Emulator Suite viven en hooks/sigp/__tests__/
     // y se excluyen del `npm test` por defecto (requieren Java + emuladores).
     // Se corren aparte con `npm run test:emulator` (vitest.emulator.config.ts).
-    exclude: [...configDefaults.exclude, '**/hooks/sigp/__tests__/**'],
+    // `.claude/worktrees/` son checkouts de trabajo de otras sesiones (aislamiento
+    // por worktree) — sus copias de tests no pertenecen a la suite del repo.
+    exclude: [...configDefaults.exclude, '**/hooks/sigp/__tests__/**', '**/.claude/**'],
   },
 })

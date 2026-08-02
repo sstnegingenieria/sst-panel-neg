@@ -87,6 +87,12 @@ service cloud.firestore {
       ];
     }
 
+    // 6. Módulo Compras (C1): registro de proveedores y su información
+    //    bancaria. Marcela (gerencia_administrativa) opera; admin respalda.
+    function gestionaCompras() {
+      return isAuthed() && rolActual() in ['gerencia_administrativa', 'admin'];
+    }
+
     // ────────────────────────────────────────────────────────────────
     // COLECCIÓN: users
     // ────────────────────────────────────────────────────────────────
@@ -248,6 +254,42 @@ service cloud.firestore {
     match /clientes/{clienteId} {
       allow read: if accesoSIGP();
       allow create, update, delete: if puedeGestionarProyectos();
+    }
+
+    // ── Compras C1: proveedores (los materiales los compra NEG) ──────
+    // Doc id = identificación normalizada. Identidad + rut_url visibles a
+    // los operativos (C2: órdenes de compra); lo bancario VIVE en la
+    // subcolección privada — las reglas no ocultan campos en lectura
+    // (mismo principio que la proyección verificaciones_sst del 3a).
+    // Sin delete: soft-delete por estado (restricción 5.1).
+    match /proveedores/{proveedorId} {
+      allow read: if accesoSIGP();
+      // Proveedor nuevo exige el RUT ya subido (validación dura UI + regla).
+      allow create: if gestionaCompras()
+                    && request.resource.data.get('rut_url', '') != '';
+      allow update: if gestionaCompras();
+
+      // Datos bancarios + certificación bancaria: SOLO gerencia_administrativa
+      // y admin (ni lectura para el resto del panel). El create exige cert +
+      // banco + cuenta (sin cuenta no se le puede pagar); tipo_cuenta es duro
+      // solo en UI. La creación ATÓMICA doc principal + este doc (un batch)
+      // es responsabilidad del flujo de registro (C1 sub-bloque 2).
+      match /privado/{docId} {
+        allow read: if gestionaCompras();
+        allow create: if gestionaCompras()
+                      && request.resource.data.get('certificacion_bancaria_url', '') != ''
+                      && request.resource.data.get('banco', '') != ''
+                      && request.resource.data.get('numero_cuenta', '') != '';
+        allow update: if gestionaCompras();
+      }
+    }
+
+    // ── Compras C1: semilla de autocompletado de contactos ───────────
+    // Solo lectura para quien registra proveedores; SIN write en reglas.
+    // Se poblará más adelante con un wizard manual desde un Excel filtrado
+    // (el seed por script se retiró del alcance de C1).
+    match /contactos_lookup/{contactoId} {
+      allow read: if gestionaCompras();
     }
 
     // ────────────────────────────────────────────────────────────────
