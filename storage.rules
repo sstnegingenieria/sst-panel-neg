@@ -50,5 +50,20 @@ service firebase.storage {
     match /proyectos/{proyectoId}/{allPaths=**} {
       allow read, write: if request.auth != null;
     }
+
+    // ── Compras C1: RUT y certificación bancaria de proveedores ──────────────
+    // Ruta: proveedores/{proveedorId}/{rut|certificacion_bancaria}/{fileName}
+    // El fileName es un UUID (paths no adivinables — mitigación H-008: el rol
+    // no se puede validar aquí; la autorización real es la regla Firestore
+    // del doc/subcolección que guarda la URL). Validación que SÍ funciona:
+    // path scoping + tipo de archivo + tamaño.
+    match /proveedores/{proveedorId}/{tipoDoc}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && tipoDoc in ['rut', 'certificacion_bancaria']
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (request.resource.contentType == 'application/pdf'
+                       || request.resource.contentType.matches('image/.*'));
+    }
   }
 }

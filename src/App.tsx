@@ -34,8 +34,10 @@ import {
   ROLES_VE_CONTRATISTAS,
   ROLES_VE_FACTURACION,
   ROLES_VE_VERIFICACION_SST,
+  ROLES_GESTIONA_COMPRAS,
 } from './types/sigp/permisos'
 import FacturacionPagos from './pages/administrativa/FacturacionPagos'
+import Proveedores from './pages/administrativa/Proveedores'
 import VerificacionContratistas from './pages/VerificacionContratistas'
 
 function ProtectedRoutes() {
@@ -118,6 +120,8 @@ function ProtectedRoutes() {
         <Route path="/sigp/proyectos/:proyectoId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ProyectoDetalleSigp /></ProtectedRoute>} />
         {/* Módulo Gerencia Administrativa (Bloque 1) — fuera del grupo SIGP */}
         <Route path="/administrativa/facturacion" element={<ProtectedRoute rolesPermitidos={ROLES_VE_FACTURACION}><FacturacionPagos /></ProtectedRoute>} />
+        {/* Módulo Compras (C1) — proveedores; solo gerencia_administrativa/admin */}
+        <Route path="/administrativa/proveedores" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_COMPRAS}><Proveedores /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

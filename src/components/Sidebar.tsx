@@ -14,6 +14,7 @@ import {
   veProyectosUI,
   veFacturacionUI,
   veVerificacionSstUI,
+  puedeGestionarComprasUI,
 } from '../types/sigp/permisos'
 
 interface SidebarProps {
@@ -375,6 +376,31 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
               </span>
               {!collapsed && <span>Gestión Administrativa</span>}
             </NavLink>
+
+            {/* Compras C1 (22-jul-2026 en adelante): proveedores — solo
+                gerencia_administrativa/admin (no gerencia_general, que aquí
+                es lectura del ciclo pero no opera compras). */}
+            {puedeGestionarComprasUI(user?.rol) && (
+              <NavLink
+                to="/administrativa/proveedores"
+                onClick={onNavigate}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                    isActive
+                      ? 'bg-brand-50 text-brand-700 font-semibold'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  }`
+                }
+              >
+                <span className="flex-shrink-0">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                  </svg>
+                </span>
+                {!collapsed && <span>Proveedores</span>}
+              </NavLink>
+            )}
           </div>
         )}
       </nav>
