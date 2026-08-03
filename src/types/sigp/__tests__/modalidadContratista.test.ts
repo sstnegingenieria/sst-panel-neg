@@ -5,10 +5,16 @@
 //   Riesgo B: anticipo y saldo del contratista siguen sobre valor_contratista
 //     PURO — los materiales los compra NEG y jamás pasan por el contratista.
 import { describe, it, expect } from 'vitest'
+import { Timestamp } from 'firebase/firestore'
 import {
   modalidadDe, costoPresupuestadoDe, utilidadEsperadaDe, margenEsperadoPctDe,
   utilidadDe, margenPctDe, anticipoValorDe, saldoValorDe,
 } from '../proyecto'
+import type { CompraReembolso } from '../proyecto'
+
+const compra = (concepto: string, valor: number): CompraReembolso => ({
+  concepto, valor, registrado_por: 'uid_gestor', fecha: Timestamp.fromMillis(1753200000000),
+})
 
 // El caso real del E2E: venta 3.000.000, mano de obra 2.250.000, materiales 800.000
 const soloMO = {
@@ -110,5 +116,37 @@ describe('costoEjecutadoDe — derivado C3 con retrocompat', () => {
     const pre = { ...preTC, costo_ejecutado: 2_400_576 }
     expect(costoEjecutadoDe({ estado: 'ejecutado', preliquidacion: pre } as never, 0)).toBe(2_400_576)
     expect(costoEjecutadoDe({ estado: 'cerrado', preliquidacion: pre } as never, 999_999)).toBe(2_400_576)
+  })
+})
+
+// ── C4 (03-ago): tercer componente del derivado — reembolsos al contratista ──
+describe('costoEjecutadoDe — C4 reembolsos al contratista (línea disjunta de OCs/menores)', () => {
+  const preTC = { valor_venta: 3_000_000, valor_contratista: 2_100_000, anticipo_pct: 50 }
+
+  it('reembolsos sumando: mano de obra + compras + Σ reembolsos', () => {
+    const pre = { ...preTC, valor_contratista: 2_000_000 }
+    const reembolsos = [compra('x', 150_000), compra('y', 50_000)]
+    expect(costoEjecutadoDe(
+      { estado: 'ejecutado', preliquidacion: pre, compras_reembolsos: reembolsos } as never, 300_000,
+    )).toBe(2_500_000) // 2.000.000 (contratista) + 300.000 (compras) + 200.000 (reembolsos)
+  })
+
+  it('manual gana aun con reembolsos — sin doble conteo', () => {
+    const pre = { ...preTC, costo_ejecutado: 2_400_576 }
+    const reembolsos = [compra('x', 150_000), compra('y', 50_000)]
+    expect(costoEjecutadoDe(
+      { estado: 'ejecutado', preliquidacion: pre, compras_reembolsos: reembolsos } as never, 760_000,
+    )).toBe(2_400_576)
+  })
+
+  it('retrocompat: sin campo compras_reembolsos → se comporta como antes (contratista + compras + 0)', () => {
+    expect(costoEjecutadoDe({ estado: 'ejecutado', preliquidacion: preTC } as never, 500_000)).toBe(2_600_000)
+  })
+
+  it('pre-ejecutado con reembolsos → null (gate intacto)', () => {
+    const reembolsos = [compra('x', 150_000), compra('y', 50_000)]
+    expect(costoEjecutadoDe(
+      { estado: 'en_ejecucion', preliquidacion: preTC, compras_reembolsos: reembolsos } as never, 500_000,
+    )).toBeNull()
   })
 })

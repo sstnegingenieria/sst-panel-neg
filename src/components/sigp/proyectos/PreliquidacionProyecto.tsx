@@ -22,7 +22,7 @@ import {
   ESTADO_PRY_LABEL,
   MODALIDADES_CONTRATISTA, MODALIDAD_CONTRATISTA_LABEL, modalidadDe,
   costoPresupuestadoDe, utilidadEsperadaDe, margenEsperadoPctDe,
-  costoEjecutadoDe, alcanzoEjecutado,
+  costoEjecutadoDe, alcanzoEjecutado, totalComprasReembolsos,
 } from '../../../types/sigp/proyecto'
 import { aprobacionRequiereSalvedad } from '../../../types/sigp/permisos'
 import { modoAgrupacionDe, actividadesDe, subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../../types/sigp/cotizacion'
@@ -672,7 +672,8 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
               <span className="text-sm text-gray-400">— (se deriva al ejecutar)</span>
             ) : costoEjecutadoDerivado != null ? (
               <span className="text-sm font-mono text-gray-700">
-                mano de obra {fmtMoney(pre.valor_contratista)} + compras {fmtMoney(comprasTotal ?? 0)} = {fmtMoney(costoEjecutadoDerivado)}
+                mano de obra {fmtMoney(pre.valor_contratista)} + compras {fmtMoney(comprasTotal ?? 0)}
+                {' '}+ reembolsos {fmtMoney(totalComprasReembolsos(proyecto.compras_reembolsos ?? []))} = {fmtMoney(costoEjecutadoDerivado)}
                 <span className="text-[10px] text-gray-400 font-sans ml-1">derivado automático</span>
               </span>
             ) : (
