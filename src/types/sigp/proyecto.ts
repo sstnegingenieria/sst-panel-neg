@@ -555,6 +555,29 @@ export const costoPresupuestadoDe = (
 ): number =>
   p.valor_contratista + (modalidadDe(p) === 'solo_mano_obra' ? (p.valor_materiales ?? 0) : 0)
 
+/** ¿El proyecto alcanzó la ejecución completa? Gate ISO del indicador #3
+ *  (decisión de Giovanny 02-ago): el cumplimiento presupuestal se evalúa
+ *  desde 'ejecutado' — antes, comparar ejecutado vs presupuesto no significa
+ *  nada. PENDIENTE EXTERNO: reflejar el gate en la Caracterización v02 con
+ *  aval de Ingrid (GI). */
+export const alcanzoEjecutado = (estado: EstadoProyecto): boolean =>
+  ESTADOS_PROYECTO.indexOf(estado) >= ESTADOS_PROYECTO.indexOf('ejecutado')
+
+/** Costo ejecutado real (C3 — DERIVADO): null si el proyecto no alcanzó
+ *  'ejecutado' (no entra al indicador); el manual histórico GANA siempre
+ *  (era el costo real TOTAL — sumarle compras duplicaría; no se reescribe
+ *  el pasado); si no, mano de obra pactada + compras reales agregadas por
+ *  la CF (compras_proyecto.compras_ejecutadas_total). */
+export function costoEjecutadoDe(
+  p: Pick<Proyecto, 'estado' | 'preliquidacion'>,
+  comprasEjecutadasTotal: number,
+): number | null {
+  const pre = p.preliquidacion
+  if (!pre || !alcanzoEjecutado(p.estado)) return null
+  if ((pre.costo_ejecutado ?? 0) > 0) return pre.costo_ejecutado!
+  return pre.valor_contratista + comprasEjecutadasTotal
+}
+
 /** Utilidad esperada REAL (24-jul) = venta − costo presupuestado total.
  *  NO alimenta la palanca margen↔valor: esa conserva utilidadDe/margenPctDe
  *  (margen sobre el contratista, convención APU). */

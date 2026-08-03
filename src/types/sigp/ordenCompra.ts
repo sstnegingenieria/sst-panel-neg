@@ -10,7 +10,7 @@ import type { Timestamp } from 'firebase/firestore'
 
 // ── Enums de dominio ──────────────────────────────────────────────────────────
 
-export type EstadoOrdenCompra = 'borrador' | 'emitida' | 'aprobada' | 'anulada'
+export type EstadoOrdenCompra = 'borrador' | 'emitida' | 'aprobada' | 'comprada' | 'anulada'
 
 // ── Sub-tipos embebidos ───────────────────────────────────────────────────────
 
@@ -60,6 +60,13 @@ export interface OrdenCompra {
    *  creó (p. ej. GG crea y GG aprueba), la salvedad es OBLIGATORIA. */
   salvedad_aprobacion?: string
   fecha_aprobacion?: Timestamp
+  /** C3 — la compra de Marcela (gestionaCompras): valor REAL pagado +
+   *  soporte a Storage (ordenes_compra/{id}/soporte/{uuid}). Ambos
+   *  obligatorios para marcar 'comprada' (UI + regla hasOnly). */
+  valor_real?: number
+  soporte_compra_url?: string
+  comprada_por?: string
+  fecha_compra?: Timestamp
   historial: CambioEstadoOC[]
   fecha_creacion: Timestamp
   fecha_actualizacion?: Timestamp
@@ -67,12 +74,13 @@ export interface OrdenCompra {
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
-export const ESTADOS_OC = ['borrador', 'emitida', 'aprobada', 'anulada'] as const
+export const ESTADOS_OC = ['borrador', 'emitida', 'aprobada', 'comprada', 'anulada'] as const
 
 export const ESTADO_OC_LABEL: Record<EstadoOrdenCompra, string> = {
   borrador: 'Borrador',
   emitida: 'Emitida',
   aprobada: 'Aprobada',
+  comprada: 'Comprada',
   anulada: 'Anulada',
 }
 
@@ -80,6 +88,7 @@ export const ESTADO_OC_COLOR: Record<EstadoOrdenCompra, string> = {
   borrador: 'bg-gray-100 text-gray-600',
   emitida:  'bg-amber-100 text-amber-800',
   aprobada: 'bg-emerald-100 text-emerald-800',
+  comprada: 'bg-brand-100 text-brand-800',
   anulada:  'bg-rose-100 text-rose-800',
 }
 
@@ -91,7 +100,8 @@ export const ESTADO_OC_COLOR: Record<EstadoOrdenCompra, string> = {
 export const TRANSICIONES_OC: Record<EstadoOrdenCompra, EstadoOrdenCompra[]> = {
   borrador: ['emitida', 'anulada'],
   emitida:  ['aprobada', 'anulada'],
-  aprobada: ['anulada'],
+  aprobada: ['comprada', 'anulada'],  // comprada = SOLO gestionaCompras (vía Marcela, C3)
+  comprada: [],                       // terminal en C3 (recepción = v2)
   anulada:  [],
 }
 
@@ -129,3 +139,26 @@ export function validarOcParaEmitir(oc: {
 /** ¿La aprobación exige salvedad? (aprobador == creador — escape con traza). */
 export const requiereSalvedadAprobacion = (uidAprobador: string, creadaPor: string): boolean =>
   uidAprobador === creadaPor
+
+/** Validación dura para marcar COMPRADA (C3 — la compra de Marcela):
+ *  valor real pagado > 0 y soporte adjunto. Devuelve mapa de errores. */
+export function validarOcParaComprar(d: { valorReal?: number; tieneSoporte: boolean }): Record<string, string> {
+  const e: Record<string, string> = {}
+  if (!((d.valorReal ?? 0) > 0)) e.valor_real = 'El valor real pagado es obligatorio (> 0)'
+  if (!d.tieneSoporte) e.soporte = 'El soporte de la compra es obligatorio'
+  return e
+}
+
+/** C3 — compra menor registrada directo en el proyecto (sin OC; subcolección
+ *  proyectos/{id}/compras_menores). El agregado de la CF la suma igual. */
+export interface CompraMenorProyecto {
+  id: string
+  descripcion: string
+  valor: number                      // > 0 (regla + UI)
+  proveedor_nombre?: string          // texto libre — sin exigir registro C1
+  soporte_url?: string               // Storage proyectos/{id}/** (bloque existente)
+  registrada_por: string
+  fecha_compra: Timestamp
+  fecha_creacion: Timestamp
+  fecha_actualizacion?: Timestamp
+}

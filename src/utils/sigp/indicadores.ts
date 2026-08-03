@@ -6,7 +6,7 @@
 // Todo es cálculo PURO client-side sobre las colecciones existentes; los
 // componentes solo pintan lo que sale de aquí.
 
-import { costoPresupuestadoDe } from '../../types/sigp/proyecto'
+import { costoPresupuestadoDe, costoEjecutadoDe } from '../../types/sigp/proyecto'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import type { Solicitud } from '../../types/sigp/solicitud'
 
@@ -112,13 +112,23 @@ export function indCalidad(proyectos: Proyecto[], p: Periodo): ValorIndicador {
  *  con costo ejecutado capturado): Σ ejecutado / Σ costo PRESUPUESTADO total
  *  × 100 — misma canasta según la modalidad (mano de obra + materiales NEG en
  *  'solo_mano_obra'). 24-jul: antes se dividía por la VENTA, que incluye la
- *  utilidad y dejaba bajo meta a todo proyecto rentable. */
-export function indPresupuesto(proyectos: Proyecto[]): ValorIndicador {
-  const con = proyectos.filter(p => (p.preliquidacion?.costo_ejecutado ?? 0) > 0
-    && costoPresupuestadoDe(p.preliquidacion!) > 0)
-  if (con.length === 0) return sinDatos
-  const ejecutado = con.reduce((s, p) => s + (p.preliquidacion!.costo_ejecutado ?? 0), 0)
-  const proyectado = con.reduce((s, p) => s + costoPresupuestadoDe(p.preliquidacion!), 0)
+ *  utilidad y dejaba bajo meta a todo proyecto rentable. 02-ago (C3, decisión
+ *  de Giovanny): el costo ejecutado ya NO es un campo manual libre — se
+ *  deriva con `costoEjecutadoDe` (gate por `estado` ≥ 'ejecutado' + manual
+ *  histórico gana siempre + compras REALES de `compras_proyecto` agregadas
+ *  por la CF cuando no hay manual). `comprasPorProyecto` es el mapa
+ *  proyecto.id → compras_ejecutadas_total (vacío si el rol no puede verlas —
+ *  el caller decide si calcula o no; nunca se calcula a medias). */
+export function indPresupuesto(
+  proyectos: Proyecto[], comprasPorProyecto: Record<string, number>,
+): ValorIndicador {
+  const entradas = proyectos
+    .map(p => ({ p, ce: p.preliquidacion ? costoEjecutadoDe(p, comprasPorProyecto[p.id] ?? 0) : null }))
+    .filter((x): x is { p: Proyecto; ce: number } =>
+      x.ce != null && !!x.p.preliquidacion && costoPresupuestadoDe(x.p.preliquidacion) > 0)
+  if (entradas.length === 0) return sinDatos
+  const ejecutado = entradas.reduce((s, x) => s + x.ce, 0)
+  const proyectado = entradas.reduce((s, x) => s + costoPresupuestadoDe(x.p.preliquidacion!), 0)
   const v = pct(ejecutado, proyectado)
   return { valor: v, semaforo: semaforoPresupuesto(v), numerador: ejecutado, denominador: proyectado }
 }

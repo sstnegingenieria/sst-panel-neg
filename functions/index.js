@@ -33,7 +33,10 @@ if (!admin.apps.length) {
 const { generarConsecutivo } = require('./consecutivos');
 const { asignarObraAlPrincipal } = require('./obraEspejo');
 const { sincronizarVerificacionSst } = require('./verificacionesSst');
+const { sincronizarComprasProyectoDesdeOC, sincronizarComprasProyectoDesdeMenores } = require('./comprasProyecto');
 
 exports.generarConsecutivo = generarConsecutivo;
 exports.asignarObraAlPrincipal = asignarObraAlPrincipal;
 exports.sincronizarVerificacionSst = sincronizarVerificacionSst;
+exports.sincronizarComprasProyectoDesdeOC = sincronizarComprasProyectoDesdeOC;
+exports.sincronizarComprasProyectoDesdeMenores = sincronizarComprasProyectoDesdeMenores;
