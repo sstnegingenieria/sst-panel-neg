@@ -345,7 +345,14 @@ service cloud.firestore {
       allow create: if puedeCrearOC()
                     && request.resource.data.get('estado', '') == 'borrador'
                     && request.resource.data.get('creada_por', '') == request.auth.uid;
-      allow update: if puedeCrearOC()
+      // Dos vías (C3): la OPERATIVA de siempre (crear/emitir/aprobar/anular)
+      // y la de MARCELA (marcar comprada — SOLO eso, hasOnly) + su corrección.
+      allow update: if (
+                    // ── Vía OPERATIVA ──
+                    puedeCrearOC()
+                    // comprada = terminal para operativos (recepción = v2)
+                    && resource.data.get('estado', '') != 'comprada'
+                    && request.resource.data.get('estado', '') != 'comprada'
                     // aprobada = inmutable, salvo ANULARLA (solo aprobadores)
                     && (resource.data.get('estado', '') != 'aprobada'
                         || (apruebaOC() && request.resource.data.get('estado', '') == 'anulada'))
@@ -364,8 +371,44 @@ service cloud.firestore {
                     && (request.resource.data.get('estado', '') != 'aprobada'
                         || resource.data.get('estado', '') == 'aprobada'
                         || (resource.data.get('estado', '') == 'emitida'
-                            && request.resource.data.get('aprobada_por', '') != ''));
+                            && request.resource.data.get('aprobada_por', '') != ''))
+                    ) || (
+                    // ── Vía MARCELA (C3): aprobada → comprada, con valor real
+                    // pagado + soporte obligatorios. hasOnly: no puede tocar
+                    // NADA más (líneas, proveedor, aprobación intactos).
+                    gestionaCompras()
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['estado', 'valor_real', 'soporte_compra_url',
+                                  'comprada_por', 'fecha_compra', 'historial',
+                                  'fecha_actualizacion'])
+                    && resource.data.get('estado', '') == 'aprobada'
+                    && request.resource.data.get('estado', '') == 'comprada'
+                    && request.resource.data.get('valor_real', 0) > 0
+                    && request.resource.data.get('soporte_compra_url', '') != ''
+                    ) || (
+                    // ── Corrección de compra (addendum C3): el ESTADO es
+                    // terminal (no se "des-compra" — la reversa con
+                    // devolución es recepción/v2) pero el MONTO registrado
+                    // es corregible con traza — filosofía Hotfix B: corregir
+                    // no se bloquea, se traza. La CF recalcula sola.
+                    gestionaCompras()
+                    && resource.data.get('estado', '') == 'comprada'
+                    && request.resource.data.get('estado', '') == 'comprada'
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['valor_real', 'soporte_compra_url',
+                                  'historial', 'fecha_actualizacion'])
+                    && request.resource.data.get('valor_real', 0) > 0
+                    );
       // sin delete — 'anulada' es el terminal suave (restricción 5.1)
+    }
+
+    // ── Compras C3: proyección del agregado de compras por proyecto ──
+    // La escribe SOLO la CF sincronizarComprasProyecto (Admin SDK) — sin
+    // ningún write de cliente: a prueba de manipulación por construcción
+    // (patrón verificaciones_sst). Alimenta el indicador presupuestal (#3).
+    // Lectura alineada con las OCs (§16/C2): sin sst ni operacion_comercial.
+    match /compras_proyecto/{proyectoId} {
+      allow read: if puedeVerOC();
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -525,6 +568,16 @@ service cloud.firestore {
                                 || (resource.data.get('estado', '') == 'facturado'
                                     && request.resource.data.get('liquidacion', {}).get('liquidacion_anticipada', false) == true
                                     && request.resource.data.get('liquidacion', {}).get('justificacion_anticipada', '') != ''))));
+
+      // ── Compras C3: compras menores del proyecto (sin OC) ──────────
+      // Subcolección con reglas PROPIAS (no hereda del padre). Las registra
+      // gerencia_administrativa/admin; el agregado de la CF las suma igual
+      // que las OCs compradas. Sin delete (corrección por update — 5.1).
+      match /compras_menores/{compraId} {
+        allow read: if puedeVerOC();
+        allow create, update: if gestionaCompras()
+                              && request.resource.data.get('valor', 0) > 0;
+      }
     }
 
     // ────────────────────────────────────────────────────────────────
