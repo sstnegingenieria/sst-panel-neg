@@ -116,9 +116,13 @@ export function indCalidad(proyectos: Proyecto[], p: Periodo): ValorIndicador {
  *  de Giovanny): el costo ejecutado ya NO es un campo manual libre — se
  *  deriva con `costoEjecutadoDe` (gate por `estado` ≥ 'ejecutado' + manual
  *  histórico gana siempre + compras REALES de `compras_proyecto` agregadas
- *  por la CF cuando no hay manual). `comprasPorProyecto` es el mapa
- *  proyecto.id → compras_ejecutadas_total (vacío si el rol no puede verlas —
- *  el caller decide si calcula o no; nunca se calcula a medias). */
+ *  por la CF cuando no hay manual). 03-ago (C4): ese derivado suma además los
+ *  reembolsos al contratista (`proyecto.compras_reembolsos`, línea disjunta
+ *  de las OCs/menores — sin doble conteo); el cálculo de este indicador NO
+ *  cambia de firma, el tercer componente lo agrega `costoEjecutadoDe` por sí
+ *  solo. `comprasPorProyecto` es el mapa proyecto.id → compras_ejecutadas_total
+ *  (vacío si el rol no puede verlas — el caller decide si calcula o no; nunca
+ *  se calcula a medias). */
 export function indPresupuesto(
   proyectos: Proyecto[], comprasPorProyecto: Record<string, number>,
 ): ValorIndicador {

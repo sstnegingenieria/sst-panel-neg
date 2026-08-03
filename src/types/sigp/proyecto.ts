@@ -566,16 +566,24 @@ export const alcanzoEjecutado = (estado: EstadoProyecto): boolean =>
 /** Costo ejecutado real (C3 — DERIVADO): null si el proyecto no alcanzó
  *  'ejecutado' (no entra al indicador); el manual histórico GANA siempre
  *  (era el costo real TOTAL — sumarle compras duplicaría; no se reescribe
- *  el pasado); si no, mano de obra pactada + compras reales agregadas por
- *  la CF (compras_proyecto.compras_ejecutadas_total). */
+ *  el pasado); si no, tres componentes: mano de obra pactada + compras
+ *  reales agregadas por la CF (compras_proyecto.compras_ejecutadas_total,
+ *  de OCs compradas + compras menores) + reembolsos al contratista (C4,
+ *  03-ago) — el array VIVO `compras_reembolsos` de la raíz del proyecto
+ *  (capturado por los gestores durante la ejecución; tras liquidar el
+ *  contratista queda congelado e idéntico al snapshot de la liquidación,
+ *  así que seguir leyéndolo de la raíz no cambia nada post-cierre). Las
+ *  líneas de OCs/menores (compra NEG) y las de reembolsos (compra del
+ *  contratista que NEG le reconoce) son DISJUNTAS por diseño — sin riesgo
+ *  de doble conteo. */
 export function costoEjecutadoDe(
-  p: Pick<Proyecto, 'estado' | 'preliquidacion'>,
+  p: Pick<Proyecto, 'estado' | 'preliquidacion' | 'compras_reembolsos'>,
   comprasEjecutadasTotal: number,
 ): number | null {
   const pre = p.preliquidacion
   if (!pre || !alcanzoEjecutado(p.estado)) return null
   if ((pre.costo_ejecutado ?? 0) > 0) return pre.costo_ejecutado!
-  return pre.valor_contratista + comprasEjecutadasTotal
+  return pre.valor_contratista + comprasEjecutadasTotal + totalComprasReembolsos(p.compras_reembolsos)
 }
 
 /** Utilidad esperada REAL (24-jul) = venta − costo presupuestado total.
