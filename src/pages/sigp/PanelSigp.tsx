@@ -13,7 +13,7 @@
 // va acompañado de texto ("En meta"), nunca color solo.
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { ReactNode } from 'react'
-import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore'
+import { doc, getDoc, setDoc, collection, getDocs, Timestamp } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import { useFirestore } from '../../hooks/useFirestore'
 import { useAuth } from '../../contexts/AuthContext'
@@ -25,9 +25,14 @@ import {
   embudoDelMes, preventivosDelMes, gruposDonut,
 } from '../../utils/sigp/indicadores'
 import type { Periodo, ValorIndicador, Semaforo } from '../../utils/sigp/indicadores'
-import { puedeGestionarProyectosUI } from '../../types/sigp/permisos'
+import { puedeGestionarProyectosUI, veOcUI } from '../../types/sigp/permisos'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import type { Solicitud } from '../../types/sigp/solicitud'
+
+/** Indicador "sin datos" (mismo shape que el `sinDatos` interno de
+ *  indicadores.ts, no exportado): usado cuando el rol NO puede ver compras —
+ *  ind. 3 nunca se calcula a medias, cuenta como sin datos en el anillo. */
+const IND_SIN_DATOS: ValorIndicador = { valor: null, semaforo: null, numerador: 0, denominador: 0 }
 
 interface DocConFecha { fecha_creacion?: { toDate?: () => Date } }
 
@@ -170,28 +175,37 @@ export default function PanelSigp() {
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([])
   const [visitas, setVisitas] = useState<DocConFecha[]>([])
   const [cotizaciones, setCotizaciones] = useState<DocConFecha[]>([])
+  const [comprasMap, setComprasMap] = useState<Record<string, number>>({})
   const [sstManual, setSstManual] = useState<number | null>(null)
   const [sstInput, setSstInput] = useState('')
   const [loading, setLoading] = useState(true)
 
+  const puedeVerCompras = veOcUI(user?.rol)
   const docSst = `sst_${periodo.anio}-${String(periodo.mes).padStart(2, '0')}`
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [pr, so, vi, co] = await Promise.all([
+      const [pr, so, vi, co, cp] = await Promise.all([
         getAll('proyectos'), getAll('solicitudes'), getAll('visitas'), getAll('cotizaciones'),
+        // Ind. 3 (C3): el mapa de compras reales SOLO se consulta si el rol
+        // puede verlas (veOcUI, alineado con la regla de `compras_proyecto`)
+        // — nunca se calcula el indicador a medias.
+        puedeVerCompras ? getDocs(collection(db, 'compras_proyecto')) : Promise.resolve(null),
       ])
       setProyectos(pr as Proyecto[])
       setSolicitudes(so as Solicitud[])
       setVisitas(vi as DocConFecha[])
       setCotizaciones(co as DocConFecha[])
+      setComprasMap(cp
+        ? Object.fromEntries(cp.docs.map(d => [d.id, (d.data().compras_ejecutadas_total as number) ?? 0]))
+        : {})
     } catch {
       toast('Error al cargar los datos del panel', 'error')
     } finally {
       setLoading(false)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [puedeVerCompras]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load() }, [load])
 
@@ -222,7 +236,12 @@ export default function PanelSigp() {
   // ── Cálculos ──
   const ind1 = useMemo(() => indPlanTrabajo(proyectos), [proyectos])
   const ind2 = useMemo(() => indCalidad(proyectos, periodo), [proyectos, periodo])
-  const ind3 = useMemo(() => indPresupuesto(proyectos), [proyectos])
+  // Ind. 3 (C3): dato económico — sin permisos de compras, NUNCA se calcula a
+  // medias (queda como "sin datos", cuenta igual en el anillo de salud).
+  const ind3 = useMemo(
+    () => puedeVerCompras ? indPresupuesto(proyectos, comprasMap) : IND_SIN_DATOS,
+    [proyectos, comprasMap, puedeVerCompras],
+  )
   const ind4 = useMemo(() => indSatisfaccion(proyectos, periodo), [proyectos, periodo])
   const ind5 = useMemo(() => indSst(sstManual), [sstManual])
   const indicadores = [ind1, ind2, ind3, ind4, ind5]
@@ -333,7 +352,11 @@ export default function PanelSigp() {
 
               <TarjetaKpi numero={3} nombre="Proyección presupuestal"
                 meta="90–110 %" frecuencia="Mensual" fuente="preliquidación · costo/presupuesto" ind={ind3}
-                subtitulo={ind3.valor != null ? 'Σ ejecutado / Σ presupuestado (corte)' : 'Requiere el costo ejecutado en la preliquidación'} />
+                subtitulo={
+                  !puedeVerCompras
+                    ? 'Dato económico — requiere permisos de compras'
+                    : ind3.valor != null ? 'Σ ejecutado / Σ presupuestado (corte)' : 'Requiere el costo ejecutado en la preliquidación'
+                } />
 
               <TarjetaKpi numero={4} nombre="Satisfacción del cliente"
                 meta="≥ 90 %" frecuencia="Por proyecto" fuente="encuesta al cierre · 1–5" ind={ind4} tendencia={tend4}

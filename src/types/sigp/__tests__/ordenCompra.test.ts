@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   valorLineaDe, totalDe, validarOcParaEmitir, requiereSalvedadAprobacion,
-  TRANSICIONES_OC, ESTADOS_OC,
+  validarOcParaComprar, TRANSICIONES_OC, ESTADOS_OC,
 } from '../ordenCompra'
 import type { LineaOrdenCompra } from '../ordenCompra'
 
@@ -62,11 +62,24 @@ describe('TRANSICIONES_OC — máquina de estados', () => {
     expect(TRANSICIONES_OC.borrador).toEqual(['emitida', 'anulada'])
     expect(TRANSICIONES_OC.emitida).toEqual(['aprobada', 'anulada'])
   })
-  it('aprobada solo se anula (inmutable en lo demás); anulada es terminal', () => {
-    expect(TRANSICIONES_OC.aprobada).toEqual(['anulada'])
+  it('aprobada → comprada (solo Marcela) o anulada; comprada y anulada terminales', () => {
+    // C3: 'comprada' se sumó a la máquina (antes aprobada solo se anulaba)
+    expect(TRANSICIONES_OC.aprobada).toEqual(['comprada', 'anulada'])
+    expect(TRANSICIONES_OC.comprada).toEqual([])   // recepción = v2
     expect(TRANSICIONES_OC.anulada).toEqual([])
   })
   it('todo estado está en la máquina (exhaustividad)', () => {
     for (const e of ESTADOS_OC) expect(TRANSICIONES_OC[e]).toBeDefined()
+  })
+})
+
+describe('validarOcParaComprar — la compra de Marcela (C3)', () => {
+  it('valor real > 0 + soporte → sin errores', () => {
+    expect(validarOcParaComprar({ valorReal: 315_000, tieneSoporte: true })).toEqual({})
+  })
+  it('sin valor real / valor 0 / sin soporte → error por campo', () => {
+    expect(validarOcParaComprar({ tieneSoporte: true }).valor_real).toBeTruthy()
+    expect(validarOcParaComprar({ valorReal: 0, tieneSoporte: true }).valor_real).toBeTruthy()
+    expect(validarOcParaComprar({ valorReal: 100, tieneSoporte: false }).soporte).toBeTruthy()
   })
 })

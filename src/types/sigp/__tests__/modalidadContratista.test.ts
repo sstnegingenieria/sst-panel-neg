@@ -70,3 +70,45 @@ describe('Riesgo B — anticipo y saldo sobre el contratista PURO', () => {
     expect(saldoValorDe(soloMO)).toBe(1_125_000)
   })
 })
+
+// ── C3 (02-ago): costo ejecutado DERIVADO con gate por estado ────────────────
+// El indicador #3 evalúa cumplimiento presupuestal desde 'ejecutado' (decisión
+// ISO de Giovanny — pendiente reflejo en Caracterización v02 con aval de GI).
+import { costoEjecutadoDe, alcanzoEjecutado, ESTADOS_PROYECTO } from '../proyecto'
+
+describe('alcanzoEjecutado — gate exhaustivo sobre la máquina', () => {
+  it('false antes de ejecutado; true desde ejecutado hasta cerrado', () => {
+    const corte = ESTADOS_PROYECTO.indexOf('ejecutado')
+    for (const e of ESTADOS_PROYECTO) {
+      expect(alcanzoEjecutado(e)).toBe(ESTADOS_PROYECTO.indexOf(e) >= corte)
+    }
+  })
+})
+
+describe('costoEjecutadoDe — derivado C3 con retrocompat', () => {
+  const preTC = { valor_venta: 3_000_000, valor_contratista: 2_100_000, anticipo_pct: 50 }
+
+  it('antes de ejecutado → null (no entra al indicador), aun con compras', () => {
+    expect(costoEjecutadoDe({ estado: 'en_ejecucion', preliquidacion: preTC } as never, 500_000)).toBeNull()
+    expect(costoEjecutadoDe({ estado: 'creado', preliquidacion: preTC } as never, 0)).toBeNull()
+  })
+
+  it('sin preliquidación → null aunque esté ejecutado', () => {
+    expect(costoEjecutadoDe({ estado: 'ejecutado', preliquidacion: undefined } as never, 100)).toBeNull()
+  })
+
+  it('todo_costo ejecutado sin compras → valor_contratista (cubre el hueco de cobertura)', () => {
+    expect(costoEjecutadoDe({ estado: 'ejecutado', preliquidacion: preTC } as never, 0)).toBe(2_100_000)
+  })
+
+  it('solo_mano_obra ejecutado con compras → contratista + compras reales', () => {
+    const pre = { ...preTC, valor_contratista: 2_250_000, modalidad_contratista: 'solo_mano_obra', valor_materiales: 800_000 }
+    expect(costoEjecutadoDe({ estado: 'pagado_cliente', preliquidacion: pre } as never, 760_000)).toBe(3_010_000)
+  })
+
+  it('manual histórico GANA siempre — con y sin compras (evita doble conteo)', () => {
+    const pre = { ...preTC, costo_ejecutado: 2_400_576 }
+    expect(costoEjecutadoDe({ estado: 'ejecutado', preliquidacion: pre } as never, 0)).toBe(2_400_576)
+    expect(costoEjecutadoDe({ estado: 'cerrado', preliquidacion: pre } as never, 999_999)).toBe(2_400_576)
+  })
+})

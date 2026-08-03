@@ -397,10 +397,28 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
                   {oc.estado === 'anulada' && motivoAnulacion(oc) && (
                     <span className="text-red-600">Motivo de anulación: {motivoAnulacion(oc)}</span>
                   )}
-                  {oc.estado === 'aprobada' && oc.fecha_aprobacion && (
+                  {(oc.estado === 'aprobada' || oc.estado === 'comprada') && oc.fecha_aprobacion && (
                     <span>Aprobada el {fFecha(oc.fecha_aprobacion)}</span>
                   )}
+                  {oc.estado === 'comprada' && (
+                    <>
+                      <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-brand-100 text-brand-800">
+                        Valor real: {oc.valor_real != null ? fmtMoney(oc.valor_real) : '—'}
+                      </span>
+                      {oc.soporte_compra_url && (
+                        <a href={oc.soporte_compra_url} target="_blank" rel="noreferrer"
+                          className="text-brand-700 underline underline-offset-2 font-medium">ver soporte</a>
+                      )}
+                      {oc.fecha_compra && <span>Comprada el {fFecha(oc.fecha_compra)}</span>}
+                    </>
+                  )}
                 </div>
+                {oc.estado === 'comprada' && (
+                  <p className="text-[11px] text-gray-400">
+                    La compra (valor real + soporte) se registra y corrige desde la bandeja de{' '}
+                    <span className="font-medium text-gray-500">Órdenes de compra</span> — aquí solo se consulta.
+                  </p>
+                )}
 
                 {/* ── Acciones por estado/rol ── */}
                 <div className="flex flex-wrap items-center gap-2">

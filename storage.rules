@@ -66,11 +66,14 @@ service firebase.storage {
                        || request.resource.contentType.matches('image/.*'));
     }
 
-    // ── Compras C2: cotización del proveedor adjunta a la OC ─────────────────
-    // Ruta: ordenes_compra/{ocId}/cotizacion/{fileName} (UUID — patrón C1, H-008)
-    match /ordenes_compra/{ocId}/cotizacion/{fileName} {
+    // ── Compras C2/C3: adjuntos de la OC ─────────────────────────────────────
+    // Ruta: ordenes_compra/{ocId}/{cotizacion|soporte}/{fileName} (UUID —
+    // patrón C1, H-008). 'cotizacion' = la del proveedor al emitir (C2);
+    // 'soporte' = el comprobante de la compra de Marcela (C3).
+    match /ordenes_compra/{ocId}/{tipoDoc}/{fileName} {
       allow read: if request.auth != null;
       allow write: if request.auth != null
+                   && tipoDoc in ['cotizacion', 'soporte']
                    && request.resource.size < 10 * 1024 * 1024
                    && (request.resource.contentType == 'application/pdf'
                        || request.resource.contentType.matches('image/.*'));

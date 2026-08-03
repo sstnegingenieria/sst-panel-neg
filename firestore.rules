@@ -231,9 +231,26 @@ service cloud.firestore {
       allow create: if isAuthed() &&
         request.resource.data.get('user_id', '') == request.auth.uid;
 
+      // Update — dos vías:
+      // 1) Revisores (puedeRevisarFormularios): sin restricción — son los
+      //    ÚNICOS que fijan revision_sst.estado en 'aprobado'/'rechazado'.
+      // 2) El DUEÑO del formulario (la app móvil): sus updates normales
+      //    (guardar `data`, actualizar `pdf_url`/`pdf_storage_path`, etc.)
+      //    siguen libres como siempre; PERO si el update toca `revision_sst`,
+      //    el nuevo `revision_sst.estado` tiene que ser exactamente
+      //    'pendiente'. El único caso legítimo de que el dueño toque
+      //    `revision_sst` es el reenvío tras corrección (#4): la app escribe
+      //    revision_sst → {estado:'pendiente', observacion:null,
+      //    revisado_por:null} + corregido_en (+ revision_sst_historial via
+      //    arrayUnion). Esto cierra el hueco de que un técnico pudiera
+      //    auto-fijarse revision_sst.estado = 'aprobado' (auto-aprobación).
       allow update: if isAuthed() && (
         puedeRevisarFormularios() ||
-        resource.data.get('user_id', '') == request.auth.uid
+        (resource.data.get('user_id', '') == request.auth.uid
+          && (!request.resource.data.diff(resource.data)
+                .affectedKeys().hasAny(['revision_sst'])
+              || request.resource.data.get('revision_sst', {})
+                   .get('estado', '') == 'pendiente'))
       );
 
       allow delete: if false;

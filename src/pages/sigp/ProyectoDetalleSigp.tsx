@@ -17,6 +17,7 @@ import EntregablesIhs from '../../components/sigp/proyectos/EntregablesIhs'
 import EvaluacionContratistaCard from '../../components/sigp/proyectos/EvaluacionContratistaCard'
 import ComprasReembolsos from '../../components/sigp/proyectos/ComprasReembolsos'
 import OrdenesCompraProyecto from '../../components/sigp/proyectos/OrdenesCompraProyecto'
+import ComprasMenoresProyecto from '../../components/sigp/proyectos/ComprasMenoresProyecto'
 import SatisfaccionClienteCard from '../../components/sigp/proyectos/SatisfaccionClienteCard'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
@@ -224,6 +225,9 @@ export default function ProyectoDetalleSigp() {
 
       {/* Compras · C2 — órdenes de compra con proveedor (se autogatea con veOcUI) */}
       <OrdenesCompraProyecto proyecto={proyecto} reload={load} />
+
+      {/* Compras · C3 — compras menores sin OC (se autogatea con veOcUI) */}
+      <ComprasMenoresProyecto proyecto={proyecto} />
 
       {/* Entregables IHS (F2.3 — solo preventivos; requisito de la entrega) */}
       <EntregablesIhs proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />

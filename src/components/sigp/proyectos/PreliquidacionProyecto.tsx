@@ -22,6 +22,7 @@ import {
   ESTADO_PRY_LABEL,
   MODALIDADES_CONTRATISTA, MODALIDAD_CONTRATISTA_LABEL, modalidadDe,
   costoPresupuestadoDe, utilidadEsperadaDe, margenEsperadoPctDe,
+  costoEjecutadoDe, alcanzoEjecutado,
 } from '../../../types/sigp/proyecto'
 import { aprobacionRequiereSalvedad } from '../../../types/sigp/permisos'
 import { modoAgrupacionDe, actividadesDe, subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../../types/sigp/cotizacion'
@@ -332,16 +333,24 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
     } catch { toast('Error al registrar el anticipo (verifica tu rol)', 'error') } finally { setAplicando(false) }
   }
 
-  /** ISO ind. 3 — persiste el costo ejecutado real (proyectado = valor venta). */
-  const guardarCostoEjecutado = async (v: number) => {
-    try {
-      await updateDoc(doc(db, 'proyectos', proyecto.id), {
-        'preliquidacion.costo_ejecutado': v,
-        fecha_actualizacion: Timestamp.now(),
-      })
-      await reload()
-    } catch { toast('Error al guardar el costo ejecutado', 'error') }
-  }
+  // ── ISO ind. 3 (C3, 02-ago) — costo ejecutado real: YA NO se teclea. Se
+  // DERIVA de compras reales (`compras_proyecto/{proyectoId}`, agregado por
+  // la CF de C3) — solo lectura, degrada a null sin error si el rol no puede
+  // leer esa colección (p. ej. comercial): costoEjecutadoDe() decide con el
+  // manual histórico ganando siempre.
+  const [comprasTotal, setComprasTotal] = useState<number | null>(null)
+  useEffect(() => {
+    if (!pre) return
+    getDoc(doc(db, 'compras_proyecto', proyecto.id))
+      .then(s => setComprasTotal(s.exists() ? ((s.data().compras_ejecutadas_total as number) ?? 0) : 0))
+      .catch(() => setComprasTotal(null))
+  }, [pre, proyecto.id])
+
+  const manualHistorico = (pre?.costo_ejecutado ?? 0) > 0
+  const alcanzoEj = alcanzoEjecutado(proyecto.estado)
+  const costoEjecutadoDerivado = pre && !manualHistorico && alcanzoEj && comprasTotal != null
+    ? costoEjecutadoDe(proyecto, comprasTotal)
+    : null
 
   /** Documento del contratista: alcance sin valores + total pactado + anticipo. */
   const generarDocContratista = async () => {
@@ -646,23 +655,38 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
             </p>
           )}
 
-          {/* ISO ind. 3 — costo ejecutado real (proyectado = valor de venta) */}
-          {puedeGestionar && (
-            <div className="flex items-center gap-2 pt-1 border-t border-gray-50">
-              <span className="text-xs text-gray-500"
-                title="Digita el costo TOTAL realmente gastado en la canasta presupuestada: en 'todo costo', lo pagado al contratista; en 'solo mano de obra', mano de obra + materiales comprados por NEG.">
-                Costo ejecutado real <span className="text-[10px] text-gray-400">(total de la canasta presupuestada · indicador ISO)</span>
+          {/* ISO ind. 3 (C3, 02-ago) — costo ejecutado real: YA NO se teclea,
+              se DERIVA de compras reales. El manual histórico (capturado
+              antes de este cambio) gana siempre — no se reescribe el pasado. */}
+          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-gray-50">
+            <span className="text-xs text-gray-500"
+              title="Se deriva automáticamente: mano de obra pactada + compras reales agregadas (órdenes de compra compradas + compras menores). Si hay un valor manual histórico capturado antes de este cambio, ese gana siempre. Sin permiso de compras, degrada a '—' sin error.">
+              Costo ejecutado real <span className="text-[10px] text-gray-400">(total de la canasta presupuestada · indicador ISO)</span>
+            </span>
+            {manualHistorico ? (
+              <span className="text-sm font-mono text-gray-700">
+                {fmtMoney(pre.costo_ejecutado!)}{' '}
+                <span className="text-[10px] text-gray-400 font-sans">capturado manualmente (histórico)</span>
               </span>
-              <InputExpresion valor={pre.costo_ejecutado} onValor={guardarCostoEjecutado}
-                placeholder="Al cierre de la ejecución"
-                className="w-44 text-sm px-3 py-1 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
-              {(pre.costo_ejecutado ?? 0) > 0 && costoPresupuestadoDe(pre) > 0 && (
+            ) : !alcanzoEj ? (
+              <span className="text-sm text-gray-400">— (se deriva al ejecutar)</span>
+            ) : costoEjecutadoDerivado != null ? (
+              <span className="text-sm font-mono text-gray-700">
+                mano de obra {fmtMoney(pre.valor_contratista)} + compras {fmtMoney(comprasTotal ?? 0)} = {fmtMoney(costoEjecutadoDerivado)}
+                <span className="text-[10px] text-gray-400 font-sans ml-1">derivado automático</span>
+              </span>
+            ) : (
+              <span className="text-sm text-gray-400">—</span>
+            )}
+            {(() => {
+              const costoFinal = manualHistorico ? pre.costo_ejecutado! : costoEjecutadoDerivado
+              return costoFinal != null && costoFinal > 0 && costoPresupuestadoDe(pre) > 0 ? (
                 <span className="text-xs font-mono text-gray-500">
-                  = {fmtNum((pre.costo_ejecutado! / costoPresupuestadoDe(pre)) * 100)}% del presupuesto
+                  = {fmtNum((costoFinal / costoPresupuestadoDe(pre)) * 100)}% del presupuesto
                 </span>
-              )}
-            </div>
-          )}
+              ) : null
+            })()}
+          </div>
           {pre.anticipo?.evidencia_url && (
             <a href={pre.anticipo.evidencia_url} target="_blank" rel="noreferrer" className="text-xs text-brand-700 underline underline-offset-2">
               📎 {pre.anticipo.evidencia_nombre ?? 'Evidencia del giro'}
