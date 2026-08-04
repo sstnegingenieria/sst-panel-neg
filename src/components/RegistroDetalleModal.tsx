@@ -16,25 +16,6 @@ interface Props {
   onPdfDescargado?: (id: string) => void
 }
 
-// ── Helpers para renderizar campos_dinamicos ─────────────────────────────────
-
-function formatKey(key: string): string {
-  return key
-    .replace(/_/g, ' ')
-    .replace(/\./g, ' › ')
-    .replace(/\b\w/g, c => c.toUpperCase())
-}
-
-function formatValue(val: unknown): string {
-  if (val === null || val === undefined || val === '') return '—'
-  if (typeof val === 'boolean') return val ? 'Sí' : 'No'
-  if (Array.isArray(val)) return val.length === 0 ? '—' : val.join(', ')
-  if (typeof val === 'object') {
-    try { return JSON.stringify(val, null, 2) } catch { return String(val) }
-  }
-  return String(val)
-}
-
 function formatDate(iso: string) {
   try {
     return new Date(iso).toLocaleString('es-CO', {
@@ -65,8 +46,6 @@ export default function RegistroDetalleModal({ formulario: f, onClose, onVistobu
       setSaving(false)
     }
   }
-
-  const campos = Object.entries(f.campos_dinamicos ?? {})
 
   return (
     <div
@@ -118,27 +97,6 @@ export default function RegistroDetalleModal({ formulario: f, onClose, onVistobu
               {f.version   && <InfoItem label="Versión"   value={f.version} />}
             </div>
           </section>
-
-          {/* Campos dinámicos */}
-          {campos.length > 0 && (
-            <section>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-                Datos del formulario
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {campos.map(([k, v]) => (
-                  <div key={k} className="bg-gray-50 rounded-lg px-3 py-2 min-w-0">
-                    <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide truncate">
-                      {formatKey(k)}
-                    </p>
-                    <p className="text-sm text-gray-700 mt-0.5 break-words whitespace-pre-wrap">
-                      {formatValue(v)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
 
           {/* Fotos */}
           {f.fotos_urls && f.fotos_urls.length > 0 && (
@@ -212,7 +170,7 @@ export default function RegistroDetalleModal({ formulario: f, onClose, onVistobu
             {/* Toggle aprobar / rechazar */}
             <div className="flex gap-3">
               <label
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg border-2 cursor-pointer text-sm font-medium transition select-none ${
+                className={`relative flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg border-2 cursor-pointer text-sm font-medium transition select-none ${
                   revEstado === 'aprobado'
                     ? 'border-green-500 bg-green-50 text-green-700'
                     : 'border-gray-200 text-gray-500 hover:border-gray-300'
@@ -233,7 +191,7 @@ export default function RegistroDetalleModal({ formulario: f, onClose, onVistobu
               </label>
 
               <label
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg border-2 cursor-pointer text-sm font-medium transition select-none ${
+                className={`relative flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg border-2 cursor-pointer text-sm font-medium transition select-none ${
                   revEstado === 'rechazado'
                     ? 'border-red-500 bg-red-50 text-red-700'
                     : 'border-gray-200 text-gray-500 hover:border-gray-300'
