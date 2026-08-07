@@ -10,13 +10,14 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
 import { useFeatureFlag } from '../../../hooks/useFeatureFlag'
 import { fmtMoney } from '../../../utils/sigp/formato'
-import { CANALES, CANAL_LABEL } from '../../../types/sigp/solicitud'
+import { CANALES, CANAL_LABEL, historialRegistroCon } from '../../../types/sigp/solicitud'
+import { crearBorradorVisita, crearBorradorCotizacion } from '../../../utils/sigp/pipeline'
 import {
   DEPARTAMENTOS_PREVENTIVO, zonaDeDepartamento, esSanAndres, precioPreventivo,
   TIPO_SITIO_LABEL, INTENSIDAD_LABEL,
 } from '../../../types/sigp/preventivos'
 import type { TipoSitio, IntensidadPreventivo } from '../../../types/sigp/preventivos'
-import type { Canal, Adjunto, TipoSolicitud } from '../../../types/sigp/solicitud'
+import type { Canal, Adjunto, TipoSolicitud, DecisionRegistro, Solicitud } from '../../../types/sigp/solicitud'
 import type { Cliente, Contacto } from '../../../types/sigp/cliente'
 
 interface SolicitudFormProps {
@@ -48,6 +49,8 @@ interface FormState {
   nombreSitio: string
   codigoSitio: string
   fechaRecepcion: string
+  // Comercial #1 — decisión de rumbo al registrar (solo tipo === 'comercial')
+  decision: DecisionRegistro | ''
   // F2.2 — preventivo IHS
   sitioId: string
   sitioNombre: string
@@ -63,6 +66,7 @@ const inicial = (): FormState => ({
   clienteId: '', prospectoNombre: '',
   contactoNombre: '', contactoCargo: '', contactoEmail: '', contactoTelefono: '',
   canal: 'correo', asunto: '', descripcion: '', sitio: '', nombreSitio: '', codigoSitio: '', fechaRecepcion: hoyISO(),
+  decision: '',
   sitioId: '', sitioNombre: '', tipoSitio: 'greenfield', intensidad: 'pesado',
   esJungle: false, departamento: '', fechaAsignacion: hoyISO(),
 })
@@ -179,6 +183,7 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
       // Bloque 1 — el sitio se identifica por su NOMBRE + código del cliente
       if (!form.nombreSitio.trim()) e.nombreSitio = 'Requerido — nombre del sitio'
       if (!form.codigoSitio.trim()) e.codigoSitio = "Requerido — escribe 'N/A' si el cliente no asigna código"
+      if (form.decision === '') e.decision = 'Elige el rumbo de la solicitud'
     }
     if (!form.contactoNombre.trim()) e.contactoNombre = 'Requerido'
     if (form.contactoEmail.trim() && !EMAIL_RE.test(form.contactoEmail.trim()))
@@ -192,6 +197,14 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
 
   const construirDoc = (consecutivo: string, adjuntos: Adjunto[]) => {
     const ahora = Timestamp.now()
+    const uid = user?.uid ?? ''
+    // Comercial #1: los preventivos conservan el arranque de siempre
+    // (recibida, sin decisión de rumbo — su flujo es aceptar/rechazar).
+    // Los comerciales nacen en_estudio y, si hay decisión, transicionan en
+    // el mismo acto (historial con los dos eslabones).
+    const { estadoFinal, historial } = esPreventivo
+      ? { estadoFinal: 'recibida' as const, historial: [{ de: null, a: 'recibida' as const, por: uid, fecha: ahora }] }
+      : historialRegistroCon(form.decision as DecisionRegistro, uid, ahora)
     const doc_: Record<string, unknown> = {
       consecutivo,
       contacto: {
@@ -203,9 +216,9 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
       canal: form.canal,
       descripcion: form.descripcion.trim(),
       fecha_recepcion: Timestamp.fromDate(new Date(form.fechaRecepcion)),
-      responsable: user?.uid ?? '',
-      estado: 'recibida',
-      historial: [{ de: null, a: 'recibida', por: user?.uid ?? '', fecha: ahora }],
+      responsable: uid,
+      estado: estadoFinal,
+      historial,
       adjuntos,
       fecha_creacion: ahora,
     }
@@ -255,7 +268,28 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
       // A partir de aquí se quema el consecutivo: cualquier fallo posterior lo preserva.
       if (!consecutivo) consecutivo = await obtener('SOL')
 
-      await setDoc(doc(db, 'solicitudes', solicitudId), construirDoc(consecutivo, adjuntos))
+      const docCreado = construirDoc(consecutivo, adjuntos)
+      await setDoc(doc(db, 'solicitudes', solicitudId), docCreado)
+
+      // Comercial #1: decisión de rumbo tomada al registrar → el pipeline
+      // (§48) dispara igual que si viniera del detalle, con los MISMOS
+      // toasts. No-fatal: la solicitud ya quedó guardada; un fallo del
+      // borrador no la revierte.
+      if (form.decision === 'requiere_visita' || form.decision === 'cotizable') {
+        const solicitudParaPipeline = { id: solicitudId, ...docCreado } as Solicitud
+        try {
+          if (form.decision === 'requiere_visita') {
+            const creada = await crearBorradorVisita(solicitudParaPipeline, user?.uid ?? '')
+            if (creada) toast('Visita pendiente de agendar creada (sin código) — ver Visitas')
+          } else {
+            const creada = await crearBorradorCotizacion(solicitudParaPipeline, user?.uid ?? '')
+            if (creada) toast('Cotización pendiente de diligenciar creada (sin código) — ver Cotizaciones')
+          }
+        } catch (errPipeline) {
+          console.error('Error creando el borrador del pipeline al registrar:', errPipeline)
+          toast('La solicitud se guardó, pero no se pudo crear el pendiente automático', 'error')
+        }
+      }
 
       // Historial de contactos: si el contacto es NUEVO y hay cliente
       // registrado, se añade a clientes.contactos[] para reutilizarlo
@@ -446,6 +480,36 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
             required
           />
         </div>
+
+        {/* Comercial #1 (03-ago): decisión de rumbo al registrar — solo
+            comercial (los preventivos aceptan/rechazan en el detalle). */}
+        {!esPreventivo && (
+          <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+            <p className="text-sm font-semibold text-gray-700">¿Qué sigue con esta solicitud?</p>
+            <div className="space-y-2">
+              {([
+                { valor: 'requiere_visita' as const, label: 'Requiere visita técnica' },
+                { valor: 'cotizable' as const, label: 'Cotizable inmediata', sub: 'pasa a Lista para cotizar y se crea la cotización pendiente' },
+                { valor: 'decidir_despues' as const, label: 'Decidir después', sub: 'queda en estudio; el rumbo se decide en el detalle' },
+              ]).map(op => (
+                <label key={op.valor} className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="decision-registro"
+                    checked={form.decision === op.valor}
+                    onChange={() => set('decision', op.valor as DecisionRegistro)}
+                    className="accent-brand-700 mt-0.5"
+                  />
+                  <span className="text-sm text-gray-700">
+                    {op.label}
+                    {op.sub && <span className="block text-xs text-gray-400">{op.sub}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+            {errores.decision && <p className="text-xs text-red-600">{errores.decision}</p>}
+          </div>
+        )}
 
         {/* ── Preventivo IHS (F2.2): sitio + matriz con precio en vivo ── */}
         {esPreventivo && (
