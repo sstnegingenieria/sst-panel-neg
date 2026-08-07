@@ -161,3 +161,24 @@ export const TRANSICIONES: Record<EstadoSolicitud, EstadoSolicitud[]> = {
   aceptada:            [],                                   // terminal — la escriben ACEPTAR preventivo (F2.2) o APROBAR cotización (27-jul), no un clic genérico
   descartada:          [],                                   // terminal (no reactivable)
 }
+
+/** Comercial #1 (03-ago): decisión de rumbo AL REGISTRAR. La solicitud nace
+ *  en `en_estudio`; si el comercial ya sabe el rumbo, transiciona en el
+ *  mismo acto (con los dos eslabones en el historial — la máquina no se
+ *  salta nada) y el pipeline (§48) dispara igual que desde el detalle. */
+export type DecisionRegistro = 'requiere_visita' | 'cotizable' | 'decidir_despues'
+
+export function historialRegistroCon(
+  decision: DecisionRegistro, uid: string, fecha: Timestamp,
+): { estadoFinal: EstadoSolicitud; historial: CambioEstado[] } {
+  const registro: CambioEstado = { de: null, a: 'en_estudio', por: uid, fecha, motivo: 'Registro — entra directo a estudio' }
+  if (decision === 'decidir_despues') return { estadoFinal: 'en_estudio', historial: [registro] }
+  const a: EstadoSolicitud = decision === 'requiere_visita' ? 'requiere_visita' : 'lista_para_cotizar'
+  return {
+    estadoFinal: a,
+    historial: [registro, {
+      de: 'en_estudio', a, por: uid, fecha,
+      motivo: decision === 'requiere_visita' ? 'Decisión al registrar: requiere visita' : 'Decisión al registrar: cotizable inmediata',
+    }],
+  }
+}
