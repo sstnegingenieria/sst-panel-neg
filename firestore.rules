@@ -615,6 +615,14 @@ service cloud.firestore {
       allow create, update: if puedeGestionarProyectos();
     }
 
+    // ── Configuración de indicadores (Opción B, 07-ago): metas editables ──
+    // Lectura: quien ve el tablero. Escritura: SOLO gerencia_general/admin.
+    // Sin delete. Doc único: configuracion/indicadores { meta_margen_pct }.
+    match /configuracion/{docId} {
+      allow read: if accesoSIGP();
+      allow create, update: if isAuthed() && rolActual() in ['gerencia_general', 'admin'];
+    }
+
     // ────────────────────────────────────────────────────────────────
     // CATCH-ALL: denegar todo lo no especificado explícitamente
     // ────────────────────────────────────────────────────────────────

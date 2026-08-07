@@ -4,6 +4,7 @@ import {
   semaforoPlan, semaforoCalidad, semaforoPresupuesto, semaforoSst,
   indPlanTrabajo, indCalidad, indPresupuesto, indSatisfaccion, indSst,
   proyectosPorEstado, preventivosDelMes, ultimosPeriodos, enPeriodo,
+  utilidadRealDe, indMargenReal,
 } from '../indicadores'
 import type { Proyecto } from '../../../types/sigp/proyecto'
 import type { Solicitud } from '../../../types/sigp/solicitud'
@@ -225,5 +226,84 @@ describe('capa operativa', () => {
     expect(enPeriodo(tsJul, P)).toBe(true)
     expect(enPeriodo(tsJun, P)).toBe(false)
     expect(enPeriodo(undefined, P)).toBe(false)
+  })
+})
+
+describe('utilidadRealDe / indMargenReal — indicador OPERATIVO "Margen real" (no ISO)', () => {
+  it('utilidadRealDe: null si no alcanzó ejecutado o sin preliquidación; con datos = venta − costo ejecutado', () => {
+    const noEjecutado = proyecto({
+      estado: 'en_ejecucion',
+      preliquidacion: { valor_venta: 1000, valor_contratista: 700, anticipo_pct: 50, definida_por: 'u', fecha_definicion: tsJul },
+    })
+    expect(utilidadRealDe(noEjecutado, 0)).toBeNull()
+
+    const sinPreliquidacion = proyecto({ estado: 'ejecutado' })
+    expect(utilidadRealDe(sinPreliquidacion, 0)).toBeNull()
+
+    const conDatos = proyecto({
+      estado: 'ejecutado',
+      preliquidacion: { valor_venta: 1000, valor_contratista: 700, anticipo_pct: 50, definida_por: 'u', fecha_definicion: tsJul, costo_ejecutado: 650 },
+    })
+    expect(utilidadRealDe(conDatos, 0)).toBe(350)
+  })
+
+  it('agregación de 2 proyectos (uno manual histórico, uno derivado de compras): margen = Σutilidad/Σventa', () => {
+    const ps = [
+      proyecto({
+        id: 'a', estado: 'ejecutado',
+        preliquidacion: { valor_venta: 1000, valor_contratista: 700, anticipo_pct: 50, definida_por: 'u', fecha_definicion: tsJul, costo_ejecutado: 650 },
+      }),
+      proyecto({
+        id: 'b', estado: 'ejecutado',
+        preliquidacion: { valor_venta: 2000, valor_contratista: 1200, anticipo_pct: 50, definida_por: 'u', fecha_definicion: tsJul },
+      }),
+    ]
+    // a (manual): utilidad = 1000 − 650 = 350. b (derivado): ce = 1200 + 200 = 1400 → utilidad = 2000 − 1400 = 600.
+    const r = indMargenReal(ps, { b: 200 }, null)
+    expect(r.utilidad).toBe(950)
+    expect(r.venta).toBe(3000)
+    expect(r.proyectos).toBe(2)
+    expect(r.valor).toBeCloseTo((950 / 3000) * 100, 6)
+  })
+
+  it('proyecto que NO alcanzó "ejecutado" se excluye aunque tenga compras', () => {
+    const ps = [proyecto({
+      id: 'c', estado: 'en_ejecucion',
+      preliquidacion: { valor_venta: 1000, valor_contratista: 700, anticipo_pct: 50, definida_por: 'u', fecha_definicion: tsJul },
+    })]
+    const r = indMargenReal(ps, { c: 500 }, null)
+    expect(r.valor).toBeNull()
+    expect(r.proyectos).toBe(0)
+  })
+
+  it('proyecto sin preliquidación se excluye', () => {
+    const ps = [proyecto({ id: 'd', estado: 'ejecutado' })]
+    expect(indMargenReal(ps, {}, null).valor).toBeNull()
+  })
+
+  it('matriz del semáforo con meta 20: 25→verde, 17→ambar, 10→rojo, negativo→rojo', () => {
+    const conMargen = (venta: number, costo: number) => [proyecto({
+      id: 'x', estado: 'ejecutado',
+      preliquidacion: { valor_venta: venta, valor_contratista: costo, anticipo_pct: 50, definida_por: 'u', fecha_definicion: tsJul, costo_ejecutado: costo },
+    })]
+    expect(indMargenReal(conMargen(1000, 750), {}, 20).semaforo).toBe('verde')  // margen 25
+    expect(indMargenReal(conMargen(1000, 830), {}, 20).semaforo).toBe('ambar') // margen 17
+    expect(indMargenReal(conMargen(1000, 900), {}, 20).semaforo).toBe('rojo')  // margen 10
+    expect(indMargenReal(conMargen(1000, 1100), {}, 20).semaforo).toBe('rojo') // margen −10
+  })
+
+  it('sin meta configurada → semaforo null aunque el valor esté presente', () => {
+    const ps = [proyecto({
+      id: 'e', estado: 'ejecutado',
+      preliquidacion: { valor_venta: 1000, valor_contratista: 700, anticipo_pct: 50, definida_por: 'u', fecha_definicion: tsJul, costo_ejecutado: 650 },
+    })]
+    const r = indMargenReal(ps, {}, null)
+    expect(r.valor).not.toBeNull()
+    expect(r.semaforo).toBeNull()
+  })
+
+  it('sin entradas que entren (ninguno ejecutado+con preliquidación) → valor null', () => {
+    expect(indMargenReal([], {}, 20).valor).toBeNull()
+    expect(indMargenReal([proyecto({ id: 'f' })], {}, 20)).toMatchObject({ valor: null, utilidad: 0, venta: 0, proyectos: 0 })
   })
 })
