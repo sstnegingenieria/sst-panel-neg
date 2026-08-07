@@ -111,9 +111,14 @@ export const puedeGestionarSolicitudesUI = (rol: string | undefined) => en(rol, 
 export const puedeGestionarVisitasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
 // Crear/gestionar cotizaciones: mismos roles (comercial/proyectos).
 export const puedeGestionarCotizacionesUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
-// Ver/gestionar Proyectos (F2.1.a): alineado con puedeGestionarProyectos() de
-// firestore.rules (mismos 5 roles). El sidebar además exige sigp_f2_enabled.
-export const puedeGestionarProyectosUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
+// ── §16 (ii, 07-ago): la frontera de comercial es la COTIZACIÓN — proyectos
+// es dominio de ejecución. Gestión de proyectos espeja puedeCrearProyectos()
+// de firestore.rules (4 roles, SIN operacion_comercial). El nacimiento del
+// proyecto es server-side (CF crearProyectoAlAprobar).
+export const ROLES_GESTIONA_PROYECTOS: Rol[] = [
+  'admin', 'gerencia_general', 'director_proyectos', 'auxiliar_proyectos',
+]
+export const puedeGestionarProyectosUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_PROYECTOS)
 
 // SEGREGACIÓN DE FUNCIONES (F2.1.c): aprobar la preliquidación y registrar el
 // anticipo girado es de gerencia_administrativa (quien define ≠ quien
@@ -157,10 +162,15 @@ export const puedeAprobarPreliquidacionUI = (rol: string | undefined) => en(rol,
 /** ¿La aprobación de este rol es de RESPALDO? (exige salvedad obligatoria). */
 export const aprobacionRequiereSalvedad = (rol: string | undefined) =>
   puedeAprobarPreliquidacionUI(rol) && rol !== 'gerencia_administrativa'
-// Visibilidad del módulo Proyectos: gestión O aprobación (gerencia_administrativa
-// necesita entrar a la ficha para aprobar/girar).
-export const veProyectosUI = (rol: string | undefined) =>
-  puedeGestionarProyectosUI(rol) || puedeAprobarPreliquidacionUI(rol)
+// Visibilidad del módulo Proyectos (§16 ii): espeja puedeVerProyectos() de
+// firestore.rules — los 6 roles de ejecución/dirección, SIN operacion_comercial
+// (su frontera es la cotización; el chip PRY de la cotización queda informativo
+// no-navegable). Gatea ruta, sidebar y la carga de `proyectos` del Panel.
+export const ROLES_VE_PROYECTOS: Rol[] = [
+  'admin', 'gerencia_general', 'gerencia_administrativa',
+  'director_proyectos', 'auxiliar_proyectos', 'gestion_integral',
+]
+export const veProyectosUI = (rol: string | undefined) => en(rol, ROLES_VE_PROYECTOS)
 
 // ── Módulo Compras (C1) — proveedores ──
 // Registrar/editar proveedores y su información bancaria: gerencia_administrativa

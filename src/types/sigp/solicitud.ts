@@ -99,6 +99,11 @@ export interface Solicitud {
   preventivo?: DatosPreventivo // solo si tipo === 'preventivo'
   proyecto_id?: string         // proyecto nacido al ACEPTAR el preventivo (1:1)
   proyecto_consecutivo?: string
+  /** §16 (ii) — STAGING del nacimiento server-side (solo preventivos): el
+   *  panel construye el snapshot con la matriz TS y lo escribe en el MISMO
+   *  updateDoc que pone la solicitud en `aceptada`; la CF
+   *  crearProyectoAlAceptarPreventivo lo COPIA al proyecto. */
+  snapshot_proyecto?: import('./proyecto').SnapshotProyecto
   adjuntos: Adjunto[]
   fecha_creacion: Timestamp    // sello de registro en el sistema
   fecha_actualizacion?: Timestamp

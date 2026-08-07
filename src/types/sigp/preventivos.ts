@@ -99,3 +99,30 @@ export function precioPreventivo(p: ParametrosPrecio): PrecioPreventivo | null {
   const transporte = p.es_jungle || p.es_sai ? TRANSPORTE_PREVENTIVO : 0
   return { base, transporte, total: base + transporte }
 }
+
+/** §16 (ii) — snapshot del proyecto de un preventivo, para STAGING en la
+ *  solicitud (`snapshot_proyecto`) al aceptarla. Réplica exacta del shape que
+ *  construía crearProyectoDesdePreventivo (retirado — la CF copia esto).
+ *  Puro: los reads (cliente) los hace el caller. */
+export function construirSnapshotPreventivo(
+  solicitud: Pick<import('./solicitud').Solicitud, 'nombre_sitio' | 'codigo_sitio_cliente' | 'prospecto_nombre'>,
+  p: import('./solicitud').DatosPreventivo,
+  precio: PrecioPreventivo,
+  clienteNombre?: string,
+  clienteNit?: string,
+): import('./proyecto').SnapshotProyecto {
+  const renglon = `Mantenimiento preventivo ${INTENSIDAD_LABEL[p.intensidad].toLowerCase()} — ${p.sitio_nombre}`
+  return {
+    cliente: clienteNombre ?? solicitud.prospecto_nombre ?? 'IHS',
+    ...(clienteNit ? { cliente_nit: clienteNit } : {}),
+    asunto: `${renglon} (${TIPO_SITIO_LABEL[p.tipo_sitio]}${p.es_jungle ? ' · jungle' : ''}${p.es_sai ? ' · SAI' : ''} · ${p.zona})`,
+    // Bloque 1 — identificación del sitio: capturada en la solicitud (con
+    // autocompletado desde el sitio IHS) o derivada de él como fallback
+    nombre_sitio: solicitud.nombre_sitio?.trim() || p.sitio_nombre,
+    codigo_sitio_cliente: solicitud.codigo_sitio_cliente?.trim() || p.sitio_id || 'N/A',
+    valor_venta: precio.total,
+    esquema_tributario: 'iva_pleno',
+    alcance: [{ grupo: renglon, items: 1, subtotal: precio.total }],
+    total_items: 1,
+  }
+}

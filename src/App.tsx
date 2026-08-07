@@ -37,6 +37,7 @@ import {
   ROLES_VE_VERIFICACION_SST,
   ROLES_GESTIONA_COMPRAS,
   ROLES_VEN_OC,
+  ROLES_VE_PROYECTOS,
 } from './types/sigp/permisos'
 import FacturacionPagos from './pages/administrativa/FacturacionPagos'
 import Proveedores from './pages/administrativa/Proveedores'
@@ -117,9 +118,13 @@ function ProtectedRoutes() {
         <Route path="/sigp/visitas/:visitaId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><VisitaDetalleSigp /></ProtectedRoute>} />
         <Route path="/sigp/cotizaciones" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionesSigp /></ProtectedRoute>} />
         <Route path="/sigp/cotizaciones/:cotizacionId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionDetalleSigp /></ProtectedRoute>} />
-        {/* F2.1.a — las páginas además se auto-gatean con sigp_f2_enabled */}
-        <Route path="/sigp/proyectos" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ProyectosSigp /></ProtectedRoute>} />
-        <Route path="/sigp/proyectos/:proyectoId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><ProyectoDetalleSigp /></ProtectedRoute>} />
+        {/* F2.1.a — las páginas además se auto-gatean con sigp_f2_enabled.
+            §16 (ii): proyectos es dominio de ejecución — SOLO los 6 roles de
+            ROLES_VE_PROYECTOS (sin comercial; espeja puedeVerProyectos() de
+            firestore.rules). redirectTo /sigp/panel: el default /registros
+            haría bucle para comercial (lección Hotfix A). */}
+        <Route path="/sigp/proyectos" element={<ProtectedRoute rolesPermitidos={ROLES_VE_PROYECTOS} redirectTo="/sigp/panel"><ProyectosSigp /></ProtectedRoute>} />
+        <Route path="/sigp/proyectos/:proyectoId" element={<ProtectedRoute rolesPermitidos={ROLES_VE_PROYECTOS} redirectTo="/sigp/panel"><ProyectoDetalleSigp /></ProtectedRoute>} />
         {/* Compras · C2 — bandeja de órdenes de compra (acciones en la ficha del proyecto) */}
         <Route path="/sigp/ordenes-compra" element={<ProtectedRoute rolesPermitidos={ROLES_VEN_OC}><OrdenesCompraSigp /></ProtectedRoute>} />
         {/* Módulo Gerencia Administrativa (Bloque 1) — fuera del grupo SIGP */}

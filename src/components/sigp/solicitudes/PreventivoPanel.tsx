@@ -1,20 +1,21 @@
 // Panel del PREVENTIVO IHS en el detalle de la solicitud (F2.2).
 //
-// Sin cotización: la decisión es ACEPTAR (calcula el precio con la matriz y
-// CREA el proyecto — reutiliza el nacimiento de F2.1 con origen 'preventivo',
-// idempotente) o RECHAZAR (motivo → descartada). Reemplaza las transiciones
-// genéricas de la máquina comercial.
-import { useRef, useState } from 'react'
+// Sin cotización: la decisión es ACEPTAR (calcula el precio con la matriz,
+// STAGEA el snapshot del proyecto y pasa la solicitud a `aceptada` — el
+// proyecto lo crea SERVER-SIDE la CF crearProyectoAlAceptarPreventivo, §16 ii)
+// o RECHAZAR (motivo → descartada). Reemplaza las transiciones genéricas de
+// la máquina comercial.
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { doc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
+import { doc, getDoc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
 import { db } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
-import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
-import { crearProyectoDesdePreventivo } from '../../../utils/sigp/proyectos'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import { fmtMoney } from '../../../utils/sigp/formato'
-import { precioPreventivo, TIPO_SITIO_LABEL, INTENSIDAD_LABEL, TRANSPORTE_PREVENTIVO } from '../../../types/sigp/preventivos'
+import { precioPreventivo, construirSnapshotPreventivo, TIPO_SITIO_LABEL, INTENSIDAD_LABEL, TRANSPORTE_PREVENTIVO } from '../../../types/sigp/preventivos'
+import { veProyectosUI } from '../../../types/sigp/permisos'
+import { useNacimientoProyecto } from '../../../hooks/sigp/useNacimientoProyecto'
 import type { Solicitud } from '../../../types/sigp/solicitud'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
@@ -28,12 +29,19 @@ interface Props {
 
 export default function PreventivoPanel({ solicitud, puedeGestionar, reload }: Props) {
   const { user } = useAuth()
-  const { obtener } = useConsecutivo()
   const [aplicando, setAplicando] = useState(false)
   const [modalRechazo, setModalRechazo] = useState(false)
   const [motivo, setMotivo] = useState('')
-  // Patrón SOL/VIS/COT/PRY: el consecutivo se preserva ante fallos.
-  const pryPendiente = useRef<string | null>(null)
+
+  // §16 (ii): el proyecto nace server-side — listener del enlace inverso
+  // (antes del early-return: los hooks no pueden ser condicionales).
+  const veProyectos = veProyectosUI(user?.rol)
+  const esperandoNacimiento = solicitud.estado === 'aceptada'
+    && !solicitud.proyecto_id && !!solicitud.snapshot_proyecto
+  const nacimiento = useNacimientoProyecto('solicitudes', solicitud.id, esperandoNacimiento)
+  const proyectoId = solicitud.proyecto_id ?? nacimiento.proyectoId
+  const proyectoConsecutivo = solicitud.proyecto_consecutivo ?? nacimiento.proyectoConsecutivo
+  const recienCreado = !solicitud.proyecto_id && !!nacimiento.proyectoId
 
   const p = solicitud.preventivo
   if (!p) return null
@@ -44,36 +52,50 @@ export default function PreventivoPanel({ solicitud, puedeGestionar, reload }: P
   })
   const decidible = puedeGestionar && ['recibida', 'en_estudio'].includes(solicitud.estado)
 
-  const obtenerPry = async () => {
-    if (pryPendiente.current) return pryPendiente.current
-    const c = await obtener('PRY')
-    pryPendiente.current = c
-    return c
+  /** Snapshot para el STAGING (§16 ii): matriz TS + cliente (read no-fatal). */
+  const construirStaging = async () => {
+    if (!precio) return null
+    let clienteNombre: string | undefined
+    let clienteNit: string | undefined
+    if (solicitud.cliente_id) {
+      try {
+        const c = await getDoc(doc(db, 'clientes', solicitud.cliente_id))
+        if (c.exists()) {
+          clienteNombre = c.data().nombre as string
+          clienteNit = (c.data().nit as string) || undefined
+        }
+      } catch { /* fallback: 'IHS' desde el builder */ }
+    }
+    return construirSnapshotPreventivo(solicitud, p, precio, clienteNombre, clienteNit)
   }
 
   const aceptar = async () => {
     if (!precio) return
-    if (!window.confirm(`¿Aceptar el preventivo ${solicitud.consecutivo}? Se crea el proyecto con el precio de matriz ${fmtMoney(precio.total)} (IVA pleno aguas abajo).`)) return
+    if (!window.confirm(`¿Aceptar el preventivo ${solicitud.consecutivo}? El sistema crea el proyecto con el precio de matriz ${fmtMoney(precio.total)} (IVA pleno aguas abajo).`)) return
     setAplicando(true)
     try {
-      const r = await crearProyectoDesdePreventivo({
-        solicitud, uid: user?.uid ?? '', obtenerConsecutivo: obtenerPry,
-      })
-      pryPendiente.current = null
+      const staged = await construirStaging()
+      if (!staged) { toast('No se pudo preparar el snapshot del proyecto — reintenta', 'error'); return }
       const ahora = Timestamp.now()
-      await updateDoc(doc(db, 'solicitudes', solicitud.id), {
-        estado: 'aceptada',
+      // UN solo updateDoc: staging + transición. La CF (trigger →aceptada en
+      // preventivos) copia el snapshot, asigna el PRY y escribe el enlace.
+      const patch: Record<string, unknown> = {
+        snapshot_proyecto: staged,
         fecha_actualizacion: ahora,
-        historial: arrayUnion({
+      }
+      if (solicitud.estado !== 'aceptada') {
+        patch.estado = 'aceptada'
+        patch.historial = arrayUnion({
           de: solicitud.estado, a: 'aceptada', por: user?.uid ?? '', fecha: ahora,
-          motivo: `Preventivo aceptado — proyecto ${r.consecutivo} · precio de matriz ${fmtMoney(precio.total)}`,
-        }),
-      })
-      toast(r.creado ? `Proyecto ${r.consecutivo} creado` : `El proyecto ${r.consecutivo} ya existía`)
+          motivo: `Preventivo aceptado — precio de matriz ${fmtMoney(precio.total)} · proyecto creado por el sistema`,
+        })
+      }
+      await updateDoc(doc(db, 'solicitudes', solicitud.id), patch)
+      toast('Preventivo aceptado — el sistema está creando el proyecto')
       await reload()
     } catch (e) {
       console.error('Error aceptando el preventivo:', e)
-      toast('No se pudo aceptar — reintenta (el consecutivo se preserva)', 'error')
+      toast('No se pudo aceptar — reintenta', 'error')
     } finally { setAplicando(false) }
   }
 
@@ -102,12 +124,23 @@ export default function PreventivoPanel({ solicitud, puedeGestionar, reload }: P
       <div className="flex items-center gap-2 flex-wrap">
         <h2 className="font-semibold text-gray-800 text-sm">Preventivo IHS</h2>
         <span className="inline-flex px-2 py-0.5 rounded text-[11px] font-semibold bg-brand-50 text-brand-700">PREVENTIVO</span>
-        {solicitud.proyecto_id && (
-          <Link to={`/sigp/proyectos/${solicitud.proyecto_id}`}
-            className="ml-auto text-xs px-2.5 py-1 rounded-lg bg-brand-50 text-brand-700 font-semibold hover:bg-brand-100">
-            🏗 {solicitud.proyecto_consecutivo ?? 'Proyecto'} →
-          </Link>
-        )}
+        {proyectoId ? (
+          veProyectos ? (
+            <Link to={`/sigp/proyectos/${proyectoId}`}
+              className="ml-auto text-xs px-2.5 py-1 rounded-lg bg-brand-50 text-brand-700 font-semibold hover:bg-brand-100">
+              🏗 {proyectoConsecutivo ?? 'Proyecto'}{recienCreado ? ' creado ✓' : ' →'}
+            </Link>
+          ) : (
+            <span className="ml-auto text-xs px-2.5 py-1 rounded-lg bg-brand-50 text-brand-700 font-semibold cursor-default"
+              title="Proyecto en manos de Gerencia de Proyectos — la gestión comercial termina aquí">
+              🏗 {proyectoConsecutivo ?? 'Proyecto'}{recienCreado ? ' creado ✓' : ''}
+            </span>
+          )
+        ) : esperandoNacimiento && !nacimiento.tardando ? (
+          <span className="ml-auto text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-500 font-medium animate-pulse">
+            ⏳ Creando proyecto…
+          </span>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
@@ -145,11 +178,18 @@ export default function PreventivoPanel({ solicitud, puedeGestionar, reload }: P
           </button>
         </div>
       )}
-      {solicitud.estado === 'aceptada' && !solicitud.proyecto_id && puedeGestionar && (
-        <button onClick={aceptar} disabled={aplicando}
-          className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 font-medium disabled:opacity-50">
-          🏗 Crear proyecto (reintento)
-        </button>
+      {solicitud.estado === 'aceptada' && !proyectoId && puedeGestionar
+        && (!esperandoNacimiento || nacimiento.tardando) && (
+        <div className="flex items-center gap-2">
+          <button onClick={aceptar} disabled={aplicando}
+            title="Solicitud aceptada sin proyecto — el reintento re-stagea el snapshot y re-toca el doc; el sistema lo crea"
+            className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 font-medium disabled:opacity-50">
+            🏗 Reintentar proyecto
+          </button>
+          {esperandoNacimiento && nacimiento.tardando && (
+            <span className="text-[11px] text-gray-400">El sistema está tardando más de lo normal…</span>
+          )}
+        </div>
       )}
 
       {/* Modal rechazo (motivo obligatorio) */}

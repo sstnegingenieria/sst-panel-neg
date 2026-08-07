@@ -6,6 +6,8 @@
 // bandeja. Convención: campos Firestore en snake_case español.
 
 import type { Timestamp } from 'firebase/firestore'
+// Circular solo de TIPOS (proyecto.ts importa de este archivo) — se borra al compilar.
+import type { SnapshotProyecto } from './proyecto'
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
@@ -319,6 +321,12 @@ export interface Cotizacion {
   // cotización). Solo existe si se aprobó con sigp_f2_enabled activo.
   proyecto_id?: string
   proyecto_consecutivo?: string
+
+  /** §16 (ii) — STAGING del nacimiento server-side: el cliente construye el
+   *  snapshot (construirSnapshotProyecto) y lo escribe en el MISMO updateDoc
+   *  de la aprobación; la CF crearProyectoAlAprobarCotizacion lo COPIA al
+   *  proyecto (jamás lo reconstruye). El enlace inverso lo escribe la CF. */
+  snapshot_proyecto?: SnapshotProyecto
 
   adjuntos: Adjunto[]          // documento de licitación externo / otros
   historial: CambioEstadoCotizacion[]
