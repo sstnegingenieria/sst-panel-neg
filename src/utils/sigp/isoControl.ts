@@ -22,3 +22,13 @@ export const PRELIQUIDACION: ControlDocumentalIso = {
   modificado: 'AGO-2026',
   nombre: 'PRELIQUIDACIÓN DEL CONTRATISTA',
 }
+
+// PENDIENTE FUERA DEL REPO: ratificación de SGI-FT-LIQ-26 por Ingrid (GI)
+// y registro en el Listado Maestro (frente Trinorma) — igual que el PRL.
+export const LIQUIDACION: ControlDocumentalIso = {
+  area: 'GESTIÓN ADMINISTRATIVA',
+  codigo: 'SGI-FT-LIQ-26',
+  version: '01',
+  modificado: 'AGO-2026',
+  nombre: 'LIQUIDACIÓN DEL CONTRATISTA',
+}
