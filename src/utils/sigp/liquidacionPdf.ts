@@ -11,6 +11,7 @@ import fontkit from '@pdf-lib/fontkit'
 import { partir, cargarAssetsPdf } from './cotizacionPdf'
 import { fmtNum } from './formato'
 import { origenDiferenciaLiquidacion } from '../../types/sigp/proyecto'
+import { LIQUIDACION as ISO } from './isoControl'
 
 export { cargarAssetsPdf }
 
@@ -69,6 +70,7 @@ export async function generarPdfLiquidacion(
     doc.embedFont(assets.bold, { subset: true }),
   ])
   const logoGris = await doc.embedPng(assets.logoGris)
+  const logo = await doc.embedPng(assets.logo)   // logo color para el cuadro ISO
 
   doc.setTitle(`${datos.proyectoConsecutivo} — Liquidación del contratista`)
   doc.setAuthor('NEG Ingeniería S.A.S. BIC')
@@ -96,7 +98,9 @@ export async function generarPdfLiquidacion(
     y = ALTO - 46
     if (!primera) {
       page.drawText(datos.proyectoConsecutivo, { x: MARGEN, y, size: 10, font: fB, color: VERDE })
-      textoDer('LIQUIDACIÓN', ANCHO - MARGEN, y + 1, 8, fS, GRIS_MEDIO)
+      // Control documental en el corrido (patrón PR #62: nombre + código, que
+      // el lector de la pág. 2 sepa qué documento es y su código).
+      textoDer(`LIQUIDACIÓN DEL CONTRATISTA · ${ISO.codigo} · v${ISO.version}`, ANCHO - MARGEN, y + 1, 7, fR, GRIS_MEDIO)
       reglaMarca(y - 6, 3)
       y -= 28
     }
@@ -106,6 +110,39 @@ export async function generarPdfLiquidacion(
 
   // ── Encabezado ──
   nuevaPagina(true)
+  // ════ Cuadro ISO de control documental (réplica exacta del de
+  //      preliquidación/cotización: 3 columnas, Montserrat, TODO en negro) —
+  //      solo página 1 ════
+  {
+    const hIso = 58
+    const yIso = ALTO - 44 - hIso
+    const c1 = 138, c3 = 150
+    const c2 = CONTENIDO - c1 - c3
+    page.drawRectangle({ x: MARGEN, y: yIso, width: CONTENIDO, height: hIso, borderColor: BORDE, borderWidth: 1 })
+    page.drawLine({ start: { x: MARGEN + c1, y: yIso }, end: { x: MARGEN + c1, y: yIso + hIso }, color: BORDE, thickness: 1 })
+    page.drawLine({ start: { x: MARGEN + c1 + c2, y: yIso }, end: { x: MARGEN + c1 + c2, y: yIso + hIso }, color: BORDE, thickness: 1 })
+    const filasIzq: [string, string][] = [
+      [ISO.area, ''], ['CÓDIGO:', ISO.codigo], ['VERSIÓN:', ISO.version], ['MODIFICADO:', ISO.modificado],
+    ]
+    let yl = yIso + hIso - 13
+    for (const [k, v] of filasIzq) {
+      page.drawText(k, { x: MARGEN + 8, y: yl, size: 6.5, font: fB, color: TINTA })
+      if (v) page.drawText(v, { x: MARGEN + 8 + fB.widthOfTextAtSize(k, 6.5) + 3, y: yl, size: 6.5, font: fR, color: TINTA })
+      yl -= 12
+    }
+    const cx = MARGEN + c1 + c2 / 2
+    const centrado = (t: string, yy: number, size: number, font: PDFFont) =>
+      page.drawText(t, { x: cx - font.widthOfTextAtSize(t, size) / 2, y: yy, size, font, color: TINTA })
+    centrado('NEG INGENIERÍA S.A.S., BIC', yIso + hIso - 14, 9, fB)
+    centrado('NIT. 900.975.870-1', yIso + hIso - 25, 7.5, fR)
+    centrado(ISO.area, yIso + hIso - 35, 6.5, fR)
+    centrado(ISO.nombre, yIso + hIso - 47, 8, fS)
+    const maxW = c3 - 20, maxH = hIso - 14
+    const esc = Math.min(maxW / logo.width, maxH / logo.height)
+    const lw = logo.width * esc, lh = logo.height * esc
+    page.drawImage(logo, { x: MARGEN + c1 + c2 + (c3 - lw) / 2, y: yIso + (hIso - lh) / 2, width: lw, height: lh })
+    y = yIso - 8
+  }
   reglaMarca(y)
   y -= 34
   {
