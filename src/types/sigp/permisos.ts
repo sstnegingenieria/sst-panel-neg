@@ -185,3 +185,9 @@ export const ROLES_VEN_OC: Rol[] = [
   'gerencia_administrativa', 'gestion_integral', 'admin',
 ]
 export const veOcUI = (rol: string | undefined) => en(rol, ROLES_VEN_OC)
+
+// ── Panel SIGP — indicador operativo "Margen real" (07-ago) ──
+// Editar la meta (`configuracion/indicadores.meta_margen_pct`): SOLO
+// gerencia_general/admin — espeja la regla Firestore del mismo doc.
+export const ROLES_EDITA_META_INDICADORES: Rol[] = ['gerencia_general', 'admin']
+export const editaMetaIndicadoresUI = (rol: string | undefined) => en(rol, ROLES_EDITA_META_INDICADORES)

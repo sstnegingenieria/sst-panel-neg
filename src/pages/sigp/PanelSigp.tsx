@@ -18,14 +18,15 @@ import { db } from '../../firebase/config'
 import { useFirestore } from '../../hooks/useFirestore'
 import { useAuth } from '../../contexts/AuthContext'
 import { toast } from '../../components/shared/Toast'
-import { fmtNum } from '../../utils/sigp/formato'
+import { fmtNum, fmtMoney } from '../../utils/sigp/formato'
+import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
 import {
   SEMAFORO_COLOR, ACENTOS, etiquetaPeriodo, ultimosPeriodos,
-  indPlanTrabajo, indCalidad, indPresupuesto, indSatisfaccion, indSst,
+  indPlanTrabajo, indCalidad, indPresupuesto, indSatisfaccion, indSst, indMargenReal,
   embudoDelMes, preventivosDelMes, gruposDonut,
 } from '../../utils/sigp/indicadores'
 import type { Periodo, ValorIndicador, Semaforo } from '../../utils/sigp/indicadores'
-import { puedeGestionarProyectosUI, veOcUI } from '../../types/sigp/permisos'
+import { puedeGestionarProyectosUI, veOcUI, editaMetaIndicadoresUI } from '../../types/sigp/permisos'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import type { Solicitud } from '../../types/sigp/solicitud'
 
@@ -179,6 +180,10 @@ export default function PanelSigp() {
   const [sstManual, setSstManual] = useState<number | null>(null)
   const [sstInput, setSstInput] = useState('')
   const [loading, setLoading] = useState(true)
+  // Margen real (operativo, 07-ago): meta editable en configuracion/indicadores.
+  const [metaMargen, setMetaMargen] = useState<number | null>(null)
+  const [editandoMeta, setEditandoMeta] = useState(false)
+  const [metaPendiente, setMetaPendiente] = useState<number | undefined>(undefined)
 
   const puedeVerCompras = veOcUI(user?.rol)
   const docSst = `sst_${periodo.anio}-${String(periodo.mes).padStart(2, '0')}`
@@ -186,12 +191,15 @@ export default function PanelSigp() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [pr, so, vi, co, cp] = await Promise.all([
+      const [pr, so, vi, co, cp, cfg] = await Promise.all([
         getAll('proyectos'), getAll('solicitudes'), getAll('visitas'), getAll('cotizaciones'),
         // Ind. 3 (C3): el mapa de compras reales SOLO se consulta si el rol
         // puede verlas (veOcUI, alineado con la regla de `compras_proyecto`)
         // — nunca se calcula el indicador a medias.
         puedeVerCompras ? getDocs(collection(db, 'compras_proyecto')) : Promise.resolve(null),
+        // Meta del indicador operativo "Margen real" — configuración editable
+        // (gerencia_general/admin). Ausente/error → sin meta (sin semáforo).
+        getDoc(doc(db, 'configuracion', 'indicadores')).catch(() => null),
       ])
       setProyectos(pr as Proyecto[])
       setSolicitudes(so as Solicitud[])
@@ -200,6 +208,7 @@ export default function PanelSigp() {
       setComprasMap(cp
         ? Object.fromEntries(cp.docs.map(d => [d.id, (d.data().compras_ejecutadas_total as number) ?? 0]))
         : {})
+      setMetaMargen(cfg?.exists() ? ((cfg.data().meta_margen_pct as number) ?? null) : null)
     } catch {
       toast('Error al cargar los datos del panel', 'error')
     } finally {
@@ -231,6 +240,35 @@ export default function PanelSigp() {
       setSstManual(v)
       toast('Indicador SST registrado (manual)')
     } catch { toast('No se pudo guardar el registro manual', 'error') }
+  }
+
+  // Margen real (operativo) — misma degradación que el ind. 3: sin veOcUI NI
+  // SE CALCULA (dato económico).
+  const margenReal = useMemo(
+    () => puedeVerCompras ? indMargenReal(proyectos, comprasMap, metaMargen) : null,
+    [proyectos, comprasMap, metaMargen, puedeVerCompras],
+  )
+  // Rojo con label PROPIO (decisión Giovanny 07-ago): "Muy bajo meta" — el
+  // estado no depende solo del color (ámbar conserva "Bajo meta").
+  const margenPillBase = margenReal && margenReal.valor != null
+    ? pillDe(0, { valor: margenReal.valor, semaforo: margenReal.semaforo, numerador: 0, denominador: 0 })
+    : null
+  const margenPill = margenPillBase && margenPillBase.s === 'rojo'
+    ? { ...margenPillBase, texto: 'Muy bajo meta' }
+    : margenPillBase
+
+  const guardarMeta = async () => {
+    if (metaPendiente == null || !Number.isFinite(metaPendiente) || metaPendiente < 0) {
+      toast('Valor inválido', 'error'); return
+    }
+    try {
+      await setDoc(doc(db, 'configuracion', 'indicadores'), {
+        meta_margen_pct: metaPendiente, actualizado_por: user?.uid ?? '', fecha_actualizacion: Timestamp.now(),
+      }, { merge: true })
+      setMetaMargen(metaPendiente)
+      setEditandoMeta(false)
+      toast('Meta de margen actualizada')
+    } catch { toast('No se pudo guardar la meta', 'error') }
   }
 
   // ── Cálculos ──
@@ -461,6 +499,64 @@ export default function PanelSigp() {
                     <p className="text-[22px] font-extrabold leading-tight text-[#4d712c]">{preventivos.entregablesOk}</p>
                     <p className="text-[10.5px] text-[#4d712c]">Con entregables IHS completos (3/3)</p>
                   </div>
+                </div>
+              </div>
+
+              {/* Margen real — indicador OPERATIVO (no ISO oficial) */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-[18px] flex flex-col">
+                <div className="flex items-center gap-2 mb-4">
+                  <h3 className="text-[13.5px] font-bold text-gray-800">💰 Margen real</h3>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">operativo</span>
+                </div>
+
+                {margenReal === null ? (
+                  <div className="flex-1">
+                    <p className="text-2xl font-extrabold text-gray-300 leading-none">—</p>
+                    <p className="text-xs text-gray-400 mt-2">Dato económico — requiere permisos de compras</p>
+                  </div>
+                ) : margenReal.valor === null ? (
+                  <p className="text-sm text-gray-400 py-6 text-center flex-1">Sin datos aún</p>
+                ) : (
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                      <span className="text-2xl font-extrabold text-gray-800 leading-none">{fmtNum(margenReal.valor)}%</span>
+                      {margenPill && (
+                        <span className={`text-[10.5px] font-bold px-2 py-0.5 rounded-md ${PILL_CLS[margenPill.s]}`}>{margenPill.texto}</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      utilidad {fmtMoney(margenReal.utilidad)} de {fmtMoney(margenReal.venta)} · {margenReal.proyectos} proyecto(s) ejecutado(s)+
+                    </p>
+                    <p className="text-[11px] text-gray-400 mt-1">venta pactada − costo real (canasta completa de compras)</p>
+                  </div>
+                )}
+
+                <div className="mt-3.5 pt-2.5 border-t border-dashed border-gray-100">
+                  {editandoMeta ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-gray-500">Meta:</span>
+                      <InputExpresion valor={metaPendiente} onValor={setMetaPendiente}
+                        className="w-16 text-xs px-2 py-1 border border-gray-200 rounded text-right font-mono focus:outline-none focus:ring-1 focus:ring-brand-300"
+                        placeholder="%" />
+                      <button onClick={guardarMeta}
+                        className="text-[11px] px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">
+                        Guardar
+                      </button>
+                      <button onClick={() => setEditandoMeta(false)} className="text-[11px] text-gray-400 hover:text-gray-600">
+                        Cancelar
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
+                      <span>{metaMargen != null ? `Meta: ${fmtNum(metaMargen)}%` : 'Meta: sin definir'}</span>
+                      {editaMetaIndicadoresUI(user?.rol) && (
+                        <button onClick={() => { setMetaPendiente(metaMargen ?? undefined); setEditandoMeta(true) }}
+                          className="text-gray-400 hover:text-gray-600" title="Editar meta">
+                          ⚙
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

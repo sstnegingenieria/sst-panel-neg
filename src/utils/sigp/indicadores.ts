@@ -156,6 +156,42 @@ export function indSst(valorManual: number | null): ValorIndicador {
 
 // ── CAPA OPERATIVA ──
 
+/** Utilidad REAL por proyecto (operativo): venta pactada − costo ejecutado
+ *  derivado. Hereda de costoEjecutadoDe el gate desde 'ejecutado', el manual
+ *  histórico y la canasta completa (mano de obra + OCs + menores + reembolsos). */
+export function utilidadRealDe(p: Proyecto, comprasTotal: number): number | null {
+  const ce = costoEjecutadoDe(p, comprasTotal)
+  if (ce == null || !p.preliquidacion) return null
+  return p.preliquidacion.valor_venta - ce
+}
+
+export interface ValorMargenReal {
+  valor: number | null          // margen % agregado (Σ utilidad real / Σ venta)
+  semaforo: Semaforo | null     // null si no hay meta configurada (sin pill)
+  utilidad: number              // Σ utilidad real $
+  venta: number                 // Σ venta $
+  proyectos: number             // n proyectos que entran (ejecutado+)
+}
+
+/** Indicador OPERATIVO (no ISO oficial). Semáforo (decisión Giovanny: más
+ *  alto es mejor): verde ≥ meta · ámbar [meta−5, meta) · rojo < meta−5 (o
+ *  negativo). metaPct null → sin semáforo (el % se muestra sin pill). */
+export function indMargenReal(
+  proyectos: Proyecto[], comprasPorProyecto: Record<string, number>, metaPct: number | null,
+): ValorMargenReal {
+  const entradas = proyectos
+    .map(p => ({ p, ur: utilidadRealDe(p, comprasPorProyecto[p.id] ?? 0) }))
+    .filter((x): x is { p: Proyecto; ur: number } =>
+      x.ur != null && !!x.p.preliquidacion && x.p.preliquidacion.valor_venta > 0)
+  if (entradas.length === 0) return { valor: null, semaforo: null, utilidad: 0, venta: 0, proyectos: 0 }
+  const utilidad = entradas.reduce((s, x) => s + x.ur, 0)
+  const venta = entradas.reduce((s, x) => s + x.p.preliquidacion!.valor_venta, 0)
+  const margen = (utilidad / venta) * 100
+  const semaforo: Semaforo | null =
+    metaPct == null ? null : margen >= metaPct ? 'verde' : margen >= metaPct - 5 ? 'ambar' : 'rojo'
+  return { valor: margen, semaforo, utilidad, venta, proyectos: entradas.length }
+}
+
 export function proyectosPorEstado(proyectos: Proyecto[]): Record<string, number> {
   const r: Record<string, number> = {}
   for (const p of proyectos) r[p.estado] = (r[p.estado] ?? 0) + 1
