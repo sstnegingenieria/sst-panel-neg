@@ -118,6 +118,24 @@ service cloud.firestore {
           && request.resource.data.get('aprobada_por', '') != resource.data.get('aprobada_por', '');
     }
 
+    // 8. §16 (07-ago): la frontera de comercial es la COTIZACIÓN — los
+    //    proyectos son dominio de ejecución. operacion_comercial queda fuera
+    //    de LEER y de CREAR proyectos; el nacimiento es de la CF
+    //    crearProyectoAlAprobar (Admin SDK, patrón 3a de único escritor).
+    function puedeVerProyectos() {
+      return isAuthed() && rolActual() in [
+        'admin', 'gerencia_general', 'gerencia_administrativa',
+        'director_proyectos', 'auxiliar_proyectos', 'gestion_integral'
+      ];
+    }
+    // Escotilla MANUAL de creación (gestores sin comercial). El creador
+    // primario es la CF; esto queda para emergencias de admin/dirección.
+    function puedeCrearProyectos() {
+      return isAuthed() && rolActual() in [
+        'admin', 'gerencia_general', 'director_proyectos', 'auxiliar_proyectos'
+      ];
+    }
+
     // ────────────────────────────────────────────────────────────────
     // COLECCIÓN: users
     // ────────────────────────────────────────────────────────────────
@@ -485,10 +503,14 @@ service cloud.firestore {
       // Bloque 3a (ajuste de confidencialidad): SST NO lee proyectos —
       // contienen valor de venta, márgenes y preliquidación. Su cola vive
       // en la proyección delgada `verificaciones_sst` (más abajo).
-      allow read: if accesoSIGP();
-      allow create: if puedeGestionarProyectos();
+      // §16 (07-ago): comercial FUERA — read por lista sin operacion_comercial;
+      // create solo escotilla de gestores (el creador primario es la CF).
+      allow read: if puedeVerProyectos();
+      allow create: if puedeCrearProyectos();
       // Bloque final: un proyecto CERRADO es inmutable — tampoco se borra.
-      allow delete: if puedeGestionarProyectos()
+      // §16: delete por la misma vía que create/update (sin comercial) — lo
+      // atrapó la batería SB4: sin read no hay delete coherente.
+      allow delete: if puedeCrearProyectos()
                     && resource.data.get('estado', '') != 'cerrado';
 
       // Bloque 3a/3b: liquidar al contratista exige el aval SST leído de la
@@ -507,7 +529,9 @@ service cloud.firestore {
       // Proyectos); ningún otro origen. El gate SST al_dia es INNEGOCIABLE
       // en ambas vías. El CIERRE exige el pago del cliente registrado (no
       // se cierra con cuenta por cobrar abierta).
-      allow update: if puedeGestionarProyectos()
+      // §16: la vía operativa también sin comercial (sin read no hay
+      // update coherente — evita el write a ciegas por id).
+      allow update: if puedeCrearProyectos()
                     && resource.data.get('estado', '') != 'cerrado'
                     && (!fijaAprobacionPreliq()
                         || (rolActual() in ['admin', 'gerencia_general']

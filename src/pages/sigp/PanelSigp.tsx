@@ -26,7 +26,7 @@ import {
   embudoDelMes, preventivosDelMes, gruposDonut,
 } from '../../utils/sigp/indicadores'
 import type { Periodo, ValorIndicador, Semaforo } from '../../utils/sigp/indicadores'
-import { puedeGestionarProyectosUI, veOcUI, editaMetaIndicadoresUI } from '../../types/sigp/permisos'
+import { puedeGestionarProyectosUI, veProyectosUI, veOcUI, editaMetaIndicadoresUI } from '../../types/sigp/permisos'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import type { Solicitud } from '../../types/sigp/solicitud'
 
@@ -186,13 +186,22 @@ export default function PanelSigp() {
   const [metaPendiente, setMetaPendiente] = useState<number | undefined>(undefined)
 
   const puedeVerCompras = veOcUI(user?.rol)
+  // §16 (ii): comercial NO lee `proyectos` (regla puedeVerProyectos). El Panel
+  // ni lo intenta — los indicadores que dependen de proyectos degradan con
+  // nota; el resto (embudo comercial, solicitudes/visitas/cotizaciones) vive.
+  const puedeVerProyectos = veProyectosUI(user?.rol)
   const docSst = `sst_${periodo.anio}-${String(periodo.mes).padStart(2, '0')}`
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const [pr, so, vi, co, cp, cfg] = await Promise.all([
-        getAll('proyectos'), getAll('solicitudes'), getAll('visitas'), getAll('cotizaciones'),
+        // try/catch propio: si la lectura fallara (p. ej. reglas más nuevas
+        // que este build), degrada a [] sin tumbar el resto del Panel.
+        puedeVerProyectos
+          ? getAll('proyectos').catch(e => { console.warn('Panel: proyectos no legible — degradando', e); return [] })
+          : Promise.resolve([]),
+        getAll('solicitudes'), getAll('visitas'), getAll('cotizaciones'),
         // Ind. 3 (C3): el mapa de compras reales SOLO se consulta si el rol
         // puede verlas (veOcUI, alineado con la regla de `compras_proyecto`)
         // — nunca se calcula el indicador a medias.
@@ -201,7 +210,7 @@ export default function PanelSigp() {
         // (gerencia_general/admin). Ausente/error → sin meta (sin semáforo).
         getDoc(doc(db, 'configuracion', 'indicadores')).catch(() => null),
       ])
-      setProyectos(pr as Proyecto[])
+      setProyectos(pr as Proyecto[])  // sin acceso a proyectos → siempre []
       setSolicitudes(so as Solicitud[])
       setVisitas(vi as DocConFecha[])
       setCotizaciones(co as DocConFecha[])
@@ -214,7 +223,7 @@ export default function PanelSigp() {
     } finally {
       setLoading(false)
     }
-  }, [puedeVerCompras]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [puedeVerCompras, puedeVerProyectos]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load() }, [load])
 
@@ -272,15 +281,18 @@ export default function PanelSigp() {
   }
 
   // ── Cálculos ──
-  const ind1 = useMemo(() => indPlanTrabajo(proyectos), [proyectos])
-  const ind2 = useMemo(() => indCalidad(proyectos, periodo), [proyectos, periodo])
+  // §16 (ii): los indicadores que se calculan de `proyectos` degradan a
+  // IND_SIN_DATOS para comercial (nota "requiere acceso a proyectos" en la
+  // tarjeta) — nunca un 0% falso calculado sobre una lista vacía.
+  const ind1 = useMemo(() => puedeVerProyectos ? indPlanTrabajo(proyectos) : IND_SIN_DATOS, [proyectos, puedeVerProyectos])
+  const ind2 = useMemo(() => puedeVerProyectos ? indCalidad(proyectos, periodo) : IND_SIN_DATOS, [proyectos, periodo, puedeVerProyectos])
   // Ind. 3 (C3): dato económico — sin permisos de compras, NUNCA se calcula a
   // medias (queda como "sin datos", cuenta igual en el anillo de salud).
   const ind3 = useMemo(
     () => puedeVerCompras ? indPresupuesto(proyectos, comprasMap) : IND_SIN_DATOS,
     [proyectos, comprasMap, puedeVerCompras],
   )
-  const ind4 = useMemo(() => indSatisfaccion(proyectos, periodo), [proyectos, periodo])
+  const ind4 = useMemo(() => puedeVerProyectos ? indSatisfaccion(proyectos, periodo) : IND_SIN_DATOS, [proyectos, periodo, puedeVerProyectos])
   const ind5 = useMemo(() => indSst(sstManual), [sstManual])
   const indicadores = [ind1, ind2, ind3, ind4, ind5]
 
@@ -294,12 +306,12 @@ export default function PanelSigp() {
       ? `Vamos muy bien: los 5 indicadores del proceso están en meta este mes.`
       : `${enMeta} de los 5 indicadores del proceso están en meta este mes${conAlerta > 0 ? `; ${conAlerta} requiere${conAlerta > 1 ? 'n' : ''} atención` : ''}${sinDatos > 0 ? ` (${sinDatos} sin datos aún)` : ''}.`
 
-  const tend2 = useMemo(() => ultimosPeriodos(periodo, 6).map(per => ({
+  const tend2 = useMemo(() => puedeVerProyectos ? ultimosPeriodos(periodo, 6).map(per => ({
     etiqueta: etiquetaPeriodo(per), valor: indCalidad(proyectos, per).valor,
-  })), [periodo, proyectos])
-  const tend4 = useMemo(() => ultimosPeriodos(periodo, 6).map(per => ({
+  })) : undefined, [periodo, proyectos, puedeVerProyectos])
+  const tend4 = useMemo(() => puedeVerProyectos ? ultimosPeriodos(periodo, 6).map(per => ({
     etiqueta: etiquetaPeriodo(per), valor: indSatisfaccion(proyectos, per).valor,
-  })), [periodo, proyectos])
+  })) : undefined, [periodo, proyectos, puedeVerProyectos])
 
   const donut = useMemo(() => gruposDonut(proyectos), [proyectos])
   const totalDonut = donut.reduce((s, g) => s + g.count, 0)
@@ -322,13 +334,16 @@ export default function PanelSigp() {
   const preventivos = useMemo(() => preventivosDelMes(solicitudes, proyectos, periodo), [solicitudes, proyectos, periodo])
 
   const RAMPA_FUNNEL = ['#628E3A', '#6a9642', '#7fa85c', '#98bd7a']
-  const pasosEmbudo: [string, number][] = [
+  // §16 (ii): el embudo COMERCIAL se conserva para todos; solo el tramo de
+  // proyectos degrada sin acceso (— en vez de un 0 falso).
+  const pasosEmbudo: [string, number | null][] = [
     ['Solicitudes', embudo.solicitudes],
     ['Visitas técnicas', embudo.visitas],
     ['Cotizaciones', embudo.cotizaciones],
-    ['Proyectos', embudo.proyectos],
+    ['Proyectos', puedeVerProyectos ? embudo.proyectos : null],
   ]
-  const conversion = embudo.solicitudes > 0 ? (embudo.proyectos / embudo.solicitudes) * 100 : null
+  const conversion = puedeVerProyectos && embudo.solicitudes > 0
+    ? (embudo.proyectos / embudo.solicitudes) * 100 : null
 
   return (
     <div className="max-w-6xl mx-auto space-y-5">
@@ -382,11 +397,13 @@ export default function PanelSigp() {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               <TarjetaKpi numero={1} nombre="Cumplimiento del plan de trabajo"
                 meta="80–100 %" frecuencia="Mensual" fuente="SIGP · plan de actividades" ind={ind1}
-                subtitulo={ind1.valor != null ? `${ind1.numerador} / ${ind1.denominador} actividades ejecutadas (corte)` : 'Se calcula del plan de actividades de los proyectos en gestión'} />
+                subtitulo={!puedeVerProyectos ? 'Requiere acceso a proyectos'
+                  : ind1.valor != null ? `${ind1.numerador} / ${ind1.denominador} actividades ejecutadas (corte)` : 'Se calcula del plan de actividades de los proyectos en gestión'} />
 
               <TarjetaKpi numero={2} nombre="Características técnicas y calidad"
                 meta="≥ 90 %" frecuencia="Por proyecto" fuente="acta de entrega · calidad 1–5" ind={ind2} tendencia={tend2}
-                subtitulo={ind2.valor != null ? `${ind2.numerador} / ${ind2.denominador} entregas con calif. ≥ 4` : 'Entregas del periodo con calificación de calidad'} />
+                subtitulo={!puedeVerProyectos ? 'Requiere acceso a proyectos'
+                  : ind2.valor != null ? `${ind2.numerador} / ${ind2.denominador} entregas con calif. ≥ 4` : 'Entregas del periodo con calificación de calidad'} />
 
               <TarjetaKpi numero={3} nombre="Proyección presupuestal"
                 meta="90–110 %" frecuencia="Mensual" fuente="preliquidación · costo/presupuesto (OCs + menores + reembolsos)" ind={ind3}
@@ -398,7 +415,8 @@ export default function PanelSigp() {
 
               <TarjetaKpi numero={4} nombre="Satisfacción del cliente"
                 meta="≥ 90 %" frecuencia="Por proyecto" fuente="encuesta al cierre · 1–5" ind={ind4} tendencia={tend4}
-                subtitulo={ind4.valor != null ? `${ind4.numerador} / ${ind4.denominador} encuestas con puntaje ≥ 4` : 'Encuestas de satisfacción del periodo'} />
+                subtitulo={!puedeVerProyectos ? 'Requiere acceso a proyectos'
+                  : ind4.valor != null ? `${ind4.numerador} / ${ind4.denominador} encuestas con puntaje ≥ 4` : 'Encuestas de satisfacción del periodo'} />
 
               <TarjetaKpi numero={5} nombre="Requisitos ambientales y SST"
                 meta="≥ 95 %" frecuencia="Mensual" fuente="Panel SST · proceso cruzado" ind={ind5}
@@ -437,7 +455,9 @@ export default function PanelSigp() {
               {/* Donut categórica: proyectos por estado agrupado */}
               <div className="bg-white rounded-2xl border border-gray-200 p-[18px]">
                 <h3 className="text-[13.5px] font-bold text-gray-800 mb-4">Proyectos por estado agrupado</h3>
-                {totalDonut === 0 ? (
+                {!puedeVerProyectos ? (
+                  <p className="text-sm text-gray-400 py-6 text-center">Requiere acceso a proyectos.</p>
+                ) : totalDonut === 0 ? (
                   <p className="text-sm text-gray-400 py-6 text-center">Sin proyectos activos aún.</p>
                 ) : (
                   <div className="flex items-center gap-4">
@@ -471,18 +491,22 @@ export default function PanelSigp() {
                     <div key={label}
                       className="flex justify-between items-center rounded-lg px-3.5 py-2 text-white text-[12.5px] font-semibold"
                       style={{ backgroundColor: RAMPA_FUNNEL[i], marginLeft: i * 6, marginRight: i * 6 }}>
-                      {label} <span className="text-[15px] font-extrabold">{n}</span>
+                      {label} <span className="text-[15px] font-extrabold">{n ?? '—'}</span>
                     </div>
                   ))}
                 </div>
                 <p className="text-[11px] text-gray-400 mt-3.5">
-                  {conversion == null ? 'Sin solicitudes en el periodo.' : <>Conversión solicitud → proyecto: <b>{fmtNum(conversion)}%</b></>}
+                  {!puedeVerProyectos ? 'El tramo de proyectos requiere acceso a proyectos.'
+                    : conversion == null ? 'Sin solicitudes en el periodo.' : <>Conversión solicitud → proyecto: <b>{fmtNum(conversion)}%</b></>}
                 </p>
               </div>
 
               {/* Preventivos IHS (tiles) */}
               <div className="bg-white rounded-2xl border border-gray-200 p-[18px]">
                 <h3 className="text-[13.5px] font-bold text-gray-800 mb-4">Preventivos IHS · {mesLargo(periodo)}</h3>
+                {!puedeVerProyectos ? (
+                  <p className="text-sm text-gray-400 py-6 text-center">Requiere acceso a proyectos.</p>
+                ) : (
                 <div className="grid grid-cols-2 gap-2.5">
                   {([
                     ['Programados', preventivos.programados, ACENTOS.verde.base],
@@ -500,6 +524,7 @@ export default function PanelSigp() {
                     <p className="text-[10.5px] text-[#4d712c]">Con entregables IHS completos (3/3)</p>
                   </div>
                 </div>
+                )}
               </div>
 
               {/* Margen real — indicador OPERATIVO (no ISO oficial) */}

@@ -34,9 +34,12 @@ const { generarConsecutivo } = require('./consecutivos');
 const { asignarObraAlPrincipal } = require('./obraEspejo');
 const { sincronizarVerificacionSst } = require('./verificacionesSst');
 const { sincronizarComprasProyectoDesdeOC, sincronizarComprasProyectoDesdeMenores } = require('./comprasProyecto');
+const { crearProyectoAlAprobarCotizacion, crearProyectoAlAceptarPreventivo } = require('./crearProyecto');
 
 exports.generarConsecutivo = generarConsecutivo;
 exports.asignarObraAlPrincipal = asignarObraAlPrincipal;
 exports.sincronizarVerificacionSst = sincronizarVerificacionSst;
 exports.sincronizarComprasProyectoDesdeOC = sincronizarComprasProyectoDesdeOC;
 exports.sincronizarComprasProyectoDesdeMenores = sincronizarComprasProyectoDesdeMenores;
+exports.crearProyectoAlAprobarCotizacion = crearProyectoAlAprobarCotizacion;
+exports.crearProyectoAlAceptarPreventivo = crearProyectoAlAceptarPreventivo;

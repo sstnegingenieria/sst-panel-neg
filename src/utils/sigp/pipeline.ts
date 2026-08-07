@@ -96,23 +96,10 @@ export function patchSolicitudCotizada(
   }
 }
 
-/** Transición cruzada al APROBAR (27-jul): con la cotización aprobada y el
- *  proyecto creado, la solicitud pasa a `aceptada` («Aceptada · proyecto
- *  creado» — el mismo estado terminal que ya usaban los preventivos). Se
- *  admite también desde `lista_para_cotizar` por robustez con datos previos
- *  al PR #54; null en el resto (ya aceptada → reintentos idempotentes). */
-export function patchSolicitudAceptada(
-  estadoSolicitud: string, consecutivoCot: string, consecutivoPry: string, uid: string, ahora: Timestamp,
-): { estado: 'aceptada'; entradaHistorial: Record<string, unknown> } | null {
-  if (estadoSolicitud !== 'cotizada' && estadoSolicitud !== 'lista_para_cotizar') return null
-  return {
-    estado: 'aceptada',
-    entradaHistorial: {
-      de: estadoSolicitud, a: 'aceptada', por: uid, fecha: ahora,
-      motivo: `Cotización ${consecutivoCot} aprobada — proyecto ${consecutivoPry} creado`,
-    },
-  }
-}
+// La transición cruzada al APROBAR (solicitud → `aceptada`) se MOVIÓ al
+// servidor en §16 (ii): vive como réplica JS en functions/crearProyecto.js
+// (patchSolicitudAceptada), dentro de la transacción que crea el proyecto.
+// El cliente ya no la ejecuta — implementación única en la CF.
 
 /** ¿Ya existe una visita enlazada a la solicitud? (cualquiera, incluso manual). */
 async function hayVisitaDeSolicitud(solicitudId: string): Promise<boolean> {

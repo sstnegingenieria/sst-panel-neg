@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   doc, getDoc, setDoc, updateDoc, arrayUnion, deleteField, Timestamp,
@@ -7,14 +7,16 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useFeatureFlag } from '../../../hooks/useFeatureFlag'
-import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
-import { crearProyectoDesdeCotizacion } from '../../../utils/sigp/proyectos'
-import { patchSolicitudCotizada, patchSolicitudAceptada } from '../../../utils/sigp/pipeline'
+import { patchSolicitudCotizada } from '../../../utils/sigp/pipeline'
+import { construirSnapshotProyecto } from '../../../types/sigp/proyecto'
+import { veProyectosUI } from '../../../types/sigp/permisos'
+import { useNacimientoProyecto } from '../../../hooks/sigp/useNacimientoProyecto'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import { puedeNuevaVersion } from '../../../types/sigp/cotizacion'
 import { etiquetaVersion } from '../../../utils/sigp/formato'
 import type { Cotizacion, EstadoCotizacion, VersionCotizacion } from '../../../types/sigp/cotizacion'
+import type { SnapshotProyecto } from '../../../types/sigp/proyecto'
 
 interface CotizacionAccionesProps {
   cotizacion: Cotizacion
@@ -41,58 +43,64 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
   const [modalAprobar, setModalAprobar] = useState(false)
   const [evidencia, setEvidencia] = useState<File | null>(null)
 
-  // ── F2.1.a — nacimiento del proyecto al aprobar, detrás de sigp_f2_enabled ──
+  // ── §16 (ii) — el proyecto nace SERVER-SIDE (CF crearProyectoAlAprobar).
+  // El cliente solo deja STAGED el snapshot (`snapshot_proyecto`) en el mismo
+  // updateDoc de la aprobación; la CF lo copia, asigna el PRY transaccional,
+  // escribe el enlace inverso y pasa la solicitud a «aceptada». Detrás de
+  // sigp_f2_enabled: con el flag apagado no se stagea y la CF no crea nada.
   const f2Enabled = useFeatureFlag('sigp_f2_enabled', false)
-  const { obtener } = useConsecutivo()
-  // Patrón SOL/VIS/COT: si la creación falla DESPUÉS de consumir el PRY-NNN,
-  // el número se preserva y el reintento lo reutiliza (no se queman huecos).
-  const pryPendiente = useRef<string | null>(null)
-  const obtenerPry = async () => {
-    if (pryPendiente.current) return pryPendiente.current
-    const c = await obtener('PRY')
-    pryPendiente.current = c
-    return c
-  }
+  // §16 (ii): comercial NO ve proyectos — su chip PRY es informativo
+  // no-navegable. El listener sigue el nacimiento server-side en vivo.
+  const veProyectos = veProyectosUI(user?.rol)
+  const esperandoNacimiento = f2Enabled && efectivo === 'aprobada'
+    && !cotizacion.proyecto_id && !!cotizacion.snapshot_proyecto
+  const nacimiento = useNacimientoProyecto('cotizaciones', cotizacion.id, esperandoNacimiento)
+  const proyectoId = cotizacion.proyecto_id ?? nacimiento.proyectoId
+  const proyectoConsecutivo = cotizacion.proyecto_consecutivo ?? nacimiento.proyectoConsecutivo
+  const recienCreado = !cotizacion.proyecto_id && !!nacimiento.proyectoId
 
-  /** Crea (o repara el enlace de) el proyecto 1:1 de esta cotización. */
-  const crearProyecto = async () => {
+  /** Construye el snapshot del proyecto desde la VERSIÓN APROBADA (mismos
+   *  reads que hacía el nacimiento client-side retirado). null = falló. */
+  const construirStaging = async (): Promise<SnapshotProyecto | null> => {
     try {
-      const r = await crearProyectoDesdeCotizacion({
-        cotizacion, uid: user?.uid ?? '', obtenerConsecutivo: obtenerPry,
-      })
-      pryPendiente.current = null
-      if (r.creado) toast(`Proyecto ${r.consecutivo} creado`)
-      // Transición cruzada (27-jul): con el proyecto creado, la solicitud
-      // enlazada pasa a «aceptada · proyecto creado». También en el reintento
-      // (repara enlaces viejos). No-fatal: el proyecto ya existe.
-      if (cotizacion.solicitud_id) {
-        try {
-          const ahora = Timestamp.now()
-          const sSnap = await getDoc(doc(db, 'solicitudes', cotizacion.solicitud_id))
-          const patch = sSnap.exists()
-            ? patchSolicitudAceptada(sSnap.data().estado, cotizacion.consecutivo, r.consecutivo, user?.uid ?? '', ahora)
-            : null
-          if (patch) {
-            await updateDoc(doc(db, 'solicitudes', cotizacion.solicitud_id), {
-              estado: patch.estado, fecha_actualizacion: ahora,
-              historial: arrayUnion(patch.entradaHistorial),
-            })
-          }
-        } catch (e) {
-          console.error('Proyecto creado, pero la solicitud no pudo pasar a aceptada:', e)
+      const vSnap = await getDoc(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(cotizacion.version_activa)))
+      if (!vSnap.exists()) throw new Error(`Versión ${cotizacion.version_activa} no encontrada`)
+      const version = vSnap.data() as VersionCotizacion
+      let clienteNombre: string | undefined
+      let clienteNit: string | undefined
+      if (cotizacion.cliente_id) {
+        const c = await getDoc(doc(db, 'clientes', cotizacion.cliente_id))
+        if (c.exists()) {
+          clienteNombre = c.data().nombre as string
+          clienteNit = (c.data().nit as string) || undefined
         }
       }
-      return true
+      return construirSnapshotProyecto(cotizacion, version, clienteNombre, clienteNit)
     } catch (e) {
-      console.error('Error creando el proyecto desde la cotización:', e)
-      toast('La cotización quedó aprobada, pero el proyecto no se pudo crear — usa "Crear proyecto" para reintentar', 'error')
-      return false
+      console.error('No se pudo construir el snapshot del proyecto:', e)
+      return null
     }
   }
 
+  /** Escotilla: cotización aprobada sin proyecto (histórica o con snapshot
+   *  fallido) → stagea el snapshot si falta y RE-TOCA el doc; el touch
+   *  re-dispara la CF, que crea el proyecto o repara el enlace. */
   const reintentarProyecto = async () => {
     setAplicando(true)
-    try { if (await crearProyecto()) await reload() } finally { setAplicando(false) }
+    try {
+      const patch: Record<string, unknown> = { fecha_actualizacion: Timestamp.now() }
+      if (!cotizacion.snapshot_proyecto) {
+        const staged = await construirStaging()
+        if (!staged) { toast('No se pudo preparar el snapshot del proyecto — reintenta', 'error'); return }
+        patch.snapshot_proyecto = staged
+      }
+      await updateDoc(doc(db, 'cotizaciones', cotizacion.id), patch)
+      toast('Reintento enviado — el sistema está creando el proyecto')
+      await reload()
+    } catch (e) {
+      console.error('Error en el reintento de creación del proyecto:', e)
+      toast('El reintento falló — vuelve a intentarlo', 'error')
+    } finally { setAplicando(false) }
   }
 
   if (!puedeGestionar) return null
@@ -168,6 +176,17 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
     if (!evidencia) return  // validación DURA: sin evidencia no hay aprobación
     setAplicando(true)
     try {
+      // §16 (ii): el snapshot se construye ANTES de subir nada — si falla,
+      // la aprobación no se aplica (mejor fallar temprano que aprobar sin
+      // staging y depender de la escotilla).
+      let snapshotProyecto: SnapshotProyecto | null = null
+      if (f2Enabled) {
+        snapshotProyecto = await construirStaging()
+        if (!snapshotProyecto) {
+          toast('No se pudo preparar el snapshot del proyecto — la aprobación no se aplicó, reintenta', 'error')
+          return
+        }
+      }
       const nombre = `${Date.now()}_${evidencia.name}`
       const snap = await uploadBytes(ref(storage, `cotizaciones/${cotizacion.id}/evidencia/${nombre}`), evidencia)
       const url = await getDownloadURL(snap.ref)
@@ -181,14 +200,14 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
           tamano: evidencia.size, subido_en: ahora,
         },
         aprobada_por: user?.uid ?? '', fecha_aprobacion: ahora, fecha_actualizacion: ahora,
+        // Staging §16 (ii): mismo updateDoc que la aprobación (atómico). La CF
+        // crearProyectoAlAprobarCotizacion copia este snapshot al proyecto,
+        // asigna el PRY y pasa la solicitud enlazada a «aceptada».
+        ...(snapshotProyecto ? { snapshot_proyecto: snapshotProyecto } : {}),
         historial: arrayUnion(entrada('enviada', 'aprobada', { motivo: `Evidencia: ${evidencia.name}` })),
       })
-      toast(`${cotizacion.consecutivo} aprobada 🎉`)
+      toast(`${cotizacion.consecutivo} aprobada 🎉${snapshotProyecto ? ' — el sistema está creando el proyecto' : ''}`)
       setModalAprobar(false); setEvidencia(null)
-      // F2.1.a: el proyecto nace de la aprobación (idempotente; solo con el
-      // flag activo — con sigp_f2_enabled=false este bloque es inerte y la
-      // aprobación se comporta EXACTAMENTE como en F1).
-      if (f2Enabled) await crearProyecto()
       await reload()
     } catch { toast('Error al aprobar', 'error') } finally { setAplicando(false) }
   }
@@ -245,17 +264,35 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
       )}
       {efectivo === 'aprobada' && (
         f2Enabled ? (
-          cotizacion.proyecto_id ? (
-            <Link to={`/sigp/proyectos/${cotizacion.proyecto_id}`}
-              className="text-xs px-2.5 py-1 rounded-lg bg-brand-50 text-brand-700 font-semibold hover:bg-brand-100">
-              🏗 {cotizacion.proyecto_consecutivo ?? 'Proyecto'} →
-            </Link>
+          proyectoId ? (
+            veProyectos ? (
+              <Link to={`/sigp/proyectos/${proyectoId}`}
+                className="text-xs px-2.5 py-1 rounded-lg bg-brand-50 text-brand-700 font-semibold hover:bg-brand-100">
+                🏗 {proyectoConsecutivo ?? 'Proyecto'}{recienCreado ? ' creado ✓' : ' →'}
+              </Link>
+            ) : (
+              // §16 (ii): chip INFORMATIVO para comercial — el proyecto existe,
+              // pero su gestión es dominio de ejecución (sin navegación).
+              <span className="text-xs px-2.5 py-1 rounded-lg bg-brand-50 text-brand-700 font-semibold cursor-default"
+                title="Proyecto en manos de Gerencia de Proyectos — la gestión comercial termina en la cotización">
+                🏗 {proyectoConsecutivo ?? 'Proyecto'}{recienCreado ? ' creado ✓' : ''}
+              </span>
+            )
+          ) : esperandoNacimiento && !nacimiento.tardando ? (
+            <span className="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-500 font-medium animate-pulse">
+              ⏳ Creando proyecto…
+            </span>
           ) : (
-            <button onClick={reintentarProyecto} disabled={aplicando}
-              className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 font-medium disabled:opacity-50"
-              title="Esta cotización aprobada aún no tiene proyecto (creación fallida o aprobada antes de F2)">
-              🏗 Crear proyecto
-            </button>
+            <>
+              <button onClick={reintentarProyecto} disabled={aplicando}
+                className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 font-medium disabled:opacity-50"
+                title="Esta cotización aprobada aún no tiene proyecto (aprobada antes de F2, snapshot fallido o el sistema tarda) — el reintento re-toca el doc y el sistema lo crea">
+                🏗 Reintentar proyecto
+              </button>
+              {esperandoNacimiento && nacimiento.tardando && (
+                <span className="text-[11px] text-gray-400">El sistema está tardando más de lo normal…</span>
+              )}
+            </>
           )
         ) : (
           <span className="text-xs text-gray-400">Estado terminal · los cambios posteriores pertenecen al proyecto.</span>
