@@ -15,6 +15,8 @@ import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import { ESTADOS_PROYECTO } from '../../types/sigp/proyecto'
 import type { Proyecto, EstadoProyecto } from '../../types/sigp/proyecto'
+import { esCoordenadaValida } from '../geo'
+import type { CoordenadasSitio } from '../geo'
 
 /** Id determinístico de la obra-espejo (idempotencia del upsert). */
 export const idObraEspejo = (proyectoId: string) => `pry_${proyectoId}`
@@ -35,6 +37,9 @@ export interface IdentidadObraEspejo {
   /** Bloque 3+5 — contratista PRINCIPAL (de la asignación del proyecto).
    *  La app lo ignora; el panel filtra el aval de obras por él. */
   contratista_id?: string
+  /** Geo-control SST (PR #75): referencia GPS del sitio para `getEstadoGeo`
+   *  sobre los formularios de la app. La app la ignora. */
+  coordenadas_sitio?: CoordenadasSitio
 }
 
 /** Identidad de la obra desde el snapshot del proyecto (pura, testeable).
@@ -76,6 +81,7 @@ export function construirObraEspejo(
     proyecto_consecutivo: p.consecutivo,
     origen: 'sigp',
     ...(p.asignacion?.contratista_id ? { contratista_id: p.asignacion.contratista_id } : {}),
+    ...(esCoordenadaValida(p.snapshot.coordenadas_sitio) ? { coordenadas_sitio: p.snapshot.coordenadas_sitio } : {}),
   }
 }
 
@@ -141,7 +147,15 @@ export async function sincronizarObraEspejo(
         fecha_actualizacion: ahora,
       })
     } else {
-      await updateDoc(refObra, { estado, fecha_actualizacion: ahora })
+      // La identidad quedó congelada al crear; el sync solo mueve el estado.
+      // EXCEPCIÓN completa-si-falta: si el snapshot trae coordenadas y la obra
+      // aún no las tiene, se backfillean (jamás se reescriben las existentes).
+      const patch: Record<string, unknown> = { estado, fecha_actualizacion: ahora }
+      const obraActual = existente.data() as { coordenadas_sitio?: CoordenadasSitio }
+      if (esCoordenadaValida(p.snapshot.coordenadas_sitio) && !esCoordenadaValida(obraActual.coordenadas_sitio)) {
+        patch.coordenadas_sitio = p.snapshot.coordenadas_sitio
+      }
+      await updateDoc(refObra, patch)
     }
     return true
   } catch (e) {

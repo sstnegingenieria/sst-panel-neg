@@ -8,6 +8,7 @@
 import type { Timestamp } from 'firebase/firestore'
 // Circular solo de TIPOS (proyecto.ts importa de este archivo) — se borra al compilar.
 import type { SnapshotProyecto } from './proyecto'
+import type { CoordenadasSitio } from '../../utils/geo'
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
@@ -300,6 +301,9 @@ export interface Cotizacion {
    *  en borrador). Alimenta el snapshot del proyecto y la obra-espejo SST. */
   nombre_sitio?: string
   codigo_sitio_cliente?: string
+  /** Coordenadas GPS del sitio (heredadas de la solicitud, editables en
+   *  borrador). Mismo shape que `obras.coordenadas_sitio`. */
+  coordenadas_sitio?: CoordenadasSitio
 
   es_licitacion: boolean
   tipo_inversion?: TipoInversion   // OPEX/CAPEX (contratos tipo Claro) — opcional

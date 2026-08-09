@@ -116,6 +116,16 @@ describe('construirSnapshotPreventivo — staging §16 (ii)', () => {
     expect(sinId.codigo_sitio_cliente).toBe('N/A')
   })
 
+  it('coordenadas de la solicitud viajan al snapshot; inválidas/ausentes se omiten', () => {
+    const conCoords = construirSnapshotPreventivo(
+      { coordenadas_sitio: { latitud: 6.24, longitud: -75.58 } }, p, precio)
+    expect(conCoords.coordenadas_sitio).toEqual({ latitud: 6.24, longitud: -75.58 })
+    const malformada = construirSnapshotPreventivo(
+      { coordenadas_sitio: { lat: 6.24, lng: -75.58 } as never }, p, precio)
+    expect('coordenadas_sitio' in malformada).toBe(false)
+    expect('coordenadas_sitio' in construirSnapshotPreventivo({}, p, precio)).toBe(false)
+  })
+
   it('asunto refleja SAI y omite jungle cuando no aplica', () => {
     const sai = construirSnapshotPreventivo({}, { ...p, es_jungle: false, es_sai: true, zona: 'Z2' },
       precioPreventivo({ zona: 'Z2', tipo: 'greenfield', intensidad: 'pesado', es_jungle: false, es_sai: true })!)

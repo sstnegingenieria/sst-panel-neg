@@ -32,3 +32,32 @@ export function getEstadoGeo(
   if (distancia > RADIO_SITIO_METROS) return { estado: 'fuera_de_sitio', distanciaMetros: distancia }
   return { estado: 'en_sitio', distanciaMetros: distancia }
 }
+
+// ——— Captura de coordenadas del sitio (SIGP → obras.coordenadas_sitio) ———
+// Mismo shape canónico {latitud, longitud} que consume getEstadoGeo.
+
+export interface CoordenadasSitio {
+  latitud: number
+  longitud: number
+}
+
+export function esCoordenadaValida(c: unknown): c is CoordenadasSitio {
+  if (typeof c !== 'object' || c === null) return false
+  const { latitud, longitud } = c as Record<string, unknown>
+  return (
+    typeof latitud === 'number' && Number.isFinite(latitud) && latitud >= -90 && latitud <= 90 &&
+    typeof longitud === 'number' && Number.isFinite(longitud) && longitud >= -180 && longitud <= 180
+  )
+}
+
+// Par pegado desde Google Maps: "4.60971, -74.08175" (acepta coma decimal y separadores coma/espacio)
+export function parseCoordenadasPegadas(texto: string): CoordenadasSitio | null {
+  const m = texto.trim().match(/^(-?\d+(?:[.,]\d+)?)[,;\s]+(-?\d+(?:[.,]\d+)?)$/)
+  if (!m) return null
+  const aNumero = (s: string) => Number(s.replace(',', '.'))
+  const candidato = { latitud: aNumero(m[1]), longitud: aNumero(m[2]) }
+  return esCoordenadaValida(candidato) ? candidato : null
+}
+
+export const urlVerificarEnMaps = (c: CoordenadasSitio): string =>
+  `https://www.google.com/maps?q=${c.latitud},${c.longitud}`

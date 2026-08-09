@@ -59,6 +59,20 @@ describe('construirSnapshotProyecto', () => {
     expect(s.tipo_inversion).toBeUndefined()
   })
 
+  it('coordenadas del sitio: válidas se congelan, inválidas/ausentes se omiten', () => {
+    const conCoords = construirSnapshotProyecto(
+      { asunto: 'X', coordenadas_sitio: { latitud: 4.60971, longitud: -74.08175 } },
+      version({}),
+    )
+    expect(conCoords.coordenadas_sitio).toEqual({ latitud: 4.60971, longitud: -74.08175 })
+    const malformada = construirSnapshotProyecto(
+      { asunto: 'X', coordenadas_sitio: { lat: 4.6, lng: -74 } as never },
+      version({}),
+    )
+    expect('coordenadas_sitio' in malformada).toBe(false)
+    expect('coordenadas_sitio' in construirSnapshotProyecto({ asunto: 'X' }, version({}))).toBe(false)
+  })
+
   it('resume el alcance por ACTIVIDAD con conteo y subtotales (huérfanos → Otros)', () => {
     const items = [
       item({ instancia_id: '1', actividad_id: 'a1', valor_total: 100 }),

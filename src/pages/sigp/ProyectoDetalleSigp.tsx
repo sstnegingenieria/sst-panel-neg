@@ -25,6 +25,7 @@ import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
 import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion } from '../../types/sigp/proyecto'
 import { TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR } from '../../types/sigp/cotizacion'
 import type { Proyecto } from '../../types/sigp/proyecto'
+import { esCoordenadaValida, urlVerificarEnMaps } from '../../utils/geo'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) ?? '—'
@@ -167,6 +168,12 @@ export default function ProyectoDetalleSigp() {
             <p className="text-xs text-gray-400">Sitio</p>
             <p className="font-semibold text-gray-800">{s.nombre_sitio || '—'}</p>
             {s.codigo_sitio_cliente && <p className="text-xs text-gray-500 font-mono">{s.codigo_sitio_cliente}</p>}
+            {esCoordenadaValida(s.coordenadas_sitio) && (
+              <a href={urlVerificarEnMaps(s.coordenadas_sitio)} target="_blank" rel="noopener noreferrer"
+                className="text-xs text-brand-600 hover:underline font-medium inline-block mt-0.5">
+                📍 Ver en Maps
+              </a>
+            )}
           </div>
           <div>
             <p className="text-xs text-gray-400">Cliente</p>

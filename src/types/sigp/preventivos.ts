@@ -11,6 +11,8 @@
 //   facturación del módulo futuro de Administrativa)
 //   rooftop solo existe en intensidad 'pesado' → otra combinación = no disponible
 
+import { esCoordenadaValida } from '../../utils/geo'
+
 export type ZonaPreventivo = 'Z1' | 'Z2' | 'Z3'
 export type TipoSitio = 'greenfield' | 'rooftop'
 export type IntensidadPreventivo = 'liviano' | 'pesado'
@@ -105,7 +107,7 @@ export function precioPreventivo(p: ParametrosPrecio): PrecioPreventivo | null {
  *  construía crearProyectoDesdePreventivo (retirado — la CF copia esto).
  *  Puro: los reads (cliente) los hace el caller. */
 export function construirSnapshotPreventivo(
-  solicitud: Pick<import('./solicitud').Solicitud, 'nombre_sitio' | 'codigo_sitio_cliente' | 'prospecto_nombre'>,
+  solicitud: Pick<import('./solicitud').Solicitud, 'nombre_sitio' | 'codigo_sitio_cliente' | 'coordenadas_sitio' | 'prospecto_nombre'>,
   p: import('./solicitud').DatosPreventivo,
   precio: PrecioPreventivo,
   clienteNombre?: string,
@@ -120,6 +122,7 @@ export function construirSnapshotPreventivo(
     // autocompletado desde el sitio IHS) o derivada de él como fallback
     nombre_sitio: solicitud.nombre_sitio?.trim() || p.sitio_nombre,
     codigo_sitio_cliente: solicitud.codigo_sitio_cliente?.trim() || p.sitio_id || 'N/A',
+    ...(esCoordenadaValida(solicitud.coordenadas_sitio) ? { coordenadas_sitio: solicitud.coordenadas_sitio } : {}),
     valor_venta: precio.total,
     esquema_tributario: 'iva_pleno',
     alcance: [{ grupo: renglon, items: 1, subtotal: precio.total }],

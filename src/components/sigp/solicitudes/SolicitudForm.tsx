@@ -10,6 +10,9 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
 import { useFeatureFlag } from '../../../hooks/useFeatureFlag'
 import { fmtMoney } from '../../../utils/sigp/formato'
+import CoordenadasSitioInput from '../shared/CoordenadasSitioInput'
+import { esCoordenadaValida } from '../../../utils/geo'
+import type { CoordenadasSitio } from '../../../utils/geo'
 import { CANALES, CANAL_LABEL, historialRegistroCon } from '../../../types/sigp/solicitud'
 import { crearBorradorVisita, crearBorradorCotizacion } from '../../../utils/sigp/pipeline'
 import {
@@ -108,6 +111,8 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
   const [errores, setErrores] = useState<Record<string, string>>({})
   const [guardando, setGuardando] = useState(false)
   const [pendiente, setPendiente] = useState<Pendiente | null>(null)
+  // Coordenadas del sitio (opcional) — un solo punto para comercial y preventivo.
+  const [coordenadas, setCoordenadas] = useState<CoordenadasSitio | null>(null)
 
   useEffect(() => {
     if (isOpen) {
@@ -115,6 +120,7 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
       setArchivos([])
       setErrores({})
       setPendiente(null)
+      setCoordenadas(null)
     }
   }, [isOpen])
 
@@ -233,6 +239,7 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
     const codigoSitio = form.codigoSitio.trim() || (esPreventivo ? (form.sitioId.trim() || 'N/A') : '')
     if (nombreSitio) doc_.nombre_sitio = nombreSitio
     if (codigoSitio) doc_.codigo_sitio_cliente = codigoSitio
+    if (esCoordenadaValida(coordenadas)) doc_.coordenadas_sitio = coordenadas
     // F2.2 — preventivo IHS: tipo + datos del sitio con zona/SAI denormalizados
     if (esPreventivo && zona) {
       doc_.tipo = 'preventivo'
@@ -600,6 +607,12 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
             hint={esPreventivo ? 'Vacío → id del sitio IHS o N/A' : "'N/A' si el cliente no asigna código"}
           />
         </div>
+
+        <CoordenadasSitioInput
+          value={coordenadas}
+          onChange={setCoordenadas}
+          direccionSugerida={form.nombreSitio || form.sitioNombre}
+        />
 
         {!esPreventivo && (
           <TextField
