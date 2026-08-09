@@ -3,9 +3,12 @@ import { useAuth } from '../contexts/AuthContext'
 import { toast } from './shared/Toast'
 import { Formulario, TIPO_LABELS } from './RegistrosTable'
 import { puedeAprobarRegistros } from '../types/sigp/permisos'
+import type { Obra } from './ObrasTable'
+import { getEstadoGeo } from '../utils/geo'
 
 interface Props {
   formulario: Formulario
+  obra?: Obra
   onClose: () => void
   onVistobueno: (
     id: string,
@@ -27,8 +30,9 @@ function formatDate(iso: string) {
 
 // ── Componente ───────────────────────────────────────────────────────────────
 
-export default function RegistroDetalleModal({ formulario: f, onClose, onVistobueno, onPdfDescargado }: Props) {
+export default function RegistroDetalleModal({ formulario: f, obra, onClose, onVistobueno, onPdfDescargado }: Props) {
   const { user } = useAuth()
+  const geo = getEstadoGeo(f.ubicacion, obra?.coordenadas_sitio)
   const [revEstado, setRevEstado] = useState<'aprobado' | 'rechazado'>(
     f.revision_sst?.estado === 'rechazado' ? 'rechazado' : 'aprobado'
   )
@@ -82,6 +86,21 @@ export default function RegistroDetalleModal({ formulario: f, onClose, onVistobu
 
         {/* Body */}
         <div className="px-6 py-5 space-y-6 overflow-y-auto" style={{ maxHeight: '75vh' }}>
+
+          {/* Indicador geo: solo se muestra si el formulario se diligenció lejos del sitio.
+              Informativo — no interfiere con el flujo de revisión. */}
+          {geo.estado === 'fuera_de_sitio' && geo.distanciaMetros !== undefined && (
+            <div className="flex items-start gap-2 bg-orange-50 border border-orange-200 rounded-lg p-3">
+              <svg className="w-4 h-4 text-orange-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <p className="text-sm text-orange-800">
+                Diligenciado fuera del sitio: {Math.round(geo.distanciaMetros)} m del punto de la obra.
+              </p>
+            </div>
+          )}
 
           {/* Información general */}
           <section>

@@ -5,9 +5,12 @@ import {
   REVISION_BADGE,
   type Formulario,
 } from '../types/formulario'
+import type { Obra } from './ObrasTable'
+import { getEstadoGeo } from '../utils/geo'
 
 interface Props {
   formulario: Formulario
+  obra?: Obra
   onClick: () => void
 }
 
@@ -32,10 +35,11 @@ function formatDateTime(iso: string): string {
   }
 }
 
-export default function RegistroCard({ formulario: f, onClick }: Props) {
+export default function RegistroCard({ formulario: f, obra, onClick }: Props) {
   const revEstado = f.revision_sst?.estado ?? 'pendiente'
   const tipoLabel = TIPO_LABELS[f.tipo] ?? f.tipo
   const tipoColor = TIPO_COLOR[f.tipo] ?? 'bg-gray-100 text-gray-700'
+  const geo = getEstadoGeo(f.ubicacion, obra?.coordenadas_sitio)
 
   return (
     <div
@@ -79,6 +83,14 @@ export default function RegistroCard({ formulario: f, onClick }: Props) {
         <span className={`inline-block text-[10px] font-medium px-2.5 py-0.5 rounded-full capitalize ${REVISION_BADGE[revEstado]}`}>
           {revEstado}
         </span>
+        {geo.estado === 'fuera_de_sitio' && (
+          <span
+            className="inline-block text-[10px] font-medium px-2.5 py-0.5 rounded-full bg-orange-100 text-orange-800 mt-1"
+            title={geo.distanciaMetros !== undefined ? `A ${Math.round(geo.distanciaMetros)} m del punto de la obra` : undefined}
+          >
+            ⚠ Fuera de sitio
+          </span>
+        )}
       </div>
     </div>
   )

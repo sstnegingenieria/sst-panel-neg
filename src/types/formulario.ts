@@ -31,6 +31,7 @@ export interface Formulario {
   revision_sst?: RevisionSST
   descargado_sst?: boolean
   fecha_descarga?: string
+  ubicacion?: { latitud: number; longitud: number }
 }
 
 // ── Normalizador ─────────────────────────────────────────────────────────────
@@ -69,6 +70,7 @@ export function normalizarDoc(id: string, raw: Record<string, unknown>): Formula
     revision_sst:       raw.revision_sst       as RevisionSST | undefined,
     descargado_sst:     (raw.descargado_sst    as boolean)  ?? false,
     fecha_descarga:     (raw.fecha_descarga    as string)   ?? undefined,
+    ubicacion:          (raw.ubicacion as { latitud: number; longitud: number } | null | undefined) ?? undefined,
   }
 }
 
