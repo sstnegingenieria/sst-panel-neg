@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { deleteField } from 'firebase/firestore'
 import ObrasTable, { Obra } from '../components/ObrasTable'
-import ObrasForm, { ObraFormData } from '../components/ObrasForm'
+import ObrasForm, { ObraSaveData } from '../components/ObrasForm'
 import StatCard from '../components/StatCard'
 import { useModal } from '../hooks/useModal'
 import { useFirestore } from '../hooks/useFirestore'
@@ -42,10 +43,14 @@ export default function Obras() {
     modal.open()
   }
 
-  const handleSave = async (data: ObraFormData) => {
+  const handleSave = async (data: ObraSaveData) => {
     try {
       if (editTarget) {
-        await update('obras', editTarget.id, data)
+        // Si el admin borró las coordenadas, se elimina el campo (nunca se escribe null)
+        const patch = data.coordenadas_sitio
+          ? data
+          : { ...data, coordenadas_sitio: deleteField() }
+        await update('obras', editTarget.id, patch)
         toast('Obra actualizada correctamente')
       } else {
         await add('obras', data)
@@ -172,7 +177,12 @@ export default function Obras() {
         isOpen={modal.isOpen}
         onClose={modal.close}
         onSave={handleSave}
-        initial={editTarget ? { ...editTarget, alcance: editTarget.alcance ?? '' } : null}
+        initial={editTarget ? {
+          ...editTarget,
+          alcance: editTarget.alcance ?? '',
+          latitud_sitio: editTarget.coordenadas_sitio ? String(editTarget.coordenadas_sitio.latitud) : '',
+          longitud_sitio: editTarget.coordenadas_sitio ? String(editTarget.coordenadas_sitio.longitud) : '',
+        } : null}
         existingCodigos={existingCodigos}
         editId={editTarget?.id}
       />

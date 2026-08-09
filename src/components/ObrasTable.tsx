@@ -13,6 +13,9 @@ export interface Obra {
   /** Bloque 3+5 — contratista PRINCIPAL del proyecto (de la asignación).
    *  La app lo ignora; el panel filtra el aval de obras por él. */
   contratista_id?: string
+  /** Coordenadas de referencia del sitio (para el indicador geo de formularios).
+   *  Opcional: sin este campo los formularios quedan en estado `sin_referencia`. */
+  coordenadas_sitio?: { latitud: number; longitud: number }
 }
 
 /** ¿Es una obra-espejo gobernada por el SIGP? */

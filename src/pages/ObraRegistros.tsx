@@ -239,19 +239,20 @@ export default function ObraRegistros() {
       {!loading && filtrados.length > 0 && view === 'lista' && (
         <div className="space-y-1.5">
           {filtrados.map(f => (
-            <RegistroCard key={f.id} formulario={f} onClick={() => setSelected(f)} />
+            <RegistroCard key={f.id} formulario={f} obra={obra} onClick={() => setSelected(f)} />
           ))}
         </div>
       )}
 
       {!loading && filtrados.length > 0 && view === 'kanban' && (
-        <RegistroKanban formularios={filtrados} onCardClick={setSelected} />
+        <RegistroKanban formularios={filtrados} obra={obra} onCardClick={setSelected} />
       )}
 
       {/* Modal de detalle */}
       {selected && (
         <RegistroDetalleModal
           formulario={selected}
+          obra={obra}
           onClose={() => setSelected(null)}
           onVistobueno={handleVistobueno}
           onPdfDescargado={handlePdfDescargado}

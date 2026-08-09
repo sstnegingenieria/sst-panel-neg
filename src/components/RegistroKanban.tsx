@@ -4,9 +4,12 @@ import {
   TIPO_COLOR,
   type Formulario,
 } from '../types/formulario'
+import type { Obra } from './ObrasTable'
+import { getEstadoGeo } from '../utils/geo'
 
 interface Props {
   formularios: Formulario[]
+  obra?: Obra
   onCardClick: (f: Formulario) => void
 }
 
@@ -27,9 +30,10 @@ function formatShortDate(iso: string): string {
   }
 }
 
-function KanbanCard({ f, onClick }: { f: Formulario; onClick: () => void }) {
+function KanbanCard({ f, obra, onClick }: { f: Formulario; obra?: Obra; onClick: () => void }) {
   const tipoLabel = TIPO_LABELS[f.tipo] ?? f.tipo
   const tipoColor = TIPO_COLOR[f.tipo] ?? 'bg-gray-100 text-gray-700'
+  const geo = getEstadoGeo(f.ubicacion, obra?.coordenadas_sitio)
   return (
     <div
       onClick={onClick}
@@ -51,11 +55,21 @@ function KanbanCard({ f, onClick }: { f: Formulario; onClick: () => void }) {
       <div className="text-[9px] text-gray-400 mt-0.5">
         {formatShortDate(f.timestamp_creacion)}
       </div>
+      {geo.estado === 'fuera_de_sitio' && (
+        <div className="mt-1">
+          <span
+            className="inline-block text-[9px] font-semibold px-1.5 py-0.5 rounded bg-orange-100 text-orange-800"
+            title={geo.distanciaMetros !== undefined ? `A ${Math.round(geo.distanciaMetros)} m del punto de la obra` : undefined}
+          >
+            ⚠ Fuera de sitio
+          </span>
+        </div>
+      )}
     </div>
   )
 }
 
-export default function RegistroKanban({ formularios, onCardClick }: Props) {
+export default function RegistroKanban({ formularios, obra, onCardClick }: Props) {
   const grouped: Record<Estado, Formulario[]> = { pendiente: [], aprobado: [], rechazado: [] }
   for (const f of formularios) {
     const estado: Estado = (f.revision_sst?.estado as Estado) ?? 'pendiente'
@@ -80,7 +94,7 @@ export default function RegistroKanban({ formularios, onCardClick }: Props) {
                 — sin registros —
               </div>
             ) : (
-              items.map(f => <KanbanCard key={f.id} f={f} onClick={() => onCardClick(f)} />)
+              items.map(f => <KanbanCard key={f.id} f={f} obra={obra} onClick={() => onCardClick(f)} />)
             )}
           </div>
         )
