@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Header from './Header'
+import RecordatorioCierreSesion from './sigp/horario/RecordatorioCierreSesion'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 
 export default function Layout() {
@@ -38,6 +39,10 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {/* #3 Horario: recordatorio de cierre de sesión al fin de la jornada
+          (todos los roles; una vez por día; el logout registra la salida). */}
+      <RecordatorioCierreSesion />
     </div>
   )
 }
