@@ -6,6 +6,7 @@
 
 import type { Timestamp } from 'firebase/firestore'
 import type { Contacto } from './cliente'
+import type { CoordenadasSitio } from '../../utils/geo'
 
 // ── Enums de dominio ──────────────────────────────────────────────────────────
 
@@ -83,6 +84,10 @@ export interface Solicitud {
    *  del sitio capturado. `codigo_sitio_cliente` admite 'N/A'. */
   nombre_sitio?: string
   codigo_sitio_cliente?: string
+  /** Coordenadas GPS del sitio ({latitud, longitud} — shape canónico de
+   *  `obras.coordenadas_sitio`, PR #75). Opcionales; viajan por el pipeline
+   *  hasta la obra-espejo para el geo-control SST de formularios. */
+  coordenadas_sitio?: CoordenadasSitio
   fecha_recepcion: Timestamp   // cuándo llegó (puede diferir del registro)
   responsable: string          // uid del comercial que la registra/gestiona
   estado: EstadoSolicitud

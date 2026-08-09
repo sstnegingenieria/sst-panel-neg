@@ -14,6 +14,7 @@ import {
   ESTADO_LABEL, ESTADO_COLOR, CANAL_LABEL, TRANSICIONES,
 } from '../../types/sigp/solicitud'
 import type { EstadoSolicitud, Solicitud } from '../../types/sigp/solicitud'
+import { esCoordenadaValida, urlVerificarEnMaps } from '../../utils/geo'
 
 function fFecha(ts: unknown): string {
   const d = (ts as { toDate?: () => Date })?.toDate?.()
@@ -216,6 +217,16 @@ export default function SolicitudDetalleSigp() {
               <Dato k="Ubicación" v={solicitud.sitio || '—'} />
               <Dato k="Registrada" v={fFecha(solicitud.fecha_creacion)} />
             </div>
+            {esCoordenadaValida(solicitud.coordenadas_sitio) && (
+              <p className="text-sm text-gray-700">
+                <span className="text-xs text-gray-400 mr-2">Coordenadas</span>
+                {solicitud.coordenadas_sitio.latitud.toFixed(6)}, {solicitud.coordenadas_sitio.longitud.toFixed(6)}
+                <a href={urlVerificarEnMaps(solicitud.coordenadas_sitio)} target="_blank" rel="noopener noreferrer"
+                  className="ml-2 text-brand-600 hover:underline text-xs font-medium">
+                  Ver en Maps ↗
+                </a>
+              </p>
+            )}
             {solicitud.motivo_descarte && (
               <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-800">
                 <span className="font-semibold">Motivo de descarte:</span> {solicitud.motivo_descarte}

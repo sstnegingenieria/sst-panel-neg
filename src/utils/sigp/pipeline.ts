@@ -18,6 +18,7 @@ import {
   collection, doc, getDoc, getDocs, query, where, limit, setDoc, Timestamp,
 } from 'firebase/firestore'
 import { db } from '../../firebase/config'
+import { esCoordenadaValida } from '../geo'
 import { calcularTotales } from '../../types/sigp/cotizacion'
 import type { Solicitud } from '../../types/sigp/solicitud'
 import type { Visita } from '../../types/sigp/visita'
@@ -65,6 +66,7 @@ export function docBorradorCotizacion(
       ...(contacto ? { contacto } : {}),
       ...(solicitud.nombre_sitio?.trim() ? { nombre_sitio: solicitud.nombre_sitio.trim() } : {}),
       ...(solicitud.codigo_sitio_cliente?.trim() ? { codigo_sitio_cliente: solicitud.codigo_sitio_cliente.trim() } : {}),
+      ...(esCoordenadaValida(solicitud.coordenadas_sitio) ? { coordenadas_sitio: solicitud.coordenadas_sitio } : {}),
       historial: [{ de: null, a: 'pendiente_diligenciar', por: uid, fecha: ahora }],
       registrada_por: uid, fecha_creacion: ahora,
     },

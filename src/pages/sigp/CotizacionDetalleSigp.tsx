@@ -33,6 +33,9 @@ import type { ItemLPU, EsquemaFactorLpu } from '../../types/sigp/lpu'
 import type { CantidadPreliminar } from '../../types/sigp/visita'
 import CotizacionAcciones from '../../components/sigp/cotizaciones/CotizacionAcciones'
 import VersionesCotizacion from '../../components/sigp/cotizaciones/VersionesCotizacion'
+import CoordenadasSitioInput from '../../components/sigp/shared/CoordenadasSitioInput'
+import { esCoordenadaValida, urlVerificarEnMaps } from '../../utils/geo'
+import type { CoordenadasSitio } from '../../utils/geo'
 
 // F1.5 p.4 — formato único es-CO máx. 2 decimales (solo render; precisión interna intacta)
 const fMoneda = fmtMoney
@@ -71,6 +74,7 @@ export default function CotizacionDetalleSigp() {
   // Bloque 1 — identificación del sitio (heredada de la solicitud, editable en borrador)
   const [nombreSitio, setNombreSitio] = useState('')
   const [codigoSitio, setCodigoSitio] = useState('')
+  const [coordenadasSitio, setCoordenadasSitio] = useState<CoordenadasSitio | null>(null)
   // 1.4B.b — análisis económico interno (toggle apagado por defecto) + modal APU
   const [analisis, setAnalisis] = useState(false)
   const [apuIdx, setApuIdx] = useState<number | null>(null)
@@ -99,7 +103,8 @@ export default function CotizacionDetalleSigp() {
     setTipoInversion(cotizacion?.tipo_inversion ?? '')
     setNombreSitio(cotizacion?.nombre_sitio ?? '')
     setCodigoSitio(cotizacion?.codigo_sitio_cliente ?? '')
-  }, [cotizacion?.id, cotizacion?.asunto, cotizacion?.contacto, cotizacion?.tipo_inversion, cotizacion?.nombre_sitio, cotizacion?.codigo_sitio_cliente]) // eslint-disable-line react-hooks/exhaustive-deps
+    setCoordenadasSitio(esCoordenadaValida(cotizacion?.coordenadas_sitio) ? cotizacion!.coordenadas_sitio! : null)
+  }, [cotizacion?.id, cotizacion?.asunto, cotizacion?.contacto, cotizacion?.tipo_inversion, cotizacion?.nombre_sitio, cotizacion?.codigo_sitio_cliente, cotizacion?.coordenadas_sitio]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!version) return
@@ -404,6 +409,12 @@ export default function CotizacionDetalleSigp() {
         asunto: asunto.trim(), contacto: contactoNombre.trim() || deleteField(),
         nombre_sitio: nombreSitio.trim() || deleteField(),
         codigo_sitio_cliente: codigoSitio.trim() || deleteField(),
+        // Coordenadas del sitio: par válido → se escribe; si el usuario lo deja
+        // vacío/inválido y la cotización YA tenía coordenadas, se retiran con
+        // deleteField(); si nunca hubo, no se toca el campo.
+        ...(esCoordenadaValida(coordenadasSitio)
+          ? { coordenadas_sitio: coordenadasSitio }
+          : esCoordenadaValida(cotizacion.coordenadas_sitio) ? { coordenadas_sitio: deleteField() } : {}),
         tipo_inversion: tipoInversion || deleteField(),
         fecha_actualizacion: Timestamp.now(),
         ...(materializa ? {
@@ -675,6 +686,25 @@ export default function CotizacionDetalleSigp() {
         <p className="text-sm text-gray-700">
           <span className="text-xs text-gray-400 mr-2">Sitio</span>{cotizacion.nombre_sitio || '—'}
           <span className="ml-4"><span className="text-xs text-gray-400 mr-2">Cód. sitio</span>{cotizacion.codigo_sitio_cliente || '—'}</span>
+        </p>
+      ) : null}
+
+      {editable ? (
+        <div className="max-w-3xl">
+          <CoordenadasSitioInput
+            value={coordenadasSitio}
+            onChange={setCoordenadasSitio}
+            direccionSugerida={nombreSitio}
+          />
+        </div>
+      ) : esCoordenadaValida(cotizacion.coordenadas_sitio) ? (
+        <p className="text-sm text-gray-700">
+          <span className="text-xs text-gray-400 mr-2">Coordenadas</span>
+          {cotizacion.coordenadas_sitio.latitud.toFixed(6)}, {cotizacion.coordenadas_sitio.longitud.toFixed(6)}
+          <a href={urlVerificarEnMaps(cotizacion.coordenadas_sitio)} target="_blank" rel="noopener noreferrer"
+            className="ml-2 text-brand-600 hover:underline text-xs font-medium">
+            Ver en Maps ↗
+          </a>
         </p>
       ) : null}
 

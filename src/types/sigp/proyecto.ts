@@ -11,6 +11,8 @@
 import type { Timestamp } from 'firebase/firestore'
 import { subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, GRUPO_OTROS_ID } from './cotizacion'
 import type { Cotizacion, VersionCotizacion, EsquemaTributario, TipoInversion } from './cotizacion'
+import { esCoordenadaValida } from '../../utils/geo'
+import type { CoordenadasSitio } from '../../utils/geo'
 
 // ── Estados (enum completo del ciclo de vida; ver capítulo 6 del CLAUDE.md) ──
 
@@ -837,6 +839,9 @@ export interface SnapshotProyecto {
    *  cliente ('N/A' cuando no asigna). Ausentes en proyectos históricos. */
   nombre_sitio?: string
   codigo_sitio_cliente?: string
+  /** Coordenadas GPS del sitio (congeladas al nacer). Alimentan
+   *  `obras.coordenadas_sitio` en la obra-espejo (geo-control SST). */
+  coordenadas_sitio?: CoordenadasSitio
   valor_venta: number          // total de la versión aprobada (con impuestos)
   esquema_tributario: EsquemaTributario
   tipo_inversion?: TipoInversion
@@ -893,7 +898,7 @@ export interface Proyecto {
  * caen en 'Otros' igual que allá.
  */
 export function construirSnapshotProyecto(
-  cotizacion: Pick<Cotizacion, 'asunto' | 'contacto' | 'tipo_inversion' | 'prospecto_nombre' | 'nombre_sitio' | 'codigo_sitio_cliente'>,
+  cotizacion: Pick<Cotizacion, 'asunto' | 'contacto' | 'tipo_inversion' | 'prospecto_nombre' | 'nombre_sitio' | 'codigo_sitio_cliente' | 'coordenadas_sitio'>,
   version: Pick<VersionCotizacion, 'items' | 'totales' | 'esquema' | 'modo_agrupacion' | 'actividades' | 'agrupador'>,
   clienteNombre?: string,
   clienteNit?: string,
@@ -918,6 +923,7 @@ export function construirSnapshotProyecto(
     ...(cotizacion.contacto ? { contacto: cotizacion.contacto } : {}),
     ...(cotizacion.nombre_sitio?.trim() ? { nombre_sitio: cotizacion.nombre_sitio.trim() } : {}),
     ...(cotizacion.codigo_sitio_cliente?.trim() ? { codigo_sitio_cliente: cotizacion.codigo_sitio_cliente.trim() } : {}),
+    ...(esCoordenadaValida(cotizacion.coordenadas_sitio) ? { coordenadas_sitio: cotizacion.coordenadas_sitio } : {}),
     valor_venta: version.totales.total,
     esquema_tributario: version.esquema,
     ...(cotizacion.tipo_inversion ? { tipo_inversion: cotizacion.tipo_inversion } : {}),

@@ -8,6 +8,7 @@ import { toast } from '../../shared/Toast'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
 import { useFirestore } from '../../../hooks/useFirestore'
+import { esCoordenadaValida } from '../../../utils/geo'
 import {
   ESQUEMAS, ESQUEMA_LABEL, calcularTotales, TIPOS_INVERSION, TIPO_INVERSION_LABEL,
   PRESETS_FORMA_PAGO, PRESETS_TIEMPO_EJECUCION, PRESETS_GARANTIA, OBSERVACIONES_BASE,
@@ -187,6 +188,7 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes, 
       // Bloque 1 — identificación del sitio heredada de la solicitud (editable en borrador)
       if (solVinculada?.nombre_sitio?.trim()) parentData.nombre_sitio = solVinculada.nombre_sitio.trim()
       if (solVinculada?.codigo_sitio_cliente?.trim()) parentData.codigo_sitio_cliente = solVinculada.codigo_sitio_cliente.trim()
+      if (esCoordenadaValida(solVinculada?.coordenadas_sitio)) parentData.coordenadas_sitio = solVinculada!.coordenadas_sitio
       // Bloque 2: el tipo de inversión solo aplica a clientes con el flag
       if (form.tipoInversion && clientes.find(c => c.id === form.clienteId)?.usa_tipo_inversion)
         parentData.tipo_inversion = form.tipoInversion

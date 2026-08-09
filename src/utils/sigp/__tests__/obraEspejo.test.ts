@@ -65,6 +65,27 @@ describe('construirObraEspejo — contrato exacto de la app Flutter', () => {
     expect(construirObraEspejo(conAsignacion, undefined, FECHA).contratista_id).toBe('redes-alturas')
     expect(construirObraEspejo(conSitio, undefined, FECHA).contratista_id).toBeUndefined()
   })
+
+  // Geo-control SST (PR #75): el snapshot alimenta obras.coordenadas_sitio
+  it('coordenadas del snapshot → obras.coordenadas_sitio (shape {latitud, longitud})', () => {
+    const conCoords = {
+      ...conSitio,
+      snapshot: { ...conSitio.snapshot, coordenadas_sitio: { latitud: 4.60971, longitud: -74.08175 } },
+    } as typeof conSitio
+    expect(construirObraEspejo(conCoords, undefined, FECHA).coordenadas_sitio)
+      .toEqual({ latitud: 4.60971, longitud: -74.08175 })
+  })
+  it('RETROCOMPAT: snapshot sin coordenadas → la obra no lleva el campo', () => {
+    const o = construirObraEspejo(conSitio, undefined, FECHA)
+    expect('coordenadas_sitio' in o).toBe(false)
+  })
+  it('coordenadas malformadas en el snapshot → se descartan (guard de objeto)', () => {
+    const malformado = {
+      ...conSitio,
+      snapshot: { ...conSitio.snapshot, coordenadas_sitio: { lat: 4.6, lng: -74 } },
+    } as unknown as typeof conSitio
+    expect('coordenadas_sitio' in construirObraEspejo(malformado, undefined, FECHA)).toBe(false)
+  })
 })
 
 describe('estadoObraSegunProyecto — inactiva desde el handoff (decisión 22-jul)', () => {
