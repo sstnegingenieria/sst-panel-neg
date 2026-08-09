@@ -38,7 +38,9 @@ import {
   ROLES_GESTIONA_COMPRAS,
   ROLES_VEN_OC,
   ROLES_VE_PROYECTOS,
+  ROLES_VE_HORARIO,
 } from './types/sigp/permisos'
+import HorarioAsistencia from './pages/administrativa/HorarioAsistencia'
 import FacturacionPagos from './pages/administrativa/FacturacionPagos'
 import Proveedores from './pages/administrativa/Proveedores'
 import VerificacionContratistas from './pages/VerificacionContratistas'
@@ -131,6 +133,9 @@ function ProtectedRoutes() {
         <Route path="/administrativa/facturacion" element={<ProtectedRoute rolesPermitidos={ROLES_VE_FACTURACION}><FacturacionPagos /></ProtectedRoute>} />
         {/* Módulo Compras (C1) — proveedores; solo gerencia_administrativa/admin */}
         <Route path="/administrativa/proveedores" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_COMPRAS}><Proveedores /></ProtectedRoute>} />
+        {/* #3 Horario y asistencia (07-ago) — reportes de reloj + ausentismos;
+            todas las gerencias + admin (gerencia_administrativa opera). */}
+        <Route path="/administrativa/horario" element={<ProtectedRoute rolesPermitidos={ROLES_VE_HORARIO} redirectTo="/sigp/panel"><HorarioAsistencia /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

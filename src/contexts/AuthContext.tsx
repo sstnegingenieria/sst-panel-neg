@@ -1,7 +1,21 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { User, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
-import { auth, db } from '../firebase/config'
+import { httpsCallable } from 'firebase/functions'
+import { auth, db, functions } from '../firebase/config'
+
+/** Validador de horario (#3, SB1): marca de ingreso/salida vía CF — el
+ *  servidor pone IP, dispositivo y timestamp; el cliente solo dice el tipo.
+ *  NO-FATAL por contrato: un fallo de la CF jamás bloquea login ni logout.
+ *  Se invoca SOLO en login()/logout() explícitos — nunca en
+ *  onAuthStateChanged (cada F5 con sesión persistida sería un falso ingreso). */
+async function registrarEventoHorario(tipo: 'ingreso' | 'salida'): Promise<void> {
+  try {
+    await httpsCallable(functions, 'registrarEventoHorario')({ tipo })
+  } catch (e) {
+    console.warn(`Validador de horario: no se pudo registrar la marca de ${tipo}`, e)
+  }
+}
 
 interface UserProfile {
   uid: string
@@ -70,11 +84,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessDenied(false)
     await signInWithEmailAndPassword(auth, email, password)
     // El onAuthStateChanged se encarga de verificar el estado después del login
+    await registrarEventoHorario('ingreso')
   }
 
   const logout = async () => {
     setAccessDenied(false)
-    await signOut(auth)
+    try {
+      // ANTES del signOut — después ya no hay token para invocar la CF.
+      await registrarEventoHorario('salida')
+    } finally {
+      await signOut(auth)
+    }
   }
 
   return (

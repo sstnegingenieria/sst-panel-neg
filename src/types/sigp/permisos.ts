@@ -201,3 +201,17 @@ export const veOcUI = (rol: string | undefined) => en(rol, ROLES_VEN_OC)
 // gerencia_general/admin — espeja la regla Firestore del mismo doc.
 export const ROLES_EDITA_META_INDICADORES: Rol[] = ['gerencia_general', 'admin']
 export const editaMetaIndicadoresUI = (rol: string | undefined) => en(rol, ROLES_EDITA_META_INDICADORES)
+
+// ── Validador de horario / asistencia (#3, 07-ago) ──
+// Espejo EXACTO de veHorario()/gestionaHorario() de firestore.rules:
+// los reportes los ven TODAS las gerencias + admin (decisión Giovanny);
+// operan (ausentismos, detalle médico, anulaciones) solo
+// gerencia_administrativa + admin. La config (IPs + hora fin) la editan
+// GG+admin (regla genérica de `configuracion`, como la meta de margen).
+export const ROLES_VE_HORARIO: Rol[] = [
+  'gerencia_administrativa', 'gerencia_general', 'gestion_integral',
+  'director_proyectos', 'admin',
+]
+export const veHorarioUI = (rol: string | undefined) => en(rol, ROLES_VE_HORARIO)
+export const ROLES_GESTIONA_HORARIO: Rol[] = ['gerencia_administrativa', 'admin']
+export const puedeGestionarHorarioUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_HORARIO)

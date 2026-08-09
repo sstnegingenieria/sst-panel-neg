@@ -66,6 +66,19 @@ service firebase.storage {
                        || request.resource.contentType.matches('image/.*'));
     }
 
+    // ── Horario (#3, SB2): soporte de ausentismos ────────────────────────────
+    // Ruta: ausentismos/{ausentismoId}/soporte/{fileName} (fileName = UUID —
+    // patrón C1, H-008: el rol no se valida aquí; la autorización real es la
+    // regla Firestore de `ausentismos`, que exige soporte_url al crear).
+    match /ausentismos/{ausentismoId}/{tipoDoc}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && tipoDoc in ['soporte']
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (request.resource.contentType == 'application/pdf'
+                       || request.resource.contentType.matches('image/.*'));
+    }
+
     // ── Compras C2/C3: adjuntos de la OC ─────────────────────────────────────
     // Ruta: ordenes_compra/{ocId}/{cotizacion|soporte}/{fileName} (UUID —
     // patrón C1, H-008). 'cotizacion' = la del proveedor al emitir (C2);

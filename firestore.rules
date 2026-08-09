@@ -93,6 +93,20 @@ service cloud.firestore {
       return isAuthed() && rolActual() in ['gerencia_administrativa', 'admin'];
     }
 
+    // 9. Validador de horario / asistencia (#3, 07-ago): los REPORTES los
+    //    ven todas las gerencias + admin (decisión Giovanny); la GESTIÓN
+    //    (ausentismos, detalle médico) es solo de gerencia_administrativa +
+    //    admin. Los registros de reloj no los escribe NADIE desde el panel.
+    function veHorario() {
+      return isAuthed() && rolActual() in [
+        'gerencia_administrativa', 'gerencia_general', 'gestion_integral',
+        'director_proyectos', 'admin'
+      ];
+    }
+    function gestionaHorario() {
+      return isAuthed() && rolActual() in ['gerencia_administrativa', 'admin'];
+    }
+
     // 7. Módulo Compras (C2): órdenes de compra — documento de EJECUCIÓN
     //    (costo operativo: jamás venta/utilidad). Lectura por lista explícita
     //    (mínimo privilegio): sin operacion_comercial ni sst — la OC no es
@@ -641,10 +655,51 @@ service cloud.firestore {
 
     // ── Configuración de indicadores (Opción B, 07-ago): metas editables ──
     // Lectura: quien ve el tablero. Escritura: SOLO gerencia_general/admin.
-    // Sin delete. Doc único: configuracion/indicadores { meta_margen_pct }.
+    // Sin delete. Docs: configuracion/indicadores { meta_margen_pct } y
+    // configuracion/horario { ips_oficina[], hora_fin_jornada } (#3 SB2 —
+    // cubierto por esta MISMA regla genérica, sin cambio).
     match /configuracion/{docId} {
       allow read: if accesoSIGP();
       allow create, update: if isAuthed() && rolActual() in ['gerencia_general', 'admin'];
+    }
+
+    // #3 SB3 (ratificado 07-ago): el doc `horario` lo lee CUALQUIER autenticado —
+    // el pop-up de fin de jornada aplica a TODOS los roles del panel (incl.
+    // sst/residente_sst, fuera de accesoSIGP). Solo IPs de oficina + hora de
+    // jornada (nada económico); `indicadores` conserva su regla de arriba.
+    // La escritura NO se amplía (la cubre el match genérico: GG+admin).
+    match /configuracion/horario {
+      allow read: if isAuthed();
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // MÓDULO HORARIO / ASISTENCIA (#3) — SB2 (07-ago-2026)
+    // ────────────────────────────────────────────────────────────────
+    // Eventos de reloj (ingreso/salida): los escribe SOLO la CF
+    // registrarEventoHorario con Admin SDK — IP, dispositivo y timestamp
+    // son server-side. Nadie "corrige el reloj" desde el panel: CERO
+    // writes de cliente, explícito (patrón compras_proyecto).
+    match /registros_horario/{registroId} {
+      allow read: if veHorario();
+      allow create, update, delete: if false;   // solo la CF (Admin SDK)
+    }
+
+    // Ausentismos (incapacidad / permiso / justificación / vacaciones):
+    // los gestiona gerencia_administrativa (+admin); las gerencias los
+    // leen para reportes. Soporte OBLIGATORIO al crear (patrón rut_url
+    // de proveedores). Sin delete: anulación SOFT (estado + motivo, 5.1).
+    match /ausentismos/{ausentismoId} {
+      allow read: if veHorario();
+      allow create: if gestionaHorario()
+                    && request.resource.data.get('soporte_url', '') != '';
+      allow update: if gestionaHorario();
+
+      // Detalle médico (diagnóstico/observaciones) = dato de SALUD —
+      // LÍNEA DURA (decisión Giovanny 07-ago): solo gerencia_administrativa
+      // + admin; ni gerencia_general lo lee (patrón datos_bancarios).
+      match /privado/{docId} {
+        allow read, create, update: if gestionaHorario();
+      }
     }
 
     // ────────────────────────────────────────────────────────────────
