@@ -2,13 +2,19 @@ rules_version = '2';
 
 // Reglas de producción de Firebase Storage para neg-sst-app.
 // Reconstruidas desde las reglas desplegadas (bloque `pdfs/**` de la app Flutter)
-// + el bloque `lpus/**` del SIGP (F1). El bloque `pdfs/**` NO se modifica.
+// + el bloque `lpus/**` del SIGP (F1). El bloque `pdfs/**` está gateado por
+// dueño: solo el uid del segmento {userId} del path lee/escribe.
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // ── App SST (Flutter): PDFs de formularios. Sin cambio. ──────────────────
-    match /pdfs/{allPaths=**} {
-      allow read, write: if request.auth != null;
+    // ── App SST (Flutter): PDFs de formularios ───────────────────────────────
+    // Ruta: pdfs/{obraId}/{userId}/{formId}/{tipo}_{ts}.pdf (la escribe la app).
+    // Gate de dueño: autoriza el uid del SEGMENTO {userId} del path (variable
+    // de ruta, no falsificable por contenido). El panel lee vía `pdf_url`
+    // (download URL con token), que no pasa por estas reglas.
+    match /pdfs/{obraId}/{userId}/{formId}/{fileName} {
+      allow write: if request.auth != null && request.auth.uid == userId;
+      allow read:  if request.auth != null && request.auth.uid == userId;
     }
 
     // ── SIGP (F1): Excel original de cada LPU ────────────────────────────────
