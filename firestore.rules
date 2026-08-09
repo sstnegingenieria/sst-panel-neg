@@ -107,6 +107,15 @@ service cloud.firestore {
       return isAuthed() && rolActual() in ['gerencia_administrativa', 'admin'];
     }
 
+    // 10. Mantenimiento de precios del catálogo NEG (#2b, 09-ago): quién
+    //     CORRIGE o AJUSTA MASIVAMENTE precios ya existentes. El ALTA desde
+    //     el cotizador (create) sigue abierta a puedeGestionarProyectos().
+    function puedeMantenerCatalogo() {
+      return isAuthed() && rolActual() in [
+        'gerencia_general', 'director_proyectos', 'admin'
+      ];
+    }
+
     // 7. Módulo Compras (C2): órdenes de compra — documento de EJECUCIÓN
     //    (costo operativo: jamás venta/utilidad). Lectura por lista explícita
     //    (mínimo privilegio): sin operacion_comercial ni sst — la OC no es
@@ -501,9 +510,16 @@ service cloud.firestore {
     // Read: acceso SIGP. Write: gestión de proyectos. El código CAT-NNNN lo
     // genera la Cloud Function generarConsecutivo (contador acumulativo).
 
+    // #2b (09-ago): el ALTA sigue siendo del cotizador (incorporación con
+    // CAT-NNNN — un setDoc sobre doc NUEVO, jamás update); el MANTENIMIENTO
+    // posterior (update todo-o-nada: precio + historial) es solo de
+    // gerencia_general/director_proyectos/admin. SIN delete: el soft-delete
+    // por `estado` es el único retiro (restricción 5.1 — un ítem con
+    // trazabilidad a cotizaciones no se borra físicamente).
     match /catalogo_items/{itemId} {
       allow read: if accesoSIGP();
-      allow create, update, delete: if puedeGestionarProyectos();
+      allow create: if puedeGestionarProyectos();
+      allow update: if puedeMantenerCatalogo();
     }
 
     // ────────────────────────────────────────────────────────────────

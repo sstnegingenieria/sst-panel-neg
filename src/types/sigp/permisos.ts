@@ -215,3 +215,11 @@ export const ROLES_VE_HORARIO: Rol[] = [
 export const veHorarioUI = (rol: string | undefined) => en(rol, ROLES_VE_HORARIO)
 export const ROLES_GESTIONA_HORARIO: Rol[] = ['gerencia_administrativa', 'admin']
 export const puedeGestionarHorarioUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_HORARIO)
+
+// ── Mantenimiento de precios del catálogo NEG (#2b, 09-ago) ──
+// Espejo EXACTO de puedeMantenerCatalogo() de firestore.rules: corrigen y
+// ajustan precios SOLO GG + director de proyectos + admin. El ALTA desde el
+// cotizador (incorporación CAT-NNNN) sigue con puedeGestionarProyectos().
+// La página /sigp/catalogo la VEN todos los roles SIGP (lectura).
+export const ROLES_MANTIENE_CATALOGO: Rol[] = ['gerencia_general', 'director_proyectos', 'admin']
+export const puedeMantenerCatalogoUI = (rol: string | undefined) => en(rol, ROLES_MANTIENE_CATALOGO)
