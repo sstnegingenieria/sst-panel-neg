@@ -433,10 +433,18 @@ export default function CotizacionDetalleSigp() {
     return persistir(its, silencioso)
   }
 
-  /** Doc de catálogo desde un ítem (sin claves undefined; Timestamp intacto). */
+  /** Doc de catálogo desde un ítem (sin claves undefined; Timestamp intacto).
+   *  #2b: siembra el PRIMER elemento de historial_precios — todo precio del
+   *  catálogo nace con origen trazable (el COT que lo incorporó). */
   const datosCatalogo = (it: ItemCotizacion, codigo: string): Record<string, unknown> => ({
     codigo, descripcion: it.descripcion, unidad: it.unidad,
     valor_unitario: it.valor_unitario,
+    historial_precios: [{
+      valor_unitario: it.valor_unitario,
+      vigente_desde: Timestamp.now(),
+      actualizado_por: user?.uid ?? '',
+      motivo: `Alta al catálogo desde cotización ${cotizacion.consecutivo}`,
+    }],
     ...(it.costo_directo !== undefined ? { costo_directo: it.costo_directo } : {}),
     ...(it.margen !== undefined ? { margen: it.margen } : {}),
     ...(it.apu ? { apu: it.apu } : {}),

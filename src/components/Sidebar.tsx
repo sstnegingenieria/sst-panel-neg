@@ -174,6 +174,18 @@ const sigpNavItems: {
       </svg>
     ),
   },
+  // #2b — Catálogo NEG (mantenimiento de precios): lectura para todo rol
+  // SIGP; las acciones se gatean dentro de la página.
+  {
+    to: '/sigp/catalogo',
+    label: 'Catálogo NEG',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z M6 6h.008v.008H6V6z" />
+      </svg>
+    ),
+  },
   // F2.1 — visible con sigp_f2_enabled + veProyectosUI (gestión o aprobación)
   // (filtro en el render, no aquí).
   {
@@ -219,7 +231,7 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   // en solo lectura); Panel/Solicitudes/Visitas/Proyectos no le aplican. Las
   // RUTAS siguen vivas (la bandeja enlaza a la ficha del proyecto para
   // aprobar preliquidación) — solo se despeja la navegación.
-  const ocultosParaGerenciaAdm = ['/sigp/panel', '/sigp/solicitudes', '/sigp/visitas', '/sigp/proyectos']
+  const ocultosParaGerenciaAdm = ['/sigp/panel', '/sigp/solicitudes', '/sigp/visitas', '/sigp/proyectos', '/sigp/catalogo']
   const visibleSigpItems = sigpNavItems.filter(item =>
     (item.to !== '/sigp/proyectos' || (f2Enabled && veProyectosUI(user?.rol)))
     && (item.to !== '/sigp/ordenes-compra' || veOcUI(user?.rol))
