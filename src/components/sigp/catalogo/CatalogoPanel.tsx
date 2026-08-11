@@ -1,20 +1,19 @@
-// Mantenimiento de precios del catálogo NEG (#2b) — src/pages/sigp/CatalogoSigp.tsx
-//
-// Lectura de `catalogo_items` (alta desde el cotizador, F1.4-B) con dos
-// acciones de mantenimiento: corrección puntual (1 ítem) y ajuste masivo por
-// % (selección o "todo el catálogo activo"). Todo el mantenimiento queda
-// trazado en `historial_precios` (APPEND-ONLY) — ver CorregirPrecioModal /
-// AjusteMasivoModal. Solo lectura para roles sin `puedeMantenerCatalogoUI`.
+// Mantenimiento de precios del catálogo NEG (#2b) — contenido extraído de la
+// antigua página CatalogoSigp (reorganización de navegación: el catálogo vive
+// como pestaña de Cotizaciones). Lógica y permisos INTACTOS: lectura de
+// `catalogo_items` con corrección puntual y ajuste masivo por %, todo trazado
+// en `historial_precios` (APPEND-ONLY). Solo lectura para roles sin
+// `puedeMantenerCatalogoUI`.
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { collection, getDocs, query, orderBy } from 'firebase/firestore'
-import { db } from '../../firebase/config'
-import { useAuth } from '../../contexts/AuthContext'
-import { toast } from '../../components/shared/Toast'
-import CorregirPrecioModal from '../../components/sigp/catalogo/CorregirPrecioModal'
-import AjusteMasivoModal from '../../components/sigp/catalogo/AjusteMasivoModal'
-import { fmtMoney } from '../../utils/sigp/formato'
-import { puedeMantenerCatalogoUI } from '../../types/sigp/permisos'
-import type { CatalogoItem, EntradaHistorialPrecio } from '../../types/sigp/catalogo'
+import { db } from '../../../firebase/config'
+import { useAuth } from '../../../contexts/AuthContext'
+import { toast } from '../../shared/Toast'
+import CorregirPrecioModal from './CorregirPrecioModal'
+import AjusteMasivoModal from './AjusteMasivoModal'
+import { fmtMoney } from '../../../utils/sigp/formato'
+import { puedeMantenerCatalogoUI } from '../../../types/sigp/permisos'
+import type { CatalogoItem, EntradaHistorialPrecio } from '../../../types/sigp/catalogo'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
@@ -24,7 +23,7 @@ function ultimoHistorial(item: CatalogoItem): EntradaHistorialPrecio | null {
   return h && h.length > 0 ? h[h.length - 1] : null
 }
 
-export default function CatalogoSigp() {
+export default function CatalogoPanel() {
   const { user } = useAuth()
   const esMantenedor = puedeMantenerCatalogoUI(user?.rol)
 
@@ -125,15 +124,7 @@ export default function CatalogoSigp() {
   const colSpan = (esMantenedor ? 1 : 0) + 7
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div>
-        <p className="text-xs font-semibold tracking-wide text-brand-700 uppercase">SIGP · Catálogo</p>
-        <h1 className="text-2xl font-bold text-gray-800">Catálogo NEG</h1>
-        <p className="text-sm text-gray-500">
-          Ítems propios incorporados desde el cotizador · el mantenimiento de precios queda trazado en el historial.
-        </p>
-      </div>
-
+    <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <input
           value={busqueda}
