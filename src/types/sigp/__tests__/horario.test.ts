@@ -5,6 +5,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
 import {
   aparearJornadas, claveDia, fmtDuracion, esHoraValida,
+  claveIngresoLS, evaluarMarcaIngreso, esClaveIngresoObsoleta,
+  PREFIJO_INGRESO_LS, PENDIENTE_INGRESO_TTL_MS,
   type RegistroHorario,
 } from '../horario'
 import {
@@ -144,5 +146,58 @@ describe('permisos UI del módulo horario — espejo de reglas', () => {
     expect(puedeGestionarHorarioUI('gerencia_general')).toBe(false)
     expect(puedeGestionarHorarioUI('gestion_integral')).toBe(false)
     expect(puedeGestionarHorarioUI('director_proyectos')).toBe(false)
+  })
+})
+
+// ── Fix 10-ago: guard una-vez-por-día de la marca de ingreso ─────────────────
+
+describe('claveIngresoLS — clave por uid + día local', () => {
+  it('arma la clave con el prefijo, el uid y claveDia', () => {
+    const fecha = new Date(2026, 7, 10, 9, 30)  // 10-ago-2026 local
+    expect(claveIngresoLS('uid123', fecha)).toBe('sigp.horario.ingreso.uid123.2026-08-10')
+    expect(claveIngresoLS('uid123', fecha).startsWith(PREFIJO_INGRESO_LS)).toBe(true)
+  })
+  it('cambia con el día (límite de medianoche local)', () => {
+    const noche = new Date(2026, 7, 10, 23, 59)
+    const madrugada = new Date(2026, 7, 11, 0, 1)
+    expect(claveIngresoLS('u', noche)).not.toBe(claveIngresoLS('u', madrugada))
+  })
+})
+
+describe('evaluarMarcaIngreso — decisión marcar/omitir', () => {
+  const ahora = new Date(2026, 7, 10, 8, 0)
+  it('sin valor (primer arranque del día) → marcar', () => {
+    expect(evaluarMarcaIngreso(null, ahora)).toBe(true)
+    expect(evaluarMarcaIngreso('', ahora)).toBe(true)
+  })
+  it("'ok' (ya marcada hoy) → omitir", () => {
+    expect(evaluarMarcaIngreso('ok', ahora)).toBe(false)
+  })
+  it('centinela pendiente FRESCO (otra pestaña en vuelo) → omitir', () => {
+    const hace30s = ahora.getTime() - 30_000
+    expect(evaluarMarcaIngreso(`pendiente:${hace30s}`, ahora)).toBe(false)
+  })
+  it('centinela pendiente VIEJO (CF que murió sin resolver) → reintentar', () => {
+    const hace3min = ahora.getTime() - PENDIENTE_INGRESO_TTL_MS - 60_000
+    expect(evaluarMarcaIngreso(`pendiente:${hace3min}`, ahora)).toBe(true)
+  })
+  it('valor corrupto → marcar (mejor doble tolerado por el apareo que día sin marca)', () => {
+    expect(evaluarMarcaIngreso('basura', ahora)).toBe(true)
+    expect(evaluarMarcaIngreso('pendiente:xx', ahora)).toBe(true)
+  })
+})
+
+describe('esClaveIngresoObsoleta — poda de claves de otros días', () => {
+  const hoy = 'sigp.horario.ingreso.uid1.2026-08-10'
+  it('clave del mismo uid de OTRO día → podable', () => {
+    expect(esClaveIngresoObsoleta('sigp.horario.ingreso.uid1.2026-08-09', 'uid1', hoy)).toBe(true)
+  })
+  it('la clave de hoy NO se poda', () => {
+    expect(esClaveIngresoObsoleta(hoy, 'uid1', hoy)).toBe(false)
+  })
+  it('claves de OTRO uid o ajenas al prefijo no se tocan', () => {
+    expect(esClaveIngresoObsoleta('sigp.horario.ingreso.uid2.2026-08-09', 'uid1', hoy)).toBe(false)
+    expect(esClaveIngresoObsoleta('sigp.horario.recordatorio.2026-08-09', 'uid1', hoy)).toBe(false)
+    expect(esClaveIngresoObsoleta('sigp.admin.orden', 'uid1', hoy)).toBe(false)
   })
 })
