@@ -16,7 +16,7 @@ const CLAVE_LS = (dia: string) => `sigp.horario.recordatorio.${dia}`
 const INTERVALO_MS = 5 * 60_000
 
 export default function RecordatorioCierreSesion() {
-  const { user, logout } = useAuth()
+  const { user, logout, cerrandoSesion } = useAuth()
   const [horaFin, setHoraFin] = useState<string | null>(null)
   const [visible, setVisible] = useState(false)
 
@@ -64,8 +64,9 @@ export default function RecordatorioCierreSesion() {
           Sigo trabajando
         </button>
         <button onClick={() => { descartar(); logout() }}
-          className="text-xs px-3 py-1 rounded-lg font-medium bg-brand-700 hover:bg-brand-800 text-white">
-          Cerrar sesión
+          disabled={cerrandoSesion}
+          className="text-xs px-3 py-1 rounded-lg font-medium bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-60 disabled:cursor-wait">
+          {cerrandoSesion ? 'Cerrando…' : 'Cerrar sesión'}
         </button>
       </div>
     </div>
