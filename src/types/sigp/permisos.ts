@@ -73,13 +73,6 @@ export const veContratistas = (rol: string | undefined) => en(rol, ROLES_VE_CONT
 // separado de puedeAdministrarSST() para no otorgar gestión de users).
 export const ROLES_APROBAR_REGISTROS: Rol[] = ['admin', 'sst', 'gestion_integral', 'residente_sst']
 
-// Crear/editar/eliminar obras. Alineado con `puedeGestionarProyectos()` de
-// firestore.rules (mismos 5 roles).
-export const ROLES_GESTIONA_OBRAS: Rol[] = [
-  'admin', 'gerencia_general', 'operacion_comercial',
-  'auxiliar_proyectos', 'director_proyectos',
-]
-
 // Crear/editar/eliminar contratistas: solo admin (UI más estricta que las
 // reglas a propósito — defensa en profundidad).
 export const ROLES_GESTIONA_CONTRATISTAS: Rol[] = ['admin']
@@ -97,7 +90,6 @@ export const ROLES_GESTIONA_CLIENTES: Rol[] = [
 ]
 
 export const puedeAprobarRegistros = (rol: string | undefined) => en(rol, ROLES_APROBAR_REGISTROS)
-export const puedeGestionarObrasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_OBRAS)
 export const puedeGestionarContratistasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CONTRATISTAS)
 export const puedeHabilitarContratistas = (rol: string | undefined) => en(rol, ROLES_HABILITA_CONTRATISTAS)
 export const puedeGestionarClientesUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)

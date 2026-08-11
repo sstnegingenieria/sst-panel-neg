@@ -24,9 +24,6 @@ export const esObraEspejo = (o: Obra) => o.origen === 'sigp'
 interface ObrasTableProps {
   obras: Obra[]
   loading: boolean
-  onEdit: (obra: Obra) => void
-  onToggleEstado: (obra: Obra) => void
-  puedeGestionar: boolean
 }
 
 const estadoBadge = {
@@ -34,7 +31,7 @@ const estadoBadge = {
   inactiva: 'bg-amber-50 text-amber-700',
 }
 
-export default function ObrasTable({ obras, loading, onEdit, onToggleEstado, puedeGestionar }: ObrasTableProps) {
+export default function ObrasTable({ obras, loading }: ObrasTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full text-sm">
@@ -45,7 +42,7 @@ export default function ObrasTable({ obras, loading, onEdit, onToggleEstado, pue
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Cliente</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Alcance / Objeto</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Estado</th>
-            <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide text-right">Acciones</th>
+            <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Coordenadas</th>
           </tr>
         </thead>
         <tbody>
@@ -93,33 +90,14 @@ export default function ObrasTable({ obras, loading, onEdit, onToggleEstado, pue
                     {obra.estado}
                   </span>
                 </td>
-                <td className="py-3 px-4 text-right">
-                  {esObraEspejo(obra) ? (
-                    <span className="text-xs text-gray-400"
-                      title="El estado de esta obra lo sincroniza su proyecto SIGP (activa en ejecución, inactiva al pasar a facturación)">
-                      gestionada por el proyecto
+                <td className="py-3 px-4">
+                  {obra.coordenadas_sitio ? (
+                    <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-50 text-brand-700"
+                      title={`lat ${obra.coordenadas_sitio.latitud}, lon ${obra.coordenadas_sitio.longitud}`}>
+                      📍 Coordenadas cargadas
                     </span>
-                  ) : puedeGestionar ? (
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => onEdit(obra)}
-                        className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition font-medium"
-                      >
-                        Editar
-                      </button>
-                      <button
-                        onClick={() => onToggleEstado(obra)}
-                        className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition ${
-                          obra.estado === 'activa'
-                            ? 'border-red-200 text-red-600 hover:bg-red-50'
-                            : 'border-green-200 text-green-600 hover:bg-green-50'
-                        }`}
-                      >
-                        {obra.estado === 'activa' ? 'Desactivar' : 'Activar'}
-                      </button>
-                    </div>
                   ) : (
-                    <span className="text-gray-300 text-xs">—</span>
+                    <span className="text-gray-400 text-xs">Sin referencia</span>
                   )}
                 </td>
               </tr>
