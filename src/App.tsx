@@ -22,7 +22,6 @@ import VisitasSigp from './pages/sigp/VisitasSigp'
 import VisitaDetalleSigp from './pages/sigp/VisitaDetalleSigp'
 import CotizacionesSigp from './pages/sigp/CotizacionesSigp'
 import CotizacionDetalleSigp from './pages/sigp/CotizacionDetalleSigp'
-import CatalogoSigp from './pages/sigp/CatalogoSigp'
 import ProyectosSigp from './pages/sigp/ProyectosSigp'
 import ProyectoDetalleSigp from './pages/sigp/ProyectoDetalleSigp'
 import OrdenesCompraSigp from './pages/sigp/OrdenesCompraSigp'
@@ -121,9 +120,10 @@ function ProtectedRoutes() {
         <Route path="/sigp/visitas/:visitaId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><VisitaDetalleSigp /></ProtectedRoute>} />
         <Route path="/sigp/cotizaciones" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionesSigp /></ProtectedRoute>} />
         <Route path="/sigp/cotizaciones/:cotizacionId" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CotizacionDetalleSigp /></ProtectedRoute>} />
-        {/* #2b — Catálogo NEG: lectura para todo rol SIGP; corregir/ajustar
-            precios solo ROLES_MANTIENE_CATALOGO (gate dentro de la página) */}
-        <Route path="/sigp/catalogo" element={<ProtectedRoute rolesPermitidos={ROLES_CON_ACCESO_SIGP}><CatalogoSigp /></ProtectedRoute>} />
+        {/* #2b — Catálogo NEG: vive como pestaña de Cotizaciones (reorg de
+            navegación); la ruta vieja redirige — enlaces guardados no se
+            rompen (patrón /sigp/lpus del PR #24) */}
+        <Route path="/sigp/catalogo" element={<Navigate to="/sigp/cotizaciones?tab=catalogo" replace />} />
         {/* F2.1.a — las páginas además se auto-gatean con sigp_f2_enabled.
             §16 (ii): proyectos es dominio de ejecución — SOLO los 6 roles de
             ROLES_VE_PROYECTOS (sin comercial; espeja puedeVerProyectos() de
