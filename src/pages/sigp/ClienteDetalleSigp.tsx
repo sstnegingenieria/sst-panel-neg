@@ -30,6 +30,16 @@ export default function ClienteDetalleSigp() {
   const [loading, setLoading] = useState(true)
   const [pestana, setPestana] = useState<Pestana>('info')
   const [wizardOpen, setWizardOpen] = useState(false)
+  // Ruta B — nombre del cliente antecesor (sucede_a), read best-effort
+  const [nombreAntecesor, setNombreAntecesor] = useState<string | null>(null)
+  useEffect(() => {
+    setNombreAntecesor(null)
+    const id = cliente?.sucede_a
+    if (!id) return
+    getDoc(doc(db, 'clientes', id))
+      .then(s => { if (s.exists()) setNombreAntecesor((s.data().nombre as string) ?? null) })
+      .catch(() => null)
+  }, [cliente?.sucede_a])
 
   const puedeEditarCliente = puedeGestionarClientesUI(user?.rol)
   const puedeGestionarLpu = puedeGestionarLpusUI(user?.rol)
@@ -152,6 +162,21 @@ export default function ClienteDetalleSigp() {
               <p className="text-xs text-gray-500 mt-1">
                 AIU por defecto: A {c.condiciones_comerciales.aiu_defaults.admin}% · I {c.condiciones_comerciales.aiu_defaults.imprevistos}% · U {c.condiciones_comerciales.aiu_defaults.utilidad}%
               </p>
+            )}
+            {(c.usa_preventivos || c.sucede_a) && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                {c.usa_preventivos && (
+                  <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-brand-50 text-brand-700">
+                    Cliente de preventivos (precio de matriz)
+                  </span>
+                )}
+                {c.sucede_a && (
+                  <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600"
+                    title="Linaje informativo — se registra por dato, sin edición">
+                    Sucede a {nombreAntecesor ?? 'otro cliente'}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </div>

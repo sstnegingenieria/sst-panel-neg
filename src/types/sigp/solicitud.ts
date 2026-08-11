@@ -72,6 +72,10 @@ export interface Solicitud {
   // formalización a cliente se exige al cotizar (F1.4).
   cliente_id?: string
   prospecto_nombre?: string    // nombre de la empresa/persona si aún no es cliente
+  /** Ruta B (preventivos): NOMBRE del cliente resuelto, denormalizado al
+   *  registrar — fallback del snapshot sin literales hardcodeados. Ausente
+   *  en solicitudes históricas y comerciales. */
+  cliente_nombre?: string
 
   contacto: Contacto           // persona que hizo la solicitud
   canal: Canal

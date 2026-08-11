@@ -73,7 +73,7 @@ export default function EntregablesIhs({ proyecto, puedeGestionar, reload }: Pro
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Entregables IHS</p>
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Entregables del cliente (preventivos)</p>
         <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold ${
           hechos === ENTREGABLES_IHS.length ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
         }`}>
@@ -81,7 +81,7 @@ export default function EntregablesIhs({ proyecto, puedeGestionar, reload }: Pro
         </span>
       </div>
       <p className="text-[11px] text-gray-400">
-        Los formatos se diligencian en los archivos de IHS y se suben a su app; aquí queda la trazabilidad y la copia.
+        Los formatos se diligencian en los archivos del cliente y se suben a su plataforma; aquí queda la trazabilidad y la copia.
         Los 3 son requisito para registrar la entrega.
       </p>
 
@@ -119,7 +119,7 @@ export default function EntregablesIhs({ proyecto, puedeGestionar, reload }: Pro
               {abierto === e.key && (
                 <div className="mt-2 pl-6 space-y-2 bg-gray-50 rounded-lg p-3">
                   <label className="block text-xs text-gray-500">
-                    Archivo diligenciado (Excel de IHS)
+                    Archivo diligenciado (Excel del cliente)
                     <input type="file" onChange={ev => setArchivo(ev.target.files?.[0] ?? null)}
                       className="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
                   </label>

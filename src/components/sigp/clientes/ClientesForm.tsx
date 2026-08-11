@@ -10,6 +10,7 @@ export interface ClienteFormData {
   nit: string
   estado: 'activo' | 'inactivo'
   usa_tipo_inversion: boolean
+  usa_preventivos: boolean
   contactos: Contacto[]
   condiciones_comerciales: CondicionesComerciales
 }
@@ -37,6 +38,7 @@ interface FormState {
   nit: string
   estado: 'activo' | 'inactivo'
   usaTipoInversion: boolean
+  usaPreventivos: boolean
   contactos: ContactoRow[]
   esquema: 'iva_pleno' | 'aiu'
   aiu: { admin: string; imprevistos: string; utilidad: string }
@@ -47,7 +49,7 @@ const EMPTY_CONTACTO: ContactoRow = { nombre: '', cargo: '', email: '', telefono
 function toFormState(c: Cliente | null | undefined): FormState {
   if (!c) {
     return {
-      nombre: '', nit: '', estado: 'activo', usaTipoInversion: false,
+      nombre: '', nit: '', estado: 'activo', usaTipoInversion: false, usaPreventivos: false,
       contactos: [{ ...EMPTY_CONTACTO }],
       esquema: 'iva_pleno',
       aiu: { admin: '', imprevistos: '', utilidad: '' },
@@ -59,6 +61,7 @@ function toFormState(c: Cliente | null | undefined): FormState {
     nit: c.nit,
     estado: c.estado,
     usaTipoInversion: c.usa_tipo_inversion ?? false,
+    usaPreventivos: c.usa_preventivos ?? false,
     contactos: c.contactos.length
       ? c.contactos.map(ct => ({
           nombre: ct.nombre,
@@ -103,6 +106,7 @@ function toFormData(s: FormState): ClienteFormData {
     nit: s.nit.trim(),
     estado: s.estado,
     usa_tipo_inversion: s.usaTipoInversion,
+    usa_preventivos: s.usaPreventivos,
     contactos,
     condiciones_comerciales,
   }
@@ -337,6 +341,14 @@ export default function ClientesForm({ isOpen, onClose, onSave, initial }: Clien
               onChange={e => set('usaTipoInversion', e.target.checked)}
               className="w-4 h-4 accent-brand-700" />
             Clasifica contratos por tipo de inversión (OPEX/CAPEX — contratos tipo Claro)
+          </label>
+          {/* Ruta B — el cliente de PREVENTIVOS (precio de matriz). Semántica
+              singular: un solo cliente flaggeado activo a la vez. */}
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={form.usaPreventivos}
+              onChange={e => set('usaPreventivos', e.target.checked)}
+              className="w-4 h-4 accent-brand-700" />
+            Cliente de preventivos (precio de matriz — metodología torres)
           </label>
         </div>
 
