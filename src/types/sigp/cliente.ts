@@ -41,11 +41,27 @@ export interface Cliente {
    *  inversión (OPEX/CAPEX — contratos tipo Claro). Solo con este flag el
    *  cotizador muestra el selector. Ausente = false. */
   usa_tipo_inversion?: boolean
+  /** Ruta B (11-ago-2026, IHS→Vertis): el cliente opera PREVENTIVOS con
+   *  precio de matriz (types/sigp/preventivos.ts). Reemplaza el viejo
+   *  hardcode por nombre "ihs" del form de solicitudes. Ausente = false;
+   *  la semántica es SINGULAR — un solo cliente flaggeado activo a la vez
+   *  (la transición de metodología apaga el del antecesor). */
+  usa_preventivos?: boolean
+  /** Linaje informativo (p. ej. Vertis sucede a IHS tras la compra). Id del
+   *  cliente antecesor. SIN UI de edición — se escribe por dato autorizado;
+   *  el detalle del cliente lo muestra como chip de solo lectura. */
+  sucede_a?: string
   condiciones_comerciales: CondicionesComerciales
   /** Mapeos de columnas guardados para reutilizar al importar futuras LPU de este cliente. */
   mapeos_lpu_guardados: MapeoImportacion[]
   fecha_creacion: Timestamp
   fecha_actualizacion?: Timestamp
+}
+
+/** Cliente que opera preventivos (Ruta B): el primero ACTIVO con el flag,
+ *  en el orden del listado (alfabético). Null si ninguno — el form bloquea. */
+export function clientePreventivosDe(clientes: Cliente[]): Cliente | null {
+  return clientes.find(c => c.usa_preventivos === true && c.estado === 'activo') ?? null
 }
 
 export const CLIENTE_ESTADOS = ['activo', 'inactivo'] as const

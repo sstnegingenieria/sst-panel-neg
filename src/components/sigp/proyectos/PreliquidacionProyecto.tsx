@@ -488,7 +488,7 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
               filaDeriv('Subtotal (costos directos)', fmtMoney(version.totales.costos_directos))
             )
           ) : proyecto.origen === 'preventivo' ? (
-            <p className="text-[11px] text-gray-400">Precio de matriz IHS — el IVA se aplica en la facturación (Administrativa, futuro).</p>
+            <p className="text-[11px] text-gray-400">Precio de matriz de preventivos — el IVA se aplica en la facturación (Administrativa, futuro).</p>
           ) : (
             <p className="text-[11px] text-gray-400">Cargando desglose…</p>
           )}

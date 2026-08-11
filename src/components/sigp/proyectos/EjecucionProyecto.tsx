@@ -279,9 +279,9 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
             const faltantes = entregablesIhsFaltantes(proyecto)
             return faltantes.length > 0 ? (
               <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-800">
-                <p className="font-semibold">Para registrar la entrega faltan los entregables IHS:</p>
+                <p className="font-semibold">Para registrar la entrega faltan los entregables del cliente:</p>
                 <ul className="list-disc pl-4 mt-0.5">{faltantes.map(f => <li key={f}>{f}</li>)}</ul>
-                <p className="mt-1 text-[11px]">Adjúntalos en la sección "Entregables IHS" de esta ficha.</p>
+                <p className="mt-1 text-[11px]">Adjúntalos en la sección "Entregables del cliente" de esta ficha.</p>
               </div>
             ) : (
               <button onClick={() => setFormEntrega(true)}

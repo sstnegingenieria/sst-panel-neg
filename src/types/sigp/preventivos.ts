@@ -107,7 +107,7 @@ export function precioPreventivo(p: ParametrosPrecio): PrecioPreventivo | null {
  *  construía crearProyectoDesdePreventivo (retirado — la CF copia esto).
  *  Puro: los reads (cliente) los hace el caller. */
 export function construirSnapshotPreventivo(
-  solicitud: Pick<import('./solicitud').Solicitud, 'nombre_sitio' | 'codigo_sitio_cliente' | 'coordenadas_sitio' | 'prospecto_nombre'>,
+  solicitud: Pick<import('./solicitud').Solicitud, 'nombre_sitio' | 'codigo_sitio_cliente' | 'coordenadas_sitio' | 'prospecto_nombre' | 'cliente_nombre'>,
   p: import('./solicitud').DatosPreventivo,
   precio: PrecioPreventivo,
   clienteNombre?: string,
@@ -115,7 +115,10 @@ export function construirSnapshotPreventivo(
 ): import('./proyecto').SnapshotProyecto {
   const renglon = `Mantenimiento preventivo ${INTENSIDAD_LABEL[p.intensidad].toLowerCase()} — ${p.sitio_nombre}`
   return {
-    cliente: clienteNombre ?? solicitud.prospecto_nombre ?? 'IHS',
+    // Ruta B: read en vivo → nombre denormalizado al registrar → prospecto.
+    // El literal de cliente hardcodeado quedó eliminado; el último fallback
+    // es un marcador neutro (solo alcanzable en históricas con read fallido).
+    cliente: clienteNombre ?? solicitud.cliente_nombre ?? solicitud.prospecto_nombre ?? 'Cliente de preventivos',
     ...(clienteNit ? { cliente_nit: clienteNit } : {}),
     asunto: `${renglon} (${TIPO_SITIO_LABEL[p.tipo_sitio]}${p.es_jungle ? ' · jungle' : ''}${p.es_sai ? ' · SAI' : ''} · ${p.zona})`,
     // Bloque 1 — identificación del sitio: capturada en la solicitud (con

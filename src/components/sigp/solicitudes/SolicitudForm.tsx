@@ -21,6 +21,7 @@ import {
 } from '../../../types/sigp/preventivos'
 import type { TipoSitio, IntensidadPreventivo } from '../../../types/sigp/preventivos'
 import type { Canal, Adjunto, TipoSolicitud, DecisionRegistro, Solicitud } from '../../../types/sigp/solicitud'
+import { clientePreventivosDe } from '../../../types/sigp/cliente'
 import type { Cliente, Contacto } from '../../../types/sigp/cliente'
 
 interface SolicitudFormProps {
@@ -103,10 +104,9 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
   const f2Enabled = useFeatureFlag('sigp_f2_enabled', false)
   const [form, setForm] = useState<FormState>(inicial)
 
-  // F2.2-ajuste: en preventivos el cliente es FIJO — se resuelve IHS del
-  // registro (nombre con la palabra "ihs", activo) y queda de solo lectura.
-  const clienteIHS = clientes.find(c =>
-    /\bihs\b/.test(normalizarNombre(c.nombre)) && c.estado === 'activo') ?? null
+  // Ruta B (11-ago): en preventivos el cliente es FIJO — el flaggeado
+  // `usa_preventivos` activo (helper puro; reemplaza el hardcode "ihs").
+  const clientePreventivos = clientePreventivosDe(clientes)
   const [archivos, setArchivos] = useState<File[]>([])
   const [errores, setErrores] = useState<Record<string, string>>({})
   const [guardando, setGuardando] = useState(false)
@@ -160,13 +160,13 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
   // Derivados del preventivo (zona/SAI del departamento; precio de matriz en vivo)
   const esPreventivo = form.tipo === 'preventivo'
 
-  // Cliente fijo: al entrar a preventivo se fuerza IHS; al volver a comercial
-  // se limpia para que el selector arranque neutro.
+  // Cliente fijo: al entrar a preventivo se fuerza el flaggeado; al volver a
+  // comercial se limpia para que el selector arranque neutro.
   useEffect(() => {
-    if (esPreventivo) set('clienteId', clienteIHS?.id ?? '')
+    if (esPreventivo) set('clienteId', clientePreventivos?.id ?? '')
     else set('clienteId', '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [esPreventivo, clienteIHS?.id])
+  }, [esPreventivo, clientePreventivos?.id])
   const zona = esPreventivo && form.departamento ? zonaDeDepartamento(form.departamento) : null
   const esSai = esPreventivo && esSanAndres(form.departamento)
   const precio = esPreventivo && zona
@@ -176,7 +176,7 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
   const validar = (): boolean => {
     const e: Record<string, string> = {}
     if (esPreventivo) {
-      if (!form.clienteId) e.origen = 'No hay un cliente IHS activo en el registro — créalo primero en Clientes'
+      if (!form.clienteId) e.origen = 'No hay un cliente de preventivos activo — marcá el flag en Clientes'
       if (!form.sitioNombre.trim()) e.sitioNombre = 'Requerido'
       if (!form.departamento) e.departamento = 'Requerido'
       else if (!zona) e.departamento = 'Departamento fuera de las zonas del contrato'
@@ -240,9 +240,12 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
     if (nombreSitio) doc_.nombre_sitio = nombreSitio
     if (codigoSitio) doc_.codigo_sitio_cliente = codigoSitio
     if (esCoordenadaValida(coordenadas)) doc_.coordenadas_sitio = coordenadas
-    // F2.2 — preventivo IHS: tipo + datos del sitio con zona/SAI denormalizados
+    // F2.2 — preventivo: tipo + datos del sitio con zona/SAI denormalizados.
+    // Ruta B: se denormaliza el NOMBRE del cliente resuelto — elimina el
+    // fallback 'IHS' literal del builder del snapshot (§16 staging).
     if (esPreventivo && zona) {
       doc_.tipo = 'preventivo'
+      if (clientePreventivos) doc_.cliente_nombre = clientePreventivos.nombre
       doc_.descripcion = form.descripcion.trim() ||
         `Mantenimiento preventivo ${INTENSIDAD_LABEL[form.intensidad].toLowerCase()} — ${form.sitioNombre.trim()}`
       doc_.preventivo = {
@@ -379,27 +382,27 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
             onChange={v => set('tipo', v as TipoSolicitud)}
             options={[
               { value: 'comercial', label: 'Comercial (cotización)' },
-              { value: 'preventivo', label: 'Preventivo IHS (precio de matriz)' },
+              { value: 'preventivo', label: 'Preventivo (precio de matriz)' },
             ]}
           />
         )}
 
-        {/* Origen: preventivo → cliente FIJO IHS (solo lectura); comercial → selector normal */}
+        {/* Origen: preventivo → cliente FIJO (el flaggeado, solo lectura); comercial → selector normal */}
         <div className="space-y-2">
           {esPreventivo ? (
-            clienteIHS ? (
+            clientePreventivos ? (
               <div>
                 <p className="text-sm font-medium text-gray-700 mb-1">Cliente <span className="text-gray-400 font-normal">(fijo para preventivos)</span></p>
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50">
-                  <span className="text-sm font-semibold text-gray-800">{clienteIHS.nombre}</span>
-                  {clienteIHS.nit && <span className="text-xs text-gray-500">NIT {clienteIHS.nit}</span>}
-                  <span className="ml-auto inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-brand-50 text-brand-700">🔒 IHS</span>
+                  <span className="text-sm font-semibold text-gray-800">{clientePreventivos.nombre}</span>
+                  {clientePreventivos.nit && <span className="text-xs text-gray-500">NIT {clientePreventivos.nit}</span>}
+                  <span className="ml-auto inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-brand-50 text-brand-700">🔒 Preventivos</span>
                 </div>
               </div>
             ) : (
               <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800">
-                <span className="font-semibold">No hay un cliente IHS activo en el registro.</span> Crea primero el
-                cliente IHS en la sección Clientes para poder registrar preventivos.
+                <span className="font-semibold">No hay un cliente de preventivos activo.</span> Marcá
+                «Cliente de preventivos» en el registro del cliente (sección Clientes) para poder registrar preventivos.
               </div>
             )
           ) : (
@@ -525,7 +528,7 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <TextField label="Nombre del sitio" value={form.sitioNombre} onChange={v => set('sitioNombre', v)}
                 error={errores.sitioNombre} placeholder="Ej: EB La Ceja" required />
-              <TextField label="ID del sitio (IHS)" value={form.sitioId} onChange={v => set('sitioId', v)} placeholder="Opcional" />
+              <TextField label="ID del sitio (del cliente)" value={form.sitioId} onChange={v => set('sitioId', v)} placeholder="Opcional" />
               <SelectField label="Tipo de sitio" value={form.tipoSitio} onChange={v => set('tipoSitio', v as TipoSitio)}
                 options={(['greenfield', 'rooftop'] as TipoSitio[]).map(t => ({ value: t, label: TIPO_SITIO_LABEL[t] }))} required />
               <SelectField label="Intensidad" value={form.intensidad} onChange={v => set('intensidad', v as IntensidadPreventivo)}
@@ -594,8 +597,8 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
             onChange={v => set('nombreSitio', v)}
             error={errores.nombreSitio}
             required={!esPreventivo}
-            placeholder={esPreventivo ? (form.sitioNombre.trim() || 'auto: nombre del sitio IHS') : 'Ej: ALKARAWI'}
-            hint={esPreventivo ? 'Vacío → se toma del sitio IHS' : 'Con este nombre se identificará la obra'}
+            placeholder={esPreventivo ? (form.sitioNombre.trim() || 'auto: nombre del sitio del preventivo') : 'Ej: ALKARAWI'}
+            hint={esPreventivo ? 'Vacío → se toma del sitio del preventivo' : 'Con este nombre se identificará la obra'}
           />
           <TextField
             label="Código del sitio (cliente)"
@@ -603,8 +606,8 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
             onChange={v => set('codigoSitio', v)}
             error={errores.codigoSitio}
             required={!esPreventivo}
-            placeholder={esPreventivo ? (form.sitioId.trim() || 'auto: id IHS · N/A') : 'Ej: COCUN7002 — N/A si no asigna'}
-            hint={esPreventivo ? 'Vacío → id del sitio IHS o N/A' : "'N/A' si el cliente no asigna código"}
+            placeholder={esPreventivo ? (form.sitioId.trim() || 'auto: id del sitio · N/A') : 'Ej: COCUN7002 — N/A si no asigna'}
+            hint={esPreventivo ? 'Vacío → id del sitio del cliente o N/A' : "'N/A' si el cliente no asigna código"}
           />
         </div>
 

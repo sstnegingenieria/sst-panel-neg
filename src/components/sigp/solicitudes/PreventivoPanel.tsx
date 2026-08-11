@@ -122,7 +122,7 @@ export default function PreventivoPanel({ solicitud, puedeGestionar, reload }: P
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
-        <h2 className="font-semibold text-gray-800 text-sm">Preventivo IHS</h2>
+        <h2 className="font-semibold text-gray-800 text-sm">Preventivo</h2>
         <span className="inline-flex px-2 py-0.5 rounded text-[11px] font-semibold bg-brand-50 text-brand-700">PREVENTIVO</span>
         {proyectoId ? (
           veProyectos ? (

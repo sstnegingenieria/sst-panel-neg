@@ -100,11 +100,20 @@ describe('construirSnapshotPreventivo — staging §16 (ii)', () => {
     expect(precio.total).toBe(2_856_685)  // jungle Z3 GF pesado + transporte
   })
 
-  it('fallbacks: sin cliente → prospecto → "IHS"; sin NIT → sin campo', () => {
+  it('fallbacks (Ruta B): read vivo → cliente_nombre denormalizado → prospecto → marcador neutro; sin NIT → sin campo', () => {
+    // El nombre denormalizado al registrar gana sobre el prospecto
+    const conDenormalizado = construirSnapshotPreventivo(
+      { cliente_nombre: 'VERTIS TORRES', prospecto_nombre: 'TORRES SAS' }, p, precio)
+    expect(conDenormalizado.cliente).toBe('VERTIS TORRES')
+    // El read en vivo gana sobre todo
+    const conRead = construirSnapshotPreventivo(
+      { cliente_nombre: 'VERTIS TORRES' }, p, precio, 'IHS TOWERS')
+    expect(conRead.cliente).toBe('IHS TOWERS')
     const conProspecto = construirSnapshotPreventivo({ prospecto_nombre: 'TORRES SAS' }, p, precio)
     expect(conProspecto.cliente).toBe('TORRES SAS')
+    // Histórica sin nada y read fallido → marcador neutro (el literal IHS murió)
     const sinNada = construirSnapshotPreventivo({}, p, precio)
-    expect(sinNada.cliente).toBe('IHS')
+    expect(sinNada.cliente).toBe('Cliente de preventivos')
     expect('cliente_nit' in sinNada).toBe(false)
   })
 

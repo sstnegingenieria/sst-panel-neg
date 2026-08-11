@@ -503,7 +503,7 @@ export default function PanelSigp() {
 
               {/* Preventivos IHS (tiles) */}
               <div className="bg-white rounded-2xl border border-gray-200 p-[18px]">
-                <h3 className="text-[13.5px] font-bold text-gray-800 mb-4">Preventivos IHS · {mesLargo(periodo)}</h3>
+                <h3 className="text-[13.5px] font-bold text-gray-800 mb-4">Preventivos · {mesLargo(periodo)}</h3>
                 {!puedeVerProyectos ? (
                   <p className="text-sm text-gray-400 py-6 text-center">Requiere acceso a proyectos.</p>
                 ) : (
@@ -521,7 +521,7 @@ export default function PanelSigp() {
                   ))}
                   <div className="col-span-2 rounded-xl py-2.5 text-center bg-[#eef4e7]">
                     <p className="text-[22px] font-extrabold leading-tight text-[#4d712c]">{preventivos.entregablesOk}</p>
-                    <p className="text-[10.5px] text-[#4d712c]">Con entregables IHS completos (3/3)</p>
+                    <p className="text-[10.5px] text-[#4d712c]">Con entregables del cliente completos (3/3)</p>
                   </div>
                 </div>
                 )}

@@ -159,7 +159,7 @@ export default function ProyectoDetalleSigp() {
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
           Lo pactado <span className="normal-case font-normal">
             {proyecto.origen === 'preventivo'
-              ? `(precio de matriz IHS · ${proyecto.solicitud_consecutivo})`
+              ? `(precio de matriz · ${proyecto.solicitud_consecutivo})`
               : `(copia de ${proyecto.cotizacion_consecutivo}${etiquetaVersion(proyecto.cotizacion_version ?? 1) ? ` ${etiquetaVersion(proyecto.cotizacion_version ?? 1)}` : ''} aprobada)`}
           </span>
         </p>
