@@ -131,6 +131,7 @@ export default function ObrasHub() {
         >
           <option value="recientes">↓ Más recientes</option>
           <option value="pendientes">↓ Con más pendientes</option>
+          <option value="rechazados">↓ Con más rechazos</option>
           <option value="alfabetico">↓ Alfabético</option>
           <option value="cliente">↓ Cliente</option>
         </select>

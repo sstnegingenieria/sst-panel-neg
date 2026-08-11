@@ -2,6 +2,7 @@
 import { Link } from 'react-router-dom'
 import type { ObraConStats } from '../hooks/useObrasConRegistros'
 import { formatRelativeDate } from '../types/formulario'
+import EstadoSstBar from './EstadoSstBar'
 
 interface Props {
   obra: ObraConStats
@@ -63,6 +64,19 @@ export default function ObraCard({ obra }: Props) {
             {tienePendientes && <span className="text-amber-500 text-base leading-none">!</span>}
           </div>
         </div>
+      </div>
+
+      {/* Estado SST: barra apilada aprobados/rechazados/pendientes */}
+      <div className="mb-3">
+        <div className="text-[9px] uppercase tracking-wider font-semibold text-gray-400 mb-1">
+          Estado SST
+        </div>
+        <EstadoSstBar
+          aprobados={obra.aprobados}
+          rechazados={obra.rechazados}
+          pendientes={obra.pendientes}
+          total={obra.totalRegistros}
+        />
       </div>
 
       {/* Footer: última actividad + CTA */}

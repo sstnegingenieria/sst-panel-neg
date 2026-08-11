@@ -17,6 +17,8 @@ function obra(overrides: Partial<ObraConStats>): ObraConStats {
     estado: 'activa',
     totalRegistros: 4,
     pendientes: 2,
+    aprobados: 2,
+    rechazados: 0,
     ultimoTimestamp: '2026-07-20T10:00:00.000Z',
     ultimoResponsable: 'Juan Carlos',
     ...overrides,
