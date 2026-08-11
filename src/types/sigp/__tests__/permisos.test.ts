@@ -5,7 +5,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   puedeAprobarRegistros,
-  ROLES_GESTIONA_OBRAS,
   ROLES_GESTIONA_CONTRATISTAS,
   ROLES_VE_PROYECTOS,
   ROLES_GESTIONA_PROYECTOS,
@@ -36,8 +35,7 @@ describe('puedeAprobarRegistros — cola de revisión SST', () => {
 })
 
 describe('residente_sst — sin sobre-otorgamiento fuera de la cola SST', () => {
-  it('NO gestiona obras ni contratistas', () => {
-    expect(ROLES_GESTIONA_OBRAS.includes('residente_sst')).toBe(false)
+  it('NO gestiona contratistas', () => {
     expect(ROLES_GESTIONA_CONTRATISTAS.includes('residente_sst')).toBe(false)
   })
 })

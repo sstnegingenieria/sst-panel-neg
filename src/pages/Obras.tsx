@@ -1,22 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { deleteField } from 'firebase/firestore'
 import ObrasTable, { Obra } from '../components/ObrasTable'
-import ObrasForm, { ObraSaveData } from '../components/ObrasForm'
 import StatCard from '../components/StatCard'
-import { useModal } from '../hooks/useModal'
 import { useFirestore } from '../hooks/useFirestore'
 import { toast } from '../components/shared/Toast'
-import { useAuth } from '../contexts/AuthContext'
-import { puedeGestionarObrasUI } from '../types/sigp/permisos'
 
 export default function Obras() {
   const [obras, setObras] = useState<Obra[]>([])
   const [loading, setLoading] = useState(true)
-  const [editTarget, setEditTarget] = useState<Obra | null>(null)
-  const modal = useModal()
-  const { add, update, getAllOrdered } = useFirestore()
-  const { user } = useAuth()
-  const puedeGestionar = puedeGestionarObrasUI(user?.rol)
+  const { getAllOrdered } = useFirestore()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -32,53 +23,6 @@ export default function Obras() {
 
   useEffect(() => { load() }, [load])
 
-  const openCreate = () => {
-    setEditTarget(null)
-    modal.open()
-  }
-
-  const openEdit = (obra: Obra) => {
-    if (obra.origen === 'sigp') return   // espejo: identidad gobernada por el proyecto
-    setEditTarget(obra)
-    modal.open()
-  }
-
-  const handleSave = async (data: ObraSaveData) => {
-    try {
-      if (editTarget) {
-        // Si el admin borró las coordenadas, se elimina el campo (nunca se escribe null)
-        const patch = data.coordenadas_sitio
-          ? data
-          : { ...data, coordenadas_sitio: deleteField() }
-        await update('obras', editTarget.id, patch)
-        toast('Obra actualizada correctamente')
-      } else {
-        await add('obras', data)
-        toast('Obra creada correctamente')
-      }
-      await load()
-    } catch {
-      toast('Error al guardar la obra', 'error')
-      throw new Error('save failed')
-    }
-  }
-
-  const handleToggle = async (obra: Obra) => {
-    if (obra.origen === 'sigp') return   // espejo: el estado lo sincroniza el proyecto
-    const nuevoEstado = obra.estado === 'activa' ? 'inactiva' : 'activa'
-    const accion = nuevoEstado === 'inactiva' ? 'desactivar' : 'activar'
-    if (!window.confirm(`¿Seguro que deseas ${accion} la obra "${obra.nombre_sitio}"?`)) return
-    try {
-      await update('obras', obra.id, { estado: nuevoEstado })
-      toast(`Obra ${nuevoEstado === 'activa' ? 'activada' : 'desactivada'}`)
-      await load()
-    } catch {
-      toast('Error al actualizar el estado', 'error')
-    }
-  }
-
-  const existingCodigos = obras.map(o => o.codigo)
-
   const stats = useMemo(() => {
     const activas = obras.filter(o => o.estado === 'activa').length
     return { activas, inactivas: obras.length - activas, total: obras.length }
@@ -86,31 +30,15 @@ export default function Obras() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      {/* Header — Bloque D: las obras nacen de los proyectos SIGP; la creación
-          manual queda como FALLBACK secundario para trabajos fuera del flujo */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">Obras activas</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Las obras nacen de los proyectos del SIGP al entrar en ejecución.
-            Los técnicos se asignan desde <span className="font-medium">Usuarios</span>.
-          </p>
-        </div>
-        {/* Hotfix A: la creación manual es una ESCOTILLA de emergencia — solo
-            admin (respaldado por la regla de `obras`: create solo admin u
-            obra-espejo con origen:'sigp'). */}
-        {user?.rol === 'admin' && (
-          <button
-            onClick={openCreate}
-            title="Escotilla de emergencia (solo admin): las obras nacen del flujo SIGP al entrar el proyecto en ejecución"
-            className="flex items-center gap-2 border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm font-medium px-4 py-2 rounded-lg transition"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Obra manual (fallback)
-          </button>
-        )}
+      {/* Vista SOLO LECTURA: la gestión de obras vive en Proyectos (SIGP).
+          Las obras nacen de los proyectos al entrar en ejecución. */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-800">Obras activas</h1>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Vista informativa. Las obras nacen de los proyectos del SIGP al entrar en ejecución
+          — su gestión vive en <span className="font-medium">Proyectos</span>.
+          Los técnicos se asignan desde <span className="font-medium">Usuarios</span>.
+        </p>
       </div>
 
       {/* Stat cards */}
@@ -163,29 +91,8 @@ export default function Obras() {
             )}
           </h2>
         </div>
-        <ObrasTable
-          obras={obras}
-          loading={loading}
-          onEdit={openEdit}
-          onToggleEstado={handleToggle}
-          puedeGestionar={puedeGestionar}
-        />
+        <ObrasTable obras={obras} loading={loading} />
       </div>
-
-      {/* Modal */}
-      <ObrasForm
-        isOpen={modal.isOpen}
-        onClose={modal.close}
-        onSave={handleSave}
-        initial={editTarget ? {
-          ...editTarget,
-          alcance: editTarget.alcance ?? '',
-          latitud_sitio: editTarget.coordenadas_sitio ? String(editTarget.coordenadas_sitio.latitud) : '',
-          longitud_sitio: editTarget.coordenadas_sitio ? String(editTarget.coordenadas_sitio.longitud) : '',
-        } : null}
-        existingCodigos={existingCodigos}
-        editId={editTarget?.id}
-      />
     </div>
   )
 }
