@@ -1,8 +1,9 @@
-export type SortBy = 'recientes' | 'pendientes' | 'alfabetico' | 'cliente'
+export type SortBy = 'recientes' | 'pendientes' | 'rechazados' | 'alfabetico' | 'cliente'
 
 export const DIRECCION_ORDEN: Record<SortBy, 'ascending' | 'descending'> = {
   recientes: 'descending',
   pendientes: 'descending',
+  rechazados: 'descending',
   alfabetico: 'ascending',
   cliente: 'ascending',
 }
@@ -11,6 +12,7 @@ export interface ObraOrdenable {
   nombre_sitio: string
   cliente: string
   pendientes: number
+  rechazados: number
   ultimoTimestamp: string
 }
 
@@ -33,6 +35,9 @@ export function ordenarObras<T extends ObraOrdenable>(obras: T[], sortBy: SortBy
       break
     case 'pendientes':
       sorted.sort((a, b) => b.pendientes - a.pendientes)
+      break
+    case 'rechazados':
+      sorted.sort((a, b) => b.rechazados - a.rechazados)
       break
     case 'alfabetico':
       sorted.sort((a, b) => a.nombre_sitio.localeCompare(b.nombre_sitio))

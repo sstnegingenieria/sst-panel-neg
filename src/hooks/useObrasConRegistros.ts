@@ -8,6 +8,8 @@ import type { Obra } from '../components/ObrasTable'
 export interface ObraConStats extends Obra {
   totalRegistros: number
   pendientes: number
+  aprobados: number
+  rechazados: number
   ultimoTimestamp: string
   ultimoResponsable: string
 }
@@ -56,11 +58,15 @@ export function useObrasConRegistros() {
       const pendientes = formsDeObra.filter(
         f => !f.revision_sst || f.revision_sst.estado === 'pendiente'
       ).length
+      const aprobados = formsDeObra.filter(f => f.revision_sst?.estado === 'aprobado').length
+      const rechazados = formsDeObra.filter(f => f.revision_sst?.estado === 'rechazado').length
       const ultimo = formsDeObra[0] // ya viene ordenado desc
       return {
         ...obra,
         totalRegistros: formsDeObra.length,
         pendientes,
+        aprobados,
+        rechazados,
         ultimoTimestamp: ultimo?.timestamp_creacion ?? '',
         ultimoResponsable: ultimo?.responsable ?? '',
       }

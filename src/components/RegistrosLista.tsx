@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import type { ObraConStats } from '../hooks/useObrasConRegistros'
 import { formatRelativeDate } from '../types/formulario'
 import { DIRECCION_ORDEN, type SortBy } from '../utils/ordenObras'
+import EstadoSstBar from './EstadoSstBar'
 
 interface Props {
   obras: ObraConStats[]
@@ -61,6 +62,9 @@ export default function RegistrosLista({ obras, sortBy, onSort }: Props) {
               Nº registros
             </th>
             <EncabezadoOrdenable label="Pendientes SST" criterio="pendientes" sortBy={sortBy} onSort={onSort} align="right" />
+            <th scope="col" className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-bold text-gray-500">
+              Estado SST
+            </th>
             <EncabezadoOrdenable label="Última actividad" criterio="recientes" sortBy={sortBy} onSort={onSort} />
             <th scope="col" className="px-3 py-2 text-right text-[10px] uppercase tracking-wider font-bold text-gray-500">
               <span className="sr-only">Acción</span>
@@ -88,6 +92,15 @@ export default function RegistrosLista({ obras, sortBy, onSort }: Props) {
                   <span className={`font-semibold ${tienePendientes ? 'text-amber-600' : 'text-gray-900'}`}>
                     {obra.pendientes}
                   </span>
+                </td>
+                <td className="px-3 py-2.5">
+                  <EstadoSstBar
+                    aprobados={obra.aprobados}
+                    rechazados={obra.rechazados}
+                    pendientes={obra.pendientes}
+                    total={obra.totalRegistros}
+                    className="max-w-[120px]"
+                  />
                 </td>
                 <td className="px-3 py-2.5 text-gray-500 text-[11px]">
                   {obra.ultimoTimestamp ? formatRelativeDate(obra.ultimoTimestamp) : 'Sin actividad'}

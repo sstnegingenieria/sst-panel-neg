@@ -8,6 +8,7 @@ function obra(overrides: Partial<ObraDeTest>): ObraDeTest {
     nombre_sitio: 'Obra',
     cliente: 'Cliente',
     pendientes: 0,
+    rechazados: 0,
     ultimoTimestamp: '',
     ...overrides,
   }
@@ -43,6 +44,16 @@ describe('ordenarObras — pendientes (desc)', () => {
     const ninguna = obra({ nombre_sitio: 'Ninguna', pendientes: 0 })
     expect(ordenarObras([pocas, muchas, ninguna], 'pendientes').map(o => o.nombre_sitio))
       .toEqual(['Muchas', 'Pocas', 'Ninguna'])
+  })
+})
+
+describe('ordenarObras — rechazados (desc)', () => {
+  it('ordena por rechazados descendente', () => {
+    const pocos = obra({ nombre_sitio: 'Pocos', rechazados: 1 })
+    const muchos = obra({ nombre_sitio: 'Muchos', rechazados: 5 })
+    const ninguno = obra({ nombre_sitio: 'Ninguno', rechazados: 0 })
+    expect(ordenarObras([pocos, muchos, ninguno], 'rechazados').map(o => o.nombre_sitio))
+      .toEqual(['Muchos', 'Pocos', 'Ninguno'])
   })
 })
 
@@ -82,6 +93,7 @@ describe('DIRECCION_ORDEN — dirección fija por criterio', () => {
   it('coincide con el diseño: recientes/pendientes desc, alfabetico/cliente asc', () => {
     expect(DIRECCION_ORDEN.recientes).toBe('descending')
     expect(DIRECCION_ORDEN.pendientes).toBe('descending')
+    expect(DIRECCION_ORDEN.rechazados).toBe('descending')
     expect(DIRECCION_ORDEN.alfabetico).toBe('ascending')
     expect(DIRECCION_ORDEN.cliente).toBe('ascending')
   })
