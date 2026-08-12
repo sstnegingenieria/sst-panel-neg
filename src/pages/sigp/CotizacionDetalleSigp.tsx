@@ -23,8 +23,9 @@ import {
   conInstanciaIds, nuevaInstanciaId, sembrarActividadesDesdeCapitulos,
   PRESETS_FORMA_PAGO, PRESETS_TIEMPO_EJECUCION, PRESETS_GARANTIA, OBSERVACIONES_BASE,
   esTransporteZona, esItemTransporte, aplicarTransporte, sugerirTransporteZona,
+  totalDescuentosDe, observacionesConNotaDescuento,
 } from '../../types/sigp/cotizacion'
-import type { ModoAgrupacion, Actividad, TipoInversion } from '../../types/sigp/cotizacion'
+import type { ModoAgrupacion, Actividad, TipoInversion, TipoDescuento, ModoDescuento, DescuentoCotizacion } from '../../types/sigp/cotizacion'
 import type { CatalogoItem } from '../../types/sigp/catalogo'
 import type { ItemCotizacion, EsquemaTributario, ConfigAIU, CondicionesCotizacion, APU } from '../../types/sigp/cotizacion'
 import ApuModal from '../../components/sigp/cotizaciones/ApuModal'
@@ -84,6 +85,12 @@ export default function CotizacionDetalleSigp() {
   const [actividades, setActividades] = useState<Actividad[]>([])
   // 1.4B.d — tipo de inversión del padre
   const [tipoInversion, setTipoInversion] = useState<TipoInversion | ''>('')
+  // #2a — descuento global de la versión (dos modos combinables; texto crudo
+  // en el estado, se parsea al calcular/persistir)
+  const [descCdTipo, setDescCdTipo] = useState<TipoDescuento>('porcentaje')
+  const [descCdValor, setDescCdValor] = useState('')
+  const [descUTipo, setDescUTipo] = useState<TipoDescuento>('porcentaje')
+  const [descUValor, setDescUValor] = useState('')
 
   // Datos auxiliares
   const [lpuItems, setLpuItems] = useState<ItemLPU[]>([])
@@ -117,6 +124,12 @@ export default function CotizacionDetalleSigp() {
     setCond(version.condiciones)
     setModoAgr(modoAgrupacionDe(version))            // versiones previas → 'capitulo'
     setActividades(actividadesDe(version))
+    // #2a — descuento global de la versión (texto para InputExpresion-like)
+    const d = version.descuento
+    setDescCdTipo(d?.costo_directo?.tipo ?? 'porcentaje')
+    setDescCdValor(d?.costo_directo ? String(d.costo_directo.valor) : '')
+    setDescUTipo(d?.utilidad?.tipo ?? 'porcentaje')
+    setDescUValor(d?.utilidad ? String(d.utilidad.valor) : '')
   }, [version?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cargar LPU vigente del cliente (para el buscador) y visita realizada vinculada.
@@ -167,9 +180,23 @@ export default function CotizacionDetalleSigp() {
   const aiuConfig = (): ConfigAIU | undefined =>
     esquema === 'aiu' ? { admin: Number(aiuAdmin), imprevistos: Number(aiuImprev), utilidad: Number(aiuUtil) } : undefined
 
+  // #2a — descuento global desde el estado del form (validación suave: valor
+  // numérico > 0; % clampeado en calcularTotales por defensa). En iva_pleno el
+  // modo contra-utilidad se descarta (la UI ni lo muestra).
+  const descuentoConfig = (): DescuentoCotizacion | undefined => {
+    const parse = (tipo: TipoDescuento, texto: string): ModoDescuento | undefined => {
+      const v = Number(texto.replace(',', '.'))
+      return texto.trim() !== '' && Number.isFinite(v) && v > 0 ? { tipo, valor: v } : undefined
+    }
+    const cd = parse(descCdTipo, descCdValor)
+    const u = esquema === 'aiu' ? parse(descUTipo, descUValor) : undefined
+    if (!cd && !u) return undefined
+    return { ...(cd ? { costo_directo: cd } : {}), ...(u ? { utilidad: u } : {}) }
+  }
+
   const totales = useMemo(
-    () => calcularTotales(items, esquema, aiuConfig(), Number(ivaPct) || 0, { modo: modoAgr, actividades }),
-    [items, esquema, aiuAdmin, aiuImprev, aiuUtil, ivaPct, modoAgr, actividades], // eslint-disable-line react-hooks/exhaustive-deps
+    () => calcularTotales(items, esquema, aiuConfig(), Number(ivaPct) || 0, { modo: modoAgr, actividades }, descuentoConfig()),
+    [items, esquema, aiuAdmin, aiuImprev, aiuUtil, ivaPct, modoAgr, actividades, descCdTipo, descCdValor, descUTipo, descUValor], // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   // Pipeline (23-jul): el borrador automático `pendiente_diligenciar` es
@@ -236,17 +263,23 @@ export default function CotizacionDetalleSigp() {
   // 1.4B.b — resumen del análisis económico (réplica de la tabla paralela de
   // DC-FT-CT-24). Solo ítems CON costo; los que no lo tienen se excluyen y se
   // advierten (evita utilidades infladas tratando costo ausente como $0).
+  // #2a — la utilidad resta EXPLÍCITAMENTE los descuentos congelados (utilidad
+  // real = venta − costo − descuento): un descuento global jamás la infla.
+  // Con ítems sin costo la resta completa SUB-estima (conservador — la
+  // advertencia existente cubre el matiz).
   const resumenEconomico = useMemo(() => {
     const conCosto = items.filter(it => it.costo_directo !== undefined)
     const todoCosto = conCosto.reduce((s, it) => s + (it.costo_directo ?? 0) * (it.cantidad || 0), 0)
-    const venta = conCosto.reduce((s, it) => s + (it.valor_total || 0), 0)
+    const ventaLista = conCosto.reduce((s, it) => s + (it.valor_total || 0), 0)
+    const descuentos = totalDescuentosDe(totales)
+    const venta = ventaLista - descuentos
     const utilidad = venta - todoCosto
     return {
-      todoCosto, utilidad,
+      todoCosto, utilidad, descuentos,
       pctUtilidad: venta > 0 ? (utilidad / venta) * 100 : null,
       sinCosto: items.length - conCosto.length,
     }
-  }, [items])
+  }, [items, totales])
 
   // Columnas de la tabla de ítems: base + 3 internas cuando el análisis está activo.
   const nCols = (editable ? 7 : 6) + (analisis ? 3 : 0)
@@ -387,14 +420,21 @@ export default function CotizacionDetalleSigp() {
       const actividadesLimpias = [...actividades]
         .sort((a, b) => a.orden - b.orden)
         .map((a, i) => ({ ...a, nombre: a.nombre.trim() || `Actividad ${i + 1}` }))
-      const tot = calcularTotales(its, esquema, aiu, Number(ivaPct) || 0, { modo: modoAgr, actividades: actividadesLimpias })
+      // #2a — descuento global: intención en `descuento`, pesos congelados en
+      // `totales`; la nota de observaciones es IDEMPOTENTE (se reemplaza/retira).
+      const descCfg = descuentoConfig()
+      const tot = calcularTotales(its, esquema, aiu, Number(ivaPct) || 0, { modo: modoAgr, actividades: actividadesLimpias }, descCfg)
+      const obsConNota = observacionesConNotaDescuento(cond.observaciones, totalDescuentosDe(tot))
+      const condFinal = { ...cond, observaciones: obsConNota, validez_dias: Number(cond.validez_dias) || 0 }
       // JSON round-trip: elimina claves undefined (Firestore las rechaza).
       const itemsLimpios = JSON.parse(JSON.stringify(its)) as ItemCotizacion[]
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(cotizacion.version_activa)), {
-        items: itemsLimpios, esquema, aiu: aiu ?? deleteField(), iva_pct: Number(ivaPct) || 0, condiciones: { ...cond, validez_dias: Number(cond.validez_dias) || 0 }, totales: tot,
+        items: itemsLimpios, esquema, aiu: aiu ?? deleteField(), iva_pct: Number(ivaPct) || 0, condiciones: condFinal, totales: tot,
+        descuento: descCfg ?? deleteField(),
         modo_agrupacion: modoAgr, actividades: actividadesLimpias,
       })
       setActividades(actividadesLimpias)
+      setCond(c => ({ ...c, observaciones: obsConNota }))
       // Pipeline: el primer guardado MATERIALIZA el pendiente — asigna el COT
       // (server-side) y pasa a borrador. El número se preserva ante fallo del
       // update (se reintenta sin quemar otro — contigüidad ISO).
@@ -1081,14 +1121,49 @@ export default function CotizacionDetalleSigp() {
                   </div>
                 )}
                 <div className="flex items-center gap-2"><span className="text-xs text-gray-500 flex-1">IVA %</span><input type="number" value={ivaPct} onChange={e => setIvaPct(e.target.value)} className="w-16 px-2 py-1 border border-gray-200 rounded text-xs text-right" /></div>
+                {/* #2a — descuento global (dos modos combinables; preview en vivo
+                    vía el recálculo de `totales`). Contra-utilidad solo en aiu. */}
+                <div className="pt-2 border-t border-gray-100 space-y-1.5">
+                  <p className="text-xs font-semibold text-gray-500">Descuento <span className="font-normal text-gray-400">(opcional)</span></p>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-gray-500 flex-1">Sobre costo directo</span>
+                    <select value={descCdTipo} onChange={e => setDescCdTipo(e.target.value as TipoDescuento)}
+                      className="px-1 py-1 border border-gray-200 rounded text-xs bg-white">
+                      <option value="porcentaje">%</option><option value="valor">$</option>
+                    </select>
+                    <input type="text" inputMode="decimal" value={descCdValor} onChange={e => setDescCdValor(e.target.value)}
+                      placeholder="0" className="w-16 px-2 py-1 border border-gray-200 rounded text-xs text-right" />
+                  </div>
+                  {esquema === 'aiu' && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-gray-500 flex-1">Contra utilidad</span>
+                      <select value={descUTipo} onChange={e => setDescUTipo(e.target.value as TipoDescuento)}
+                        className="px-1 py-1 border border-gray-200 rounded text-xs bg-white">
+                        <option value="porcentaje">%</option><option value="valor">$</option>
+                      </select>
+                      <input type="text" inputMode="decimal" value={descUValor} onChange={e => setDescUValor(e.target.value)}
+                        placeholder="0" className="w-16 px-2 py-1 border border-gray-200 rounded text-xs text-right" />
+                    </div>
+                  )}
+                  {totalDescuentosDe(totales) > 0 && (
+                    <p className="text-[11px] text-amber-700">Cede {fMoneda(totalDescuentosDe(totales))} — al guardar se anota en las observaciones.</p>
+                  )}
+                </div>
               </div>
             )}
             <div className="text-sm space-y-1 pt-2 border-t border-gray-100">
-              <Fila k="Costos directos" v={fMoneda(totales.costos_directos)} />
+              <Fila k={totales.descuento_cd ? 'Costo directo (lista)' : 'Costos directos'} v={fMoneda(totales.costos_directos)} />
+              {totales.descuento_cd !== undefined && <>
+                <div className="flex justify-between text-amber-700"><span>Descuento s/CD</span><span className="font-mono">−{fMoneda(totales.descuento_cd)}</span></div>
+                <Fila k="Costo directo neto" v={fMoneda(totales.costos_directos_netos ?? 0)} />
+              </>}
               {esquema === 'aiu' && <>
                 <Fila k={`Admin (${aiuAdmin}%)`} v={fMoneda(totales.admin ?? 0)} />
                 <Fila k={`Imprevistos (${aiuImprev}%)`} v={fMoneda(totales.imprevistos ?? 0)} />
                 <Fila k={`Utilidad (${aiuUtil}%)`} v={fMoneda(totales.utilidad ?? 0)} />
+                {totales.descuento_utilidad !== undefined && (
+                  <div className="flex justify-between text-amber-700"><span>Descuento s/utilidad</span><span className="font-mono">−{fMoneda(totales.descuento_utilidad)}</span></div>
+                )}
               </>}
               <Fila k={`IVA (${ivaPct}%${esquema === 'aiu' ? ' s/U' : ''})`} v={fMoneda(totales.iva)} />
               <div className="flex justify-between pt-2 border-t border-gray-100 font-bold text-gray-900"><span>Total</span><span>{fMoneda(totales.total)}</span></div>
@@ -1104,6 +1179,9 @@ export default function CotizacionDetalleSigp() {
               </h2>
               <div className="text-sm space-y-1">
                 <Fila k="Todo Costo" v={fMoneda(resumenEconomico.todoCosto)} />
+                {resumenEconomico.descuentos > 0 && (
+                  <div className="flex justify-between text-amber-700"><span>Descuento cedido</span><span className="font-mono">−{fMoneda(resumenEconomico.descuentos)}</span></div>
+                )}
                 <Fila k="Utilidad $" v={fMoneda(resumenEconomico.utilidad)} />
                 <div className={`flex justify-between font-semibold ${resumenEconomico.utilidad < 0 ? 'text-red-600' : 'text-gray-800'}`}>
                   <span>% Utilidad</span>
