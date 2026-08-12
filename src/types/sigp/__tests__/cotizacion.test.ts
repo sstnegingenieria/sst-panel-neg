@@ -4,6 +4,7 @@ import {
   precioDesdeCosto, margenDesdePrecio, costoDirectoAPU, asignarCodigosINP, colorSeguimiento,
   subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, GRUPO_OTROS_ID,
   conInstanciaIds, sembrarActividadesDesdeCapitulos, esItemBloqueado, patchInstancia,
+  totalDescuentosDe, observacionesConNotaDescuento, NOTA_DESCUENTO_PREFIJO,
 } from '../cotizacion'
 import type { ItemCotizacion, Actividad } from '../cotizacion'
 
@@ -55,6 +56,125 @@ describe('calcularTotales — aiu', () => {
   it('suma los valor_total de varios ítems como CD', () => {
     const t = calcularTotales([item(1000), item(2500), item(500)], 'iva_pleno', undefined, 19)
     expect(t.costos_directos).toBe(4000)
+  })
+})
+
+// ── #2a — descuento global (dos modos combinables) ───────────────────────────
+
+describe('calcularTotales — descuento (#2a)', () => {
+  const AIU = { admin: 10, imprevistos: 6, utilidad: 8 }
+
+  it('PARIDAD: sin descuento (undefined o sin efecto) → resultado byte-idéntico al histórico', () => {
+    const base = calcularTotales([item(1_000_000)], 'aiu', AIU, 19)
+    expect(calcularTotales([item(1_000_000)], 'aiu', AIU, 19, undefined, undefined)).toEqual(base)
+    expect(calcularTotales([item(1_000_000)], 'aiu', AIU, 19, undefined, {})).toEqual(base)
+    // valor 0 o negativo = sin efecto — ni campos fantasma
+    const cero = calcularTotales([item(1_000_000)], 'aiu', AIU, 19, undefined,
+      { costo_directo: { tipo: 'porcentaje', valor: 0 } })
+    expect(cero).toEqual(base)
+    expect('descuento_cd' in cero).toBe(false)
+  })
+
+  it('AIU + descuento sobre CD (5%): CASCADA completa — A/I/U e IVA bajan solos', () => {
+    const t = calcularTotales([item(1_000_000)], 'aiu', AIU, 19, undefined,
+      { costo_directo: { tipo: 'porcentaje', valor: 5 } })
+    expect(t.costos_directos).toBe(1_000_000)          // BRUTO (lista) intacto
+    expect(t.descuento_cd).toBe(50_000)
+    expect(t.costos_directos_netos).toBe(950_000)
+    expect(t.admin).toBe(95_000)                       // 10% del NETO
+    expect(t.imprevistos).toBe(57_000)                 // 6% del NETO
+    expect(t.utilidad).toBe(76_000)                    // 8% del NETO
+    expect(t.base_iva).toBe(76_000)                    // IVA sobre la U neta (sin desc. de U, U misma)
+    expect(t.iva).toBe(14_440)                         // round(76000 × 0.19)
+    expect(t.total).toBe(950_000 + 95_000 + 57_000 + 76_000 + 14_440)
+  })
+
+  it('AIU + descuento contra utilidad ($): SOLO baja la U y su IVA — CD/A/I intactos', () => {
+    const t = calcularTotales([item(1_000_000)], 'aiu', AIU, 19, undefined,
+      { utilidad: { tipo: 'valor', valor: 30_000 } })
+    expect(t.costos_directos).toBe(1_000_000)
+    expect('descuento_cd' in t).toBe(false)
+    expect(t.utilidad).toBe(80_000)                    // BRUTA del AIU
+    expect(t.descuento_utilidad).toBe(30_000)
+    expect(t.base_iva).toBe(50_000)                    // U − descuento → el IVA baja proporcionalmente
+    expect(t.iva).toBe(9_500)
+    expect(t.total).toBe(1_000_000 + 100_000 + 60_000 + 50_000 + 9_500)
+  })
+
+  it('AIU + AMBOS: primero CD (cascada), luego utilidad sobre el resultado', () => {
+    const t = calcularTotales([item(1_000_000)], 'aiu', AIU, 19, undefined, {
+      costo_directo: { tipo: 'porcentaje', valor: 5 },
+      utilidad: { tipo: 'porcentaje', valor: 50 },
+    })
+    expect(t.descuento_cd).toBe(50_000)
+    expect(t.utilidad).toBe(76_000)                    // 8% del CD neto
+    expect(t.descuento_utilidad).toBe(38_000)          // 50% de la U (ya sobre neto)
+    expect(t.base_iva).toBe(38_000)
+    expect(t.iva).toBe(7_220)
+    expect(t.total).toBe(950_000 + 95_000 + 57_000 + 38_000 + 7_220)
+  })
+
+  it('iva_pleno + descuento sobre CD: base del IVA = CD neto', () => {
+    const t = calcularTotales([item(200_000)], 'iva_pleno', undefined, 19, undefined,
+      { costo_directo: { tipo: 'valor', valor: 20_000 } })
+    expect(t.descuento_cd).toBe(20_000)
+    expect(t.costos_directos_netos).toBe(180_000)
+    expect(t.base_iva).toBe(180_000)
+    expect(t.iva).toBe(34_200)
+    expect(t.total).toBe(214_200)
+  })
+
+  it('iva_pleno IGNORA el modo contra-utilidad (defensa — sin campos fantasma)', () => {
+    const t = calcularTotales([item(200_000)], 'iva_pleno', undefined, 19, undefined,
+      { utilidad: { tipo: 'porcentaje', valor: 50 } })
+    expect('descuento_utilidad' in t).toBe(false)
+    expect(t).toEqual(calcularTotales([item(200_000)], 'iva_pleno', undefined, 19))
+  })
+
+  it('CLAMP: $ mayor que la base se recorta a la base (neto jamás negativo); % > 100 → 100', () => {
+    const t = calcularTotales([item(100_000)], 'iva_pleno', undefined, 19, undefined,
+      { costo_directo: { tipo: 'valor', valor: 999_999 } })
+    expect(t.descuento_cd).toBe(100_000)
+    expect(t.costos_directos_netos).toBe(0)
+    expect(t.total).toBe(0)
+    const p = calcularTotales([item(100_000)], 'iva_pleno', undefined, 19, undefined,
+      { costo_directo: { tipo: 'porcentaje', valor: 150 } })
+    expect(p.descuento_cd).toBe(100_000)
+  })
+
+  it('redondeo peso-a-peso: el % produce pesos enteros congelados', () => {
+    const t = calcularTotales([item(333_333)], 'iva_pleno', undefined, 19, undefined,
+      { costo_directo: { tipo: 'porcentaje', valor: 7.5 } })
+    expect(t.descuento_cd).toBe(25_000)                // round(24999.975)
+    expect(Number.isInteger(t.descuento_cd)).toBe(true)
+    expect(t.costos_directos_netos).toBe(308_333)
+  })
+
+  it('totalDescuentosDe suma los congelados (0 sin descuento)', () => {
+    expect(totalDescuentosDe({})).toBe(0)
+    expect(totalDescuentosDe({ descuento_cd: 50_000 })).toBe(50_000)
+    expect(totalDescuentosDe({ descuento_cd: 50_000, descuento_utilidad: 38_000 })).toBe(88_000)
+  })
+})
+
+describe('observacionesConNotaDescuento — nota idempotente', () => {
+  it('agrega la nota con descuento y la retira sin él', () => {
+    const con = observacionesConNotaDescuento('Nota A\nNota B', 88_000)
+    expect(con.split('\n')).toHaveLength(3)
+    expect(con).toContain(NOTA_DESCUENTO_PREFIJO)
+    const sin = observacionesConNotaDescuento(con, 0)
+    expect(sin).toBe('Nota A\nNota B')
+  })
+  it('IDEMPOTENTE: re-aplicar con otro monto reemplaza la línea — jamás duplica', () => {
+    const v1 = observacionesConNotaDescuento('Nota A', 50_000)
+    const v2 = observacionesConNotaDescuento(v1, 88_000)
+    expect(v2.split('\n').filter(l => l.startsWith(NOTA_DESCUENTO_PREFIJO))).toHaveLength(1)
+    expect(v2).toContain('88.000')
+    expect(v2).not.toContain('50.000')
+  })
+  it('observaciones vacías/undefined: solo la nota (o vacío sin descuento)', () => {
+    expect(observacionesConNotaDescuento(undefined, 10_000).startsWith(NOTA_DESCUENTO_PREFIJO)).toBe(true)
+    expect(observacionesConNotaDescuento(undefined, 0)).toBe('')
   })
 })
 

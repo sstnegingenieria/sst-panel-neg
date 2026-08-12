@@ -212,17 +212,44 @@ export const OBSERVACIONES_BASE =
   'Cualquier trabajo adicional será objeto de cotización por separado.\n' +
   'Vencida la validez indicada, los valores de esta propuesta podrán ser ajustados.'
 
+// ── #2a — Descuento global de la versión (11-ago-2026) ───────────────────────
+// Dos modos COMBINABLES: sobre el costo directo (antes del AIU → cascada
+// completa: A/I/U e IVA bajan solos) y contra la utilidad ya calculada (solo
+// esquema aiu → la base del IVA baja proporcionalmente — jamás se paga IVA
+// sobre utilidad que no se cobra). "Sobre el total" NO existe por diseño
+// (desalinearía la base del IVA). El descuento JAMÁS muta ítems (fidelidad
+// LPU: valor_unitario/valor_total quedan como LISTA); el % guardado aquí es
+// la INTENCIÓN pactada — los pesos congelados viven en TotalesCotizacion.
+
+export type TipoDescuento = 'porcentaje' | 'valor'
+export interface ModoDescuento {
+  tipo: TipoDescuento
+  valor: number                // % (0–100) o $ ≥ 0
+}
+export interface DescuentoCotizacion {
+  costo_directo?: ModoDescuento
+  utilidad?: ModoDescuento     // ignorado con defensa en iva_pleno
+}
+
 /** Bloque de totales calculado (snapshot). */
 export interface TotalesCotizacion {
-  costos_directos: number      // suma de valor_total de ítems
-  admin?: number               // solo AIU
-  imprevistos?: number         // solo AIU
-  utilidad?: number            // solo AIU
-  base_iva: number             // iva_pleno: costos_directos | aiu: utilidad
+  costos_directos: number      // BRUTO (lista) = suma de valor_total de ítems
+  /** #2a — $ congelado del descuento sobre CD (positivo; el render pinta −).
+   *  Presente SOLO cuando hay descuento — snapshots históricos intactos. */
+  descuento_cd?: number
+  /** CD − descuento_cd = base real del AIU (o del IVA en iva_pleno). */
+  costos_directos_netos?: number
+  admin?: number               // solo AIU — calculado sobre el CD NETO
+  imprevistos?: number         // solo AIU — ídem
+  utilidad?: number            // solo AIU — BRUTA del AIU (sobre el CD neto)
+  /** #2a — $ congelado del descuento contra la utilidad (solo aiu). */
+  descuento_utilidad?: number
+  base_iva: number             // iva_pleno: CD neto | aiu: utilidad − descuento_utilidad
   iva: number                  // base_iva * iva_pct / 100
-  total: number
-  /** Desglose por grupo ANTES de impuestos (F1.5.2). Presente solo cuando
-   *  calcularTotales recibe la agrupación; ausente en snapshots anteriores. */
+  total: number                // suma de componentes YA redondeados
+  /** Desglose por grupo ANTES de impuestos (F1.5.2) — SIGUE BRUTO (suma al
+   *  CD de lista); el descuento es global y vive en el resumen. Presente solo
+   *  cuando calcularTotales recibe la agrupación. */
   subtotales_por_grupo?: SubtotalGrupo[]
 }
 
@@ -234,6 +261,9 @@ export interface VersionCotizacion {
   esquema: EsquemaTributario
   aiu?: ConfigAIU              // si esquema === 'aiu'
   iva_pct: number              // default 19 (editable)
+  /** #2a — descuento global (intención pactada; los $ congelados van en
+   *  `totales`). Opcional, retrocompatible; viaja con la versión. */
+  descuento?: DescuentoCotizacion
   items: ItemCotizacion[]      // inline
   condiciones: CondicionesCotizacion
   totales: TotalesCotizacion   // snapshot calculado
@@ -567,21 +597,37 @@ export function subtotalesPorGrupo(
   return res
 }
 
+/** #2a — $ congelado de un modo de descuento sobre su base, redondeado a peso
+ *  y CLAMPEADO a [0, base] (jamás deja un neto negativo; defensa en
+ *  profundidad además de la validación de la UI). 0 = sin efecto. */
+function pesosDescuento(modo: ModoDescuento | undefined, base: number): number {
+  if (!modo || !Number.isFinite(modo.valor) || modo.valor <= 0 || base <= 0) return 0
+  const bruto = modo.tipo === 'porcentaje'
+    ? base * Math.min(modo.valor, 100) / 100
+    : modo.valor
+  return Math.min(Math.round(bruto), base)
+}
+
 /**
  * Calcula el bloque de totales según el esquema.
- * - iva_pleno: total = CD + IVA(CD)
- * - aiu:       total = CD + A + I + U + IVA(U)   (IVA SOLO sobre la Utilidad)
- *   con A/I/U = CD × porcentaje. (Verificado contra el modelo Excel real de NEG.)
+ * - iva_pleno: total = CD_neto + IVA(CD_neto)
+ * - aiu:       total = CD_neto + A + I + U_neta + IVA(U_neta)
+ *   con A/I/U = CD_NETO × porcentaje. (IVA SOLO sobre la Utilidad — verificado
+ *   contra el modelo Excel real de NEG.)
  *
- * REDONDEO: cada componente (CD, A, I, U, IVA, Total) se redondea a peso con
- * Math.round al final; la operación intermedia usa precisión completa. Así el
- * snapshot guardado coincide con lo que mostrará el PDF.
+ * REDONDEO: cada componente (CD, descuentos, A, I, U, IVA, Total) se redondea
+ * a peso con Math.round al calcularse; el total es la SUMA de componentes ya
+ * redondeados. Así el snapshot guardado coincide con lo que mostrará el PDF.
  *
  * F1.5.2 — `agrupacion` (opcional): si se pasa, el resultado incluye
- * `subtotales_por_grupo` (desglose ANTES de impuestos). Los impuestos se
- * calculan a nivel versión exactamente igual con o sin agrupación; las
- * llamadas existentes (sin 5º argumento) devuelven un resultado idéntico
- * al histórico.
+ * `subtotales_por_grupo` (desglose ANTES de impuestos, SIGUE BRUTO).
+ *
+ * #2a — `descuento` (opcional, 6º parámetro): sobre CD → cascada completa
+ * (A/I/U e IVA bajan porque se calculan del CD neto); contra utilidad →
+ * base_iva = U − descuento (solo aiu; en iva_pleno se IGNORA con defensa).
+ * Orden con ambos: primero CD, luego utilidad sobre el resultado. Sin el
+ * parámetro (o sin efecto) el resultado es IDÉNTICO al histórico — fijado
+ * por test de paridad.
  */
 export function calcularTotales(
   items: ItemCotizacion[],
@@ -589,30 +635,66 @@ export function calcularTotales(
   aiu: ConfigAIU | undefined,
   ivaPct: number,
   agrupacion?: { modo: ModoAgrupacion; actividades?: Actividad[] },
+  descuento?: DescuentoCotizacion,
 ): TotalesCotizacion {
-  // CD = suma de valor_total (ya redondeado por ítem); se redondea de nuevo por robustez.
+  // CD BRUTO (lista) = suma de valor_total (ya redondeado por ítem); se
+  // redondea de nuevo por robustez. Los ítems JAMÁS se tocan.
   const costos_directos = Math.round(items.reduce((s, it) => s + (it.valor_total || 0), 0))
 
   const desglose = agrupacion
     ? { subtotales_por_grupo: subtotalesPorGrupo(items, agrupacion.modo, agrupacion.actividades) }
     : {}
 
+  // Descuento sobre CD — antes del AIU (cascada completa)
+  const descCd = pesosDescuento(descuento?.costo_directo, costos_directos)
+  const cdNeto = costos_directos - descCd
+  const conDescCd = descCd > 0
+    ? { descuento_cd: descCd, costos_directos_netos: cdNeto }
+    : {}
+
   if (esquema === 'aiu') {
     const a = aiu ?? { admin: 0, imprevistos: 0, utilidad: 0 }
-    const admin = Math.round(costos_directos * a.admin / 100)
-    const imprevistos = Math.round(costos_directos * a.imprevistos / 100)
-    const utilidad = Math.round(costos_directos * a.utilidad / 100)
-    const iva = Math.round(utilidad * ivaPct / 100)
+    const admin = Math.round(cdNeto * a.admin / 100)
+    const imprevistos = Math.round(cdNeto * a.imprevistos / 100)
+    const utilidad = Math.round(cdNeto * a.utilidad / 100)
+    // Descuento contra la utilidad ya calculada (sobre el CD neto)
+    const descU = pesosDescuento(descuento?.utilidad, utilidad)
+    const uNeta = utilidad - descU
+    const iva = Math.round(uNeta * ivaPct / 100)
     return {
-      costos_directos, admin, imprevistos, utilidad,
-      base_iva: utilidad, iva,
-      total: costos_directos + admin + imprevistos + utilidad + iva,
+      costos_directos, ...conDescCd,
+      admin, imprevistos, utilidad,
+      ...(descU > 0 ? { descuento_utilidad: descU } : {}),
+      base_iva: uNeta, iva,
+      total: cdNeto + admin + imprevistos + uNeta + iva,
       ...desglose,
     }
   }
 
-  const iva = Math.round(costos_directos * ivaPct / 100)
-  return { costos_directos, base_iva: costos_directos, iva, total: costos_directos + iva, ...desglose }
+  // iva_pleno: el modo contra-utilidad NO existe (se ignora con defensa)
+  const iva = Math.round(cdNeto * ivaPct / 100)
+  return { costos_directos, ...conDescCd, base_iva: cdNeto, iva, total: cdNeto + iva, ...desglose }
+}
+
+/** #2a — Σ de los descuentos congelados de un bloque de totales (0 si no hay).
+ *  Fuente única para el análisis 📊 y las notas — jamás re-derivar del %. */
+export const totalDescuentosDe = (t: Pick<TotalesCotizacion, 'descuento_cd' | 'descuento_utilidad'>): number =>
+  (t.descuento_cd ?? 0) + (t.descuento_utilidad ?? 0)
+
+/** #2a — Nota IDEMPOTENTE del descuento en las observaciones: la línea con
+ *  este prefijo se reemplaza al recalcular y se retira al quitar el descuento
+ *  — jamás se duplica. Pura (testeable). */
+export const NOTA_DESCUENTO_PREFIJO = 'Esta propuesta incluye un descuento comercial'
+
+export function observacionesConNotaDescuento(observaciones: string | undefined, totalDescuento: number): string {
+  const lineas = (observaciones ?? '')
+    .split(/\r?\n/)
+    .filter(l => !l.trim().startsWith(NOTA_DESCUENTO_PREFIJO))
+  while (lineas.length && !lineas[lineas.length - 1].trim()) lineas.pop()
+  if (totalDescuento > 0) {
+    lineas.push(`${NOTA_DESCUENTO_PREFIJO} de $${totalDescuento.toLocaleString('es-CO')} ya aplicado en el resumen económico.`)
+  }
+  return lineas.join('\n')
 }
 
 // ── Análisis económico (interno) ──────────────────────────────────────────────

@@ -471,17 +471,33 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
 
   // ════ 6. RESUMEN ECONÓMICO — héroe ════
   {
+    // #2a — filas de descuento (pesos CONGELADOS del snapshot — jamás se
+    // re-derivan del %). Con descuento sobre CD la primera fila se reetiqueta
+    // "(lista)" y aparece el neto; el descuento contra utilidad va entre la
+    // Utilidad y el IVA. Sin descuento: filas byte-idénticas a las históricas.
+    const t = datos.totales
+    const conDescCd = t.descuento_cd !== undefined
+    const filaCd: [string, string][] = conDescCd
+      ? [
+          ['Costo directo (lista)', fMoneda(t.costos_directos)],
+          ['Descuento comercial', `-${fMoneda(t.descuento_cd ?? 0)}`],
+          ['Costo directo neto', fMoneda(t.costos_directos_netos ?? 0)],
+        ]
+      : [['Costo directo', fMoneda(t.costos_directos)]]
     const filas: [string, string][] = datos.esquema === 'aiu'
       ? [
-          ['Costo directo', fMoneda(datos.totales.costos_directos)],
-          [`Administración (${datos.aiu?.admin ?? 0}%)`, fMoneda(datos.totales.admin ?? 0)],
-          [`Imprevistos (${datos.aiu?.imprevistos ?? 0}%)`, fMoneda(datos.totales.imprevistos ?? 0)],
-          [`Utilidad (${datos.aiu?.utilidad ?? 0}%)`, fMoneda(datos.totales.utilidad ?? 0)],
-          [`IVA ${datos.ivaPct}% sobre la Utilidad`, fMoneda(datos.totales.iva)],
+          ...filaCd,
+          [`Administración (${datos.aiu?.admin ?? 0}%)`, fMoneda(t.admin ?? 0)],
+          [`Imprevistos (${datos.aiu?.imprevistos ?? 0}%)`, fMoneda(t.imprevistos ?? 0)],
+          [`Utilidad (${datos.aiu?.utilidad ?? 0}%)`, fMoneda(t.utilidad ?? 0)],
+          ...(t.descuento_utilidad !== undefined
+            ? [['Descuento sobre utilidad', `-${fMoneda(t.descuento_utilidad)}`] as [string, string]]
+            : []),
+          [`IVA ${datos.ivaPct}% sobre la Utilidad`, fMoneda(t.iva)],
         ]
       : [
-          ['Costo directo', fMoneda(datos.totales.costos_directos)],
-          [`IVA (${datos.ivaPct}%)`, fMoneda(datos.totales.iva)],
+          ...filaCd,
+          [`IVA (${datos.ivaPct}%)`, fMoneda(t.iva)],
         ]
     const wCard = CONTENIDO * 0.56
     const xCard = ANCHO - MARGEN - wCard
@@ -495,7 +511,10 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
     page.drawText('RESUMEN ECONÓMICO', { x: xCard + 30, y: yTop - 14, size: 6.8, font: fS, color: VERDE_OSCURO })
     let yf = yTop - hCab
     filas.forEach(([k, v], i) => {
-      const esIva = i === filas.length - 1
+      // #2a — la divisoria pre-IVA se ancla POR NOMBRE (la fila que empieza
+      // con "IVA"), no por índice: con filas de descuento el IVA sigue siendo
+      // la última pero el anclaje semántico no depende de eso.
+      const esIva = k.startsWith('IVA')
       if (i % 2 === 1)
         page.drawRectangle({ x: xCard + 1, y: yf - hFila + 3, width: wCard - 2, height: hFila, color: ZEBRA })
       if (esIva) page.drawLine({ start: { x: xCard + 12, y: yf + 3 }, end: { x: xCard + wCard - 12, y: yf + 3 }, color: DIVISOR, thickness: 0.8 })
