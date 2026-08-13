@@ -149,7 +149,7 @@ export function partir(texto: string, font: PDFFont, size: number, maxAncho: num
 }
 
 /** Máximo `max` líneas; la última termina en … si el texto sigue. */
-function partirMax(texto: string, font: PDFFont, size: number, maxAncho: number, max: number): string[] {
+export function partirMax(texto: string, font: PDFFont, size: number, maxAncho: number, max: number): string[] {
   const lineas = partir(texto, font, size, maxAncho)
   if (lineas.length <= max) return lineas
   const visibles = lineas.slice(0, max)
@@ -314,17 +314,29 @@ export async function generarPdfCotizacion(datos: DatosPdfCotizacion, assets: As
       { ico: ICO.moneda, etiqueta: 'MONEDA', valor: datos.condiciones.moneda === 'COP' ? 'Pesos colombianos (COP)' : datos.condiciones.moneda },
     ]
     const hFila = 20
-    const hCaja = Math.max(izq.length, der.length) * hFila + 10
-    rectR(MARGEN, y, CONTENIDO, hCaja, 8, { borderColor: BORDE, borderWidth: 1 })
+    const INTERLINEA = 11        // 2ª línea del nombre (11-ago: nombres largos envuelven)
     const colW = CONTENIDO / 2
+    // La fila DESTACADA (CLIENTE) envuelve hasta 2 líneas con "…" defensivo;
+    // el resto conserva su línea única (NIT/CONTACTO/FECHA… no desbordan).
+    // Sin desborde: 1 línea por fila → alturas y trazado BYTE-idénticos.
+    const lineasDe = (f: Fila): string[] =>
+      f.destacada
+        ? partirMax(f.valor, fB, 9.5, colW - 46, 2)
+        : [partir(f.valor, fR, 8.5, colW - 46)[0]]
+    const alturaCol = (filas: Fila[]) =>
+      filas.reduce((s, f) => s + hFila + (lineasDe(f).length - 1) * INTERLINEA, 0)
+    const hCaja = Math.max(alturaCol(izq), alturaCol(der)) + 10
+    rectR(MARGEN, y, CONTENIDO, hCaja, 8, { borderColor: BORDE, borderWidth: 1 })
     const pintar = (filas: Fila[], x0: number) => {
       let yy = y - 18
       for (const f of filas) {
         icono(f.ico, x0 + 14, yy + 11, 10.5, f.destacada ? VERDE : GRIS_MEDIO, 1.2)
         page.drawText(f.etiqueta, { x: x0 + 32, y: yy + 3.5, size: 5.8, font: fS, color: GRIS_MEDIO })
-        const linea = partir(f.valor, f.destacada ? fB : fR, f.destacada ? 9.5 : 8.5, colW - 46)[0]
-        page.drawText(linea, { x: x0 + 32, y: yy - 7.5, size: f.destacada ? 9.5 : 8.5, font: f.destacada ? fB : fR, color: TINTA })
-        yy -= hFila
+        const lineas = lineasDe(f)
+        lineas.forEach((l, i) => {
+          page.drawText(l, { x: x0 + 32, y: yy - 7.5 - i * INTERLINEA, size: f.destacada ? 9.5 : 8.5, font: f.destacada ? fB : fR, color: TINTA })
+        })
+        yy -= hFila + (lineas.length - 1) * INTERLINEA   // las filas siguientes bajan
       }
     }
     pintar(izq, MARGEN)
