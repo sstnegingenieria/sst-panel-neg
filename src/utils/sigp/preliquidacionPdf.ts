@@ -7,7 +7,7 @@
 // internos de NEG. Reutiliza los assets de marca del PDF de cotización.
 import { PDFDocument, PDFFont, PDFPage, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
-import { partir, cargarAssetsPdf } from './cotizacionPdf'
+import { partir, partirMax, cargarAssetsPdf } from './cotizacionPdf'
 import { PRELIQUIDACION as ISO } from './isoControl'
 import { fmtNum } from './formato'
 import type { ModalidadContratista } from '../../types/sigp/proyecto'
@@ -157,13 +157,20 @@ export async function generarPdfPreliquidacion(
 
   // ── Datos ──
   {
-    const par = (etiqueta: string, valor: string, x: number, yy: number) => {
+    // 11-ago: nombres largos envuelven hasta 2 líneas ("…" defensivo) y la
+    // fila siguiente baja lo que haga falta — antes se truncaban en silencio.
+    const par = (etiqueta: string, valor: string, x: number, yy: number): number => {
       page.drawText(etiqueta, { x, y: yy, size: 5.8, font: fS, color: GRIS_MEDIO })
-      page.drawText(partir(valor, fR, 8.5, CONTENIDO / 2 - 24)[0], { x, y: yy - 11, size: 8.5, font: fR, color: TINTA })
+      const lineas = partirMax(valor, fR, 8.5, CONTENIDO / 2 - 24, 2)
+      lineas.forEach((l, i) =>
+        page.drawText(l, { x, y: yy - 11 - i * 10.5, size: 8.5, font: fR, color: TINTA }))
+      return lineas.length
     }
-    par('CONTRATISTA', datos.contratistaNombre, MARGEN, y)
-    par('CLIENTE / SITIO', datos.clienteNombre, MARGEN + CONTENIDO / 2, y)
-    y -= 26
+    const nSup = Math.max(
+      par('CONTRATISTA', datos.contratistaNombre, MARGEN, y),
+      par('CLIENTE / SITIO', datos.clienteNombre, MARGEN + CONTENIDO / 2, y),
+    )
+    y -= 26 + (nSup - 1) * 10.5
     par('FECHA', fFechaLarga(datos.fecha), MARGEN, y)
     y -= 30
   }
