@@ -2,6 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useNotificaciones } from '../contexts/NotificacionesContext'
 import { usePendientesSigp } from '../hooks/sigp/usePendientesSigp'
+import { useTareasPendientes } from '../hooks/sigp/useTareasPendientes'
 import { useFeatureFlag } from '../hooks/useFeatureFlag'
 import { accesoSIGP, type Rol } from '../types/sigp/roles'
 import {
@@ -17,6 +18,7 @@ import {
   veVerificacionSstUI,
   puedeGestionarComprasUI,
   veOcUI,
+  veTareasUI,
 } from '../types/sigp/permisos'
 
 interface SidebarProps {
@@ -210,6 +212,13 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   const f2Enabled = useFeatureFlag('sigp_f2_enabled', false)
   // El bloque SIGP se muestra si el flag está activo y el rol tiene acceso SIGP.
   const mostrarSigp = sigpEnabled && !!user?.rol && accesoSIGP(user.rol as Rol)
+  // Módulo Tareas (SB2, 14-ago): grupo propio entre SST y SIGP — flag +
+  // veTareasUI (los 9 roles del panel). Badge = misTareas + balones (mismo
+  // hook que alimenta la página /tareas y el pop-up RecordatorioTareas).
+  const tareasEnabled = useFeatureFlag('sigp_tareas_enabled', false)
+  const mostrarTareas = tareasEnabled && veTareasUI(user?.rol)
+  const { misTareas, balones } = useTareasPendientes(mostrarTareas, user?.uid)
+  const badgeTareas = misTareas + balones
   // Pipeline (23-jul): contadores vivos de pendientes sin código — badges
   // clickeables en Visitas y Cotizaciones.
   const { visitasPendientes, cotizacionesPendientes } = usePendientesSigp(mostrarSigp)
@@ -307,6 +316,54 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
             )}
           </NavLink>
         ))}
+
+        {/* Grupo Tareas (SB2, 14-ago) — entre SST y SIGP: asignación + balón
+            en cancha, disponible a los 9 roles del panel (gated por flag). */}
+        {mostrarTareas && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            {!collapsed && (
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                Tareas
+              </p>
+            )}
+            <NavLink
+              to="/tareas"
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  isActive
+                    ? 'bg-brand-50 text-brand-700 font-semibold'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                }`
+              }
+            >
+              <span className="flex-shrink-0 relative">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+                </svg>
+                {collapsed && badgeTareas > 0 && (
+                  <span
+                    onClick={e => { e.preventDefault(); e.stopPropagation(); navigate('/tareas?pendientes=1'); onNavigate?.() }}
+                    className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 rounded-full cursor-pointer" title="Tareas pendientes" />
+                )}
+              </span>
+              {!collapsed && (
+                <span className="flex items-center justify-between flex-1">
+                  <span>Tareas</span>
+                  {badgeTareas > 0 && (
+                    <span
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); navigate('/tareas?pendientes=1'); onNavigate?.() }}
+                      title="Tareas y balones pendientes — clic para verlas"
+                      className="ml-auto bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center cursor-pointer">
+                      {badgeTareas > 99 ? '99+' : badgeTareas}
+                    </span>
+                  )}
+                </span>
+              )}
+            </NavLink>
+          </div>
+        )}
 
         {/* Sección SIGP — solo si el feature flag de Remote Config está encendido
             (sigp_f1_enabled) y el usuario tiene acceso SIGP (accesoSIGP). Si lo

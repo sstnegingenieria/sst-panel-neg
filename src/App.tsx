@@ -39,11 +39,13 @@ import {
   ROLES_VEN_OC,
   ROLES_VE_PROYECTOS,
   ROLES_VE_HORARIO,
+  ROLES_VE_TAREAS,
 } from './types/sigp/permisos'
 import HorarioAsistencia from './pages/administrativa/HorarioAsistencia'
 import FacturacionPagos from './pages/administrativa/FacturacionPagos'
 import Proveedores from './pages/administrativa/Proveedores'
 import VerificacionContratistas from './pages/VerificacionContratistas'
+import Tareas from './pages/tareas/Tareas'
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth()
@@ -98,6 +100,11 @@ function ProtectedRoutes() {
         <Route path="/reportes" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REPORTES} redirectTo="/sigp/panel"><Reportes /></ProtectedRoute>} />
         {/* Bloque 3a — Gate SST previo a la liquidación (vista del área SST) */}
         <Route path="/verificacion-contratistas" element={<ProtectedRoute rolesPermitidos={ROLES_VE_VERIFICACION_SST} redirectTo="/sigp/panel"><VerificacionContratistas /></ProtectedRoute>} />
+
+        {/* Módulo Tareas (SB2, 14-ago-2026): asignación + balón en cancha,
+            los 9 roles del panel. La ruta NO se gatea por el flag
+            sigp_tareas_enabled (convención: el flag solo oculta el sidebar). */}
+        <Route path="/tareas" element={<ProtectedRoute rolesPermitidos={ROLES_VE_TAREAS} redirectTo="/"><Tareas /></ProtectedRoute>} />
 
         {/* Rutas SIGP (placeholders F0). Protegidas por rol con ProtectedRoute
             ('admin' siempre incluido como fallback). La sección del Sidebar se
