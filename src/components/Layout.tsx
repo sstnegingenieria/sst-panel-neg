@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Header from './Header'
 import RecordatorioCierreSesion from './sigp/horario/RecordatorioCierreSesion'
+import RecordatorioTareas from './sigp/tareas/RecordatorioTareas'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 
 export default function Layout() {
@@ -43,6 +44,9 @@ export default function Layout() {
       {/* #3 Horario: recordatorio de cierre de sesión al fin de la jornada
           (todos los roles; una vez por día; el logout registra la salida). */}
       <RecordatorioCierreSesion />
+      {/* Módulo Tareas (SB2): recordatorio de tareas/balón pendientes, una
+          vez por día — gateado por flag + rol dentro del propio componente. */}
+      <RecordatorioTareas />
     </div>
   )
 }

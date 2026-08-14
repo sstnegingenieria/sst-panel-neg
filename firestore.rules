@@ -116,6 +116,16 @@ service cloud.firestore {
       ];
     }
 
+    // 11. Módulo Tareas (14-ago): asignar tareas A OTROS es de las gerencias
+    //     + admin (misma lectura de "gerencias" que veHorario); cualquiera
+    //     del panel se AUTO-asigna y pasa/recibe el balón.
+    function puedeAsignarTareas() {
+      return isAuthed() && rolActual() in [
+        'gerencia_general', 'gerencia_administrativa',
+        'director_proyectos', 'gestion_integral', 'admin'
+      ];
+    }
+
     // 7. Módulo Compras (C2): órdenes de compra — documento de EJECUCIÓN
     //    (costo operativo: jamás venta/utilidad). Lectura por lista explícita
     //    (mínimo privilegio): sin operacion_comercial ni sst — la OC no es
@@ -716,6 +726,80 @@ service cloud.firestore {
       match /privado/{docId} {
         allow read, create, update: if gestionaHorario();
       }
+    }
+
+    // Módulo Tareas (14-ago): tareas con asignación y "balón en cancha".
+    // Calco de ordenes_compra con TRES vías de update por `||`:
+    //   asignador (editar/reasignar/anular — jamás cierra la tarea de otro)
+    //   · asignado (por UID del doc — primera regla del SIGP autorizada por
+    //     UID y no por rol; el balón lo pide por naturaleza)
+    //   · receptor del balón (solo devolverlo).
+    // `hecha`/`anulada` terminales sin reapertura (decisión SB1).
+    // Sin delete — 'anulada' es el terminal suave (restricción 5.1).
+    match /tareas/{tareaId} {
+      allow read: if esPersonalPanel();
+
+      // Nace SIEMPRE pendiente, con creador real no suplantable (patrón OC).
+      // Asignador → a cualquiera; el resto del panel → SOLO a sí mismo.
+      allow create: if isAuthed()
+                    && request.resource.data.get('creada_por', '') == request.auth.uid
+                    && request.resource.data.get('estado', '') == 'pendiente'
+                    && request.resource.data.get('titulo', '') != ''
+                    && request.resource.data.get('asignada_a', '') != ''
+                    && (puedeAsignarTareas()
+                        || (esPersonalPanel()
+                            && request.resource.data.get('asignada_a', '') == request.auth.uid));
+
+      allow update: if (
+                    // ── Vía ASIGNADOR (o dueño de su AUTO-tarea) ──
+                    (puedeAsignarTareas()
+                     || (resource.data.get('creada_por', '') == request.auth.uid
+                         && resource.data.get('asignada_a', '') == request.auth.uid))
+                    && resource.data.get('estado', '') != 'hecha'
+                    && resource.data.get('estado', '') != 'anulada'
+                    && request.resource.data.get('creada_por', '')
+                         == resource.data.get('creada_por', '')
+                    // el asignador NO "hace" la tarea de otro: estado igual,
+                    // o anulada, o pendiente (reasignación resetea)
+                    && (request.resource.data.get('estado', '')
+                          == resource.data.get('estado', '')
+                        || request.resource.data.get('estado', '') in ['anulada', 'pendiente'])
+                    // invariante del balón también en esta vía (anular /
+                    // reasignar lo limpian; editar sin tocarlo lo conserva)
+                    && (request.resource.data.get('estado', '') != 'en_espera'
+                        || request.resource.data.get('balon_en', {}).get('uid', '') != '')
+                    && (request.resource.data.get('estado', '') == 'en_espera'
+                        || request.resource.data.get('balon_en', null) == null)
+                    ) || (
+                    // ── Vía ASIGNADO (autorizada por UID del doc) ──
+                    isAuthed()
+                    && resource.data.get('asignada_a', '') == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['estado', 'comentario_cierre', 'evidencia_url',
+                                  'balon_en', 'historial', 'fecha_actualizacion'])
+                    && resource.data.get('estado', '') in ['pendiente', 'en_curso', 'en_espera']
+                    && request.resource.data.get('estado', '') in ['en_curso', 'en_espera', 'hecha']
+                    // cerrar exige comentario (+ evidencia si la tarea la pide)
+                    && (request.resource.data.get('estado', '') != 'hecha'
+                        || (request.resource.data.get('comentario_cierre', '') != ''
+                            && (resource.data.get('requiere_evidencia', false) == false
+                                || request.resource.data.get('evidencia_url', '') != '')))
+                    // invariante del balón: en_espera ⟺ balon_en con uid
+                    && (request.resource.data.get('estado', '') != 'en_espera'
+                        || request.resource.data.get('balon_en', {}).get('uid', '') != '')
+                    && (request.resource.data.get('estado', '') == 'en_espera'
+                        || request.resource.data.get('balon_en', null) == null)
+                    ) || (
+                    // ── Vía RECEPTOR del balón: SOLO devolverlo ──
+                    isAuthed()
+                    && resource.data.get('estado', '') == 'en_espera'
+                    && resource.data.get('balon_en', {}).get('uid', '') == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['estado', 'balon_en', 'historial', 'fecha_actualizacion'])
+                    && request.resource.data.get('estado', '') == 'en_curso'
+                    && request.resource.data.get('balon_en', null) == null
+                    );
+      // sin delete — 'anulada' es el terminal suave (restricción 5.1)
     }
 
     // ────────────────────────────────────────────────────────────────

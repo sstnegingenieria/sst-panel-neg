@@ -215,3 +215,20 @@ export const puedeGestionarHorarioUI = (rol: string | undefined) => en(rol, ROLE
 // La página /sigp/catalogo la VEN todos los roles SIGP (lectura).
 export const ROLES_MANTIENE_CATALOGO: Rol[] = ['gerencia_general', 'director_proyectos', 'admin']
 export const puedeMantenerCatalogoUI = (rol: string | undefined) => en(rol, ROLES_MANTIENE_CATALOGO)
+
+// ── Módulo Tareas (14-ago) ──
+// Espejo EXACTO de las reglas: read de `tareas` = esPersonalPanel() (los 9
+// roles del panel; `cliente_final` es futuro y queda fuera hasta revisitar);
+// asignar A OTROS = puedeAsignarTareas() (las gerencias + admin, misma
+// lectura de "gerencias" que el horario). Auto-tarea y balón: cualquiera.
+export const ROLES_VE_TAREAS: Rol[] = [
+  'sst', 'admin', 'gerencia_general', 'gerencia_administrativa',
+  'operacion_comercial', 'director_proyectos', 'auxiliar_proyectos',
+  'residente_sst', 'gestion_integral',
+]
+export const veTareasUI = (rol: string | undefined) => en(rol, ROLES_VE_TAREAS)
+export const ROLES_ASIGNA_TAREAS: Rol[] = [
+  'gerencia_general', 'gerencia_administrativa',
+  'director_proyectos', 'gestion_integral', 'admin',
+]
+export const puedeAsignarTareasUI = (rol: string | undefined) => en(rol, ROLES_ASIGNA_TAREAS)

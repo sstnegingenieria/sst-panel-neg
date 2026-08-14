@@ -85,6 +85,20 @@ service firebase.storage {
                        || request.resource.contentType.matches('image/.*'));
     }
 
+    // ── Tareas (14-ago): evidencia de cierre ─────────────────────────────────
+    // Ruta: tareas/{tareaId}/evidencia/{fileName} (fileName = UUID — patrón
+    // H-008: el rol no se valida aquí; la autorización real es la regla
+    // Firestore de `tareas`, que exige evidencia_url al cerrar si la tarea
+    // la pide).
+    match /tareas/{tareaId}/{tipoDoc}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && tipoDoc in ['evidencia']
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (request.resource.contentType == 'application/pdf'
+                       || request.resource.contentType.matches('image/.*'));
+    }
+
     // ── Compras C2/C3: adjuntos de la OC ─────────────────────────────────────
     // Ruta: ordenes_compra/{ocId}/{cotizacion|soporte}/{fileName} (UUID —
     // patrón C1, H-008). 'cotizacion' = la del proveedor al emitir (C2);
