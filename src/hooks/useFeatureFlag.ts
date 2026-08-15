@@ -42,9 +42,14 @@ export function useFeatureFlag(nombre: string, defaultValue = false): boolean {
     async function cargar() {
       try {
         const remoteConfig = getRemoteConfig(app)
-        // En dev: refresca cada 60s. En prod: cada 12h (default de Firebase).
+        // En dev: refresca cada 60s. En prod: cada 1h (14-ago-2026 — antes 12h,
+        // el default de Firebase): los flags son también KILL SWITCH y con 12h
+        // no se revierte nada a tiempo; F2 tendrá un flag por generador. El
+        // umbral se evalúa en CADA intento de fetch contra el timestamp del
+        // último fetch exitoso (lo único persistido) — el intervalo nuevo rige
+        // apenas carga este bundle, sin esperar a que venza el cache viejo.
         remoteConfig.settings.minimumFetchIntervalMillis =
-          import.meta.env.DEV ? 60_000 : 43_200_000
+          import.meta.env.DEV ? 60_000 : 3_600_000
         await fetchAndActivate(remoteConfig)
         if (!cancelado) {
           setValor(getValue(remoteConfig, nombre).asBoolean())
