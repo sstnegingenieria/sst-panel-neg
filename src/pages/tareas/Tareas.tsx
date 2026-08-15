@@ -11,7 +11,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { ChangeEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
-  addDoc, collection, deleteField, doc, getDocs, Timestamp, updateDoc,
+  addDoc, collection, deleteField, doc, getDocs, query, Timestamp, updateDoc, where,
 } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { db, storage } from '../../firebase/config'
@@ -81,13 +81,19 @@ function fechaInputDe(ts: unknown): string {
   return d ? d.toISOString().slice(0, 10) : ''
 }
 
-/** Ruta navegable del contexto, si el tipo tiene ficha propia en el panel. */
+/** Ruta navegable del contexto. Resuelve con `ruta_id ?? id` (SB2.2):
+ *  `id` es siempre el documento ORIGEN; `ruta_id` es el override de
+ *  navegación para entidades sin ficha propia — una OC se navega por la
+ *  ficha de su proyecto (`ruta_id` = proyecto_id), que es donde vive su
+ *  sección (C2: surfacear, no reinventar). */
 function rutaContexto(c: ContextoTarea): string | null {
+  const destino = c.ruta_id ?? c.id
   switch (c.tipo) {
-    case 'solicitud': return `/sigp/solicitudes/${c.id}`
-    case 'cotizacion': return `/sigp/cotizaciones/${c.id}`
-    case 'proyecto': return `/sigp/proyectos/${c.id}`
-    case 'cliente': return `/sigp/clientes/${c.id}`
+    case 'solicitud': return `/sigp/solicitudes/${destino}`
+    case 'cotizacion': return `/sigp/cotizaciones/${destino}`
+    case 'proyecto': return `/sigp/proyectos/${destino}`
+    case 'cliente': return `/sigp/clientes/${destino}`
+    case 'orden_compra': return `/sigp/proyectos/${destino}`
     default: return null
   }
 }
@@ -134,41 +140,62 @@ export default function Tareas() {
   const [personas, setPersonas] = useState<PersonaAsignable[]>([])
   useEffect(() => { listarAsignables().then(setPersonas).catch(() => setPersonas([])) }, [])
 
-  // ── "Equipo": TODAS las tareas, getDocs client-side (solo asignadores)
+  // ── "Equipo" (solo asignadores). SB2.2: por defecto SOLO activas — el
+  //    histórico (hecha/anulada) se descarga BAJO DEMANDA, no siempre.
   const [equipoTareas, setEquipoTareas] = useState<TareaConId[]>([])
   const [equipoLoading, setEquipoLoading] = useState(false)
+  // null = histórico aún no pedido; [] = pedido y vacío.
+  const [historico, setHistorico] = useState<TareaConId[] | null>(null)
   const cargarEquipo = useCallback(async () => {
     setEquipoLoading(true)
     try {
-      const snap = await getDocs(collection(db, 'tareas'))
+      const snap = await getDocs(query(collection(db, 'tareas'), where('activa', '==', true)))
       setEquipoTareas(snap.docs.map(d => ({ id: d.id, ...d.data() }) as TareaConId))
     } catch {
       toast('Error al cargar las tareas del equipo', 'error')
       setEquipoTareas([])
     } finally { setEquipoLoading(false) }
   }, [])
+  const cargarHistorico = useCallback(async () => {
+    try {
+      const snap = await getDocs(query(collection(db, 'tareas'), where('activa', '==', false)))
+      setHistorico(snap.docs.map(d => ({ id: d.id, ...d.data() }) as TareaConId))
+    } catch { toast('Error al cargar el histórico', 'error') }
+  }, [])
   useEffect(() => { if (tab === 'equipo' && puedeAsignar) cargarEquipo() }, [tab, puedeAsignar, cargarEquipo])
   const [filtroEstadoEquipo, setFiltroEstadoEquipo] = useState('')
   const [busquedaEquipo, setBusquedaEquipo] = useState('')
+  // Un filtro de estado terminal exige el histórico cargado.
+  const elegirFiltroEstado = (e: string) => {
+    setFiltroEstadoEquipo(e)
+    if ((e === 'hecha' || e === 'anulada') && historico === null) cargarHistorico()
+  }
+  const equipoVisibles = useMemo(
+    () => [...equipoTareas, ...(historico ?? [])],
+    [equipoTareas, historico],
+  )
   const equipoFiltrado = useMemo(() => {
     const q = busquedaEquipo.trim().toLowerCase()
-    return equipoTareas
+    return equipoVisibles
       .filter(t =>
         (!filtroEstadoEquipo || t.estado === filtroEstadoEquipo) &&
         (!q ||
           (t.titulo ?? '').toLowerCase().includes(q) ||
           (t.asignada_a_nombre ?? '').toLowerCase().includes(q)))
       .sort(compararEquipo)
-  }, [equipoTareas, filtroEstadoEquipo, busquedaEquipo])
+  }, [equipoVisibles, filtroEstadoEquipo, busquedaEquipo])
   const contadorPorEstado = useMemo(() => {
     const m = new Map<EstadoTarea, number>()
-    for (const t of equipoTareas) m.set(t.estado, (m.get(t.estado) ?? 0) + 1)
+    for (const t of equipoVisibles) m.set(t.estado, (m.get(t.estado) ?? 0) + 1)
     return m
-  }, [equipoTareas])
+  }, [equipoVisibles])
 
   const recargarEquipoSiAplica = useCallback(async () => {
-    if (tab === 'equipo') await cargarEquipo()
-  }, [tab, cargarEquipo])
+    if (tab === 'equipo') {
+      await cargarEquipo()
+      if (historico !== null) await cargarHistorico()   // cerrar/anular mueve docs allá
+    }
+  }, [tab, cargarEquipo, cargarHistorico, historico])
 
   // ── Fila expandida (detalle)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -403,6 +430,7 @@ export default function Tareas() {
         asignada_por_nombre: user.nombre,
         creada_por: user.uid,
         estado: 'pendiente',
+        activa: true,          // SB2.2: la regla de create lo exige
         prioridad: nvPrioridad,
         ...(nvFechaLimite ? { fecha_limite: timestampDeInputFecha(nvFechaLimite) } : {}),
         ...(nvRequiereEvidencia ? { requiere_evidencia: true } : {}),
@@ -502,14 +530,22 @@ export default function Tareas() {
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => setFiltroEstadoEquipo('')}
               className={`text-xs px-2.5 py-1 rounded-full font-medium border ${filtroEstadoEquipo === '' ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
-              Todas ({equipoTareas.length})
+              Todas ({equipoVisibles.length})
             </button>
             {ESTADOS_TAREA.map(e => (
-              <button key={e} onClick={() => setFiltroEstadoEquipo(e)}
+              <button key={e} onClick={() => elegirFiltroEstado(e)}
                 className={`text-xs px-2.5 py-1 rounded-full font-medium border ${filtroEstadoEquipo === e ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
-                {ESTADO_TAREA_LABEL[e]} ({contadorPorEstado.get(e) ?? 0})
+                {ESTADO_TAREA_LABEL[e]}{(e === 'hecha' || e === 'anulada') && historico === null
+                  ? '' : ` (${contadorPorEstado.get(e) ?? 0})`}
               </button>
             ))}
+            {historico === null && (
+              <button onClick={cargarHistorico}
+                title="Las cerradas y anuladas no se descargan por defecto"
+                className="text-xs px-2.5 py-1 rounded-full font-medium border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50">
+                ⏳ Cargar histórico
+              </button>
+            )}
             <input value={busquedaEquipo} onChange={e => setBusquedaEquipo(e.target.value)}
               placeholder="Buscar por título o asignado…"
               className="ml-auto px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-64 max-w-full focus:outline-none focus:ring-2 focus:ring-brand-300" />

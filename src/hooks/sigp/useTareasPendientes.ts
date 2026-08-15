@@ -19,13 +19,15 @@ export function useTareasPendientes(activo: boolean, uid: string | undefined) {
       setBalonesTareas([])
       return
     }
+    // SB2.2: acotadas a activas — igualdad+igualdad se sirve fusionando
+    // índices de campo único (sin índice compuesto, convención del proyecto).
     const unsubAsignadas = onSnapshot(
-      query(collection(db, 'tareas'), where('asignada_a', '==', uid)),
+      query(collection(db, 'tareas'), where('asignada_a', '==', uid), where('activa', '==', true)),
       snap => setTareasAsignadas(snap.docs.map(d => ({ id: d.id, ...d.data() }) as TareaConId)),
       () => setTareasAsignadas([]),
     )
     const unsubBalon = onSnapshot(
-      query(collection(db, 'tareas'), where('balon_en.uid', '==', uid)),
+      query(collection(db, 'tareas'), where('balon_en.uid', '==', uid), where('activa', '==', true)),
       snap => setBalonesTareas(
         snap.docs
           .map(d => ({ id: d.id, ...d.data() }) as TareaConId)

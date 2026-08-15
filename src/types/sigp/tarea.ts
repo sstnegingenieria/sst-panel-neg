@@ -56,10 +56,17 @@ export const PRIORIDAD_TAREA_COLOR: Record<PrioridadTarea, string> = {
 // ── Sub-tipos ────────────────────────────────────────────────────────────────
 
 /** Enlace OPCIONAL a la entidad de la que nace la tarea. Solo referencia
- *  visual/navegable — la tarea no depende de que la entidad exista. */
+ *  visual/navegable — la tarea no depende de que la entidad exista.
+ *
+ *  CONVENCIÓN (SB2.2): `id` es SIEMPRE el documento ORIGEN real (evidencia
+ *  referencial, no textual — Trinorma: la cadena acción → documento origen
+ *  se sigue por id). `ruta_id` es el override de NAVEGACIÓN para entidades
+ *  sin ficha propia: una OC se navega por la ficha de su proyecto, así que
+ *  `id` = doc id de la OC y `ruta_id` = proyecto_id. */
 export interface ContextoTarea {
-  tipo: 'solicitud' | 'cotizacion' | 'proyecto' | 'cliente' | 'obra' | 'otro'
+  tipo: 'solicitud' | 'cotizacion' | 'proyecto' | 'cliente' | 'obra' | 'orden_compra' | 'otro'
   id: string
+  ruta_id?: string
   label: string            // p. ej. "COT-2026-021 · Plaza San Nicolás"
 }
 
@@ -92,6 +99,11 @@ export interface Tarea {
    *  y lo vuelve inmutable en updates (no suplantable, patrón OC). */
   creada_por: string
   estado: EstadoTarea      // nace SIEMPRE 'pendiente' (regla)
+  /** Acota las consultas (igualdad simple — sin índice compuesto, SB2.2):
+   *  `true` salvo en los terminales `hecha`/`anulada`. La MANTIENEN los
+   *  patch builders (derivada del estado resultante, auto-sanadora), no la
+   *  UI; la regla de create exige nacer con `true`. */
+  activa: boolean
   prioridad: PrioridadTarea
   fecha_limite?: Timestamp
   requiere_evidencia?: boolean
@@ -125,6 +137,9 @@ export function puedeTransicionarTarea(de: EstadoTarea, a: EstadoTarea): boolean
 export const esTareaTerminal = (estado: EstadoTarea): boolean =>
   TRANSICIONES_TAREA[estado]?.length === 0
 
+/** `activa` derivada del estado — fuente única para los patch builders. */
+export const esTareaActiva = (estado: EstadoTarea): boolean => !esTareaTerminal(estado)
+
 /** INVARIANTE del balón: 'en_espera' ⟺ balon_en con uid no vacío. */
 export function balonConsistente(estado: EstadoTarea, balon: BalonTarea | null | undefined): boolean {
   const tiene = !!balon && (balon.uid ?? '') !== ''
@@ -150,6 +165,7 @@ export function patchIniciarTarea(t: Tarea, actor: ActorTarea, ahora: Timestamp)
   if (!puedeTransicionarTarea(t.estado, 'en_curso') || t.estado === 'en_espera') return null
   return {
     estado: 'en_curso' as EstadoTarea,
+    activa: esTareaActiva('en_curso'),
     fecha_actualizacion: ahora,
     historial: [...(t.historial ?? []), evento(ahora, actor, t.estado, 'en_curso')],
   }
@@ -165,6 +181,7 @@ export function patchPasarBalon(
   const balon: BalonTarea = { uid: destino.uid, nombre: destino.nombre, motivo: motivo.trim(), fecha: ahora }
   return {
     estado: 'en_espera' as EstadoTarea,
+    activa: esTareaActiva('en_espera'),
     balon_en: balon,
     fecha_actualizacion: ahora,
     historial: [...(t.historial ?? []), evento(ahora, actor, t.estado, 'en_espera',
@@ -177,6 +194,7 @@ export function patchDevolverBalon(t: Tarea, actor: ActorTarea, ahora: Timestamp
   if (t.estado !== 'en_espera') return null
   return {
     estado: 'en_curso' as EstadoTarea,
+    activa: esTareaActiva('en_curso'),
     balon_en: null,
     fecha_actualizacion: ahora,
     historial: [...(t.historial ?? []), evento(ahora, actor, 'en_espera', 'en_curso',
@@ -194,6 +212,7 @@ export function patchCerrarTarea(
   if (t.requiere_evidencia && !evidenciaUrl) return null
   return {
     estado: 'hecha' as EstadoTarea,
+    activa: esTareaActiva('hecha'),
     comentario_cierre: comentario.trim(),
     ...(evidenciaUrl ? { evidencia_url: evidenciaUrl } : {}),
     fecha_actualizacion: ahora,
@@ -207,6 +226,7 @@ export function patchAnularTarea(t: Tarea, actor: ActorTarea, ahora: Timestamp, 
   if (!motivo.trim()) return null
   return {
     estado: 'anulada' as EstadoTarea,
+    activa: esTareaActiva('anulada'),
     ...(t.balon_en ? { balon_en: null } : {}),
     fecha_actualizacion: ahora,
     historial: [...(t.historial ?? []), evento(ahora, actor, t.estado, 'anulada', motivo.trim())],
@@ -227,6 +247,7 @@ export function patchReasignarTarea(
     asignada_por: actor.uid,
     asignada_por_nombre: actor.nombre ?? '',
     estado: 'pendiente' as EstadoTarea,
+    activa: esTareaActiva('pendiente'),
     ...(t.balon_en ? { balon_en: null } : {}),
     fecha_actualizacion: ahora,
     historial: [...(t.historial ?? []), evento(ahora, actor, t.estado, 'pendiente',
