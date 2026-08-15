@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { Timestamp } from 'firebase/firestore'
 import {
-  TRANSICIONES_TAREA, puedeTransicionarTarea, esTareaTerminal, balonConsistente,
+  TRANSICIONES_TAREA, puedeTransicionarTarea, esTareaTerminal, esTareaActiva, balonConsistente,
   patchIniciarTarea, patchPasarBalon, patchDevolverBalon,
   patchCerrarTarea, patchAnularTarea, patchReasignarTarea,
   type Tarea, type EstadoTarea, type BalonTarea, ESTADOS_TAREA,
@@ -17,6 +17,7 @@ const base = (extra?: Partial<Tarea>): Tarea => ({
   asignada_por: 'uid-giovanny', asignada_por_nombre: 'Giovanny',
   creada_por: 'uid-giovanny',
   estado: 'pendiente',
+  activa: true,
   prioridad: 'media',
   fecha_creacion: AHORA,
   historial: [],
@@ -44,6 +45,34 @@ describe('máquina de estados de tareas', () => {
     expect(puedeTransicionarTarea('pendiente', 'en_espera')).toBe(true)
     expect(puedeTransicionarTarea('en_curso', 'en_espera')).toBe(true)
     expect(TRANSICIONES_TAREA.en_espera.sort()).toEqual(['anulada', 'en_curso'])
+  })
+})
+
+describe('activa — derivada del estado, mantenida por los builders (SB2.2)', () => {
+  it('esTareaActiva: true salvo en los terminales', () => {
+    expect(esTareaActiva('pendiente')).toBe(true)
+    expect(esTareaActiva('en_curso')).toBe(true)
+    expect(esTareaActiva('en_espera')).toBe(true)
+    expect(esTareaActiva('hecha')).toBe(false)
+    expect(esTareaActiva('anulada')).toBe(false)
+  })
+
+  it('TODOS los builders escriben activa coherente con el estado resultante', () => {
+    const iniciar = patchIniciarTarea(base(), ACTOR, AHORA)!
+    expect(iniciar.activa).toBe(true)
+    const pasar = patchPasarBalon(base({ estado: 'en_curso' }), ACTOR, AHORA,
+      { uid: 'uid-marcela', nombre: 'Marcela' }, 'motivo')!
+    expect(pasar.activa).toBe(true)
+    const devolver = patchDevolverBalon(base({ estado: 'en_espera', balon_en: BALON }),
+      { uid: 'uid-marcela', nombre: 'Marcela' }, AHORA)!
+    expect(devolver.activa).toBe(true)
+    const cerrar = patchCerrarTarea(base({ estado: 'en_curso' }), ACTOR, AHORA, 'listo')!
+    expect(cerrar.activa).toBe(false)              // hecha → sale de las consultas
+    const anular = patchAnularTarea(base(), { uid: 'uid-giovanny' }, AHORA, 'ya no aplica')!
+    expect(anular.activa).toBe(false)              // anulada → sale de las consultas
+    const reasignar = patchReasignarTarea(base({ estado: 'en_curso' }),
+      { uid: 'uid-giovanny', nombre: 'Giovanny' }, AHORA, { uid: 'uid-david', nombre: 'David' })!
+    expect(reasignar.activa).toBe(true)            // resetea a pendiente → sigue activa
   })
 })
 
