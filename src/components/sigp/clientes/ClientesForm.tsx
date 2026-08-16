@@ -11,6 +11,8 @@ export interface ClienteFormData {
   estado: 'activo' | 'inactivo'
   usa_tipo_inversion: boolean
   usa_preventivos: boolean
+  /** C1.1: vocabulario controlado de contratos (alcance de LPUs). */
+  contratos: string[]
   contactos: Contacto[]
   condiciones_comerciales: CondicionesComerciales
 }
@@ -39,6 +41,8 @@ interface FormState {
   estado: 'activo' | 'inactivo'
   usaTipoInversion: boolean
   usaPreventivos: boolean
+  contratos: string[]
+  contratoNuevo: string
   contactos: ContactoRow[]
   esquema: 'iva_pleno' | 'aiu'
   aiu: { admin: string; imprevistos: string; utilidad: string }
@@ -50,6 +54,7 @@ function toFormState(c: Cliente | null | undefined): FormState {
   if (!c) {
     return {
       nombre: '', nit: '', estado: 'activo', usaTipoInversion: false, usaPreventivos: false,
+      contratos: [], contratoNuevo: '',
       contactos: [{ ...EMPTY_CONTACTO }],
       esquema: 'iva_pleno',
       aiu: { admin: '', imprevistos: '', utilidad: '' },
@@ -62,6 +67,8 @@ function toFormState(c: Cliente | null | undefined): FormState {
     estado: c.estado,
     usaTipoInversion: c.usa_tipo_inversion ?? false,
     usaPreventivos: c.usa_preventivos ?? false,
+    contratos: c.contratos ?? [],
+    contratoNuevo: '',
     contactos: c.contactos.length
       ? c.contactos.map(ct => ({
           nombre: ct.nombre,
@@ -107,6 +114,7 @@ function toFormData(s: FormState): ClienteFormData {
     estado: s.estado,
     usa_tipo_inversion: s.usaTipoInversion,
     usa_preventivos: s.usaPreventivos,
+    contratos: s.contratos,
     contactos,
     condiciones_comerciales,
   }
@@ -292,6 +300,52 @@ export default function ClientesForm({ isOpen, onClose, onSave, initial }: Clien
           <p className="text-xs text-gray-400">
             Opcional. Las filas vacías se descartan al guardar.
           </p>
+        </div>
+
+        {/* ── Contratos (C1.1 — alcance de listas de precios) ─────────────── */}
+        <div className="space-y-2 rounded-lg bg-gray-50 border border-gray-200 p-4">
+          <p className="text-sm font-semibold text-gray-700">Contratos</p>
+          <p className="text-xs text-gray-500">
+            Vocabulario del cliente para separar listas de precios por contrato
+            (y naturaleza OPEX/CAPEX). Vacío = el cliente maneja una sola lista.
+          </p>
+          {form.contratos.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {form.contratos.map(c => (
+                <span key={c} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-brand-50 border border-brand-200 text-xs text-brand-800">
+                  {c}
+                  <button type="button" aria-label={`Quitar ${c}`}
+                    onClick={() => set('contratos', form.contratos.filter(x => x !== c))}
+                    className="text-brand-400 hover:text-red-600">×</button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input value={form.contratoNuevo}
+              onChange={e => set('contratoNuevo', e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  const v = form.contratoNuevo.trim()
+                  if (v && !form.contratos.includes(v)) {
+                    setForm(f => ({ ...f, contratos: [...f.contratos, v], contratoNuevo: '' }))
+                  }
+                }
+              }}
+              placeholder="Ej: Contrato marco obra civil 2026"
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            <button type="button"
+              onClick={() => {
+                const v = form.contratoNuevo.trim()
+                if (v && !form.contratos.includes(v)) {
+                  setForm(f => ({ ...f, contratos: [...f.contratos, v], contratoNuevo: '' }))
+                }
+              }}
+              className="px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-100 transition">
+              ＋ Agregar
+            </button>
+          </div>
         </div>
 
         {/* ── Condiciones comerciales ───────────────────────────────────── */}

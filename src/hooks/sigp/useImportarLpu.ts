@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import {
-  collection, doc, getDocs, query, where, setDoc, updateDoc, writeBatch, Timestamp,
+  arrayUnion, collection, doc, getDocs, query, where, updateDoc, writeBatch, Timestamp,
 } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../firebase/config'
 import type { Cliente } from '../../types/sigp/cliente'
 import type { MapeoHoja, MapeoImportacion } from '../../types/sigp/importacion'
 import type { ItemParseado } from '../../utils/sigp/lpuMapeo'
+import { lpuVigente, type AlcanceLpu, type LPU } from '../../types/sigp/lpu'
 
 // Máximo de operaciones por batch de Firestore es 500; dejamos margen.
 const TAM_BATCH = 450
@@ -21,6 +22,11 @@ export interface ImportarLpuParams {
   categorias: string[]
   mapeos: Record<string, MapeoHoja>
   uid?: string
+  /** C1.1: alcance de la lista (contrato + naturaleza). Vacío = clásica. */
+  alcance?: AlcanceLpu
+  /** C1.1: si el guard de calidad disparó y el usuario FORZÓ, las señales
+   *  quedan registradas en el doc de la LPU (evidencia auditable). */
+  forzadoSenales?: string[]
 }
 
 export interface ProgresoImportacion {
@@ -76,14 +82,27 @@ export function useImportarLpu() {
     const snap = await uploadBytes(ref(storage, `lpus/${p.cliente.id}/${lpuId}/${nombreArchivo}`), p.file)
     const archivo_original_url = await getDownloadURL(snap.ref)
 
-    // 3. Versionado: buscar LPU vigente del cliente (filtro de estado en cliente).
+    // 3. Versionado POR ALCANCE (C1.1): la anterior a historizar es la vigente
+    //    del MISMO alcance; si es la primera importación CON alcance y existe
+    //    una legacy sin alcance, ESA es la anterior (misma cadena del cliente)
+    //    — así la resolución nunca queda ambigua. Vigentes de OTROS alcances
+    //    no se tocan.
     setProgreso({ fase: 'Finalizando', pct: 85 })
     const existentes = await getDocs(query(collection(db, 'lpus'), where('cliente_id', '==', p.cliente.id)))
-    const vigentes = existentes.docs.filter(d => d.data().estado === 'vigente')
-    const anterior = vigentes.sort((a, b) => (b.data().version ?? 0) - (a.data().version ?? 0))[0]
-    const version = anterior ? (anterior.data().version ?? 0) + 1 : 1
+    const lpus = existentes.docs.map(d => ({ id: d.id, ...d.data() })) as LPU[]
+    const mismaAlcance = lpuVigente(lpus, p.cliente.id, p.alcance)
+    const legacySinAlcance = (p.alcance?.contrato || p.alcance?.naturaleza)
+      ? lpus.find(l => l.estado === 'vigente' && !l.contrato && !l.naturaleza) ?? null
+      : null
+    const anterior = mismaAlcance ?? legacySinAlcance
+    const version = anterior ? (anterior.version ?? 0) + 1 : 1
 
-    // 4. Doc padre AL FINAL (la LPU aparece solo cuando ya tiene ítems + Excel).
+    // 4+5. ATÓMICO (C1.1, diseño aprobado): los ítems ya viven en la
+    //    subcolección SIN doc padre (invisible para todo el panel — Firestore
+    //    lo permite), así que la PRIMERA aparición de la lista nueva Y la
+    //    historización de la anterior van en UN solo writeBatch: ningún modo
+    //    de fallo deja dos vigentes ni cero. Si la carga de ítems murió antes,
+    //    queda una subcolección huérfana reimportable y la vigente intacta.
     const lpuData: Record<string, unknown> = {
       cliente_id: p.cliente.id,
       nombre: p.nombre,
@@ -99,12 +118,26 @@ export function useImportarLpu() {
     }
     if (p.vigencia && (p.vigencia.desde || p.vigencia.hasta)) lpuData.vigencia = p.vigencia
     if (anterior) lpuData.reemplaza_a = anterior.id
-    await setDoc(lpuRef, lpuData)
-
-    // 5. Supersede: la anterior pasa a histórica.
-    if (anterior) {
-      await updateDoc(anterior.ref, { estado: 'historica', fecha_actualizacion: Timestamp.now() })
+    if (p.alcance?.contrato) lpuData.contrato = p.alcance.contrato
+    if (p.alcance?.naturaleza) lpuData.naturaleza = p.alcance.naturaleza
+    if (p.forzadoSenales && p.forzadoSenales.length > 0) {
+      lpuData.forzado_importacion = {
+        por: p.uid ?? 'desconocido',
+        fecha: Timestamp.now(),
+        senales: p.forzadoSenales,
+      }
     }
+    const swap = writeBatch(db)
+    swap.set(lpuRef, lpuData)
+    if (anterior) {
+      swap.update(doc(db, 'lpus', anterior.id), { estado: 'historica', fecha_actualizacion: Timestamp.now() })
+    }
+    // Historizar también la legacy si la anterior fue la del mismo alcance
+    // pero además quedaba una legacy vigente sin alcance (ambigüedad).
+    if (mismaAlcance && legacySinAlcance && legacySinAlcance.id !== mismaAlcance.id) {
+      swap.update(doc(db, 'lpus', legacySinAlcance.id), { estado: 'historica', fecha_actualizacion: Timestamp.now() })
+    }
+    await swap.commit()
 
     // 6. Guardar el mapeo en el cliente para reutilizarlo.
     const nuevoMapeo: MapeoImportacion = {
@@ -112,8 +145,12 @@ export function useImportarLpu() {
       hojas: Object.values(p.mapeos),
       fecha_guardado: Timestamp.now(),
     }
+    // C1.1: arrayUnion — APPEND server-side. Antes se escribía
+    // [...prop.mapeos, nuevo] con el PROP del componente: en dos
+    // importaciones de la misma sesión (el flujo normal de alcances) la
+    // segunda PISABA el mapeo de la primera con la base stale.
     await updateDoc(doc(db, 'clientes', p.cliente.id), {
-      mapeos_lpu_guardados: [...p.cliente.mapeos_lpu_guardados, nuevoMapeo],
+      mapeos_lpu_guardados: arrayUnion(nuevoMapeo),
       fecha_actualizacion: Timestamp.now(),
     })
 
