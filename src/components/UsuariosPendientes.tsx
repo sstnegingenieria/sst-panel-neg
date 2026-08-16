@@ -15,6 +15,10 @@ export interface Tecnico {
   obras_asignadas: string[]
   estado: 'pendiente' | 'activo' | 'inactivo'
   rol: string
+  // C2.1: cliente al que pertenece un rol residente_cliente. Fuente del
+  // claim `cliente_id` que deriva la CF sincronizarClaims (precedente de
+  // campo de alcance en users: obras_asignadas). Ausente en roles internos.
+  cliente_id?: string
   // Documentos adjuntos subidos desde la app móvil
   cedula_url?: string
   seguridad_social_url?: string

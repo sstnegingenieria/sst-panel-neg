@@ -36,6 +36,7 @@ const { sincronizarVerificacionSst } = require('./verificacionesSst');
 const { sincronizarComprasProyectoDesdeOC, sincronizarComprasProyectoDesdeMenores } = require('./comprasProyecto');
 const { crearProyectoAlAprobarCotizacion, crearProyectoAlAceptarPreventivo } = require('./crearProyecto');
 const { registrarEventoHorario } = require('./horario');
+const { sincronizarClaims, resincronizarClaims } = require('./claims');
 
 exports.generarConsecutivo = generarConsecutivo;
 exports.asignarObraAlPrincipal = asignarObraAlPrincipal;
@@ -45,3 +46,5 @@ exports.sincronizarComprasProyectoDesdeMenores = sincronizarComprasProyectoDesde
 exports.crearProyectoAlAprobarCotizacion = crearProyectoAlAprobarCotizacion;
 exports.crearProyectoAlAceptarPreventivo = crearProyectoAlAceptarPreventivo;
 exports.registrarEventoHorario = registrarEventoHorario;
+exports.sincronizarClaims = sincronizarClaims;
+exports.resincronizarClaims = resincronizarClaims;
