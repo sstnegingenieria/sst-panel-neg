@@ -51,6 +51,11 @@ export interface Cliente {
    *  cliente antecesor. SIN UI de edición — se escribe por dato autorizado;
    *  el detalle del cliente lo muestra como chip de solo lectura. */
   sucede_a?: string
+  /** C1.1 (14-ago): vocabulario controlado de CONTRATOS del cliente (texto
+   *  libre, chips en el CRUD — nada hardcodeado). Vacío/ausente = el cliente
+   *  no maneja la dimensión de contrato y ninguna UI cambia. Las LPUs y el
+   *  cotizador lo usan como alcance (contrato + naturaleza OPEX/CAPEX). */
+  contratos?: string[]
   condiciones_comerciales: CondicionesComerciales
   /** Mapeos de columnas guardados para reutilizar al importar futuras LPU de este cliente. */
   mapeos_lpu_guardados: MapeoImportacion[]

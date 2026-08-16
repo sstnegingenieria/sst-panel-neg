@@ -211,7 +211,7 @@ export default function ClienteDetalleSigp() {
         clientes={[c]}
         clienteIdInicial={c.id}
         lpus={lpus}
-        onImportado={reloadLpus}
+        onImportado={() => { reloadLpus(); load() }}   // load(): refresca los mapeos guardados del cliente (C1.1 — dos pasadas en la misma sesión)
       />
 
       <ClientesForm isOpen={modal.isOpen} onClose={modal.close} onSave={handleSave} initial={c} />

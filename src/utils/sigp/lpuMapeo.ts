@@ -149,18 +149,27 @@ export function columnaConMasPrecios(hoja: HojaCruda, desde: number): number | n
   return mejor
 }
 
-/** Columna de texto más poblada, excluyendo columnas ya asignadas. */
+/** Columna de texto más poblada, excluyendo columnas ya asignadas.
+ *  C1.1: ante EMPATE de población gana la de texto más LARGO en promedio —
+ *  las descripciones son largas y los códigos cortos; el `>` estricto de
+ *  antes favorecía a la primera columna y con el archivo de Claro eso era
+ *  la columna de CÓDIGOS (causa próxima del corrimiento OPEX). */
 function columnaTextoMasPoblada(hoja: HojaCruda, desde: number, excluir: (number | null)[]): number | null {
   let mejor: number | null = null
   let mejorCount = 0
+  let mejorLargo = 0
   for (let c = 0; c < hoja.numColumnas; c++) {
     if (excluir.includes(c)) continue
     let count = 0
+    let largo = 0
     for (let i = desde; i < hoja.filas.length; i++) {
       const v = hoja.filas[i][c]
-      if (typeof v === 'string' && v.trim()) count++
+      if (typeof v === 'string' && v.trim()) { count++; largo += v.trim().length }
     }
-    if (count > mejorCount) { mejorCount = count; mejor = c }
+    const promedio = count > 0 ? largo / count : 0
+    if (count > mejorCount || (count === mejorCount && promedio > mejorLargo)) {
+      mejorCount = count; mejorLargo = promedio; mejor = c
+    }
   }
   return mejor
 }
@@ -176,7 +185,7 @@ export function sugerirMapeoColumnas(hoja: HojaCruda, filaEncabezado: number): M
     return null
   }
 
-  const codigo = buscar(/c[oó]digo|c[oó]d\b|item|referencia|ref\b/i)
+  let codigo = buscar(/c[oó]digo|c[oó]d\b|item|referencia|ref\b/i)
   const capitulo = buscar(/cap[ií]tulo|grupo|secci[oó]n/i)
   // Predicado dedicado (esEncabezadoUnidad): formas largas por regex +
   // cortas por match exacto anclado — sustituye las alternativas frágiles
@@ -188,6 +197,27 @@ export function sugerirMapeoColumnas(hoja: HojaCruda, filaEncabezado: number): M
   }
   let valor = buscar(/valor|precio|vr\.?|v\/u|unitario/i)
   let descripcion = buscar(/descrip|concepto|actividad|detalle/i)
+
+  // ── Coalesce de ENCABEZADO COMPUESTO (C1.1, caso real Claro OPEX): el
+  //    archivo trae las etiquetas repartidas en DOS filas — ITEM/DESCRIPCION
+  //    en la fila anterior y UND/CANT/VALOR en la fila elegida (que además es
+  //    la primera fila de capítulo). Los campos que la fila elegida no
+  //    resolvió por ETIQUETA se re-buscan en la fila N−1.
+  //    LIMITACIÓN CONOCIDA Y ACEPTADA: solo mira N−1 — un encabezado
+  //    repartido en 3+ filas seguirá fallando (el guard de calidad del
+  //    wizard es la red para ese caso). No generalizar sin caso real.
+  if (filaEncabezado > 0 && (codigo === null || descripcion === null)) {
+    const previa = hoja.filas[filaEncabezado - 1] ?? []
+    const buscarEn = (fila: typeof previa, re: RegExp): number | null => {
+      for (let c = 0; c < fila.length; c++) {
+        const v = fila[c]
+        if (typeof v === 'string' && re.test(v)) return c
+      }
+      return null
+    }
+    if (codigo === null) codigo = buscarEn(previa, /c[oó]digo|c[oó]d\b|item|referencia|ref\b/i)
+    if (descripcion === null) descripcion = buscarEn(previa, /descrip|concepto|actividad|detalle/i)
+  }
 
   const desde = filaEncabezado + 1
   if (valor === null) valor = columnaConMasPrecios(hoja, desde)
@@ -303,9 +333,29 @@ export interface Consolidado {
   itemsSinUnidad: number
   /** Muestra para el panel (hasta 6): "4.1.1 — Limpieza de terreno… [HOJA]". */
   ejemplosSinUnidad: string[]
-  /** true si hay unidades vacías O códigos duplicados → el wizard exige el
-   *  "forzar" consciente antes de importar. */
+  /** Señales de CALIDAD del dato (C1.1 — nacidas del incidente Claro OPEX:
+   *  315 ítems con columnas corridas guardados en silencio). Texto legible
+   *  para el panel del wizard; si el usuario FORZA pese a ellas, quedan
+   *  registradas en `lpus.forzado_importacion` (evidencia auditable). */
+  senalesCalidad: string[]
+  /** true si hay unidades vacías, códigos duplicados O señales de calidad →
+   *  el wizard exige el "forzar" consciente antes de importar. */
   requiereConfirmacion: boolean
+}
+
+// Umbrales del guard de calidad (constantes nombradas, no números mágicos).
+// Calibrados con el incidente real: OPEX de Claro daba 100 % códigos vacíos,
+// mediana de descripción 6 chars y mediana de unidad ~200 chars.
+const UMBRAL_PCT_CODIGOS_VACIOS = 0.6   // ≥60 % de códigos vacíos
+const UMBRAL_MEDIANA_DESC_CORTA = 12    // descripciones que parecen códigos
+const UMBRAL_MEDIANA_UNIDAD_LARGA = 20  // unidades que parecen descripciones
+const UMBRAL_PCT_SIN_PRECIO = 0.2       // ≥20 % de filas descartadas por precio
+
+function mediana(nums: number[]): number {
+  if (nums.length === 0) return 0
+  const s = [...nums].sort((a, b) => a - b)
+  const m = Math.floor(s.length / 2)
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
 export function consolidar(resultados: ResultadoHoja[]): Consolidado {
@@ -333,6 +383,31 @@ export function consolidar(resultados: ResultadoHoja[]): Consolidado {
   const ejemplosSinUnidad = sinUnidad.slice(0, 6).map(it =>
     `${it.codigo || '(sin código)'} — ${it.descripcion.slice(0, 50).trimEnd()} [${it.categoria}]`)
 
+  // ── Señales de CALIDAD (C1.1): detectan el corrimiento de columnas del
+  //    caso Claro (códigos vacíos + descripciones-código + unidades-párrafo)
+  //    y cargas mayormente sin precio. Sobre la muestra completa. ──
+  const senalesCalidad: string[] = []
+  if (items.length > 0) {
+    const pctCodigosVacios = items.filter(it => !it.codigo.trim()).length / items.length
+    if (pctCodigosVacios >= UMBRAL_PCT_CODIGOS_VACIOS) {
+      senalesCalidad.push(`${Math.round(pctCodigosVacios * 100)} % de los ítems tienen el código vacío — revisa el mapeo de la columna CÓDIGO`)
+    }
+    const medDesc = mediana(items.map(it => it.descripcion.trim().length))
+    if (medDesc > 0 && medDesc < UMBRAL_MEDIANA_DESC_CORTA) {
+      senalesCalidad.push(`Las descripciones son anormalmente cortas (mediana ${medDesc} caracteres) — parecen CÓDIGOS: posible corrimiento de columnas`)
+    }
+    const conUnidad = items.filter(it => it.unidad.trim())
+    const medUnidad = mediana(conUnidad.map(it => it.unidad.trim().length))
+    if (medUnidad > UMBRAL_MEDIANA_UNIDAD_LARGA) {
+      senalesCalidad.push(`Las unidades son anormalmente largas (mediana ${Math.round(medUnidad)} caracteres) — parecen DESCRIPCIONES: posible corrimiento de columnas`)
+    }
+    const sinPrecio = descartadasPorMotivo.precio_invalido
+    const universo = items.length + sinPrecio
+    if (universo > 0 && sinPrecio / universo >= UMBRAL_PCT_SIN_PRECIO) {
+      senalesCalidad.push(`${Math.round((sinPrecio / universo) * 100)} % de las filas se descartaron por precio inválido — revisa el mapeo de la columna VALOR`)
+    }
+  }
+
   return {
     items,
     descartadas,
@@ -344,6 +419,8 @@ export function consolidar(resultados: ResultadoHoja[]): Consolidado {
     codigosDuplicados,
     itemsSinUnidad: sinUnidad.length,
     ejemplosSinUnidad,
-    requiereConfirmacion: sinUnidad.length > 0 || codigosDuplicados.length > 0,
+    senalesCalidad,
+    requiereConfirmacion: sinUnidad.length > 0 || codigosDuplicados.length > 0
+      || senalesCalidad.length > 0,
   }
 }

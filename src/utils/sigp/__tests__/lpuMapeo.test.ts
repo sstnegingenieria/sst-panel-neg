@@ -249,8 +249,10 @@ describe('consolidar', () => {
 
 // ── Guardia post-import (27-jul): unidades vacías y duplicados exigen "forzar" ──
 
+// C1.1: la descripción default es REALISTA (larga) — el guard de calidad
+// nuevo marca descripciones-mediana-corta como señal de mapeo corrido.
 const item = (parcial: Partial<ItemParseado>): ItemParseado => ({
-  codigo: 'X-1', descripcion: 'Ítem', unidad: 'm', valor_unitario: 100,
+  codigo: 'X-1', descripcion: 'Suministro e instalación de ítem de prueba', unidad: 'm', valor_unitario: 100,
   categoria: 'HOJA', orden: 0, ...parcial,
 })
 const resultado = (items: ItemParseado[]): ResultadoHoja =>
@@ -296,6 +298,101 @@ describe('consolidar — guardia de unidades vacías', () => {
     ])])
     expect(c.itemsSinUnidad).toBe(0)
     expect(c.ejemplosSinUnidad).toEqual([])
+    expect(c.requiereConfirmacion).toBe(false)
+  })
+})
+
+// ── C1.1 (14-ago): encabezado compuesto, desempate del fallback y señales ──
+
+describe('sugerirMapeoColumnas — coalesce de encabezado compuesto (caso real Claro OPEX)', () => {
+  // Réplica de la forma del archivo real: fila 0 trae ITEM/DESCRIPCION y la
+  // fila 1 (que ADEMÁS es la primera fila de capítulo) trae UND/CANT/VALOR.
+  const claroOpex = hoja('OPEX', [
+    ['ITEM', 'DESCRIPCION', null, null, null, null],
+    ['1.1.', 'PRELIMINARES (CAMBIO, REPARACIÓN)', 'UND', 'CANT', 'VALOR UNITARIO NEG SUBASTA', 'VALOR TOTAL NEG SUBASTA'],
+    ['1.1.1', 'Suministro e instalación de cerramiento provisional', 'ML', 144, 13900, 2001600],
+    ['1.1.2', 'Reparación de cerramiento para demarcación de zonas', 'ML', 72, 8531, 614232],
+    ['1.1.3', 'Retiro de cerramiento para demarcar zona de trabajo', 'ML', 144, 1079, 155376],
+  ])
+
+  it('elige la fila 1 (más keywords) y el coalesce rescata código y descripción de la fila 0', () => {
+    const fila = detectarFilaEncabezado(claroOpex)
+    expect(fila).toBe(1)
+    const sug = sugerirMapeoColumnas(claroOpex, fila)
+    // ANTES del fix: codigo=null y descripcion=0 (la columna de códigos) —
+    // el corrimiento exacto que dejó 315 ítems malformados en prod.
+    expect(sug.codigo).toBe(0)
+    expect(sug.descripcion).toBe(1)
+    expect(sug.unidad).toBe(2)
+    expect(sug.valor_unitario).toBe(4)
+  })
+
+  it('regresión: encabezado COMPLETO en una sola fila no activa el coalesce (forma CAPEX)', () => {
+    const capex = hoja('CAPEX', [
+      [null, 'ADECUACIONES DE OBRA CIVIL', null, null, null, null, null, null],
+      ['1', 'PRELIMINARES', null, null, null, null, null, null],
+      [null, 'EVALUACION TECNICA', null, null, null, null, 'VALORES NEG', null],
+      ['ITEM', 'DESCRIPCION', null, null, 'UNIDAD', 'CANTIDAD', 'Valor Unitario', 'Valor Total'],
+      ['1.1', 'Aseo general al iniciar y finalizar la obra', null, null, 'M2', 200, 9492.6, 1898522],
+    ])
+    const fila = detectarFilaEncabezado(capex)
+    expect(fila).toBe(3)
+    const sug = sugerirMapeoColumnas(capex, fila)
+    expect(sug.codigo).toBe(0)
+    expect(sug.descripcion).toBe(1)
+    expect(sug.unidad).toBe(4)
+    expect(sug.valor_unitario).toBe(6)
+  })
+})
+
+describe('columnaTextoMasPoblada — desempate por longitud (vía sugerirMapeoColumnas)', () => {
+  it('ante empate de población, la descripción cae en la columna de texto MÁS LARGO', () => {
+    // Encabezado sin etiqueta de descripción NI de código → fallback puro.
+    // Col 0: códigos cortos · col 1: descripciones largas — misma población.
+    const h = hoja('SIN_ETIQUETAS', [
+      ['AA', 'BB', 'UNIDAD', 'VALOR'],
+      ['1.1', 'Suministro e instalación de malla eslabonada', 'm', 100],
+      ['1.2', 'Reparación de cerramiento perimetral en madera', 'm', 200],
+      ['1.3', 'Retiro y disposición final de escombros de obra', 'm', 300],
+    ])
+    const sug = sugerirMapeoColumnas(h, 0)
+    expect(sug.descripcion).toBe(1)   // antes del fix: 0 (el > estricto favorecía a la primera)
+  })
+})
+
+describe('consolidar — señales de calidad del dato (C1.1)', () => {
+  it('códigos vacíos + descripciones-código + unidades-párrafo (el cuadro exacto de Claro OPEX)', () => {
+    const corridos = Array.from({ length: 10 }, (_, i) => item({
+      codigo: '',
+      descripcion: `1.7.${i}`,
+      unidad: 'Demolición de pasa muros o perforaciones sobre muro en mampostería con herramienta especial',
+    }))
+    const c = consolidar([resultado(corridos)])
+    expect(c.senalesCalidad.length).toBeGreaterThanOrEqual(3)
+    expect(c.senalesCalidad.join(' ')).toMatch(/código vacío/)
+    expect(c.senalesCalidad.join(' ')).toMatch(/anormalmente cortas/)
+    expect(c.senalesCalidad.join(' ')).toMatch(/anormalmente largas/)
+    expect(c.requiereConfirmacion).toBe(true)
+  })
+
+  it('mayoría de filas descartadas por precio inválido dispara su señal', () => {
+    const r: ResultadoHoja = {
+      items: [item({}), item({ codigo: 'X-2' })],
+      descartadas: [0, 1, 2].map(i =>
+        ({ hoja: 'H', fila: i, motivo: 'precio_invalido' as const, contenido: '…' })),
+      capitulos: [],
+    }
+    const c = consolidar([r])
+    expect(c.senalesCalidad.join(' ')).toMatch(/precio inválido/)
+  })
+
+  it('una carga SANA no dispara ninguna señal (regresión del caso limpio)', () => {
+    const c = consolidar([resultado([
+      item({ codigo: 'A-1' }),
+      item({ codigo: 'A-2', unidad: 'und' }),
+      item({ codigo: 'A-3', unidad: 'm2' }),
+    ])])
+    expect(c.senalesCalidad).toEqual([])
     expect(c.requiereConfirmacion).toBe(false)
   })
 })

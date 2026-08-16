@@ -30,7 +30,7 @@ import type { CatalogoItem } from '../../types/sigp/catalogo'
 import type { ItemCotizacion, EsquemaTributario, ConfigAIU, CondicionesCotizacion, APU } from '../../types/sigp/cotizacion'
 import ApuModal from '../../components/sigp/cotizaciones/ApuModal'
 import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
-import type { ItemLPU, EsquemaFactorLpu } from '../../types/sigp/lpu'
+import { lpuVigente, NATURALEZAS_LPU, NATURALEZA_LPU_LABEL, type ItemLPU, type EsquemaFactorLpu, type LPU, type NaturalezaLpu } from '../../types/sigp/lpu'
 import type { CantidadPreliminar } from '../../types/sigp/visita'
 import CotizacionAcciones from '../../components/sigp/cotizaciones/CotizacionAcciones'
 import VersionesCotizacion from '../../components/sigp/cotizaciones/VersionesCotizacion'
@@ -97,6 +97,12 @@ export default function CotizacionDetalleSigp() {
   const [sitioSolicitud, setSitioSolicitud] = useState('')   // Bloque C — sugerencia de zona
   const [lpuNombre, setLpuNombre] = useState<string | null>(null)
   const [lpuVigenteId, setLpuVigenteId] = useState<string | null>(null)
+  // C1.1 — alcance (cliente con contratos): elegir contrato+naturaleza decide
+  // qué lista carga el buscador. Cliente sin contratos: nada de esto se ve.
+  const [lpusCliente, setLpusCliente] = useState<LPU[]>([])
+  const [clienteContratos, setClienteContratos] = useState<string[]>([])
+  const [alcanceContrato, setAlcanceContrato] = useState('')
+  const [alcanceNaturaleza, setAlcanceNaturaleza] = useState<'' | NaturalezaLpu>('')
   // Esquema Matriz→NEG del LPU vigente (solo INGEMEC hoy; null = LPU normal)
   const [lpuEsquema, setLpuEsquema] = useState<EsquemaFactorLpu | null>(null)
   const [catItems, setCatItems] = useState<CatalogoItem[]>([])
@@ -132,6 +138,29 @@ export default function CotizacionDetalleSigp() {
     setDescUValor(d?.utilidad ? String(d.utilidad.valor) : '')
   }, [version?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // C1.1 — carga (o descarga) la lista del buscador según la LPU resuelta.
+  const cargarListaLpu = async (vig: LPU | null) => {
+    if (!vig) {
+      setLpuNombre(null); setLpuVigenteId(null); setLpuEsquema(null); setLpuItems([])
+      return
+    }
+    setLpuNombre(vig.nombre)
+    setLpuVigenteId(vig.id)
+    // Esquema Matriz→NEG (INGEMEC): factor por ítem sobre el precio full
+    setLpuEsquema(vig.esquema_factor ?? null)
+    const its = await getDocs(collection(db, 'lpus', vig.id, 'items'))
+    setLpuItems(its.docs.map(d => ({ id: d.id, ...d.data() }) as ItemLPU))
+  }
+
+  // C1.1 — al cambiar el alcance elegido, re-resolver y cargar esa lista.
+  useEffect(() => {
+    if (!cotizacion?.cliente_id || lpusCliente.length === 0) return
+    const alc = (alcanceContrato || alcanceNaturaleza)
+      ? { ...(alcanceContrato ? { contrato: alcanceContrato } : {}), ...(alcanceNaturaleza ? { naturaleza: alcanceNaturaleza } : {}) }
+      : undefined
+    cargarListaLpu(lpuVigente(lpusCliente, cotizacion.cliente_id, alc)).catch(() => {})
+  }, [alcanceContrato, alcanceNaturaleza]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Cargar LPU vigente del cliente (para el buscador) y visita realizada vinculada.
   useEffect(() => {
     if (!cotizacion) return
@@ -139,15 +168,18 @@ export default function CotizacionDetalleSigp() {
       if (cotizacion.cliente_id) {
         try {
           const lpus = await getDocs(query(collection(db, 'lpus'), where('cliente_id', '==', cotizacion.cliente_id)))
-          const vig = lpus.docs.map(d => ({ id: d.id, ...d.data() })).find((l: any) => l.estado === 'vigente') as any
-          if (vig) {
-            setLpuNombre(vig.nombre)
-            setLpuVigenteId(vig.id)
-            // Esquema Matriz→NEG (INGEMEC): factor por ítem sobre el precio full
-            setLpuEsquema(vig.esquema_factor ?? null)
-            const its = await getDocs(collection(db, 'lpus', vig.id, 'items'))
-            setLpuItems(its.docs.map(d => ({ id: d.id, ...d.data() }) as ItemLPU))
-          }
+          const docs = lpus.docs.map(d => ({ id: d.id, ...d.data() })) as LPU[]
+          setLpusCliente(docs)
+          // C1.1: contratos del cliente (vocabulario del alcance)
+          try {
+            const cli = await getDoc(doc(db, 'clientes', cotizacion.cliente_id))
+            setClienteContratos(cli.exists() ? ((cli.data().contratos as string[]) ?? []) : [])
+          } catch { setClienteContratos([]) }
+          // Resolución consolidada (C1.1): sin alcance = comportamiento
+          // clásico (única vigente); con varias listas con alcance, el
+          // selector de arriba del buscador decide cuál se carga.
+          const vig = lpuVigente(docs, cotizacion.cliente_id)
+          if (vig) await cargarListaLpu(vig)
         } catch { /* LPU opcional */ }
       }
       if (cotizacion.solicitud_id) {
@@ -820,6 +852,28 @@ export default function CotizacionDetalleSigp() {
                       Sugerido por el sitio: {transporteLpu[sugerenciaTransporte].codigo} — aplicar
                     </button>
                   )}
+                </div>
+              )}
+
+              {/* C1.1 — selector de alcance: SOLO clientes con contratos.
+                  Elegir contrato + naturaleza decide qué lista carga el
+                  buscador; sin contratos, nada de esto existe. */}
+              {clienteContratos.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-medium text-gray-600">Lista de precios:</span>
+                  <select value={alcanceContrato} onChange={e => setAlcanceContrato(e.target.value)}
+                    className="px-2 py-1.5 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+                    <option value="">(sin contrato)</option>
+                    {clienteContratos.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <select value={alcanceNaturaleza} onChange={e => setAlcanceNaturaleza(e.target.value as '' | NaturalezaLpu)}
+                    className="px-2 py-1.5 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+                    <option value="">(—)</option>
+                    {NATURALEZAS_LPU.map(n => <option key={n} value={n}>{NATURALEZA_LPU_LABEL[n]}</option>)}
+                  </select>
+                  {lpuNombre
+                    ? <span className="text-gray-500">→ {lpuNombre}</span>
+                    : <span className="text-amber-700">sin lista vigente para ese alcance</span>}
                 </div>
               )}
 

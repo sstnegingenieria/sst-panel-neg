@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Timestamp } from 'firebase/firestore'
 import type { Cliente } from '../../../types/sigp/cliente'
 import type { MapeoColumnas, MapeoHoja } from '../../../types/sigp/importacion'
-import type { LPU } from '../../../types/sigp/lpu'
+import { lpuVigente, NATURALEZAS_LPU, NATURALEZA_LPU_LABEL, type LPU, type NaturalezaLpu } from '../../../types/sigp/lpu'
 import { leerLibro, pareceListaDePrecios, type HojaCruda } from '../../../utils/sigp/lpuExcel'
 import {
   detectarFilaEncabezado, sugerirMapeoColumnas, sugerirOrigenCapitulo,
@@ -35,6 +35,12 @@ const CAMPOS: { key: keyof MapeoColumnas; label: string; requerido?: boolean }[]
 const estadoInicial = {
   paso: 1,
   clienteId: '',
+  // C1.1 — alcance de la lista (solo si el cliente tiene `contratos`).
+  contrato: '',
+  naturaleza: '' as '' | NaturalezaLpu,
+  // C1.1 — hojas cuyo mapeo se precargó de un guardado del cliente (el
+  // wizard lo MUESTRA antes de aplicarlo — nada de reutilización silenciosa).
+  hojasConMapeoGuardado: [] as string[],
   file: null as File | null,
   parseando: false,
   errorParseo: null as string | null,
@@ -60,13 +66,21 @@ function inicializarMapeos(
   hojasSel: HojaCruda[],
   cliente: Cliente | null,
   previos: Record<string, MapeoHoja>,
-): Record<string, MapeoHoja> {
+): { mapeos: Record<string, MapeoHoja>; deGuardado: string[] } {
   const guardadas = (cliente?.mapeos_lpu_guardados ?? []).flatMap(m => m.hojas)
   const out: Record<string, MapeoHoja> = {}
+  const deGuardado: string[] = []
   for (const h of hojasSel) {
     if (previos[h.nombre]) { out[h.nombre] = previos[h.nombre]; continue }
     const guardada = guardadas.find(g => g.nombre_hoja === h.nombre)
-    if (guardada) { out[h.nombre] = { ...guardada, es_lpu: true }; continue }
+    if (guardada) {
+      // C1.1: el guardado se PRECARGA pero se declara — el paso de Mapeo
+      // muestra qué se va a aplicar antes de aplicarlo (incidente Claro:
+      // un mapeo guardado con corrimiento se re-aplicaba en silencio).
+      out[h.nombre] = { ...guardada, es_lpu: true }
+      deGuardado.push(h.nombre)
+      continue
+    }
     const fila = detectarFilaEncabezado(h)
     const columnas = sugerirMapeoColumnas(h, fila)
     out[h.nombre] = {
@@ -78,7 +92,7 @@ function inicializarMapeos(
       origen_capitulo: sugerirOrigenCapitulo(h, columnas, fila),
     }
   }
-  return out
+  return { mapeos: out, deGuardado }
 }
 
 function fmt(n: number): string {
@@ -95,8 +109,16 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
   }, [isOpen, clienteIdInicial])
 
   const cliente = clientes.find(c => c.id === st.clienteId) || null
-  const lpuVigente = st.clienteId
-    ? lpus.find(l => l.cliente_id === st.clienteId && l.estado === 'vigente') || null
+  const contratosCliente = cliente?.contratos ?? []
+  const alcance = (st.contrato || st.naturaleza)
+    ? { ...(st.contrato ? { contrato: st.contrato } : {}), ...(st.naturaleza ? { naturaleza: st.naturaleza } : {}) }
+    : undefined
+  // La vigente que se HISTORIZARÍA con esta importación — misma resolución
+  // del hook: la del MISMO alcance, o la legacy sin alcance si es la primera
+  // importación con alcance (C1.1).
+  const vigenteAfectada = st.clienteId
+    ? (lpuVigente(lpus, st.clienteId, alcance)
+      ?? (alcance ? lpus.find(l => l.cliente_id === st.clienteId && l.estado === 'vigente' && !l.contrato && !l.naturaleza) ?? null : null))
     : null
   const hojasSel = useMemo(
     () => st.hojas.filter(h => st.seleccion[h.nombre]),
@@ -166,7 +188,11 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
     const next = Math.min(s.paso + 1, PASOS.length)
     if (s.paso === 2 && next === 3) {
       const sel = s.hojas.filter(h => s.seleccion[h.nombre])
-      return { ...s, paso: next, mapeos: inicializarMapeos(sel, cliente, s.mapeos), hojaActiva: sel[0]?.nombre ?? '' }
+      const init = inicializarMapeos(sel, cliente, s.mapeos)
+      return {
+        ...s, paso: next, mapeos: init.mapeos, hojaActiva: sel[0]?.nombre ?? '',
+        hojasConMapeoGuardado: [...new Set([...s.hojasConMapeoGuardado, ...init.deGuardado])],
+      }
     }
     if (s.paso === 4 && next === 5 && !s.nombre.trim()) {
       return { ...s, paso: next, nombre: `LPU ${cliente?.nombre ?? ''}`.trim() }
@@ -197,6 +223,15 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
 
     setSt(s => ({ ...s, importando: true }))
     try {
+      // C1.1: si el guard exigió forzar, las señales quedan en el doc de la
+      // LPU — evidencia auditable de la decisión (quién, cuándo, qué disparó).
+      const senalesForzadas = consolidado.requiereConfirmacion && st.forzar
+        ? [
+          ...(consolidado.itemsSinUnidad > 0 ? [`${consolidado.itemsSinUnidad} ítem(s) sin unidad`] : []),
+          ...(consolidado.codigosDuplicados.length > 0 ? [`${consolidado.codigosDuplicados.length} código(s) duplicado(s)`] : []),
+          ...consolidado.senalesCalidad,
+        ]
+        : undefined
       await importar({
         cliente,
         file: st.file,
@@ -207,6 +242,8 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
         categorias: consolidado.categorias,
         mapeos: st.mapeos,
         uid: user?.uid,
+        alcance,
+        forzadoSenales: senalesForzadas,
       })
       toast('LPU importada correctamente')
       onImportado()
@@ -289,9 +326,37 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
                 )}
               </div>
 
+              {/* C1.1 — alcance de la lista: SOLO si el cliente maneja contratos */}
+              {contratosCliente.length > 0 && (
+                <div className="rounded-lg border border-gray-200 p-4 space-y-3">
+                  <p className="text-sm font-medium text-gray-700">Alcance de la lista <span className="text-xs font-normal text-gray-400">(opcional)</span></p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-600">Contrato</label>
+                      <select value={st.contrato} onChange={e => setSt(s => ({ ...s, contrato: e.target.value }))}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+                        <option value="">(sin contrato)</option>
+                        {contratosCliente.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-600">Naturaleza</label>
+                      <select value={st.naturaleza} onChange={e => setSt(s => ({ ...s, naturaleza: e.target.value as '' | NaturalezaLpu }))}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+                        <option value="">(—)</option>
+                        {NATURALEZAS_LPU.map(n => <option key={n} value={n}>{NATURALEZA_LPU_LABEL[n]}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Cada alcance versiona su propia lista. Para importar los dos contratos de un mismo Excel, corre el asistente una vez por alcance eligiendo sus hojas.
+                  </p>
+                </div>
+              )}
+
               {cliente && cliente.mapeos_lpu_guardados.length > 0 && (
                 <div className="rounded-lg bg-brand-50 border border-brand-100 px-4 py-3 text-xs text-brand-800">
-                  Este cliente tiene {cliente.mapeos_lpu_guardados.length} mapeo(s) guardado(s); se aplicarán automáticamente a las hojas que coincidan.
+                  Este cliente tiene {cliente.mapeos_lpu_guardados.length} mapeo(s) guardado(s); se precargarán en las hojas que coincidan y <span className="font-semibold">los verás en el paso Mapeo antes de aplicarlos</span>.
                 </div>
               )}
             </div>
@@ -334,6 +399,18 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
                   </button>
                 ))}
               </div>
+
+              {/* C1.1 — el mapeo GUARDADO se muestra antes de aplicarse (el
+                  guardado de Claro arrastraba un corrimiento y se re-aplicaba
+                  en silencio). El usuario lo ve y lo corrige aquí mismo. */}
+              {st.hojasConMapeoGuardado.includes(st.hojaActiva) && (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                  📋 Esta hoja usa un <span className="font-semibold">mapeo GUARDADO</span> de una importación anterior:
+                  {' '}encabezado fila {mapeoActivo.fila_encabezado + 1} ·{' '}
+                  {CAMPOS.map(c => `${c.label.toLowerCase()}=${mapeoActivo.columnas[c.key] != null ? letraColumna(mapeoActivo.columnas[c.key]!) : '—'}`).join(' · ')}.
+                  {' '}<span className="font-semibold">Revísalo contra la vista previa</span> antes de continuar — si está corrido, corrígelo acá.
+                </div>
+              )}
 
               {/* Selector de fila de encabezado */}
               <div>
@@ -460,6 +537,15 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
                   <p className="text-red-600">Revisa el mapeo de la columna de unidad de la(s) hoja(s) en el paso anterior.</p>
                 </div>
               )}
+              {/* C1.1 — señales de CALIDAD del dato (nacidas del corrimiento
+                  de columnas de Claro OPEX: 315 ítems guardados en silencio) */}
+              {consolidado.senalesCalidad.length > 0 && (
+                <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 space-y-1">
+                  <p className="font-semibold">⛔ Señales de calidad del dato — la carga NO se guarda en silencio:</p>
+                  {consolidado.senalesCalidad.map((s, i) => <p key={i} className="text-red-600/90">· {s}</p>)}
+                  <p className="text-red-600">Suelen indicar un mapeo de columnas corrido — revisa el paso anterior.</p>
+                </div>
+              )}
               {consolidado.requiereConfirmacion && (
                 <label className="flex items-start gap-2 text-xs text-gray-700 cursor-pointer rounded-lg border border-gray-300 px-3 py-2">
                   <input type="checkbox" checked={st.forzar}
@@ -469,7 +555,9 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
                     <span className="font-medium">Forzar importación</span> — entiendo que quedarán
                     {consolidado.itemsSinUnidad > 0 && <> {consolidado.itemsSinUnidad} ítem(s) sin unidad</>}
                     {consolidado.itemsSinUnidad > 0 && consolidado.codigosDuplicados.length > 0 && <> y</>}
-                    {consolidado.codigosDuplicados.length > 0 && <> {consolidado.codigosDuplicados.length} código(s) duplicado(s)</>}.
+                    {consolidado.codigosDuplicados.length > 0 && <> {consolidado.codigosDuplicados.length} código(s) duplicado(s)</>}
+                    {consolidado.senalesCalidad.length > 0 && <> las señales de calidad listadas arriba</>}.
+                    {' '}Esta decisión quedará <span className="font-semibold">registrada en la LPU</span> (quién, cuándo y qué señales).
                   </span>
                 </label>
               )}
@@ -527,10 +615,20 @@ export default function ImportarLpuWizard({ isOpen, onClose, clientes, lpus, onI
                     para <span className="font-semibold">{cliente?.nombre}</span>.
                   </div>
 
-                  {lpuVigente && (
+                  {alcance && (
+                    <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-xs text-gray-700">
+                      Alcance: {st.contrato && <span className="font-semibold">{st.contrato}</span>}
+                      {st.contrato && st.naturaleza && ' · '}
+                      {st.naturaleza && <span className="font-semibold">{NATURALEZA_LPU_LABEL[st.naturaleza]}</span>}
+                      {' '}— esta lista versiona dentro de su alcance.
+                    </div>
+                  )}
+
+                  {vigenteAfectada && (
                     <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800">
-                      ⚠ Este cliente ya tiene una LPU vigente («{lpuVigente.nombre}», v{lpuVigente.version}).
-                      Al importar, esa pasará a <span className="font-semibold">histórica</span> y esta será la v{lpuVigente.version + 1}.
+                      ⚠ Al importar, «{vigenteAfectada.nombre}» (v{vigenteAfectada.version}
+                      {!vigenteAfectada.contrato && !vigenteAfectada.naturaleza && alcance ? ', sin alcance' : ''})
+                      pasará a <span className="font-semibold">histórica</span> y esta será la v{vigenteAfectada.version + 1}.
                     </div>
                   )}
 

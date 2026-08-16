@@ -72,7 +72,64 @@ export interface LPU {
 
   /** Esquema Matriz → NEG (solo INGEMEC hoy; ausente = LPU normal). */
   esquema_factor?: EsquemaFactorLpu
+
+  // ── Alcance (C1.1, 14-ago-2026) — AMBOS opcionales: ausentes = la lista
+  //    "global del cliente" de siempre (INGEMEC/IHS/Vertis no se migran).
+  //    Un cliente con varios contratos (caso real: Claro OPEX/CAPEX) importa
+  //    una lista POR alcance y el versionado historiza dentro del alcance. ──
+  /** Contrato al que pertenece la lista — vocabulario de `Cliente.contratos`. */
+  contrato?: string
+  /** Naturaleza de la inversión del contrato. */
+  naturaleza?: NaturalezaLpu
+
+  /** C1.1: si la importación disparó el guard de calidad y el usuario FORZÓ,
+   *  la decisión queda auditable en el propio doc (quién, cuándo, señales). */
+  forzado_importacion?: {
+    por: string
+    fecha: Timestamp
+    senales: string[]
+  }
+}
+
+export const NATURALEZAS_LPU = ['opex', 'capex'] as const
+export type NaturalezaLpu = typeof NATURALEZAS_LPU[number]
+export const NATURALEZA_LPU_LABEL: Record<NaturalezaLpu, string> = {
+  opex: 'OPEX', capex: 'CAPEX',
 }
 
 export const LPU_ESTADOS = ['vigente', 'historica'] as const
 export const MONEDA_DEFAULT = 'COP'
+
+// ── Resolución consolidada de "la vigente" (C1.1) ────────────────────────────
+
+/** Alcance pedido al resolver una lista. Vacío = comportamiento clásico. */
+export interface AlcanceLpu {
+  contrato?: string
+  naturaleza?: NaturalezaLpu
+}
+
+const tieneAlcance = (a?: AlcanceLpu): boolean => !!(a && (a.contrato || a.naturaleza))
+
+/** ¿La LPU coincide EXACTAMENTE con el alcance pedido? (campos presentes). */
+function coincideAlcance(l: LPU, a: AlcanceLpu): boolean {
+  return (l.contrato ?? undefined) === (a.contrato || undefined)
+    && (l.naturaleza ?? undefined) === (a.naturaleza || undefined)
+}
+
+/**
+ * ÚNICA resolución de "la LPU vigente" del panel (reemplaza los `.find()`
+ * sueltos — wizard, historización y buscador del cotizador).
+ *
+ *  - Con alcance: la vigente del cliente que coincida exactamente.
+ *  - Sin alcance: si el cliente tiene UNA sola vigente → esa (compat total
+ *    con el comportamiento histórico); si tiene varias (cliente con
+ *    contratos) → null y el caller debe pedir el alcance.
+ */
+export function lpuVigente(lpus: LPU[], clienteId: string, alcance?: AlcanceLpu): LPU | null {
+  const vigentes = lpus.filter(l => l.cliente_id === clienteId && l.estado === 'vigente')
+  if (tieneAlcance(alcance)) return vigentes.find(l => coincideAlcance(l, alcance!)) ?? null
+  if (vigentes.length === 1) return vigentes[0]
+  // varias vigentes sin alcance pedido: preferir la ÚNICA sin alcance si existe
+  const sinAlcance = vigentes.filter(l => !l.contrato && !l.naturaleza)
+  return sinAlcance.length === 1 ? sinAlcance[0] : null
+}
