@@ -19,6 +19,7 @@ import {
   puedeGestionarComprasUI,
   veOcUI,
   veTareasUI,
+  veActividadesUI,
 } from '../types/sigp/permisos'
 
 interface SidebarProps {
@@ -190,6 +191,18 @@ const sigpNavItems: {
       </svg>
     ),
   },
+  // Actividades F1 (17-ago-2026): operación in-house por LPU — visible con
+  // sigp_actividades_enabled + veActividadesUI (filtro en el render).
+  {
+    to: '/sigp/actividades',
+    label: 'Actividades',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M11.35 3.836c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m8.9-4.414c.376.023.75.05 1.124.08 1.131.094 1.976 1.057 1.976 2.192V16.5A2.25 2.25 0 0118 18.75h-2.25m-7.5-10.5H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V18.75m-7.5-10.5h6.375c.621 0 1.125.504 1.125 1.125v9.375m-8.25-3l1.5 1.5 3-3.75" />
+      </svg>
+    ),
+  },
   // Compras · C2 (02-ago-2026): órdenes de compra con proveedor — visible si
   // veOcUI(rol) (filtro en el render, junto al de Proyectos).
   {
@@ -231,9 +244,11 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   // RUTAS siguen vivas (la bandeja enlaza a la ficha del proyecto para
   // aprobar preliquidación) — solo se despeja la navegación.
   const ocultosParaGerenciaAdm = ['/sigp/panel', '/sigp/solicitudes', '/sigp/visitas', '/sigp/proyectos']
+  const actividadesEnabled = useFeatureFlag('sigp_actividades_enabled', false)
   const visibleSigpItems = sigpNavItems.filter(item =>
     (item.to !== '/sigp/proyectos' || (f2Enabled && veProyectosUI(user?.rol)))
     && (item.to !== '/sigp/ordenes-compra' || veOcUI(user?.rol))
+    && (item.to !== '/sigp/actividades' || (actividadesEnabled && veActividadesUI(user?.rol)))
     && (user?.rol !== 'gerencia_administrativa' || !ocultosParaGerenciaAdm.includes(item.to)))
   // Bloque 6: "Obras" vive SIEMPRE en el bloque SST (vista informativa; las
   // obras nacen de los proyectos SIGP). Mismos roles de siempre (veObras).

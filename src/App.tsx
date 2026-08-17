@@ -25,8 +25,9 @@ import CotizacionDetalleSigp from './pages/sigp/CotizacionDetalleSigp'
 import ProyectosSigp from './pages/sigp/ProyectosSigp'
 import ProyectoDetalleSigp from './pages/sigp/ProyectoDetalleSigp'
 import OrdenesCompraSigp from './pages/sigp/OrdenesCompraSigp'
-import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, accesoClientes, type Rol } from './types/sigp/roles'
-import PortalClientes from './pages/clientes/PortalClientes'
+import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, accesoResidente, type Rol } from './types/sigp/roles'
+import ShellResidente from './components/ShellResidente'
+import ActividadesSigp from './pages/sigp/ActividadesSigp'
 import {
   ROLES_VE_DASHBOARD_SST,
   ROLES_VE_TECNICOS,
@@ -38,6 +39,7 @@ import {
   ROLES_VE_VERIFICACION_SST,
   ROLES_GESTIONA_COMPRAS,
   ROLES_VEN_OC,
+  ROLES_VE_ACTIVIDADES,
   ROLES_VE_PROYECTOS,
   ROLES_VE_HORARIO,
   ROLES_VE_TAREAS,
@@ -64,17 +66,17 @@ function ProtectedRoutes() {
 
   if (!user) return <Login />
 
-  // C2.1 paso 6 — TERCERA área del gatekeeper: portal de clientes.
-  // El residente entra al panel pero NO comparte ni una ruta con el personal
-  // interno: su árbol de rutas es SOLO el portal neutro (sin Layout, sin
-  // sidebar, sin menús — cero lecturas). Rama PROPIA, no un permiso más
-  // dentro del árbol interno: cualquier URL cae a /portal, sin cadenas de
-  // redirect con las rutas internas (anti-bucle, lección Hotfix A).
-  if (accesoClientes(user.rol as Rol)) {
+  // residente_obra — empleado NEG con acceso RESTRINGIDO al cliente asignado.
+  // Rama PROPIA del gatekeeper: monta la MISMA página de Actividades que los
+  // internos (una sola UI — las reglas y la preselección de cliente hacen el
+  // resto) dentro de un shell mínimo sin sidebar. Cualquier URL cae a la
+  // única ruta, sin cadenas de redirect con las rutas internas (anti-bucle,
+  // lección Hotfix A).
+  if (accesoResidente(user.rol as Rol)) {
     return (
       <Routes>
-        <Route path="/portal" element={<PortalClientes />} />
-        <Route path="*" element={<Navigate to="/portal" replace />} />
+        <Route path="/sigp/actividades" element={<ShellResidente><ActividadesSigp /></ShellResidente>} />
+        <Route path="*" element={<Navigate to="/sigp/actividades" replace />} />
       </Routes>
     )
   }
@@ -156,6 +158,10 @@ function ProtectedRoutes() {
         <Route path="/sigp/proyectos/:proyectoId" element={<ProtectedRoute rolesPermitidos={ROLES_VE_PROYECTOS} redirectTo="/sigp/panel"><ProyectoDetalleSigp /></ProtectedRoute>} />
         {/* Compras · C2 — bandeja de órdenes de compra (acciones en la ficha del proyecto) */}
         <Route path="/sigp/ordenes-compra" element={<ProtectedRoute rolesPermitidos={ROLES_VEN_OC}><OrdenesCompraSigp /></ProtectedRoute>} />
+        {/* Actividades F1 (17-ago): la MISMA página que monta la rama del
+            residente — acá dentro del Layout para los internos. La ruta no se
+            gatea por el flag (convención Tareas: el flag solo oculta sidebar). */}
+        <Route path="/sigp/actividades" element={<ProtectedRoute rolesPermitidos={ROLES_VE_ACTIVIDADES}><ActividadesSigp /></ProtectedRoute>} />
         {/* Módulo Gerencia Administrativa (Bloque 1) — fuera del grupo SIGP */}
         <Route path="/administrativa/facturacion" element={<ProtectedRoute rolesPermitidos={ROLES_VE_FACTURACION}><FacturacionPagos /></ProtectedRoute>} />
         {/* Módulo Compras (C1) — proveedores; solo gerencia_administrativa/admin */}

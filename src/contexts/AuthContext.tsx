@@ -4,7 +4,7 @@ import { doc, getDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { auth, db, functions } from '../firebase/config'
 import { claveIngresoLS, evaluarMarcaIngreso, esClaveIngresoObsoleta } from '../types/sigp/horario'
-import { accesoClientes, type Rol } from '../types/sigp/roles'
+import { accesoResidente, type Rol } from '../types/sigp/roles'
 
 /** Validador de horario (#3): marca de ingreso/salida vía CF — el servidor
  *  pone IP, dispositivo y timestamp; el cliente solo dice el tipo. LANZA en
@@ -116,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // C2.1 paso 6: los residentes de cliente NO marcan asistencia — el
         // reloj es del personal interno (el rol externo nace sin efectos
         // colaterales; sus logins no ensucian registros_horario).
-        if (!accesoClientes((docSnap.exists() ? (docSnap.data().rol ?? '') : '') as Rol)) {
+        if (!accesoResidente((docSnap.exists() ? (docSnap.data().rol ?? '') : '') as Rol)) {
           void marcarIngresoSiCorresponde(firebaseUser.uid)
         }
       } else {
@@ -151,7 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         // ANTES del signOut — después ya no hay token para invocar la CF.
         // C2.1 paso 6: el residente de cliente no marca (espejo del ingreso).
-        if (!accesoClientes((user?.rol ?? '') as Rol)) {
+        if (!accesoResidente((user?.rol ?? '') as Rol)) {
           await invocarMarcaHorario('salida')
         }
       } catch (e) {

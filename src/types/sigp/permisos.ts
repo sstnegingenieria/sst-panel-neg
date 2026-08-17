@@ -232,3 +232,24 @@ export const ROLES_ASIGNA_TAREAS: Rol[] = [
   'director_proyectos', 'gestion_integral', 'admin',
 ]
 export const puedeAsignarTareasUI = (rol: string | undefined) => en(rol, ROLES_ASIGNA_TAREAS)
+
+// ── Módulo de Actividades (F1 operación in-house, 17-ago) ──
+// Espejo EXACTO de las reglas de `actividades`: leen y operan los mismos
+// que gestionan proyectos + gerencia administrativa (lectura/gestión) — y
+// el rol residente_obra, cuya SEGUNDA concesión explícita es esta (la
+// whitelist de rolResidente.test.ts la registra). El residente opera la
+// MISMA página con su cliente fijo; las reglas acotan el alcance.
+export const ROLES_VE_ACTIVIDADES: Rol[] = [
+  'admin', 'gerencia_general', 'operacion_comercial',
+  'auxiliar_proyectos', 'director_proyectos', 'gerencia_administrativa',
+  'residente_obra',
+]
+export const veActividadesUI = (rol: string | undefined) => en(rol, ROLES_VE_ACTIVIDADES)
+// Gestión (crear/editar/hitos): espejo de las vías de write de la regla —
+// puedeGestionarProyectos() en reglas + el residente (acotado por reglas).
+export const ROLES_GESTIONA_ACTIVIDADES: Rol[] = [
+  'admin', 'gerencia_general', 'operacion_comercial',
+  'auxiliar_proyectos', 'director_proyectos',
+  'residente_obra',
+]
+export const puedeGestionarActividadesUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_ACTIVIDADES)

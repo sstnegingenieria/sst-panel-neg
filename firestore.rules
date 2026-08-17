@@ -30,7 +30,8 @@ service cloud.firestore {
       ];
     }
 
-    // C2.1 paso 6 — rol EXTERNO residente_cliente (portal de clientes).
+    // residente_obra (renombrado R2, antes residente_cliente): EMPLEADO NEG
+    // con acceso restringido al cliente asignado — NO un acceso del cliente.
     // REGLA OPERATIVA: este rol JAMÁS entra a un helper existente (los de
     // arriba y abajo son listas blancas de personal interno) — nace pudiendo
     // NADA y cada permiso suyo será una cita EXPLÍCITA de este helper en los
@@ -39,7 +40,7 @@ service cloud.firestore {
     // fuente auditable); regresión permanente en rolResidente.test.ts.
     function esResidenteDe(clienteId) {
       return isAuthed()
-             && request.auth.token.get('perfil', '') == 'residente_cliente'
+             && request.auth.token.get('perfil', '') == 'residente_obra'
              && request.auth.token.get('cliente_id', '') == clienteId
              && request.auth.token.get('cliente_id', '') != '';
     }
@@ -380,7 +381,10 @@ service cloud.firestore {
     // Write: solo roles que gestionan proyectos/comercial.
 
     match /clientes/{clienteId} {
-      allow read: if accesoSIGP();
+      // F1 Actividades: el residente lee SU cliente (sedes, solicitantes,
+      // contratos — los necesita para operar actividades). Concesión
+      // explícita vía esResidenteDe; jamás la lista interna.
+      allow read: if accesoSIGP() || esResidenteDe(clienteId);
       allow create, update, delete: if puedeGestionarProyectos();
     }
 
@@ -504,11 +508,16 @@ service cloud.firestore {
     // Los ítems (~900 por LPU) viven en la subcolección lpus/{id}/items.
 
     match /lpus/{lpuId} {
-      allow read: if accesoSIGP();
+      // F1 Actividades: el residente lee las LPUs de SU cliente (el buscador
+      // de líneas del alcance). El list exige where cliente_id == el suyo.
+      allow read: if accesoSIGP() || esResidenteDe(resource.data.cliente_id);
       allow create, update, delete: if puedeGestionarProyectos();
 
       match /items/{itemId} {
-        allow read: if accesoSIGP();
+        // Los ítems no llevan cliente_id: se resuelve por el doc PADRE
+        // (get cacheado por request — un solo doc único por consulta).
+        allow read: if accesoSIGP()
+                    || esResidenteDe(get(/databases/$(database)/documents/lpus/$(lpuId)).data.cliente_id);
         allow create, update, delete: if puedeGestionarProyectos();
       }
     }
@@ -771,6 +780,28 @@ service cloud.firestore {
     //   · receptor del balón (solo devolverlo).
     // `hecha`/`anulada` terminales sin reapertura (decisión SB1).
     // Sin delete — 'anulada' es el terminal suave (restricción 5.1).
+    // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: actividades — F1 de la operación in-house
+    // ────────────────────────────────────────────────────────────────
+    // Actividades de mantenimiento con dos hitos independientes
+    // (aprobación / ejecución) y líneas de LPU por alcance. El RESIDENTE
+    // OPERA (crea, edita, carga líneas, marca ambos hitos) pero SOLO
+    // dentro de su cliente — el doble esResidenteDe del update impide
+    // mover una actividad hacia o desde otro cliente. Sin segregación
+    // interna entre hitos: la evidencia de la aprobación es la
+    // referencia (aprobacion.referencia), no quién la teclea.
+    // Sin delete: anulación soft con motivo (restricción 5.1).
+    match /actividades/{actividadId} {
+      allow read: if puedeGestionarProyectos() || gestionaCompras()
+                  || esResidenteDe(resource.data.cliente_id);
+      allow create: if puedeGestionarProyectos()
+                    || esResidenteDe(request.resource.data.cliente_id);
+      allow update: if puedeGestionarProyectos()
+                    || (esResidenteDe(resource.data.cliente_id)
+                        && esResidenteDe(request.resource.data.cliente_id));
+      allow delete: if false;
+    }
+
     match /tareas/{tareaId} {
       allow read: if esPersonalPanel();
 

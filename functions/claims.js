@@ -1,7 +1,7 @@
 /**
  * sincronizarClaims + resincronizarClaims — C2.1 paso 1 (16-ago-2026).
  *
- * Custom claims para el futuro rol residente_cliente (segregación real por
+ * Custom claims para el futuro rol residente_obra (segregación real por
  * cliente) y para el hardening de Storage (H-008: las reglas de Storage no
  * pueden leer Firestore — el claim es el único vehículo de rol/perfil ahí).
  *
@@ -41,7 +41,7 @@ const ROLES_INTERNOS = [
 ];
 
 // Nombre del rol residente (F1 lo materializa; la derivación queda lista).
-const ROL_RESIDENTE = 'residente_cliente';
+const ROL_RESIDENTE = 'residente_obra';
 
 /** Deriva los claims desde el doc de users. PURA (testeable).
  *  null/estado≠activo → {} (claims limpios). */
@@ -53,7 +53,7 @@ function derivarClaims(userDoc) {
     return { perfil: 'interno', rol };
   }
   if (rol === ROL_RESIDENTE) {
-    const claims = { perfil: 'residente_cliente', rol };
+    const claims = { perfil: 'residente_obra', rol };
     if (userDoc.cliente_id) claims.cliente_id = userDoc.cliente_id;
     return claims;
   }

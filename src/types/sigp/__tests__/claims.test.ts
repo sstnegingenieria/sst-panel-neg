@@ -34,14 +34,14 @@ describe('derivarClaims — proyección del doc de users al token', () => {
     expect(ROLES_INTERNOS).not.toContain('tecnico')
   })
 
-  it('residente_cliente activo con cliente_id → claims con cliente_id', () => {
-    expect(derivarClaims({ rol: 'residente_cliente', estado: 'activo', cliente_id: 'cli1' }))
-      .toEqual({ perfil: 'residente_cliente', rol: 'residente_cliente', cliente_id: 'cli1' })
+  it('residente_obra activo con cliente_id → claims con cliente_id', () => {
+    expect(derivarClaims({ rol: 'residente_obra', estado: 'activo', cliente_id: 'cli1' }))
+      .toEqual({ perfil: 'residente_obra', rol: 'residente_obra', cliente_id: 'cli1' })
   })
 
-  it('residente_cliente sin cliente_id → claims SIN la clave (no cliente_id vacío)', () => {
-    const claims = derivarClaims({ rol: 'residente_cliente', estado: 'activo' })
-    expect(claims).toEqual({ perfil: 'residente_cliente', rol: 'residente_cliente' })
+  it('residente_obra sin cliente_id → claims SIN la clave (no cliente_id vacío)', () => {
+    const claims = derivarClaims({ rol: 'residente_obra', estado: 'activo' })
+    expect(claims).toEqual({ perfil: 'residente_obra', rol: 'residente_obra' })
     expect('cliente_id' in claims).toBe(false)
   })
 
@@ -89,16 +89,16 @@ describe('esReduccion — cuándo revocar refresh tokens', () => {
   })
 
   it('quita de cliente_id reduce; agregarlo no', () => {
-    const conCliente = { perfil: 'residente_cliente', rol: 'residente_cliente', cliente_id: 'cli1' }
-    const sinCliente = { perfil: 'residente_cliente', rol: 'residente_cliente' }
+    const conCliente = { perfil: 'residente_obra', rol: 'residente_obra', cliente_id: 'cli1' }
+    const sinCliente = { perfil: 'residente_obra', rol: 'residente_obra' }
     expect(esReduccion(conCliente, sinCliente)).toBe(true)
     expect(esReduccion(sinCliente, conCliente)).toBe(false)
   })
 
   it('cambio de cliente_id reduce (pierde el acceso al cliente previo)', () => {
     expect(esReduccion(
-      { perfil: 'residente_cliente', rol: 'residente_cliente', cliente_id: 'cli1' },
-      { perfil: 'residente_cliente', rol: 'residente_cliente', cliente_id: 'cli2' },
+      { perfil: 'residente_obra', rol: 'residente_obra', cliente_id: 'cli1' },
+      { perfil: 'residente_obra', rol: 'residente_obra', cliente_id: 'cli2' },
     )).toBe(true)
   })
 })

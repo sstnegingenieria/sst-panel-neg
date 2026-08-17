@@ -9,6 +9,7 @@ import { db } from '../../firebase/config'
 import LpusTable from '../../components/sigp/lpus/LpusTable'
 import ImportarLpuWizard from '../../components/sigp/lpus/ImportarLpuWizard'
 import ClientesForm, { ClienteFormData } from '../../components/sigp/clientes/ClientesForm'
+import SedesSolicitantesConfig from '../../components/sigp/actividades/SedesSolicitantesConfig'
 import { useModal } from '../../hooks/useModal'
 import { useLpus } from '../../hooks/sigp/useLpus'
 import { useFirestore } from '../../hooks/useFirestore'
@@ -178,6 +179,16 @@ export default function ClienteDetalleSigp() {
                 )}
               </div>
             )}
+          </div>
+
+          {/* Actividades F1 (17-ago): sedes + solicitantes + flag del módulo,
+              a mano en el cliente (alimentan el registro en <1 minuto). */}
+          <div className="lg:col-span-2">
+            <SedesSolicitantesConfig
+              cliente={c}
+              puedeEditar={puedeEditarCliente}
+              onGuardado={() => { void load() }}
+            />
           </div>
         </div>
       )}
