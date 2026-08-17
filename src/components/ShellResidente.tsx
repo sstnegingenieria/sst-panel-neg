@@ -7,6 +7,7 @@ import { ReactNode, useEffect, useState } from 'react'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useAuth } from '../contexts/AuthContext'
+import { useFeatureFlag } from '../hooks/useFeatureFlag'
 
 interface ShellResidenteProps {
   children: ReactNode
@@ -15,6 +16,10 @@ interface ShellResidenteProps {
 export default function ShellResidente({ children }: ShellResidenteProps) {
   const { user, logout, cerrandoSesion } = useAuth()
   const [nombreCliente, setNombreCliente] = useState<string | null>(null)
+  // El flag gatea TAMBIÉN al residente (decisión 17-ago): con el módulo
+  // apagado ve un mensaje explícito — jamás un shell en blanco, que parece
+  // una falla del sistema y genera una llamada.
+  const moduloActivo = useFeatureFlag('sigp_actividades_enabled', false)
 
   useEffect(() => {
     let vivo = true
@@ -55,7 +60,16 @@ export default function ShellResidente({ children }: ShellResidenteProps) {
           </button>
         </div>
       </header>
-      <main className="max-w-6xl mx-auto p-4 lg:p-6">{children}</main>
+      <main className="max-w-6xl mx-auto p-4 lg:p-6">
+        {moduloActivo ? children : (
+          <div className="bg-white border border-gray-200 rounded-xl p-8 text-center max-w-md mx-auto mt-10">
+            <p className="text-sm font-semibold text-gray-800">El módulo no está disponible en este momento.</p>
+            <p className="text-xs text-gray-500 mt-2">
+              Si cree que se trata de un error, comuníquese con NEG Ingeniería.
+            </p>
+          </div>
+        )}
+      </main>
     </div>
   )
 }
