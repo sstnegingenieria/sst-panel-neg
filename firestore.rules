@@ -232,17 +232,28 @@ service cloud.firestore {
     // COLECCIÓN: contratistas
     // ────────────────────────────────────────────────────────────────
     // Lectura pública justificada: el formulario de registro de
-    // técnicos en la app SST necesita listar contratistas pre-login.
-    // Solo se expone el nombre del contratista; NIT/cédula/teléfono/
-    // dirección están cubiertos por seguridad en Firestore Rules
-    // (documentos con campos protegidos). Ver H-001 (severidad bajada
-    // a Baja tras validación del caso de uso).
+    // técnicos en la app SST necesita listar contratistas pre-login
+    // (el selector solo muestra el nombre). C2.1 paso 5 — cierre
+    // PARCIAL de H-001: la CÉDULA (dato personal, Ley 1581/2012) vive
+    // en el sub-doc privado/datos y NO en este doc público; el NIT se
+    // queda en el padre como riesgo aceptado (registro mercantil
+    // público — y la app Flutter lo lee/escribe, línea roja no tocar).
 
     match /contratistas/{contratistaId} {
       allow read: if true;
 
       // Gestión completa (crear/editar/eliminar).
       allow create, update, delete: if puedeGestionarProyectos();
+
+      // C2.1 paso 5: datos personales del contratista (cédula de persona
+      // natural) — patrón sub-doc privado de proveedores (C1). Leen quienes
+      // gestionan proyectos (asignación congela el documento) y gerencia
+      // administrativa (tabla de contratistas / habilitación); escriben
+      // solo los gestores (mismo camino del CRUD del padre).
+      match /privado/{docId} {
+        allow read: if puedeGestionarProyectos() || gestionaCompras();
+        allow write: if puedeGestionarProyectos();
+      }
 
       // gerencia_administrativa: habilitar/deshabilitar contratistas. SOLO puede
       // cambiar el campo `estado`. El panel (useFirestore) inyecta

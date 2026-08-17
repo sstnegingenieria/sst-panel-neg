@@ -13,6 +13,7 @@ import { toast } from '../../shared/Toast'
 import { contratistaAsignable, construirAsignacion } from '../../../types/sigp/proyecto'
 import type { Proyecto } from '../../../types/sigp/proyecto'
 import type { Contratista } from '../../ContratistasTable'
+import { resolverCedula, leerPrivado } from '../../../utils/contratistasPrivado'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
@@ -49,7 +50,12 @@ export default function AsignacionContratista({ proyecto, puedeGestionar, reload
     setAplicando(true)
     try {
       const ahora = Timestamp.now()
-      const asignacion = construirAsignacion(seleccionado, user?.uid ?? '', ahora, nota)
+      // C2.1 (H-001): la cédula del natural vive en privado/datos — el snapshot
+      // de asignación (contratista_documento) la lee de ahí, con respaldo al
+      // campo legado del padre durante la transición.
+      const privado = await leerPrivado(seleccionado.id)
+      const conCedula = { ...seleccionado, cedula: resolverCedula(seleccionado, privado) }
+      const asignacion = construirAsignacion(conCedula, user?.uid ?? '', ahora, nota)
       await updateDoc(doc(db, 'proyectos', proyecto.id), {
         asignacion,
         estado: 'contratista_asignado',
