@@ -1,0 +1,271 @@
+// MÓDULO DE ACTIVIDADES (F1 de la operación in-house) — modelo y builders.
+//
+// Entidad GENÉRICA a propósito: describe el modelo de operación (actividades
+// de mantenimiento con dos hitos independientes), no a un cliente — nada de
+// nombres de cliente en colecciones, campos ni reglas.
+//
+// Los DOS HITOS son independientes y sin secuencia obligatoria:
+//   - aprobacion  (la decisión del gestor del cliente; la EVIDENCIA es la
+//     referencia — correo/FAD/número —, no quién la teclea)
+//   - ejecucion   (el trabajo hecho en campo)
+// El camino normal aprueba antes de ejecutar; la emergencia ejecuta antes de
+// aprobar. Ambos caben en la misma tabla de estados, sin ramificar.
+//
+// `estado` es DERIVADO y PERSISTIDO, mantenido por los builders en cada
+// write (mismo patrón y misma razón que `activa` en Tareas: auto-sanador,
+// consultable por campo único, la UI no improvisa writes).
+import { Timestamp } from 'firebase/firestore'
+import type { LPU } from './lpu'
+
+// ── Estados ──────────────────────────────────────────────────────────────────
+export type EstadoActividad =
+  | 'registrada'   // sin hitos
+  | 'aprobada'     // aprobada, pendiente de ejecutar (camino normal)
+  | 'ejecutada'    // ejecutada SIN aprobar (emergencia — plata en riesgo)
+  | 'completa'     // ambos hitos
+  | 'anulada'      // terminal, soft (sin delete — restricción 5.1)
+
+export const ESTADO_ACTIVIDAD_LABEL: Record<EstadoActividad, string> = {
+  registrada: 'Registrada',
+  aprobada: 'Aprobada',
+  ejecutada: 'Ejecutada sin aprobar',
+  completa: 'Completa',
+  anulada: 'Anulada',
+}
+
+/** Colores por estado — semánticos, sin azules. */
+export const ESTADO_ACTIVIDAD_COLOR: Record<EstadoActividad, string> = {
+  registrada: 'bg-gray-100 text-gray-700',
+  aprobada: 'bg-emerald-100 text-emerald-800',
+  ejecutada: 'bg-amber-100 text-amber-800',
+  completa: 'bg-brand-100 text-brand-800',
+  anulada: 'bg-red-100 text-red-700',
+}
+
+// ── Modelo ───────────────────────────────────────────────────────────────────
+export interface LineaActividad {
+  /** Trazabilidad al LPU del ALCANCE de la actividad (cliente+contrato+
+   *  naturaleza). Las líneas nacen SIEMPRE del LPU — códigos canónicos ANP,
+   *  sin líneas manuales (el trabajo no previsto entra por origen_cantidad
+   *  'negociada': ítem del LPU + valor acordado → cantidad despejada). */
+  lpu_id: string
+  lpu_item_id: string
+  // Snapshot al insertar (regla 7.1). CONGELADOS desde que existe aprobación.
+  codigo: string
+  descripcion: string
+  unidad: string
+  valor_unitario: number
+  cantidad: number
+  /** 'medida' = medida en campo · 'negociada' = valor acordado con el
+   *  cliente, cantidad despejada (valor / valor_unitario). */
+  origen_cantidad: 'medida' | 'negociada'
+  total: number   // derivado: round(cantidad × valor_unitario)
+}
+
+export interface HitoAprobacion {
+  fecha: Timestamp
+  por: string          // quién REGISTRÓ (traza) — la decisión es del cliente
+  referencia?: string  // correo / FAD / número — la EVIDENCIA de la aprobación
+}
+
+export interface HitoEjecucion {
+  fecha: Timestamp
+  por: string
+  nota?: string
+}
+
+export interface EntradaHistorialActividad {
+  fecha: Timestamp
+  por: string
+  accion: string
+}
+
+export interface Actividad {
+  id: string
+  cliente_id: string            // eje de esResidenteDe
+  sede_id?: string
+  sede_nombre: string           // denormalizado (editar la sede no reescribe historia)
+  zona?: string                 // denormalizada de la sede
+  contrato: string              // del vocabulario Cliente.contratos
+  naturaleza: 'opex' | 'capex'
+  descripcion: string
+  solicitante?: string          // de Cliente.contactos_solicitantes
+  referencia_cliente?: string   // código/radicado del cliente (libre, buscable)
+  fecha_solicitud?: Timestamp
+  aprobacion?: HitoAprobacion | null
+  ejecucion?: HitoEjecucion | null
+  lineas: LineaActividad[]
+  total: number                 // derivado persistido (Σ líneas)
+  estado: EstadoActividad       // derivado persistido (builders)
+  anulacion?: { fecha: Timestamp, por: string, motivo: string }
+  historial: EntradaHistorialActividad[]
+  creada_por: string
+  fecha_creacion: Timestamp
+  fecha_actualizacion?: Timestamp
+}
+
+// ── Derivaciones puras ───────────────────────────────────────────────────────
+/** Tabla de los dos hitos → estado. `anulada` se maneja aparte (terminal). */
+export function estadoDe(a: Pick<Actividad, 'aprobacion' | 'ejecucion' | 'anulacion'>): EstadoActividad {
+  if (a.anulacion) return 'anulada'
+  const apr = !!a.aprobacion
+  const eje = !!a.ejecucion
+  if (apr && eje) return 'completa'
+  if (apr) return 'aprobada'
+  if (eje) return 'ejecutada'
+  return 'registrada'
+}
+
+export function totalLineas(lineas: LineaActividad[]): number {
+  return lineas.reduce((s, l) => s + (l.total || 0), 0)
+}
+
+export function estaValorizada(a: Pick<Actividad, 'lineas' | 'total'>): boolean {
+  return a.lineas.length > 0 && a.total > 0
+}
+
+/** LA LISTA DE ORO — "ejecutada y todavía no facturable": tiene ejecución y
+ *  le falta la aprobación O la valorización. Las dos son plata en riesgo
+ *  (una `completa` sin líneas tampoco se puede cobrar). Derivado de LECTURA
+ *  (no persiste: `estado` ya se consulta por campo único y este predicado
+ *  filtra client-side sobre estados ejecutada+completa). */
+export function noFacturable(a: Pick<Actividad, 'aprobacion' | 'ejecucion' | 'anulacion' | 'lineas' | 'total'>): boolean {
+  if (a.anulacion || !a.ejecucion) return false
+  return !a.aprobacion || !estaValorizada(a)
+}
+
+/** Congelamiento: desde que existe aprobación, código/descripción/unidad/
+ *  valor_unitario y el conjunto de líneas quedan inmutables — solo cantidad
+ *  y origen_cantidad siguen editables (la emergencia ajusta al aprobar). */
+export function lineasCongeladas(a: Pick<Actividad, 'aprobacion'>): boolean {
+  return !!a.aprobacion
+}
+
+// ── Alcance ──────────────────────────────────────────────────────────────────
+/** El sistema IMPIDE cruzar el alcance (no lo advierte): una línea solo puede
+ *  provenir de la LPU vigente del alcance exacto de la actividad. */
+export function lpuValidaParaActividad(
+  lpu: Pick<LPU, 'cliente_id' | 'contrato' | 'naturaleza' | 'estado'>,
+  act: Pick<Actividad, 'cliente_id' | 'contrato' | 'naturaleza'>,
+): boolean {
+  return lpu.estado === 'vigente'
+    && lpu.cliente_id === act.cliente_id
+    && (lpu.contrato ?? '') === act.contrato
+    && (lpu.naturaleza ?? '') === act.naturaleza
+}
+
+// ── Builders de líneas ───────────────────────────────────────────────────────
+export interface ItemLpuParaLinea {
+  id: string
+  codigo: string
+  descripcion: string
+  unidad: string
+  valor_unitario: number
+}
+
+/** Línea con cantidad MEDIDA (o negociada por cantidad directa). */
+export function construirLinea(
+  lpu: Pick<LPU, 'id' | 'cliente_id' | 'contrato' | 'naturaleza' | 'estado'>,
+  item: ItemLpuParaLinea,
+  cantidad: number,
+  origen: 'medida' | 'negociada',
+  act: Pick<Actividad, 'cliente_id' | 'contrato' | 'naturaleza'>,
+): LineaActividad | null {
+  if (!lpuValidaParaActividad(lpu, act)) return null      // alcance cruzado: NO
+  if (!(cantidad > 0) || !(item.valor_unitario > 0)) return null
+  return {
+    lpu_id: lpu.id, lpu_item_id: item.id,
+    codigo: item.codigo, descripcion: item.descripcion, unidad: item.unidad,
+    valor_unitario: item.valor_unitario,
+    cantidad, origen_cantidad: origen,
+    total: Math.round(cantidad * item.valor_unitario),
+  }
+}
+
+/** Trabajo NO PREVISTO: ítem del LPU + valor acordado → cantidad DESPEJADA
+ *  (lo que hoy hacen a mano con quince decimales). El total es el valor
+ *  acordado redondeado a peso; la cantidad conserva la precisión completa. */
+export function construirLineaNegociada(
+  lpu: Pick<LPU, 'id' | 'cliente_id' | 'contrato' | 'naturaleza' | 'estado'>,
+  item: ItemLpuParaLinea,
+  valorAcordado: number,
+  act: Pick<Actividad, 'cliente_id' | 'contrato' | 'naturaleza'>,
+): LineaActividad | null {
+  if (!lpuValidaParaActividad(lpu, act)) return null
+  if (!(valorAcordado > 0) || !(item.valor_unitario > 0)) return null
+  const cantidad = valorAcordado / item.valor_unitario
+  return {
+    lpu_id: lpu.id, lpu_item_id: item.id,
+    codigo: item.codigo, descripcion: item.descripcion, unidad: item.unidad,
+    valor_unitario: item.valor_unitario,
+    cantidad, origen_cantidad: 'negociada',
+    total: Math.round(valorAcordado),
+  }
+}
+
+// ── Patch builders (validan y devuelven el write exacto, o null) ────────────
+type PatchActividad = Record<string, unknown> | null
+
+const conDerivados = (base: Record<string, unknown>, a: Actividad, lineas?: LineaActividad[]): Record<string, unknown> => {
+  const ls = lineas ?? a.lineas
+  const preview = { ...a, ...base, lineas: ls } as Actividad
+  return {
+    ...base,
+    ...(lineas ? { lineas: ls, total: totalLineas(ls) } : {}),
+    estado: estadoDe(preview),
+  }
+}
+
+/** Marca el hito de APROBACIÓN. Congela las líneas de ahí en adelante. */
+export function patchAprobar(a: Actividad, por: string, fecha: Timestamp, referencia?: string): PatchActividad {
+  if (a.anulacion || a.aprobacion) return null
+  const aprobacion: HitoAprobacion = { fecha, por, ...(referencia?.trim() ? { referencia: referencia.trim() } : {}) }
+  return conDerivados({ aprobacion }, { ...a, aprobacion })
+}
+
+/** Marca el hito de EJECUCIÓN (normal tras aprobar, o emergencia primero). */
+export function patchEjecutar(a: Actividad, por: string, fecha: Timestamp, nota?: string): PatchActividad {
+  if (a.anulacion || a.ejecucion) return null
+  const ejecucion: HitoEjecucion = { fecha, por, ...(nota?.trim() ? { nota: nota.trim() } : {}) }
+  return conDerivados({ ejecucion }, { ...a, ejecucion })
+}
+
+/** Reemplaza el conjunto de líneas. RECHAZADO si están congeladas y el patch
+ *  toca algo más que cantidad/origen_cantidad de líneas existentes. */
+export function patchLineas(a: Actividad, nuevas: LineaActividad[]): PatchActividad {
+  if (a.anulacion) return null
+  if (lineasCongeladas(a)) {
+    // Congeladas: mismo conjunto (por lpu_item_id y orden), snapshot intacto;
+    // solo cantidad/origen_cantidad/total pueden diferir.
+    if (nuevas.length !== a.lineas.length) return null
+    for (let i = 0; i < nuevas.length; i++) {
+      const v = a.lineas[i], n = nuevas[i]
+      if (n.lpu_id !== v.lpu_id || n.lpu_item_id !== v.lpu_item_id
+        || n.codigo !== v.codigo || n.descripcion !== v.descripcion
+        || n.unidad !== v.unidad || n.valor_unitario !== v.valor_unitario) return null
+      if (n.total !== Math.round(n.cantidad * n.valor_unitario)) return null
+    }
+  }
+  return conDerivados({}, a, nuevas)
+}
+
+/** Anulación soft, terminal, con motivo. */
+export function patchAnular(a: Actividad, por: string, fecha: Timestamp, motivo: string): PatchActividad {
+  if (a.anulacion || !motivo.trim()) return null
+  const anulacion = { fecha, por, motivo: motivo.trim() }
+  return conDerivados({ anulacion }, { ...a, anulacion })
+}
+
+/** Edición de cabecera (descripción/sede/solicitante/referencia/fecha_solicitud).
+ *  El ALCANCE (cliente/contrato/naturaleza) NO se edita con líneas cargadas —
+ *  las líneas pertenecen a la LPU del alcance. */
+export function patchCabecera(
+  a: Actividad,
+  campos: Partial<Pick<Actividad, 'descripcion' | 'sede_id' | 'sede_nombre' | 'zona' | 'solicitante' | 'referencia_cliente' | 'fecha_solicitud' | 'contrato' | 'naturaleza'>>,
+): PatchActividad {
+  if (a.anulacion) return null
+  const tocaAlcance = ('contrato' in campos && campos.contrato !== a.contrato)
+    || ('naturaleza' in campos && campos.naturaleza !== a.naturaleza)
+  if (tocaAlcance && a.lineas.length > 0) return null
+  return conDerivados({ ...campos }, a)
+}

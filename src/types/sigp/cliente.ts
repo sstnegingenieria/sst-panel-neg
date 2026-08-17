@@ -56,6 +56,18 @@ export interface Cliente {
    *  no maneja la dimensión de contrato y ninguna UI cambia. Las LPUs y el
    *  cotizador lo usan como alcance (contrato + naturaleza OPEX/CAPEX). */
   contratos?: string[]
+  /** F1 Actividades: el cliente opera bajo el módulo de ACTIVIDADES (dos
+   *  hitos aprobación/ejecución + líneas de LPU por alcance). Con un solo
+   *  cliente flaggeado, el registro lo preselecciona — pieza del <1 minuto.
+   *  Ausente = false. */
+  usa_actividades?: boolean
+  /** F1 Actividades: SEDES del cliente con su zona (se cargan a mano en el
+   *  detalle del cliente). `id` local estable para denormalizar sin romper
+   *  historia al renombrar. */
+  sedes?: { id: string; nombre: string; zona?: string }[]
+  /** F1 Actividades: contactos SOLICITANTES del cliente (quién pide el
+   *  trabajo). Lista simple a mano — distinta de `contactos` (comercial). */
+  contactos_solicitantes?: string[]
   condiciones_comerciales: CondicionesComerciales
   /** Mapeos de columnas guardados para reutilizar al importar futuras LPU de este cliente. */
   mapeos_lpu_guardados: MapeoImportacion[]
