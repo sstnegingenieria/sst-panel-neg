@@ -1,24 +1,22 @@
-// C2.1 paso 5 (H-001 parcial) — resolución tolerante de la cédula durante la
-// transición del despliegue en 3 pasos (sub-doc primero, respaldo al padre).
+// C2.1 paso 5 fase 3 (H-001 parcial) — la cédula se lee SOLO del sub-doc
+// privado: el respaldo al campo legado del padre se retiró tras verificar la
+// migración, y la regla restrictiva impide que el campo vuelva al padre.
 import { describe, it, expect } from 'vitest'
 import { resolverCedula } from '../contratistasPrivado'
 
-describe('resolverCedula — sub-doc privado manda, respaldo al padre', () => {
-  it('con privado poblado gana el privado aunque el padre traiga otra', () => {
+describe('resolverCedula — solo el sub-doc privado (fase 3)', () => {
+  it('lee la cédula del privado', () => {
+    expect(resolverCedula({}, { cedula: '91535923' })).toBe('91535923')
+  })
+
+  it('IGNORA el campo legado del padre aunque exista (el respaldo se retiró)', () => {
     expect(resolverCedula({ cedula: '111' }, { cedula: '91535923' })).toBe('91535923')
+    expect(resolverCedula({ cedula: '111' }, null)).toBe('')
   })
 
-  it('sin sub-doc (null) cae al campo legado del padre — la ventana pre-migración', () => {
-    expect(resolverCedula({ cedula: '1022962180' }, null)).toBe('1022962180')
-  })
-
-  it('privado existente pero con cedula vacía cae al padre (merge parcial)', () => {
-    expect(resolverCedula({ cedula: '91535923' }, {})).toBe('91535923')
-    expect(resolverCedula({ cedula: '91535923' }, { cedula: '' })).toBe('91535923')
-  })
-
-  it('sin dato en ningún lado → cadena vacía (jurídicas, padre ya migrado)', () => {
+  it('sin sub-doc o sin cédula → cadena vacía (jurídicas y naturales sin dato)', () => {
     expect(resolverCedula({}, null)).toBe('')
-    expect(resolverCedula({ cedula: '' }, { cedula: '' })).toBe('')
+    expect(resolverCedula({}, {})).toBe('')
+    expect(resolverCedula({}, { cedula: '' })).toBe('')
   })
 })

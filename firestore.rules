@@ -242,8 +242,18 @@ service cloud.firestore {
     match /contratistas/{contratistaId} {
       allow read: if true;
 
-      // Gestión completa (crear/editar/eliminar).
-      allow create, update, delete: if puedeGestionarProyectos();
+      // Gestión completa (crear/editar/eliminar). C2.1 paso 5 fase 3: el
+      // padre RECHAZA los campos de datos personales en create y update —
+      // aunque un formulario futuro se equivoque, la cédula no puede volver
+      // al doc público (la protección no depende de que ningún desarrollador
+      // se equivoque nunca).
+      allow create: if puedeGestionarProyectos()
+                    && !request.resource.data.keys()
+                        .hasAny(['cedula', 'telefono', 'direccion']);
+      allow update: if puedeGestionarProyectos()
+                    && !request.resource.data.diff(resource.data)
+                        .affectedKeys().hasAny(['cedula', 'telefono', 'direccion']);
+      allow delete: if puedeGestionarProyectos();
 
       // C2.1 paso 5: datos personales del contratista (cédula de persona
       // natural) — patrón sub-doc privado de proveedores (C1). Leen quienes
