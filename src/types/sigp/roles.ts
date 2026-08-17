@@ -23,8 +23,16 @@ export type RolSIGP =
   | 'contratista'
   | 'cliente_final'
 
-// Cualquier rol válido del sistema (union de ambos)
-export type Rol = RolSST | RolSIGP
+// C2.1 paso 6 — rol EXTERNO del portal de clientes. NO es personal interno:
+// nace pudiendo NADA (cero colecciones, cero archivos, cero menús) y cada
+// permiso que reciba será una concesión explícita en sus propios matches
+// de reglas (esResidenteDe) y sus propias vistas (bloque F1 aparte).
+// JAMÁS se agrega a un helper/array existente — regresión permanente en
+// __tests__/rolResidente.test.ts.
+export type RolClientes = 'residente_cliente'
+
+// Cualquier rol válido del sistema (union de los tres orígenes)
+export type Rol = RolSST | RolSIGP | RolClientes
 
 // Helper: roles con acceso al panel web (excluye tecnico y contratista,
 // que solo usan la app móvil)
@@ -80,4 +88,20 @@ export const ROLES_CON_ACCESO_SIGP: Rol[] = [
 /** Determina si un rol tiene acceso al panel SIGP. */
 export function accesoSIGP(rol: Rol): boolean {
   return ROLES_CON_ACCESO_SIGP.includes(rol)
+}
+
+/**
+ * C2.1 paso 6 — TERCERA área del gatekeeper: portal de clientes.
+ * Solo `residente_cliente`. El acceso que otorga es ENTRAR al panel y
+ * aterrizar en su portal vacío — nada más: ni SST, ni SIGP, ni Tareas,
+ * ni ninguna colección/ruta de Storage (el rol nace en cero; evidencia
+ * en la batería del paso 6). Su alcance por cliente viaja en el custom
+ * claim {perfil: 'residente_cliente', cliente_id} que deriva la CF
+ * sincronizarClaims del doc de users (fuente auditable).
+ */
+export const ROLES_CON_ACCESO_CLIENTES: Rol[] = ['residente_cliente']
+
+/** Determina si un rol pertenece al portal de clientes. */
+export function accesoClientes(rol: Rol): boolean {
+  return ROLES_CON_ACCESO_CLIENTES.includes(rol)
 }
