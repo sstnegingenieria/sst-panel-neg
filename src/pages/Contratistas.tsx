@@ -9,6 +9,7 @@ import { useFirestore } from '../hooks/useFirestore'
 import { toast } from '../components/shared/Toast'
 import { useAuth } from '../contexts/AuthContext'
 import { puedeGestionarContratistasUI, puedeHabilitarContratistas } from '../types/sigp/permisos'
+import { resolverCedula, leerPrivado, guardarCedulaPrivada } from '../utils/contratistasPrivado'
 
 export default function Contratistas() {
   const [contratistas, setContratistas] = useState<Contratista[]>([])
@@ -24,8 +25,11 @@ export default function Contratistas() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await getAllOrdered('contratistas', 'nombre', 'asc')
-      setContratistas(data as Contratista[])
+      const data = await getAllOrdered('contratistas', 'nombre', 'asc') as Contratista[]
+      // C2.1 (H-001): la cédula vive en privado/datos — lectura tolerante con
+      // respaldo al campo legado del padre durante la transición.
+      const privados = await Promise.all(data.map(c => leerPrivado(c.id)))
+      setContratistas(data.map((c, i) => ({ ...c, cedula: resolverCedula(c, privados[i]) })))
       // Bloque 3+5 — técnicos activos para el vínculo contratista ↔ usuario
       const users = await getDocs(query(collection(db, 'users'), where('rol', '==', 'tecnico')))
       setTecnicos(users.docs
@@ -47,11 +51,17 @@ export default function Contratistas() {
 
   const handleSave = async (data: ContratistaFormData) => {
     try {
+      // C2.1 (H-001): la cédula JAMÁS va al doc padre (público, read: if true)
+      // — se escribe en el sub-doc privado/datos. El NIT sí queda en el padre
+      // (registro mercantil público; la app lo lee).
+      const { cedula, ...padre } = data
       if (editTarget) {
-        await update('contratistas', editTarget.id, data)
+        await update('contratistas', editTarget.id, padre)
+        await guardarCedulaPrivada(editTarget.id, cedula)
         toast('Contratista actualizado')
       } else {
-        await add('contratistas', data)
+        const nuevoId = await add('contratistas', padre)
+        await guardarCedulaPrivada(nuevoId, cedula)
         toast('Contratista creado')
       }
       await load()
