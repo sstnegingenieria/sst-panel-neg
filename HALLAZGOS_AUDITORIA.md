@@ -12,7 +12,7 @@ Cada hallazgo tiene: identificador, severidad (Alta / Media / Baja), descripció
 ## H-001 · Colección `contratistas` con lectura pública sin autenticación
 
 **Severidad**: Baja
-**Estado**: Abierto
+**Estado**: **CERRADO PARCIALMENTE — 17-ago-2026** (cédulas protegidas; NIT permanece público como **riesgo aceptado y fundamentado** — ver cierre al final de esta sección)
 
 ### Descripción
 
@@ -68,6 +68,61 @@ que la app Flutter no consulta ni muestra en el selector público.
 **Cambio de severidad**: Alta → Baja.
 **Estado**: Refinamiento opcional para F1+ (Cloud Function callable 
 que expone solo `{ id, nombre }` sin acceso público a otros campos).
+
+### CIERRE PARCIAL con riesgo aceptado (17-ago-2026 — C2.1 paso 5)
+
+**Qué era**: el doc de `contratistas` (lectura `if true`, exigida por el
+selector de empleador pre-login de la app Flutter) exponía a internet sin
+autenticación el nombre, tipo, estado, NIT y **cédula** de los contratistas.
+Abierto desde el **05-jul-2026** (primer registro de este archivo). La cédula
+de una persona natural es dato personal protegido por la **Ley 1581/2012**;
+el propio análisis de riesgo original de este hallazgo ya lo señalaba.
+
+**Qué se hizo** (despliegue en 3 fases, cada una inofensiva por sí sola):
+
+1. **Lectura tolerante primero** (PR #89, merge `5c7f6b2`): el panel lee la
+   cédula del sub-doc **`contratistas/{id}/privado/datos`** (patrón
+   proveedores C1) con respaldo al campo legado del padre; el guardado separa
+   la cédula del payload del padre. Regla ADITIVA del sub-doc desplegada
+   ANTES del merge (read: gestores + gerencia administrativa; write: gestores).
+2. **Migración de datos** con **respaldo previo completo**
+   (`_respaldos/contratistas-backup-2026-08-17.json`, colección íntegra antes
+   del primer write): cédulas de los docs afectados copiadas al sub-doc
+   privado y campo `cedula` BORRADO del padre (incl. los vacíos).
+3. **Regla restrictiva del padre + retiro del respaldo**: el `create` del
+   padre rechaza los campos `cedula`/`telefono`/`direccion`
+   (`keys().hasAny`) y el `update` rechaza tocarlos
+   (`diff().affectedKeys().hasAny`) — **la cédula no puede volver al doc
+   público ni por el error de un formulario futuro**: la protección no
+   depende de que ningún desarrollador se equivoque nunca. La lectura
+   tolerante se retiró (el privado es el único punto de lectura).
+
+**Cómo se verificó**: censo exhaustivo previo de las 5 rutas de escritura
+(3 del panel, 2 de la app — la de crear desde la app ya estaba denegada por
+reglas para rol `sst` desde F0.6); verificación de solapamiento NIT↔cédula
+con el dato (ningún natural con NIT; cero coincidencias numéricas, incl.
+cédula+dígito de verificación); baterías de reglas en emulador con actores
+de mínimo privilegio (aditiva 10/10, restrictiva en la fase 3); migración
+con dry-run → aplicación → post-verificación (0 padres con campo `cedula`;
+privados con el valor exacto); reglas pre/post byte-idénticas contra prod.
+
+**Riesgo ACEPTADO y fundamentado**: el **NIT queda legible sin
+autenticación**. Fundamento: (a) el NIT es dato de **registro mercantil
+público** en Colombia (consultable en RUES) — no es dato personal en el
+sentido de la 1581/2012 para personas jurídicas, y **ningún contratista
+persona natural tiene NIT cargado** (verificado con el dato); (b) la app
+Flutter lee y escribe el NIT del doc padre (`contratista_model.dart`) y
+moverlo la rompería — línea roja del proyecto; ratificado operativamente
+por Giovanny (16-ago). Este residual es lo que mantiene el cierre como
+PARCIAL: un hallazgo declarado cerrado sin estarlo es peor que uno abierto.
+
+**Residual conexo anotado en H-008**: la cédula del contratista asignado
+viaja congelada como `asignacion.contratista_documento` en los snapshots de
+`proyectos` (lectura interna `puedeVerProyectos`) y en los PDFs de
+preliquidación/liquidación que se DESCARGAN y comparten por fuera
+(WhatsApp) — esos PDFs no se almacenan en Storage (verificado:
+`createObjectURL`, sin `uploadBytes` de los generados). Proteger el doc de
+Firestore no los saca de ahí.
 
 ---
 
@@ -419,6 +474,25 @@ En el **primer uso real** (importación de la LPU de IHS, 536 ítems, usuario co
 
 **Hardening futuro (abierto):** para un gate por rol confiable en Storage, el mecanismo adecuado son **custom claims** (rol en el token de Auth → `request.auth.token.rol in [...]`, sin lectura a Firestore), lo que requiere una Cloud Function que sincronice los claims con `users/{uid}.rol`. No es bloqueante para F1.
 
+> **AVANCE (16/17-ago-2026 — C2.1)**: la infraestructura de claims existe
+> (CF `sincronizarClaims` + backfill verificado) y las **3 rutas más
+> sensibles ya quedaron gateadas por claim** en `storage.rules`
+> (`cotizaciones/**` → perfil interno; `certificacion_bancaria` y
+> `ausentismos/soporte` → gerencia+admin). Las demás rutas siguen auth-only
+> — extenderlas es ahora trivial con `esInterno()`/`esGerenciaAdminPorClaim()`.
+>
+> **RESIDUAL NUEVO anotado (17-ago, del cierre parcial de H-001)**: la
+> cédula del contratista persona natural viaja congelada como
+> `asignacion.contratista_documento` en los snapshots de `proyectos`
+> (lectura interna `puedeVerProyectos` — acotado) y dentro de los **PDFs de
+> preliquidación/liquidación**, que se generan client-side, se DESCARGAN
+> (`createObjectURL`, verificado: los generadores no suben a Storage) y se
+> comparten por fuera del sistema (WhatsApp). Proteger el doc de Firestore
+> no las saca de esos artefactos. Si un PDF de esos se sube a mano como
+> adjunto a `proyectos/**`, queda bajo la ruta auth-only. Pendiente de
+> decisión: si el documento del contratista debe salir en esos PDFs o basta
+> el nombre.
+
 ### Componente de proceso — deploy de corrección sin la autorización explícita acordada
 
 La mecánica del proyecto exige **OK explícito por-deploy a producción**, con el comando nombrado (patrón «Autorizado el deploy: `<cmd>`»). El deploy de corrección (`firebase deploy --only storage`, auth-only) se ejecutó tras un **«realiza lo que recomiendes»** del usuario — una delegación general, no la autorización explícita por-comando. Hubo aprobación, pero se desvió del rigor acordado; y el contexto (un bloqueo en producción a mitad de una validación en curso) es justamente donde esa desviación es más probable.
@@ -568,7 +642,7 @@ Seguimiento abierto post-F0: **H-001** (refinamiento opcional), **H-004** (bump 
 
 | Hallazgo | Fecha detección | Estado | Fecha resolución | Commit / referencia |
 |---|---|---|---|---|
-| H-001 | 05-jul-2026 | Abierto — severidad bajada Alta → Baja (refinamiento opcional F1+) | — | — |
+| H-001 | 05-jul-2026 | **Cerrado PARCIALMENTE** — cédulas al sub-doc `privado/datos` + regla del padre que las rechaza + respaldo previo; NIT público = riesgo aceptado fundamentado (registro mercantil + app Flutter lo lee); residual de PDFs anotado en H-008 | 17-ago-2026 | PR #89 (`5c7f6b2`) + PR fase 3 (C2.1 paso 5) |
 | H-002 | 05-jul-2026 | Resuelto (datos; fallback Flutter cosmético post-F0) | 05-jul-2026 | commit F0 0.5.c |
 | H-003 | 05-jul-2026 | Resuelto | 05-jul-2026 | commit F0 0.3.c-bis |
 | H-004 | 05-jul-2026 | Parcialmente resuelto — 05-jul-2026 (Node 22 en 0.3.d, `firebase-functions` v6 pendiente) | 05-jul-2026 (parcial) | commit F0 0.3.d.2-bis |

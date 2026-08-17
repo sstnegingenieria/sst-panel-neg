@@ -15,15 +15,15 @@ export interface ContratistaPrivado {
   cedula?: string
 }
 
-/** Resolución TOLERANTE (fase de transición del despliegue en 3 pasos):
- *  el sub-doc privado manda; respaldo al campo legado del padre mientras
- *  la migración de datos no haya corrido. Cuando el respaldo se retire
- *  (paso 3), esta función queda como único punto de lectura. */
+/** Único punto de lectura de la cédula. Desde la fase 3 (migración
+ *  completada y verificada) lee SOLO el sub-doc privado — el respaldo al
+ *  campo legado del padre se retiró: el padre ya no tiene el campo y la
+ *  regla restrictiva del padre impide que vuelva. */
 export function resolverCedula(
-  padre: { cedula?: string },
+  _padre: { cedula?: string },
   privado: ContratistaPrivado | null | undefined,
 ): string {
-  return (privado?.cedula ?? '') || (padre.cedula ?? '')
+  return privado?.cedula ?? ''
 }
 
 /** Lee el sub-doc privado. Sin permiso o inexistente → null (degrada al
