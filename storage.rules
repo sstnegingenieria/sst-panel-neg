@@ -7,6 +7,20 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // ── C2.1 (16-ago-2026): helpers por CUSTOM CLAIM ─────────────────────────
+    // Storage no puede leer Firestore (H-008): el claim {perfil, rol} que
+    // deriva la CF sincronizarClaims del doc de users es el único vehículo de
+    // rol aquí. La fuente AUDITABLE sigue siendo el doc de users; el claim es
+    // copia derivada. Helpers NUEVOS — ningún helper/bloque existente cambia
+    // de semántica salvo las 3 rutas confidenciales que estos gates cierran.
+    function esInterno() {
+      return request.auth != null && request.auth.token.perfil == 'interno';
+    }
+    function esGerenciaAdminPorClaim() {
+      return esInterno()
+             && request.auth.token.rol in ['gerencia_administrativa', 'admin'];
+    }
+
     // ── App SST (Flutter): PDFs de formularios ───────────────────────────────
     // Ruta: pdfs/{obraId}/{userId}/{formId}/{tipo}_{ts}.pdf (la escribe la app).
     // Gate de dueño: autoriza el uid del SEGMENTO {userId} del path (variable
@@ -45,9 +59,13 @@ service firebase.storage {
     }
 
     // ── SIGP (F1): evidencia de aprobación / doc de licitación de cotizaciones ─
-    // Ruta: cotizaciones/{cotizacionId}/**. Auth-only (patrón final de LPU, H-008).
+    // Ruta: cotizaciones/{cotizacionId}/**. C2.1: SOLO perfil interno (los PDFs
+    // llevan precios — un residente de cliente no debe listarlos/leerlos por
+    // SDK). Los links con ?token= ya compartidos NO pasan por estas reglas y
+    // siguen vivos. Si un interno con token viejo queda denegado: recargar la
+    // página fuerza token nuevo (ventana ≤1 h post-backfill, se cura sola).
     match /cotizaciones/{cotizacionId}/{allPaths=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if esInterno();
     }
 
     // ── SIGP (F2.1.b): adjuntos del proyecto (permisos de ingreso, etc.) ─────
@@ -63,22 +81,39 @@ service firebase.storage {
     // no se puede validar aquí; la autorización real es la regla Firestore
     // del doc/subcolección que guarda la URL). Validación que SÍ funciona:
     // path scoping + tipo de archivo + tamaño.
+    // C2.1: este match EXCLUYE certificacion_bancaria (en Storage basta que UN
+    // match solape para conceder — el bloque dedicado de abajo es quien la
+    // gobierna). El RUT queda auth-only como estaba.
     match /proveedores/{proveedorId}/{tipoDoc}/{fileName} {
-      allow read: if request.auth != null;
+      allow read: if request.auth != null
+                  && tipoDoc != 'certificacion_bancaria';
       allow write: if request.auth != null
-                   && tipoDoc in ['rut', 'certificacion_bancaria']
+                   && tipoDoc in ['rut']
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (request.resource.contentType == 'application/pdf'
+                       || request.resource.contentType.matches('image/.*'));
+    }
+
+    // ── C2.1: certificación bancaria — SOLO gerencia_administrativa + admin ──
+    // El dato más sensible de Storage (hoy lo leía cualquier autenticado).
+    // Espejo del sub-doc privado/datos_bancarios de Firestore (C1), ahora
+    // posible en Storage gracias al claim `rol`.
+    match /proveedores/{proveedorId}/certificacion_bancaria/{fileName} {
+      allow read: if esGerenciaAdminPorClaim();
+      allow write: if esGerenciaAdminPorClaim()
                    && request.resource.size < 10 * 1024 * 1024
                    && (request.resource.contentType == 'application/pdf'
                        || request.resource.contentType.matches('image/.*'));
     }
 
     // ── Horario (#3, SB2): soporte de ausentismos ────────────────────────────
-    // Ruta: ausentismos/{ausentismoId}/soporte/{fileName} (fileName = UUID —
-    // patrón C1, H-008: el rol no se valida aquí; la autorización real es la
-    // regla Firestore de `ausentismos`, que exige soporte_url al crear).
+    // Ruta: ausentismos/{ausentismoId}/soporte/{fileName} (fileName = UUID).
+    // C2.1: documentos médicos → SOLO gerencia_administrativa + admin por
+    // claim (espejo de gestionaHorario() de Firestore — quien sube y gestiona
+    // ausentismos). El soporte_url con ?token= del doc no pasa por aquí.
     match /ausentismos/{ausentismoId}/{tipoDoc}/{fileName} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null
+      allow read: if esGerenciaAdminPorClaim();
+      allow write: if esGerenciaAdminPorClaim()
                    && tipoDoc in ['soporte']
                    && request.resource.size < 10 * 1024 * 1024
                    && (request.resource.contentType == 'application/pdf'
