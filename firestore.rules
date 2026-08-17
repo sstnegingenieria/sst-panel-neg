@@ -30,6 +30,20 @@ service cloud.firestore {
       ];
     }
 
+    // C2.1 paso 6 — rol EXTERNO residente_cliente (portal de clientes).
+    // REGLA OPERATIVA: este rol JAMÁS entra a un helper existente (los de
+    // arriba y abajo son listas blancas de personal interno) — nace pudiendo
+    // NADA y cada permiso suyo será una cita EXPLÍCITA de este helper en los
+    // matches del módulo de clientes (bloque F1 aparte). El claim que se
+    // evalúa aquí lo deriva la CF sincronizarClaims del doc de users (la
+    // fuente auditable); regresión permanente en rolResidente.test.ts.
+    function esResidenteDe(clienteId) {
+      return isAuthed()
+             && request.auth.token.get('perfil', '') == 'residente_cliente'
+             && request.auth.token.get('cliente_id', '') == clienteId
+             && request.auth.token.get('cliente_id', '') != '';
+    }
+
     // 2. Roles que administran obras y contratistas (crear/editar).
     function puedeGestionarProyectos() {
       return isAuthed() && rolActual() in [

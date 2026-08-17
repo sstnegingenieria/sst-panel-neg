@@ -25,7 +25,8 @@ import CotizacionDetalleSigp from './pages/sigp/CotizacionDetalleSigp'
 import ProyectosSigp from './pages/sigp/ProyectosSigp'
 import ProyectoDetalleSigp from './pages/sigp/ProyectoDetalleSigp'
 import OrdenesCompraSigp from './pages/sigp/OrdenesCompraSigp'
-import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, type Rol } from './types/sigp/roles'
+import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, accesoClientes, type Rol } from './types/sigp/roles'
+import PortalClientes from './pages/clientes/PortalClientes'
 import {
   ROLES_VE_DASHBOARD_SST,
   ROLES_VE_TECNICOS,
@@ -62,6 +63,21 @@ function ProtectedRoutes() {
   }
 
   if (!user) return <Login />
+
+  // C2.1 paso 6 — TERCERA área del gatekeeper: portal de clientes.
+  // El residente entra al panel pero NO comparte ni una ruta con el personal
+  // interno: su árbol de rutas es SOLO el portal neutro (sin Layout, sin
+  // sidebar, sin menús — cero lecturas). Rama PROPIA, no un permiso más
+  // dentro del árbol interno: cualquier URL cae a /portal, sin cadenas de
+  // redirect con las rutas internas (anti-bucle, lección Hotfix A).
+  if (accesoClientes(user.rol as Rol)) {
+    return (
+      <Routes>
+        <Route path="/portal" element={<PortalClientes />} />
+        <Route path="*" element={<Navigate to="/portal" replace />} />
+      </Routes>
+    )
+  }
 
   if (!accesoSST(user.rol as Rol) && !accesoSIGP(user.rol as Rol)) {
     return (
