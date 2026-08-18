@@ -2,7 +2,10 @@
 //
 // La ÚNICA página de Actividades — internos y residente_obra comparten este
 // componente (el residente entra vía ShellResidente, sin sidebar). Vista
-// principal: "Ejecutadas no facturables" (noFacturable) — plata en riesgo.
+// principal: "Pendientes para el acta" (pendienteParaActa). Estar en esa
+// lista es NORMAL — lo que pasa el corte cae al acta del mes siguiente; lo
+// que se vigila es la ANTIGÜEDAD: la que envejece sin aprobar/valorizar
+// (umbral UMBRAL_PENDIENTE_ACTA_DIAS) es lo que hoy se pierde.
 // Render defensivo ante docs malformados (patrón OrdenesCompraSigp): ningún
 // campo faltante revienta la página.
 import { useState, useEffect, useMemo } from 'react'
@@ -19,16 +22,17 @@ import { fmtMoney } from '../../utils/sigp/formato'
 import { accesoResidente, type Rol } from '../../types/sigp/roles'
 import { puedeGestionarActividadesUI } from '../../types/sigp/permisos'
 import {
-  ESTADO_ACTIVIDAD_LABEL, ESTADO_ACTIVIDAD_COLOR, noFacturable, estaValorizada,
+  ESTADO_ACTIVIDAD_LABEL, ESTADO_ACTIVIDAD_COLOR, pendienteParaActa, estaValorizada,
+  diasPendiente, UMBRAL_PENDIENTE_ACTA_DIAS,
 } from '../../types/sigp/actividad'
 import type { Actividad, EstadoActividad } from '../../types/sigp/actividad'
 import type { Cliente } from '../../types/sigp/cliente'
 import type { LPU } from '../../types/sigp/lpu'
 
-type Pill = 'no_facturable' | 'todas' | EstadoActividad
+type Pill = 'pendiente_acta' | 'todas' | EstadoActividad
 
 const PILLS: { clave: Pill; etiqueta: string }[] = [
-  { clave: 'no_facturable', etiqueta: '⚠ Ejecutadas no facturables' },
+  { clave: 'pendiente_acta', etiqueta: 'Pendientes para el acta' },
   { clave: 'ejecutada', etiqueta: 'Ejecutadas s/aprobar' },
   { clave: 'aprobada', etiqueta: 'Aprobadas' },
   { clave: 'registrada', etiqueta: 'Registradas' },
@@ -42,6 +46,8 @@ const fFecha = (a: Actividad) => {
   return t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
 }
 
+const fAntiguedad = (d: number) => (d === 0 ? 'hoy' : d === 1 ? 'hace 1 día' : `hace ${d} días`)
+
 export default function ActividadesSigp() {
   const { user } = useAuth()
   const { getAll } = useFirestore()
@@ -54,7 +60,7 @@ export default function ActividadesSigp() {
   const [cargandoClientes, setCargandoClientes] = useState(true)
   const [lpus, setLpus] = useState<LPU[]>([])
 
-  const [pill, setPill] = useState<Pill>('no_facturable')
+  const [pill, setPill] = useState<Pill>('pendiente_acta')
   const [busqueda, setBusqueda] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [detalle, setDetalle] = useState<Actividad | null>(null)
@@ -119,8 +125,8 @@ export default function ActividadesSigp() {
   const conteos = useMemo(() => {
     const c: Record<string, number> = {}
     for (const p of PILLS) {
-      c[p.clave] = p.clave === 'no_facturable'
-        ? actividades.filter(noFacturable).length
+      c[p.clave] = p.clave === 'pendiente_acta'
+        ? actividades.filter(pendienteParaActa).length
         : p.clave === 'todas'
           ? actividades.filter(a => a.estado !== 'anulada').length
           : actividades.filter(a => a.estado === p.clave).length
@@ -130,7 +136,7 @@ export default function ActividadesSigp() {
 
   const porPill = useMemo(() => {
     switch (pill) {
-      case 'no_facturable': return actividades.filter(noFacturable)
+      case 'pendiente_acta': return actividades.filter(pendienteParaActa)
       case 'todas': return actividades.filter(a => a.estado !== 'anulada')
       default: return actividades.filter(a => a.estado === pill)
     }
@@ -146,12 +152,17 @@ export default function ActividadesSigp() {
       (a.lineas ?? []).some(l => (l.codigo ?? '').toLowerCase().includes(q)))
   }, [porPill, busqueda])
 
-  const metricasRiesgo = useMemo(() => {
+  // Total pendiente de facturar — plata que va camino al acta, no "en riesgo":
+  // estar en la lista es normal (encuadre corregido por Giovanny, 18-ago).
+  const metricasPendientes = useMemo(() => {
     const valorizadas = porPill.filter(a => estaValorizada(a))
     const suma = valorizadas.reduce((s, a) => s + (a.total || 0), 0)
     const sinValorizar = porPill.length - valorizadas.length
     return { suma, sinValorizar }
   }, [porPill])
+
+  // Reloj de la vista: una sola lectura por render (no por fila).
+  const ahora = useMemo(() => new Date(), [actividades]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -202,15 +213,15 @@ export default function ActividadesSigp() {
             ))}
           </div>
 
-          {pill === 'no_facturable' && (
+          {pill === 'pendiente_acta' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="bg-white rounded-lg border border-amber-200 p-4">
-                <p className="text-xs font-medium text-amber-700 uppercase tracking-wide">En riesgo, valorizadas</p>
-                <p className="text-2xl font-bold text-gray-800 mt-1">{fmtMoney(metricasRiesgo.suma)}</p>
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pendiente de facturar</p>
+                <p className="text-2xl font-bold text-gray-800 mt-1">{fmtMoney(metricasPendientes.suma)}</p>
               </div>
               <div className="bg-white rounded-lg border border-gray-200 p-4">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Sin valorizar</p>
-                <p className="text-2xl font-bold text-gray-800 mt-1">{metricasRiesgo.sinValorizar}</p>
+                <p className="text-2xl font-bold text-gray-800 mt-1">{metricasPendientes.sinValorizar}</p>
               </div>
             </div>
           )}
@@ -229,15 +240,16 @@ export default function ActividadesSigp() {
                   <th className="py-3 px-4 font-semibold">Contrato / Naturaleza</th>
                   <th className="py-3 px-4 font-semibold">Referencia</th>
                   <th className="py-3 px-4 font-semibold">Estado</th>
+                  {pill === 'pendiente_acta' && <th className="py-3 px-4 font-semibold">Antigüedad</th>}
                   <th className="py-3 px-4 font-semibold text-right">Total</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && (
-                  <tr><td colSpan={7} className="py-10 text-center text-gray-400">Cargando…</td></tr>
+                  <tr><td colSpan={pill === 'pendiente_acta' ? 8 : 7} className="py-10 text-center text-gray-400">Cargando…</td></tr>
                 )}
                 {!loading && filtradas.length === 0 && (
-                  <tr><td colSpan={7} className="py-12 text-center text-gray-400">
+                  <tr><td colSpan={pill === 'pendiente_acta' ? 8 : 7} className="py-12 text-center text-gray-400">
                     No hay actividades{busqueda ? ' con esa búsqueda' : ' en esta vista'}.
                   </td></tr>
                 )}
@@ -259,6 +271,20 @@ export default function ActividadesSigp() {
                         <span className="ml-1.5 inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">sin valorizar</span>
                       )}
                     </td>
+                    {pill === 'pendiente_acta' && (() => {
+                      const dias = diasPendiente(a, ahora)
+                      return (
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          {dias === null ? <span className="text-gray-400">—</span>
+                            : dias >= UMBRAL_PENDIENTE_ACTA_DIAS
+                              ? <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700"
+                                  title={`Pendiente hace más de ${UMBRAL_PENDIENTE_ACTA_DIAS} días — ya dejó pasar un corte de acta`}>
+                                  {fAntiguedad(dias)}
+                                </span>
+                              : <span className="text-gray-500 text-xs">{fAntiguedad(dias)}</span>}
+                        </td>
+                      )
+                    })()}
                     <td className="py-3 px-4 text-right font-mono text-gray-700">{fmtMoney(a.total || 0)}</td>
                   </tr>
                 ))}
