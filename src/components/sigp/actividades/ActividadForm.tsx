@@ -54,8 +54,10 @@ export default function ActividadForm({ isOpen, onClose, cliente, lpus, onRegist
 
   const [guardando, setGuardando] = useState<'registrar' | 'ejecutar' | null>(null)
 
+  const [zona, setZona] = useState('')
+
   const reset = () => {
-    setSedeId(''); setSedeLibre(''); setContrato(contratos.length === 1 ? contratos[0] : '')
+    setSedeId(''); setSedeLibre(''); setZona(''); setContrato(contratos.length === 1 ? contratos[0] : '')
     setNaturaleza('opex'); setDescripcion(''); setDetallesAbiertos(false)
     setSolicitanteSel(''); setSolicitanteLibre(''); setFechaSolicitud(hoyISO()); setReferenciaCliente('')
     setLineasAbiertas(false); setLineas([])
@@ -66,11 +68,16 @@ export default function ActividadForm({ isOpen, onClose, cliente, lpus, onRegist
   const sedeSeleccionada = sedes.find(s => s.id === sedeId)
   const sedeNombreFinal = sedes.length > 0 ? (sedeSeleccionada?.nombre ?? '') : sedeLibre.trim()
   const solicitanteFinal = solicitanteSel === '__nuevo__' ? solicitanteLibre.trim() : solicitanteSel
+  // La zona es la columna UBICACIÓN del acta (p. ej. "Búnker XI") — si la
+  // sede tiene zonas, elegir una es OBLIGATORIO: sin ella, F2 no tendría qué
+  // imprimir y habría que reconstruirla de memoria.
+  const zonasSede = sedeSeleccionada?.zonas ?? []
+  const zonaRequerida = zonasSede.length > 0
 
   const alcance = { cliente_id: cliente.id, contrato, naturaleza }
   const lpuAlcance = lpuVigente(lpus, cliente.id, { contrato, naturaleza })
 
-  const valido = descripcion.trim() !== '' && sedeNombreFinal !== ''
+  const valido = descripcion.trim() !== '' && sedeNombreFinal !== '' && (!zonaRequerida || zona !== '')
 
   const registrar = async (marcarEjecutada: boolean) => {
     if (!user || !valido) {
@@ -89,7 +96,7 @@ export default function ActividadForm({ isOpen, onClose, cliente, lpus, onRegist
         cliente_id: cliente.id,
         ...(sedeSeleccionada ? { sede_id: sedeSeleccionada.id } : {}),
         sede_nombre: sedeNombreFinal,
-        ...(sedeSeleccionada?.zona ? { zona: sedeSeleccionada.zona } : {}),
+        ...(zona ? { zona } : {}),
         contrato,
         naturaleza,
         descripcion: descripcion.trim(),
@@ -130,11 +137,17 @@ export default function ActividadForm({ isOpen, onClose, cliente, lpus, onRegist
         </p>
 
         {sedes.length > 0 ? (
-          <SelectField label="Sede" value={sedeId} onChange={setSedeId} required
-            options={sedes.map(s => ({ value: s.id, label: s.zona ? `${s.nombre} · ${s.zona}` : s.nombre }))}
+          <SelectField label="Sede" value={sedeId} onChange={v => { setSedeId(v); setZona('') }} required
+            options={sedes.map(s => ({ value: s.id, label: s.ciudad ? `${s.nombre} · ${s.ciudad}` : s.nombre }))}
             placeholder="Selecciona la sede" />
         ) : (
           <TextField label="Sede" value={sedeLibre} onChange={setSedeLibre} required placeholder="Nombre de la sede" />
+        )}
+
+        {zonaRequerida && (
+          <SelectField label="Zona (ubicación en la sede)" value={zona} onChange={setZona} required
+            options={zonasSede.map(z => ({ value: z, label: z }))}
+            placeholder="Selecciona la zona" />
         )}
 
         {contratos.length > 1 && (
