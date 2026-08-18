@@ -21,6 +21,8 @@ import {
   patchAprobar, patchEjecutar, patchLineas, patchAnular, patchCabecera,
 } from '../../../types/sigp/actividad'
 import type { Actividad, LineaActividad as TipoLineaActividad } from '../../../types/sigp/actividad'
+import { propuestaVigenteDe } from '../../../types/sigp/propuestaActividad'
+import type { PropuestaActividad } from '../../../types/sigp/propuestaActividad'
 
 interface ActividadDetalleProps {
   isOpen: boolean
@@ -30,6 +32,9 @@ interface ActividadDetalleProps {
   puedeGestionar: boolean
   uid: string
   onCambio: () => void
+  /** Propuestas del cliente (F1.2) — para el chip de la vigente que cubre la
+   *  actividad y para CONGELAR consecutivo+versión al marcar la aprobación. */
+  propuestas?: PropuestaActividad[]
 }
 
 const hoyISO = () => new Date().toISOString().slice(0, 10)
@@ -37,11 +42,17 @@ const aTimestamp = (fechaISO: string) => Timestamp.fromDate(new Date(`${fechaISO
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
 
-export default function ActividadDetalle({ isOpen, onClose, actividad, lpus, puedeGestionar, uid, onCambio }: ActividadDetalleProps) {
+export default function ActividadDetalle({ isOpen, onClose, actividad, lpus, puedeGestionar, uid, onCambio, propuestas }: ActividadDetalleProps) {
   const anulada = !!actividad.anulacion
   const soloLectura = !puedeGestionar || anulada
 
   const lpu = lpuVigente(lpus, actividad.cliente_id, { contrato: actividad.contrato, naturaleza: actividad.naturaleza })
+
+  // Propuesta VIGENTE que cubre la actividad hoy (puntero vivo — distinta de
+  // la evidencia congelada del hito, aprobacion.propuesta_ref).
+  const propuestaVigente = actividad.propuesta_consecutivo
+    ? propuestaVigenteDe(propuestas ?? [], actividad.propuesta_consecutivo)
+    : null
 
   const [guardando, setGuardando] = useState(false)
   const [historialAbierto, setHistorialAbierto] = useState(false)
@@ -52,7 +63,11 @@ export default function ActividadDetalle({ isOpen, onClose, actividad, lpus, pue
   const [refAprob, setRefAprob] = useState('')
 
   const confirmarAprobacion = async () => {
-    const patch = patchAprobar(actividad, uid, aTimestamp(fechaAprob), refAprob)
+    // §6d: congela contra qué documento se aprobó — la vigente EN ESTE momento.
+    const propuestaRef = propuestaVigente
+      ? { consecutivo: propuestaVigente.consecutivo, version: propuestaVigente.version }
+      : undefined
+    const patch = patchAprobar(actividad, uid, aTimestamp(fechaAprob), refAprob, propuestaRef)
     if (!patch) { toast('No se pudo aprobar (¿ya estaba aprobada o anulada?)', 'error'); return }
     setGuardando(true)
     try {
@@ -197,6 +212,14 @@ export default function ActividadDetalle({ isOpen, onClose, actividad, lpus, pue
           )}
           <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{actividad.contrato || 'sin contrato'}</span>
           <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 uppercase">{actividad.naturaleza}</span>
+          {actividad.propuesta_consecutivo && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-brand-50 text-brand-700"
+              title={propuestaVigente
+                ? `Cubierta por la propuesta vigente ${propuestaVigente.consecutivo} v${propuestaVigente.version}`
+                : 'Propuesta de la serie (vigente no cargada)'}>
+              📄 {actividad.propuesta_consecutivo}{propuestaVigente ? ` v${propuestaVigente.version}` : ''}
+            </span>
+          )}
           {actividad.referencia_cliente && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">ref. {actividad.referencia_cliente}</span>}
           {actividad.solicitante && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">solicita: {actividad.solicitante}</span>}
           {!estaValorizada(actividad) && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">sin valorizar</span>}
@@ -238,6 +261,12 @@ export default function ActividadDetalle({ isOpen, onClose, actividad, lpus, pue
           {actividad.aprobacion ? (
             <div className="text-sm text-gray-600 space-y-0.5">
               <p>{fFecha(actividad.aprobacion.fecha)}{actividad.aprobacion.referencia ? ` · ref: ${actividad.aprobacion.referencia}` : ''}</p>
+              {actividad.aprobacion.propuesta_ref && (
+                <p className="text-xs text-gray-500"
+                  title="Evidencia congelada al aprobar — no cambia aunque la propuesta se re-emita después">
+                  🧊 aprobada contra {actividad.aprobacion.propuesta_ref.consecutivo} v{actividad.aprobacion.propuesta_ref.version}
+                </p>
+              )}
               <p className="text-xs text-gray-400">registrada por {actividad.aprobacion.por}</p>
             </div>
           ) : !aprobando ? (

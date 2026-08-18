@@ -20,6 +20,15 @@ service firebase.storage {
       return esInterno()
              && request.auth.token.rol in ['gerencia_administrativa', 'admin'];
     }
+    // F1.2 (18-ago-2026): espejo del esResidenteDe de Firestore sobre los
+    // claims de C2.1 — el residente_obra accede SOLO a las rutas de SU
+    // cliente (el clienteId viaja en el path para autorizar sin lookups).
+    function esResidenteDeStorage(clienteId) {
+      return request.auth != null
+             && request.auth.token.perfil == 'residente_obra'
+             && clienteId != ''
+             && request.auth.token.cliente_id == clienteId;
+    }
 
     // ── App SST (Flutter): PDFs de formularios ───────────────────────────────
     // Ruta: pdfs/{obraId}/{userId}/{formId}/{tipo}_{ts}.pdf (la escribe la app).
@@ -145,6 +154,18 @@ service firebase.storage {
                    && request.resource.size < 10 * 1024 * 1024
                    && (request.resource.contentType == 'application/pdf'
                        || request.resource.contentType.matches('image/.*'));
+    }
+
+    // ── F1.2: PDFs de PROPUESTAS ECONÓMICAS de actividades ──────────────────
+    // Ruta: propuestas_actividad/{clienteId}/{docId}/documento.pdf — el
+    // cliente va en el PATH para autorizar por claim. ⚠ NO calcar de
+    // cotizaciones/** (solo interno): los residentes EMITEN y VEN sus propias
+    // propuestas — son quienes negocian con el gestor (§5b del diseño).
+    match /propuestas_actividad/{clienteId}/{propuestaId}/{fileName} {
+      allow read: if esInterno() || esResidenteDeStorage(clienteId);
+      allow write: if (esInterno() || esResidenteDeStorage(clienteId))
+                   && request.resource.contentType == 'application/pdf'
+                   && request.resource.size < 10 * 1024 * 1024;
     }
   }
 }

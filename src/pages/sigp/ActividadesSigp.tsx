@@ -18,6 +18,11 @@ import { toast } from '../../components/shared/Toast'
 import SelectField from '../../components/shared/SelectField'
 import ActividadForm from '../../components/sigp/actividades/ActividadForm'
 import ActividadDetalle from '../../components/sigp/actividades/ActividadDetalle'
+import PropuestaForm from '../../components/sigp/actividades/PropuestaForm'
+import PropuestasPanel from '../../components/sigp/actividades/PropuestasPanel'
+import { cargarPropuestasDe } from '../../utils/sigp/propuestaActividad'
+import { puedeProponerse, seriesDe } from '../../types/sigp/propuestaActividad'
+import type { PropuestaActividad } from '../../types/sigp/propuestaActividad'
 import { fmtMoney } from '../../utils/sigp/formato'
 import { accesoResidente, type Rol } from '../../types/sigp/roles'
 import { puedeGestionarActividadesUI } from '../../types/sigp/permisos'
@@ -65,6 +70,13 @@ export default function ActividadesSigp() {
   const [formOpen, setFormOpen] = useState(false)
   const [detalle, setDetalle] = useState<Actividad | null>(null)
 
+  // ── Propuestas económicas (F1.2) ──
+  const [vista, setVista] = useState<'actividades' | 'propuestas'>('actividades')
+  const [propuestas, setPropuestas] = useState<PropuestaActividad[]>([])
+  const [cargandoPropuestas, setCargandoPropuestas] = useState(false)
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
+  const [propForm, setPropForm] = useState<{ abierto: boolean; reemitirDe?: PropuestaActividad }>({ abierto: false })
+
   // Clientes elegibles: interno → todos con usa_actividades + activo;
   // residente → SOLO el suyo (id resuelto por el hook desde users/{uid}).
   useEffect(() => {
@@ -111,6 +123,29 @@ export default function ActividadesSigp() {
     })()
     return () => { vivo = false }
   }, [cliente?.id])
+
+  // Propuestas del cliente activo (bandeja + chip del detalle + ref congelada).
+  const recargarPropuestas = async (clienteId: string) => {
+    setCargandoPropuestas(true)
+    try { setPropuestas(await cargarPropuestasDe(clienteId)) }
+    catch { setPropuestas([]) }
+    finally { setCargandoPropuestas(false) }
+  }
+  useEffect(() => {
+    setSeleccion(new Set()); setVista('actividades')
+    if (!cliente) { setPropuestas([]); return }
+    recargarPropuestas(cliente.id)
+  }, [cliente?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleSeleccion = (id: string) => setSeleccion(prev => {
+    const s = new Set(prev)
+    if (s.has(id)) s.delete(id); else s.add(id)
+    return s
+  })
+  const actividadesSeleccionadas = useMemo(
+    () => actividades.filter(a => seleccion.has(a.id)),
+    [actividades, seleccion],
+  )
 
   // Sincroniza el detalle abierto con la última carga (tras aprobar/ejecutar/
   // anular/editar líneas — sin cerrar el modal en cada acción).
@@ -202,6 +237,34 @@ export default function ActividadesSigp() {
 
       {cliente && (
         <>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs font-medium">
+              <button onClick={() => setVista('actividades')}
+                className={`px-3 py-1.5 ${vista === 'actividades' ? 'bg-brand-700 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                Actividades
+              </button>
+              <button onClick={() => setVista('propuestas')}
+                className={`px-3 py-1.5 border-l border-gray-300 ${vista === 'propuestas' ? 'bg-brand-700 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                📄 Propuestas ({seriesDe(propuestas).length})
+              </button>
+            </div>
+            {puedeGestionar && vista === 'actividades' && (
+              <button onClick={() => setPropForm({ abierto: true })} disabled={seleccion.size === 0}
+                title={seleccion.size === 0 ? 'Selecciona actividades con el checkbox de cada fila' : ''}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium border border-brand-700 text-brand-700 hover:bg-brand-50 disabled:opacity-40">
+                📄 Generar propuesta ({seleccion.size})
+              </button>
+            )}
+          </div>
+
+          {vista === 'propuestas' && (
+            <PropuestasPanel propuestas={propuestas} cargando={cargandoPropuestas} puedeGestionar={puedeGestionar}
+              seleccionadas={seleccion.size}
+              onReemitir={vigente => setPropForm({ abierto: true, reemitirDe: vigente })} />
+          )}
+
+          {vista === 'actividades' && (
+          <>
           <div className="flex items-center gap-1.5 flex-wrap">
             {PILLS.map(p => (
               <button key={p.clave}
@@ -234,6 +297,7 @@ export default function ActividadesSigp() {
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
+                  {puedeGestionar && <th className="py-3 pl-4 pr-1 font-semibold" title="Selección para propuesta"> </th>}
                   <th className="py-3 px-4 font-semibold">Fecha</th>
                   <th className="py-3 px-4 font-semibold">Sede</th>
                   <th className="py-3 px-4 font-semibold">Descripción</th>
@@ -246,15 +310,23 @@ export default function ActividadesSigp() {
               </thead>
               <tbody>
                 {loading && (
-                  <tr><td colSpan={pill === 'pendiente_acta' ? 8 : 7} className="py-10 text-center text-gray-400">Cargando…</td></tr>
+                  <tr><td colSpan={(pill === 'pendiente_acta' ? 8 : 7) + (puedeGestionar ? 1 : 0)} className="py-10 text-center text-gray-400">Cargando…</td></tr>
                 )}
                 {!loading && filtradas.length === 0 && (
-                  <tr><td colSpan={pill === 'pendiente_acta' ? 8 : 7} className="py-12 text-center text-gray-400">
+                  <tr><td colSpan={(pill === 'pendiente_acta' ? 8 : 7) + (puedeGestionar ? 1 : 0)} className="py-12 text-center text-gray-400">
                     No hay actividades{busqueda ? ' con esa búsqueda' : ' en esta vista'}.
                   </td></tr>
                 )}
                 {!loading && filtradas.map(a => (
                   <tr key={a.id} onClick={() => setDetalle(a)} className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer">
+                    {puedeGestionar && (
+                      <td className="py-3 pl-4 pr-1" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={seleccion.has(a.id)}
+                          disabled={!puedeProponerse(a, a.propuesta_consecutivo)}
+                          title={!puedeProponerse(a, a.propuesta_consecutivo) ? 'Sin valorizar o anulada — no entra a una propuesta' : ''}
+                          onChange={() => toggleSeleccion(a.id)} />
+                      </td>
+                    )}
                     <td className="py-3 px-4 text-gray-500 whitespace-nowrap">{fFecha(a)}</td>
                     <td className="py-3 px-4 text-gray-700">{a.sede_nombre || '—'}</td>
                     <td className="py-3 px-4 text-gray-800 max-w-xs truncate" title={a.descripcion}>{a.descripcion || '—'}</td>
@@ -291,6 +363,8 @@ export default function ActividadesSigp() {
               </tbody>
             </table>
           </div>
+          </>
+          )}
         </>
       )}
 
@@ -299,9 +373,21 @@ export default function ActividadesSigp() {
           onRegistrada={() => { setFormOpen(false); reload() }} clienteFijo={esResidente} />
       )}
 
+      {cliente && user && propForm.abierto && (
+        <PropuestaForm isOpen={propForm.abierto} onClose={() => setPropForm({ abierto: false })}
+          cliente={cliente} actividades={actividadesSeleccionadas} reemitirDe={propForm.reemitirDe}
+          firmante={{ nombre: user.nombre || user.email || 'NEG Ingeniería', ...(user.email ? { correo: user.email } : {}) }}
+          uid={user.uid}
+          onEmitida={() => {
+            setPropForm({ abierto: false }); setSeleccion(new Set())
+            recargarPropuestas(cliente.id); reload(); setVista('propuestas')
+          }} />
+      )}
+
       {detalle && user && (
         <ActividadDetalle isOpen={!!detalle} onClose={() => setDetalle(null)} actividad={detalle} lpus={lpus}
-          puedeGestionar={puedeGestionar} uid={user.uid} onCambio={() => { reload() }} />
+          puedeGestionar={puedeGestionar} uid={user.uid} onCambio={() => { reload() }}
+          propuestas={propuestas} />
       )}
     </div>
   )
