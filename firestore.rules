@@ -131,6 +131,20 @@ service cloud.firestore {
       ];
     }
 
+    // 11. Módulo de ACTIVIDADES + sus propuestas económicas (F1/F1.2).
+    //     Helper PROPIO del módulo (decisión de Giovanny, 18-ago-2026):
+    //     operacion_comercial NO ve actividades ni propuestas — Karen está
+    //     a cargo únicamente de licitaciones; la operación in-house de
+    //     Claro no es su frente. Antes estas colecciones heredaban
+    //     puedeGestionarProyectos() (que sí incluye comercial porque
+    //     gobierna el dominio comercial); ese helper NO se toca — cada
+    //     módulo trae el suyo. El residente entra por esResidenteDe.
+    function gestionaActividades() {
+      return isAuthed() && rolActual() in [
+        'admin', 'gerencia_general', 'auxiliar_proyectos', 'director_proyectos'
+      ];
+    }
+
     // 11. Módulo Tareas (14-ago): asignar tareas A OTROS es de las gerencias
     //     + admin (misma lectura de "gerencias" que veHorario); cualquiera
     //     del panel se AUTO-asigna y pasa/recibe el balón.
@@ -792,11 +806,11 @@ service cloud.firestore {
     // referencia (aprobacion.referencia), no quién la teclea.
     // Sin delete: anulación soft con motivo (restricción 5.1).
     match /actividades/{actividadId} {
-      allow read: if puedeGestionarProyectos() || gestionaCompras()
+      allow read: if gestionaActividades() || gestionaCompras()
                   || esResidenteDe(resource.data.cliente_id);
-      allow create: if puedeGestionarProyectos()
+      allow create: if gestionaActividades()
                     || esResidenteDe(request.resource.data.cliente_id);
-      allow update: if puedeGestionarProyectos()
+      allow update: if gestionaActividades()
                     || (esResidenteDe(resource.data.cliente_id)
                         && esResidenteDe(request.resource.data.cliente_id));
       allow delete: if false;
@@ -808,18 +822,15 @@ service cloud.firestore {
     // con el gestor del cliente) acotado por su claim; el doble esResidenteDe
     // del update impide mover una propuesta entre clientes. Sin delete
     // (restricción 5.1) — las históricas se conservan con su PDF y su hash.
-    // ⚠ PENDIENTE DE DECISIÓN DE NEGOCIO (18-ago, consultándose con
-    // Giovanny): operacion_comercial puede leer y emitir propuestas por la
-    // vía puedeGestionarProyectos() — CONSECUENCIA HEREDADA del helper que
-    // ya gobierna `actividades` (PR #92), NO una decisión de diseño de F1.2.
-    // No cambiar la vía a mitad de bloque; si la decisión la excluye, se
-    // acota en un PR propio.
+    // DECISIÓN DE NEGOCIO (Giovanny, 18-ago-2026): operacion_comercial NO
+    // lee ni emite — vía gestionaActividades(), el helper propio del módulo
+    // (ver su comentario). El pendiente que vivió aquí queda CERRADO.
     match /propuestas_actividad/{propuestaId} {
-      allow read: if puedeGestionarProyectos()
+      allow read: if gestionaActividades()
                   || esResidenteDe(resource.data.cliente_id);
-      allow create: if puedeGestionarProyectos()
+      allow create: if gestionaActividades()
                     || esResidenteDe(request.resource.data.cliente_id);
-      allow update: if puedeGestionarProyectos()
+      allow update: if gestionaActividades()
                     || (esResidenteDe(resource.data.cliente_id)
                         && esResidenteDe(request.resource.data.cliente_id));
       allow delete: if false;

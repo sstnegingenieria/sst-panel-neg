@@ -234,21 +234,26 @@ export const ROLES_ASIGNA_TAREAS: Rol[] = [
 export const puedeAsignarTareasUI = (rol: string | undefined) => en(rol, ROLES_ASIGNA_TAREAS)
 
 // ── Módulo de Actividades (F1 operación in-house, 17-ago) ──
-// Espejo EXACTO de las reglas de `actividades`: leen y operan los mismos
-// que gestionan proyectos + gerencia administrativa (lectura/gestión) — y
-// el rol residente_obra, cuya SEGUNDA concesión explícita es esta (la
-// whitelist de rolResidente.test.ts la registra). El residente opera la
-// MISMA página con su cliente fijo; las reglas acotan el alcance.
+// Espejo EXACTO de las reglas de `actividades` y `propuestas_actividad`:
+// el helper PROPIO del módulo gestionaActividades() en firestore.rules +
+// gerencia administrativa (solo lectura, vía gestionaCompras) + el rol
+// residente_obra, cuya SEGUNDA concesión explícita es esta (la whitelist
+// de rolResidente.test.ts la registra). El residente opera la MISMA
+// página con su cliente fijo; las reglas acotan el alcance.
+// ⛔ operacion_comercial FUERA (decisión de Giovanny, 18-ago-2026): Karen
+// está a cargo únicamente de licitaciones — la operación in-house de
+// Claro no es su frente. Antes heredaba puedeGestionarProyectos(); el
+// helper propio del módulo cerró esa vía en ambas colecciones.
 export const ROLES_VE_ACTIVIDADES: Rol[] = [
-  'admin', 'gerencia_general', 'operacion_comercial',
+  'admin', 'gerencia_general',
   'auxiliar_proyectos', 'director_proyectos', 'gerencia_administrativa',
   'residente_obra',
 ]
 export const veActividadesUI = (rol: string | undefined) => en(rol, ROLES_VE_ACTIVIDADES)
-// Gestión (crear/editar/hitos): espejo de las vías de write de la regla —
-// puedeGestionarProyectos() en reglas + el residente (acotado por reglas).
+// Gestión (crear/editar/hitos/emisión de propuestas): espejo de las vías
+// de write de la regla — gestionaActividades() + el residente (acotado).
 export const ROLES_GESTIONA_ACTIVIDADES: Rol[] = [
-  'admin', 'gerencia_general', 'operacion_comercial',
+  'admin', 'gerencia_general',
   'auxiliar_proyectos', 'director_proyectos',
   'residente_obra',
 ]
