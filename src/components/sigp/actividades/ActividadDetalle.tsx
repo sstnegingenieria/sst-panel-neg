@@ -189,6 +189,12 @@ export default function ActividadDetalle({ isOpen, onClose, actividad, lpus, pue
             {ESTADO_ACTIVIDAD_LABEL[actividad.estado] ?? actividad.estado}
           </span>
           <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{actividad.sede_nombre || '—'}</span>
+          {actividad.zona && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-brand-50 text-brand-700"
+              title="Zona — columna UBICACIÓN de la memoria de cantidades del acta">
+              📍 {actividad.zona}
+            </span>
+          )}
           <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{actividad.contrato || 'sin contrato'}</span>
           <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 uppercase">{actividad.naturaleza}</span>
           {actividad.referencia_cliente && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">ref. {actividad.referencia_cliente}</span>}

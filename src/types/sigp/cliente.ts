@@ -61,10 +61,19 @@ export interface Cliente {
    *  cliente flaggeado, el registro lo preselecciona — pieza del <1 minuto.
    *  Ausente = false. */
   usa_actividades?: boolean
-  /** F1 Actividades: SEDES del cliente con su zona (se cargan a mano en el
-   *  detalle del cliente). `id` local estable para denormalizar sin romper
-   *  historia al renombrar. */
-  sedes?: { id: string; nombre: string; zona?: string }[]
+  /** F1 Actividades: SEDES del cliente con su CIUDAD y sus ZONAS (se cargan
+   *  a mano en el detalle del cliente). La zona es la columna UBICACIÓN de
+   *  la memoria de cantidades del acta (p. ej. "Búnker XI" en Triara) — no
+   *  es decorativa. `id` local estable para denormalizar sin romper historia
+   *  al renombrar.
+   *
+   *  ⚠ QUÉ ES UNA "SEDE" AQUÍ (decisión de Giovanny, 17-ago-2026): la unidad
+   *  de este nivel NO es la geografía sino QUÉ GENERA ACTA PROPIA. Caso
+   *  canónico: Oracle es físicamente un edificio DENTRO de Triara, pero se
+   *  emite un acta para Triara y OTRA para Oracle → Oracle es una sede
+   *  propia en esta lista, no una zona de Triara. No lo "corrijas" por
+   *  criterio geográfico. */
+  sedes?: { id: string; nombre: string; ciudad?: string; zonas?: string[] }[]
   /** F1 Actividades: contactos SOLICITANTES del cliente (quién pide el
    *  trabajo). Lista simple a mano — distinta de `contactos` (comercial). */
   contactos_solicitantes?: string[]
