@@ -21,7 +21,7 @@ import type { LPU } from './lpu'
 export type EstadoActividad =
   | 'registrada'   // sin hitos
   | 'aprobada'     // aprobada, pendiente de ejecutar (camino normal)
-  | 'ejecutada'    // ejecutada SIN aprobar (emergencia — plata en riesgo)
+  | 'ejecutada'    // ejecutada SIN aprobar (emergencia — pendiente para el acta)
   | 'completa'     // ambos hitos
   | 'anulada'      // terminal, soft (sin delete — restricción 5.1)
 
@@ -124,15 +124,52 @@ export function estaValorizada(a: Pick<Actividad, 'lineas' | 'total'>): boolean 
   return a.lineas.length > 0 && a.total > 0
 }
 
-/** LA LISTA DE ORO — "ejecutada y todavía no facturable": tiene ejecución y
- *  le falta la aprobación O la valorización. Las dos son plata en riesgo
- *  (una `completa` sin líneas tampoco se puede cobrar). Derivado de LECTURA
- *  (no persiste: `estado` ya se consulta por campo único y este predicado
- *  filtra client-side sobre estados ejecutada+completa). */
-export function noFacturable(a: Pick<Actividad, 'aprobacion' | 'ejecucion' | 'anulacion' | 'lineas' | 'total'>): boolean {
+/** LA LISTA DE ORO — "PENDIENTE PARA EL ACTA": tiene ejecución y le falta la
+ *  aprobación O la valorización (una `completa` sin líneas tampoco entra al
+ *  acta). ⚠ ENCUADRE (corrección de Giovanny, 18-ago-2026): estar aquí es
+ *  NORMAL, no plata en riesgo — una actividad en ejecución o pendiente de
+ *  socializar con el gestor simplemente pasa al acta del mes siguiente. Lo
+ *  que sí se pierde es la que envejece sin resolverse: por eso lo que se
+ *  vigila es la ANTIGÜEDAD (pendienteDesde/diasPendiente + umbral), no la
+ *  pertenencia a la lista. Derivado de LECTURA (no persiste: `estado` ya se
+ *  consulta por campo único y este predicado filtra client-side). */
+export function pendienteParaActa(a: Pick<Actividad, 'aprobacion' | 'ejecucion' | 'anulacion' | 'lineas' | 'total'>): boolean {
   if (a.anulacion || !a.ejecucion) return false
   return !a.aprobacion || !estaValorizada(a)
 }
+
+/** Días pendiente que se consideran normales dentro del ciclo mensual del
+ *  acta: pasado este umbral la actividad se destaca en la UI — "ejecutada
+ *  hace cuatro días es normal; hace tres meses y sin aprobar es lo que hoy
+ *  se pierde" (Giovanny). Un ciclo de acta es mensual; 30 días pendiente
+ *  significa que ya dejó pasar un corte sin resolverse. */
+export const UMBRAL_PENDIENTE_ACTA_DIAS = 30
+
+type ActividadParaAntiguedad = Pick<Actividad, 'aprobacion' | 'ejecucion' | 'anulacion' | 'lineas' | 'total' | 'fecha_creacion'>
+
+/** Desde cuándo está pendiente para el acta: el hecho MÁS VIEJO que la dejó
+ *  en la lista. Hoy ese hecho es siempre la ejecución (es lo que la mete);
+ *  si mañana hubiera más hechos habilitantes se tomaría el mínimo entre
+ *  ellos. Fallback defensivo a fecha_creacion si el hito no trae fecha. */
+export function pendienteDesde(a: ActividadParaAntiguedad): Timestamp | null {
+  if (!pendienteParaActa(a)) return null
+  const fechas = [a.ejecucion?.fecha].filter((f): f is Timestamp => !!f)
+  if (fechas.length === 0) return a.fecha_creacion ?? null
+  return fechas.reduce((m, f) => (f.toMillis() < m.toMillis() ? f : m))
+}
+
+/** Días completos pendiente para el acta (0 = hoy). Null si no está pendiente. */
+export function diasPendiente(a: ActividadParaAntiguedad, ahora: Date): number | null {
+  const desde = pendienteDesde(a)
+  if (!desde) return null
+  return Math.max(0, Math.floor((ahora.getTime() - desde.toMillis()) / 86_400_000))
+}
+
+// ── REGLA DEL ACTA (decisión de Giovanny para el diseño de F2, 18-ago-2026) ──
+// La actividad entra al acta del mes en que queda COMPLETA (aprobada Y
+// ejecutada) — no del mes en que se ejecutó. Eso resuelve el arrastre entre
+// meses: lo que no alcanza el corte simplemente cae en el acta siguiente,
+// sin nada especial que hacer. F2 debe implementar el corte con esta regla.
 
 /** Congelamiento: desde que existe aprobación, código/descripción/unidad/
  *  valor_unitario y el conjunto de líneas quedan inmutables — solo cantidad

@@ -4,7 +4,8 @@
 import { describe, it, expect } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
 import {
-  estadoDe, noFacturable, estaValorizada, totalLineas, lineasCongeladas,
+  estadoDe, pendienteParaActa, estaValorizada, totalLineas, lineasCongeladas,
+  pendienteDesde, diasPendiente, UMBRAL_PENDIENTE_ACTA_DIAS,
   lpuValidaParaActividad, construirLinea, construirLineaNegociada,
   patchAprobar, patchEjecutar, patchLineas, patchAnular, patchCabecera,
   type Actividad, type LineaActividad,
@@ -43,30 +44,72 @@ describe('estadoDe — tabla de los dos hitos, sin ramificar', () => {
   })
 })
 
-describe('noFacturable — la lista de oro ensanchada', () => {
+describe('pendienteParaActa — la lista de oro ensanchada', () => {
   const eje = { fecha: ts(), por: 'u1' }
   const apr = { fecha: ts(), por: 'u1' }
   const conLineas = { lineas: [linea()], total: 70000 }
   const sinLineas = { lineas: [], total: 0 }
 
-  it('ejecutada SIN aprobar (valorizada) → en riesgo', () => {
-    expect(noFacturable({ ejecucion: eje, ...conLineas })).toBe(true)
+  it('ejecutada SIN aprobar (valorizada) → pendiente para el acta', () => {
+    expect(pendienteParaActa({ ejecucion: eje, ...conLineas })).toBe(true)
   })
-  it('COMPLETA pero sin valorizar → también en riesgo (el agujero de la corrección 4)', () => {
-    expect(noFacturable({ aprobacion: apr, ejecucion: eje, ...sinLineas })).toBe(true)
+  it('COMPLETA pero sin valorizar → también pendiente (el agujero de la corrección 4)', () => {
+    expect(pendienteParaActa({ aprobacion: apr, ejecucion: eje, ...sinLineas })).toBe(true)
   })
-  it('completa y valorizada → facturable (fuera de la lista)', () => {
-    expect(noFacturable({ aprobacion: apr, ejecucion: eje, ...conLineas })).toBe(false)
+  it('completa y valorizada → lista para el acta (fuera de la lista)', () => {
+    expect(pendienteParaActa({ aprobacion: apr, ejecucion: eje, ...conLineas })).toBe(false)
   })
   it('sin ejecutar jamás está en la lista (aprobada o registrada)', () => {
-    expect(noFacturable({ aprobacion: apr, ...sinLineas })).toBe(false)
-    expect(noFacturable({ ...sinLineas })).toBe(false)
+    expect(pendienteParaActa({ aprobacion: apr, ...sinLineas })).toBe(false)
+    expect(pendienteParaActa({ ...sinLineas })).toBe(false)
   })
   it('anulada jamás está en la lista', () => {
-    expect(noFacturable({ ejecucion: eje, anulacion: { fecha: ts(), por: 'u', motivo: 'x' }, ...conLineas })).toBe(false)
+    expect(pendienteParaActa({ ejecucion: eje, anulacion: { fecha: ts(), por: 'u', motivo: 'x' }, ...conLineas })).toBe(false)
   })
   it('total 0 con líneas cuenta como sin valorizar', () => {
     expect(estaValorizada({ lineas: [linea()], total: 0 })).toBe(false)
+  })
+})
+
+describe('antigüedad — pendienteDesde / diasPendiente (lo que se vigila es el tiempo, no la pertenencia)', () => {
+  const tsDe = (iso: string) => Timestamp.fromDate(new Date(iso))
+  const conLineas = { lineas: [linea()], total: 70000 }
+  const sinLineas = { lineas: [], total: 0 }
+  const creada = tsDe('2026-08-01T08:00:00')
+
+  it('pendiente desde la EJECUCIÓN — el hecho que la mete a la lista', () => {
+    const eje = { fecha: tsDe('2026-08-10T09:00:00'), por: 'u1' }
+    expect(pendienteDesde({ ejecucion: eje, fecha_creacion: creada, ...conLineas })!.toMillis())
+      .toBe(eje.fecha.toMillis())
+  })
+  it('la aprobación posterior NO mueve el reloj (completa sin valorizar sigue contando desde la ejecución)', () => {
+    const eje = { fecha: tsDe('2026-08-10T09:00:00'), por: 'u1' }
+    const apr = { fecha: tsDe('2026-08-15T09:00:00'), por: 'u1' }
+    expect(pendienteDesde({ aprobacion: apr, ejecucion: eje, fecha_creacion: creada, ...sinLineas })!.toMillis())
+      .toBe(eje.fecha.toMillis())
+  })
+  it('no pendiente → null (completa valorizada, registrada, anulada)', () => {
+    const eje = { fecha: tsDe('2026-08-10T09:00:00'), por: 'u1' }
+    const apr = { fecha: tsDe('2026-08-11T09:00:00'), por: 'u1' }
+    expect(pendienteDesde({ aprobacion: apr, ejecucion: eje, fecha_creacion: creada, ...conLineas })).toBeNull()
+    expect(pendienteDesde({ fecha_creacion: creada, ...sinLineas })).toBeNull()
+    expect(pendienteDesde({ ejecucion: eje, anulacion: { fecha: ts(), por: 'u', motivo: 'x' }, fecha_creacion: creada, ...conLineas })).toBeNull()
+  })
+  it('hito sin fecha → cae defensivo a fecha_creacion', () => {
+    const eje = { fecha: undefined as unknown as Timestamp, por: 'u1' }
+    expect(pendienteDesde({ ejecucion: eje, fecha_creacion: creada, ...conLineas })!.toMillis())
+      .toBe(creada.toMillis())
+  })
+  it('diasPendiente: días completos, 0 el mismo día, null si no aplica', () => {
+    const eje = { fecha: tsDe('2026-08-10T09:00:00'), por: 'u1' }
+    const a = { ejecucion: eje, fecha_creacion: creada, ...conLineas }
+    expect(diasPendiente(a, new Date('2026-08-10T18:00:00'))).toBe(0)
+    expect(diasPendiente(a, new Date('2026-08-14T09:00:00'))).toBe(4)
+    expect(diasPendiente(a, new Date('2026-11-10T09:00:00'))).toBeGreaterThan(UMBRAL_PENDIENTE_ACTA_DIAS)
+    expect(diasPendiente({ fecha_creacion: creada, ...sinLineas }, new Date())).toBeNull()
+  })
+  it('el umbral es una constante nombrada dentro del ciclo mensual del acta', () => {
+    expect(UMBRAL_PENDIENTE_ACTA_DIAS).toBe(30)
   })
 })
 
