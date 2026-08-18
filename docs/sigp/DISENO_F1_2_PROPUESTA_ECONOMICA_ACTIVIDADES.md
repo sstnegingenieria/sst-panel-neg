@@ -1,7 +1,11 @@
 # F1.2 — Propuesta económica en PDF para Actividades (DISEÑO)
 
-**Estado: DISEÑO APROBABLE — no implementado.** Bloque aparte del PR C (evidencias
-fotográficas). Autor: Code, 18-ago-2026, a pedido de Giovanny.
+**Estado: ✅ IMPLEMENTADO** (18-ago-2026, PR #96 — rev. 3 + agregados rev. 4;
+CF con prefijo PEA y reglas FS/ST desplegadas aditivas antes del merge). Quedan
+abiertos: la decisión de negocio sobre `operacion_comercial` (vía heredada de
+`puedeGestionarProyectos()`, consultándose con Giovanny) y la ratificación de
+Ingrid del CM-FT-CT-19 numerado PEA- (frente Trinorma). Bloque aparte del PR C
+(evidencias fotográficas). Autor: Code, a pedido de Giovanny.
 **Rev. 2 (18-ago)**: pregunta de agrupación RESUELTA por Giovanny (N actividades →
 1 propuesta, §6); principio de los dos ejes independientes (§6b); pregunta nueva
 de VERSIONES planteada con hallazgos, sin resolver (§6c).
