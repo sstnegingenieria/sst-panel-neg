@@ -802,6 +802,29 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // F1.2 — PROPUESTAS ECONÓMICAS de actividades: un doc por VERSIÓN
+    // (patrón LPU vigente/historica; la re-emisión es un batch atómico que
+    // historiza la anterior y re-apunta punteros). El RESIDENTE emite (negocia
+    // con el gestor del cliente) acotado por su claim; el doble esResidenteDe
+    // del update impide mover una propuesta entre clientes. Sin delete
+    // (restricción 5.1) — las históricas se conservan con su PDF y su hash.
+    // ⚠ PENDIENTE DE DECISIÓN DE NEGOCIO (18-ago, consultándose con
+    // Giovanny): operacion_comercial puede leer y emitir propuestas por la
+    // vía puedeGestionarProyectos() — CONSECUENCIA HEREDADA del helper que
+    // ya gobierna `actividades` (PR #92), NO una decisión de diseño de F1.2.
+    // No cambiar la vía a mitad de bloque; si la decisión la excluye, se
+    // acota en un PR propio.
+    match /propuestas_actividad/{propuestaId} {
+      allow read: if puedeGestionarProyectos()
+                  || esResidenteDe(resource.data.cliente_id);
+      allow create: if puedeGestionarProyectos()
+                    || esResidenteDe(request.resource.data.cliente_id);
+      allow update: if puedeGestionarProyectos()
+                    || (esResidenteDe(resource.data.cliente_id)
+                        && esResidenteDe(request.resource.data.cliente_id));
+      allow delete: if false;
+    }
+
     match /tareas/{tareaId} {
       allow read: if esPersonalPanel();
 

@@ -19,6 +19,9 @@ const RESIDENTE = 'residente_obra'
 //  - ROLES_RESIDENTES: su gatekeeper (C2.1 paso 6).
 //  - ROLES_VE_ACTIVIDADES / ROLES_GESTIONA_ACTIVIDADES: el módulo de
 //    Actividades F1 — el residente OPERA su cliente (decisión 17-ago).
+//  - esResidenteDeStorage (storage.rules): concesión F1.2 §5b — el residente
+//    emite y ve los PDFs de las propuestas de SU cliente (decisión 18-ago);
+//    el literal del rol solo puede vivir DENTRO de ese helper.
 const ARRAYS_PROPIOS = new Set([
   'ROLES_RESIDENTES',
   'ROLES_VE_ACTIVIDADES',
@@ -91,8 +94,18 @@ describe('rol residente_obra — nace en cero (reglas, chequeo textual)', () => 
     expect(cuerpo).not.toContain(RESIDENTE)
   })
 
-  it('storage.rules no cita el rol (allí gobierna esInterno por claim)', () => {
+  it('storage.rules solo cita el rol dentro de esResidenteDeStorage (concesión F1.2 §5b) o en comentarios', () => {
     const storage = readFileSync(resolve(__dirname, '../../../../storage.rules'), 'utf8')
-    expect(storage).not.toContain(RESIDENTE)
+    const lineas = storage.split('\n')
+    const inicio = lineas.findIndex(l => l.includes('function esResidenteDeStorage'))
+    expect(inicio).toBeGreaterThan(-1)
+    let fin = inicio
+    while (fin < lineas.length && !lineas[fin].trim().startsWith('}')) fin++
+    const fuera = lineas
+      .map((l, i) => ({ l, i }))
+      .filter(({ l, i }) => l.includes(RESIDENTE)
+        && !(i >= inicio && i <= fin)          // dentro del helper: OK
+        && !l.trim().startsWith('//'))          // comentario: OK
+    expect(fuera.map(f => `línea ${f.i + 1}: ${f.l.trim()}`)).toEqual([])
   })
 })

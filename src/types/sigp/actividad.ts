@@ -14,7 +14,7 @@
 // `estado` es DERIVADO y PERSISTIDO, mantenido por los builders en cada
 // write (mismo patrón y misma razón que `activa` en Tareas: auto-sanador,
 // consultable por campo único, la UI no improvisa writes).
-import { Timestamp } from 'firebase/firestore'
+import { Timestamp, deleteField } from 'firebase/firestore'
 import type { LPU } from './lpu'
 
 // ── Estados ──────────────────────────────────────────────────────────────────
@@ -66,6 +66,13 @@ export interface HitoAprobacion {
   fecha: Timestamp
   por: string          // quién REGISTRÓ (traza) — la decisión es del cliente
   referencia?: string  // correo / FAD / número — la EVIDENCIA de la aprobación
+  /** 🧊 EVIDENCIA CONGELADA (F1.2 §6d, obligatoria por Giovanny): consecutivo
+   *  y versión de la propuesta VIGENTES al marcar la aprobación — responde
+   *  "¿qué documento aprobó el gestor?" sin depender de que nadie re-emita
+   *  después (el conjunto de una propuesta cambia entre rondas). INMUTABLE
+   *  como todo hito. Ausente si se aprobó sin propuesta (emergencia) —
+   *  ausencia honesta, no un dato inventado. */
+  propuesta_ref?: { consecutivo: string; version: number }
 }
 
 export interface HitoEjecucion {
@@ -94,6 +101,14 @@ export interface Actividad {
   fecha_solicitud?: Timestamp
   aprobacion?: HitoAprobacion | null
   ejecucion?: HitoEjecucion | null
+  /** F1.2 — PUNTERO VIVO a la propuesta económica que la CUBRE HOY (doc de la
+   *  versión VIGENTE; se re-apunta en el batch del swap al re-emitir; se
+   *  limpia si la actividad sale del conjunto). Pregunta distinta de "qué me
+   *  aprobó" — esa evidencia vive congelada en aprobacion.propuesta_ref. */
+  propuesta_id?: string
+  /** Consecutivo PEA de la serie — NO cambia dentro de la serie (mismo PEA
+   *  por negociación), por eso apunta bien tras re-emitir por construcción. */
+  propuesta_consecutivo?: string
   lineas: LineaActividad[]
   total: number                 // derivado persistido (Σ líneas)
   estado: EstadoActividad       // derivado persistido (builders)
@@ -253,11 +268,34 @@ const conDerivados = (base: Record<string, unknown>, a: Actividad, lineas?: Line
   }
 }
 
-/** Marca el hito de APROBACIÓN. Congela las líneas de ahí en adelante. */
-export function patchAprobar(a: Actividad, por: string, fecha: Timestamp, referencia?: string): PatchActividad {
+/** Marca el hito de APROBACIÓN. Congela las líneas de ahí en adelante.
+ *  `propuestaRef` congela la evidencia documental (§6d): la vigente EN ESE
+ *  MOMENTO — el caller la resuelve con propuestaVigenteDe(). */
+export function patchAprobar(
+  a: Actividad, por: string, fecha: Timestamp, referencia?: string,
+  propuestaRef?: { consecutivo: string; version: number },
+): PatchActividad {
   if (a.anulacion || a.aprobacion) return null
-  const aprobacion: HitoAprobacion = { fecha, por, ...(referencia?.trim() ? { referencia: referencia.trim() } : {}) }
+  const aprobacion: HitoAprobacion = {
+    fecha, por,
+    ...(referencia?.trim() ? { referencia: referencia.trim() } : {}),
+    ...(propuestaRef ? { propuesta_ref: { consecutivo: propuestaRef.consecutivo, version: propuestaRef.version } } : {}),
+  }
   return conDerivados({ aprobacion }, { ...a, aprobacion })
+}
+
+/** F1.2 — fija el puntero vivo a la propuesta que cubre la actividad (al
+ *  emitir/re-emitir; va DENTRO del batch atómico del swap). */
+export function patchVincularPropuesta(a: Pick<Actividad, 'anulacion'>, propuestaId: string, consecutivo: string): PatchActividad {
+  if (a.anulacion || !propuestaId || !consecutivo) return null
+  return { propuesta_id: propuestaId, propuesta_consecutivo: consecutivo }
+}
+
+/** F1.2 — limpia el puntero vivo (la actividad salió del conjunto en una
+ *  re-emisión). La evidencia congelada del hito NO se toca — es inmutable. */
+export function patchDesvincularPropuesta(a: Pick<Actividad, 'propuesta_id' | 'propuesta_consecutivo'>): PatchActividad {
+  if (!a.propuesta_id && !a.propuesta_consecutivo) return null
+  return { propuesta_id: deleteField(), propuesta_consecutivo: deleteField() }
 }
 
 /** Marca el hito de EJECUCIÓN (normal tras aprobar, o emergencia primero). */
