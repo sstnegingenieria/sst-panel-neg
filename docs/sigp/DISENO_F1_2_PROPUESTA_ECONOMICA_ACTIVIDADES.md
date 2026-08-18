@@ -8,6 +8,9 @@ de VERSIONES planteada con hallazgos, sin resolver (§6c).
 **Rev. 3 (18-ago)**: versiones RESUELTAS por Giovanny — mismo PEA por negociación;
 mecanismo elegido por Code: **patrón LPU** (vigente/histórica + `reemplaza_a` con
 swap atómico), no la subcolección del cotizador (§6c).
+**Rev. 4 (18-ago)**: evidencia congelada en la aprobación (contra qué versión se
+aprobó — obligatoria, §6d) + la ruta de Storage ADMITE residentes acotados por
+claim (no calcar `cotizaciones/**` de C2.1, §5b).
 
 ## 1. Contexto
 
@@ -94,8 +97,32 @@ el campo `referencia` puede precargar el consecutivo `PEA-…` — la cadena
 propuesta → aprobación queda referencial, criterio Trinorma.
 
 **Deploys cuando se implemente** (todos con OK aparte): regla Firestore de la
-colección (read internos + `esResidenteDe`; create según rol; sin delete) +
-ruta de Storage + prefijo en la CF. Orden aditivo: reglas/CF antes del merge.
+colección + ruta de Storage (§5b) + prefijo en la CF. Orden aditivo: reglas/CF
+antes del merge.
+
+**Firestore de `propuestas_actividad`**: read y write (emisión + swap) para
+internos con gestión de actividades **Y para el residente acotado por
+`esResidenteDe(cliente_id)`** — los residentes son quienes negocian con el
+gestor y EMITEN propuestas; en update, doble cita de `esResidenteDe` (recurso y
+dato nuevo, patrón `actividades` del PR #92) para que no puedan mover una
+propuesta entre clientes. Sin delete (restricción 5.1).
+
+## 5b. ⚠ STORAGE: la ruta ADMITE residentes (agregado de Giovanny, 18-ago — no calcar C2.1)
+
+En C2.1 `cotizaciones/**` se cerró a `perfil == 'interno'`. **Si la ruta nueva
+se calca de ahí, César y Sthefany no podrían emitir ni ver sus propias
+propuestas** — y son justamente quienes negocian con el gestor.
+
+- **La ruta lleva el cliente en el path** para poder autorizar por CLAIM sin
+  lookups: `propuestas_actividad/{clienteId}/{docId}/documento.pdf`.
+- **Regla**: `esInterno() || esResidenteDeStorage(clienteId)` — helper nuevo en
+  `storage.rules`: `request.auth.token.perfil == 'residente_obra' &&
+  request.auth.token.cliente_id == clienteId && clienteId != ''` (espejo del
+  `esResidenteDe` de Firestore, sobre los claims de C2.1 que Storage sí ve).
+- **Verificación exigida**: la batería DEBE incluir un actor residente real
+  (mínimo privilegio por vía — lección 14-ago) probando 200 en su cliente y
+  403 en otro cliente, con `uploadBytes` real (el POST REST crudo da falso 403
+  — gotcha documentado del módulo #3). **No se asume: se prueba.**
 
 ## 6. ✅ RESUELTO (Giovanny, 18-ago): N actividades → 1 propuesta
 
@@ -180,7 +207,35 @@ actividades). El patrón LPU (C1.1) calza exacto y ya está probado:
 - **Re-emitir solo desde la vigente** (una histórica no se corrige — la
   corrección siempre nace de la última foto). La aprobación por actividad (§6)
   no se toca: re-emitir no borra hitos ya marcados; qué actividades siguen en la
-  ronda nueva lo decide la negociación, no una regla del sistema.
+  ronda nueva lo decide la negociación, no una regla del sistema (ver §6d — la
+  evidencia de qué se aprobó no depende de eso).
+
+## 6d. 🧊 EVIDENCIA CONGELADA en la aprobación (agregado de Giovanny, 18-ago — OBLIGATORIA)
+
+Como `actividad_ids[]` puede cambiar entre rondas, una actividad ya aprobada
+podría salir del conjunto en una re-emisión y perder el puntero vivo al
+documento que la justificó. Ante un auditor —o ante el propio Claro— la pregunta
+es **"¿qué documento aprobó el gestor?"**, y la respuesta no puede depender de
+que nadie haya re-emitido después.
+
+- **Al marcar la aprobación, el hito congela la referencia documental**:
+  `HitoAprobacion.propuesta_ref?: { consecutivo, version }` — el consecutivo y
+  el número de versión VIGENTES en ese momento, escritos por `patchAprobar`
+  (extendido) e **inmutables** (los hitos jamás se mutan; viaja junto a la
+  `referencia` correo/FAD). Ausente si la actividad se aprueba sin propuesta
+  (flujo de emergencia) — ausencia honesta, no un dato inventado.
+- **Cadena de auditoría completa sin depender del puntero vivo**: hito
+  (`consecutivo` + `version`) → doc histórico `pea-YYYY-NNN_v{n}` (conservado
+  SIEMPRE, §6c) → `pdf_hash` → el PDF exacto que vio el gestor.
+- **Decisión de Code sobre impedir que una aprobada salga del conjunto: NO se
+  impide.** Razones: (a) es el flujo real — el gestor aprueba 2 de 3 y la ronda
+  siguiente cubre lo que queda; forzar a arrastrar lo ya aprobado haría que el
+  documento nuevo re-proponga lo que ya está decidido y desfigure la
+  negociación; (b) con la evidencia congelada del hito la salida es INOFENSIVA:
+  el puntero vivo (`propuesta_id`) describe "qué me cubre hoy", la evidencia del
+  hito responde "qué me aprobó" — son preguntas distintas y cada una tiene su
+  campo. La UI puede mostrar ambas (chip de la vigente + referencia congelada en
+  el timeline del hito).
 
 ## 7. 📌 REGLA DEL ACTA — decisión registrada para el diseño de F2
 
