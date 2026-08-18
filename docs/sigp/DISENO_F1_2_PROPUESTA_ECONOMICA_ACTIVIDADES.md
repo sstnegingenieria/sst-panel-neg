@@ -5,6 +5,9 @@ fotográficas). Autor: Code, 18-ago-2026, a pedido de Giovanny.
 **Rev. 2 (18-ago)**: pregunta de agrupación RESUELTA por Giovanny (N actividades →
 1 propuesta, §6); principio de los dos ejes independientes (§6b); pregunta nueva
 de VERSIONES planteada con hallazgos, sin resolver (§6c).
+**Rev. 3 (18-ago)**: versiones RESUELTAS por Giovanny — mismo PEA por negociación;
+mecanismo elegido por Code: **patrón LPU** (vigente/histórica + `reemplaza_a` con
+swap atómico), no la subcolección del cotizador (§6c).
 
 ## 1. Contexto
 
@@ -80,12 +83,11 @@ rastreable:
 
 ## 5. Persistencia mínima (colección nueva `propuestas_actividad`)
 
-Doc por propuesta emitida: `consecutivo`, `cliente_id` (eje `esResidenteDe`),
-`actividad_ids[]`, snapshot congelado de items+totales+asunto, `fecha_emision`,
-`firmante`, `pdf_hash` (SHA-256, regla 8) y `pdf_url` (Storage
-`propuestas_actividad/{id}/…`). **Lo emitido es inmutable** (cada PDF que salió
-conserva su snapshot y su hash); cómo se corrige — versión sobre el mismo PEA o
-propuesta nueva con `reemplaza_a` — es la pregunta abierta del §6c.
+Un doc por VERSIÓN emitida (ver mecanismo completo en §6c): `consecutivo`,
+`version`, `estado: vigente|historica`, `reemplaza_a`, `cliente_id` (eje
+`esResidenteDe`), `actividad_ids[]`, snapshot congelado de items+totales+asunto,
+`fecha_emision`, `firmante`, `pdf_hash` (SHA-256, regla 8) y `pdf_url`.
+**Lo emitido es inmutable** — cada PDF que salió conserva su snapshot y su hash.
 
 **Sinergia con el hito de aprobación**: al marcar la aprobación de la actividad,
 el campo `referencia` puede precargar el consecutivo `PEA-…` — la cadena
@@ -130,40 +132,55 @@ ni la propuesta restringe a qué acta entra la actividad. En el modelo, la
 actividad lleva DOS punteros independientes: `propuesta_id` (este bloque) y el
 futuro puntero al acta (F2) — ninguno se deriva del otro.
 
-## 6c. ⚠ PREGUNTA ABIERTA (planteada, NO resuelta): ¿la propuesta necesita VERSIONES?
+## 6c. ✅ RESUELTO (Giovanny, 18-ago): la propuesta SE VERSIONA bajo el mismo PEA
 
-Hay negociación con el gestor, y negociar suele implicar mandar una versión
-corregida. **Hallazgos (verificados en código) para decidir:**
+**Decisión**: una negociación es un evento comercial y tiene UN número
+(`PEA-YYYY-NNN`), con las versiones que haga falta. **Fundamento (para la
+bitácora)**: los formatos del SGI ya se versionan bajo un código fijo — es la
+práctica de control documental de la casa — y quemar un consecutivo por ronda
+haría que el conteo de la serie sobre-reporte la cantidad de propuestas emitidas.
 
-**Cómo versiona el cotizador hoy**: un doc `cotizaciones/{id}` = un COT- con
-subcolección `versiones/{n}` — cada versión es un snapshot COMPLETO (ítems
-inline, totales, condiciones, descuento); el padre denormaliza la versión
-activa; `puedeNuevaVersion()` solo desde enviada/rechazada/vencida; un PDF
-inmutable por versión (`v{n}.pdf` + hash); etiqueta de cara al cliente
-`etiquetaVersion` (v1 sin sufijo, v≥2 "vN").
+### Mecanismo elegido (Code): patrón LPU — vigente/histórica + `reemplaza_a` con swap atómico
 
-**Hallazgo 1 — el generador ya soporta versiones GRATIS**: `DatosPdfCotizacion`
-trae `versionNum`; el PDF pinta "Versión N" discreta bajo el consecutivo y en el
-encabezado corrido de páginas 2+. Versionar la propuesta cuesta CERO en el PDF.
+**NO se copia la subcolección del cotizador** (allá la versión es dueña de los
+ítems y se edita ahí; acá el documento es fotografía derivada de las
+actividades). El patrón LPU (C1.1) calza exacto y ya está probado:
 
-**Hallazgo 2 — diferencia estructural con el cotizador**: en el cotizador la
-versión ES dueña de los ítems (el snapshot vive en la versión y se edita ahí);
-en la propuesta los ítems viven en las ACTIVIDADES y la propuesta es una
-fotografía derivada. Negociar cambia las actividades (cantidades, línea
-negociada, sacar una actividad del grupo) y re-emitir re-fotografía — **en ambos
-esquemas**. La diferencia real es de IDENTIDAD DOCUMENTAL:
-
-- **Versionar (mismo PEA, subcolección)**: el hilo con el gestor conserva UNA
-  referencia ("PEA-2026-005, va la v2"); no consume consecutivos por ronda;
-  requiere subcolección + denormalización en el padre (calco del cotizador).
-- **Propuesta nueva con `reemplaza_a`**: modelo más simple (docs planos
-  inmutables, sin subcolección); cada ronda consume un consecutivo y el gestor
-  ve un número nuevo por corrección; la trazabilidad obliga a seguir la cadena
-  `reemplaza_a` y a re-apuntar `actividad.propuesta_id`.
-
-**Matiz operativo**: si la negociación es frecuente (Giovanny dice que la hay),
-el costo de "un número nuevo por ronda" se paga en cada correo; si es ocasional,
-la subcolección es sobre-ingeniería. **Sin resolver — decide Giovanny.**
+- **Cada versión es SU PROPIO doc plano e inmutable** en `propuestas_actividad`,
+  con id determinístico **`pea-YYYY-NNN_v{n}`** (reintentar una re-emisión no
+  duplica — patrón doc-id de obra-espejo/proyectos): `consecutivo` (el MISMO en
+  todas las versiones de la serie), `version: n`, `estado: 'vigente'|'historica'`,
+  `reemplaza_a` (id de la versión anterior), `actividad_ids[]` DE ESA versión
+  (el conjunto puede cambiar entre rondas), snapshot items+totales+asunto,
+  `fecha_emision`, `firmante`, `pdf_hash`, `pdf_url`.
+- **Consecutivo: se quema UNA vez, al emitir la v1.** Re-emitir NO llama la CF —
+  el contador de la serie cuenta negociaciones, no rondas (el fundamento).
+- **Re-emisión = UN `writeBatch` atómico** (el swap endurecido de C1.1):
+  crear `_v{n+1}` como `vigente` + patch de `_v{n}` → `historica` + los patches
+  de punteros en las actividades (ver abajo). Jamás dos vigentes ni cero.
+  **La consecuencia conocida de C1.1 (subcolección huérfana si muere a mitad)
+  AQUÍ NO EXISTE**: la propuesta no tiene subcolección — el batch es completo o
+  no es (límite 500 writes; una propuesta cubre pocas actividades, sobra).
+- **La vigente se identifica sin ambigüedad** por `estado == 'vigente'` dentro
+  del `consecutivo`, con helper canónico **`propuestaVigenteDe()`** (calco de
+  `lpuVigente()` — única resolución, nada de `.find()` sueltos). Las históricas
+  se conservan con su PDF y su hash — nada se borra (restricción 5.1).
+- **Punteros de la actividad tras re-emitir** (requisito): `propuesta_consecutivo`
+  denormalizado **no cambia nunca** dentro de la serie (propiedad del mismo-PEA:
+  sigue apuntando bien por construcción); `propuesta_id` apunta al doc de la
+  versión VIGENTE y se re-apunta DENTRO del mismo batch del swap. Actividades
+  que SALEN del conjunto en la ronda nueva → puntero limpiado en el mismo batch
+  (ya no las cubre la vigente); las que entran → puntero fijado. Todo vía patch
+  builders (`patchVincularPropuesta`/`patchDesvincularPropuesta`) con entrada de
+  historial — la UI no improvisa writes.
+- **PDF**: `versionNum` del generador pinta "Versión N" bajo el consecutivo y en
+  el encabezado corrido (soporte nativo, costo cero — hallazgo de la rev. 2);
+  etiqueta de cara al gestor con `etiquetaVersion` (v1 sin sufijo). Un PDF
+  inmutable por versión en Storage (`propuestas_actividad/{docId}/documento.pdf`).
+- **Re-emitir solo desde la vigente** (una histórica no se corrige — la
+  corrección siempre nace de la última foto). La aprobación por actividad (§6)
+  no se toca: re-emitir no borra hitos ya marcados; qué actividades siguen en la
+  ronda nueva lo decide la negociación, no una regla del sistema.
 
 ## 7. 📌 REGLA DEL ACTA — decisión registrada para el diseño de F2
 
