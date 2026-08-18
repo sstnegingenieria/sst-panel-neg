@@ -2,6 +2,9 @@
 
 **Estado: DISEÑO APROBABLE — no implementado.** Bloque aparte del PR C (evidencias
 fotográficas). Autor: Code, 18-ago-2026, a pedido de Giovanny.
+**Rev. 2 (18-ago)**: pregunta de agrupación RESUELTA por Giovanny (N actividades →
+1 propuesta, §6); principio de los dos ejes independientes (§6b); pregunta nueva
+de VERSIONES planteada con hallazgos, sin resolver (§6c).
 
 ## 1. Contexto
 
@@ -80,8 +83,9 @@ rastreable:
 Doc por propuesta emitida: `consecutivo`, `cliente_id` (eje `esResidenteDe`),
 `actividad_ids[]`, snapshot congelado de items+totales+asunto, `fecha_emision`,
 `firmante`, `pdf_hash` (SHA-256, regla 8) y `pdf_url` (Storage
-`propuestas_actividad/{id}/v1.pdf`). **Inmutable una vez emitida** — corrección =
-propuesta nueva con `reemplaza_a` (versionado por reemplazo, no subcolección).
+`propuestas_actividad/{id}/…`). **Lo emitido es inmutable** (cada PDF que salió
+conserva su snapshot y su hash); cómo se corrige — versión sobre el mismo PEA o
+propuesta nueva con `reemplaza_a` — es la pregunta abierta del §6c.
 
 **Sinergia con el hito de aprobación**: al marcar la aprobación de la actividad,
 el campo `referencia` puede precargar el consecutivo `PEA-…` — la cadena
@@ -91,16 +95,75 @@ propuesta → aprobación queda referencial, criterio Trinorma.
 colección (read internos + `esResidenteDe`; create según rol; sin delete) +
 ruta de Storage + prefijo en la CF. Orden aditivo: reglas/CF antes del merge.
 
-## 6. ⚠ PREGUNTA ABIERTA (planteada, NO resuelta — la consulta Giovanny)
+## 6. ✅ RESUELTO (Giovanny, 18-ago): N actividades → 1 propuesta
 
-**¿Una propuesta cubre UNA actividad o puede agrupar VARIAS en un solo documento?**
+Una propuesta puede cubrir varias actividades — el cotizador ya agrupa así
+(modo 'actividad'). Consecuencias de diseño:
 
-El diseño soporta ambas (`actividad_ids[]` + agrupación por actividad). Implicaciones:
-- **1:1** — trazabilidad simple (una PEA por hito de aprobación), más consecutivos.
-- **Agrupada** — menos documentos y el gestor decide en bloque, pero la aprobación
-  se registra POR actividad: la misma `referencia PEA-…` se repetiría en N hitos
-  (válido y auditable), y una aprobación PARCIAL del grupo obligaría a decidir si
-  la PEA se considera parcialmente aceptada o se re-emite por las restantes.
+- **Selección múltiple → un documento, un solo consecutivo PEA.** Cada actividad
+  fuente es un grupo del PDF (nombre = sede · zona · descripción corta) con su
+  subtotal; el resumen económico consolida el total del documento.
+- **Puntero en la actividad**: `actividad.propuesta_id` + `propuesta_consecutivo`
+  (denormalizado para pintar el chip sin lecturas extra), escritos por un patch
+  builder al emitir (`patchVincularPropuesta`, con entrada de historial — la UI
+  no improvisa writes). El puntero apunta a la propuesta VIGENTE que la cubre;
+  una re-emisión lo actualiza y el historial conserva la cadena.
+- **La aprobación SIGUE SIENDO POR ACTIVIDAD, no por propuesta.** El gestor puede
+  aprobar dos de tres: cada actividad lleva su propio hito `aprobacion` con SU
+  fecha y SU `referencia` (que puede citar `PEA-… + correo/FAD`). **El doc de la
+  propuesta NO tiene estado de aprobación** — jamás se colapsa la decisión por
+  actividad a un estado del documento; su único ciclo documental es
+  `emitida → reemplazada` (si aplica §6c).
+
+## 6b. 📐 PRINCIPIO: dos ejes de agrupación INDEPENDIENTES (propuesta ≠ acta)
+
+El mismo patrón aparece dos veces, en ejes distintos:
+
+- La **propuesta** agrupa por **lo que el gestor pidió en un momento**.
+- El **acta** (F2) agrupa por **mes de cierre** — la regla del §7: la actividad
+  entra al acta del mes en que queda COMPLETA.
+
+Una actividad puede estar en la propuesta PEA-X y caer en el acta de un mes
+distinto al de sus hermanas de propuesta (aprobada después, ejecutada después).
+**Las dos relaciones NO se encadenan**: el acta jamás se arma "desde propuestas"
+ni la propuesta restringe a qué acta entra la actividad. En el modelo, la
+actividad lleva DOS punteros independientes: `propuesta_id` (este bloque) y el
+futuro puntero al acta (F2) — ninguno se deriva del otro.
+
+## 6c. ⚠ PREGUNTA ABIERTA (planteada, NO resuelta): ¿la propuesta necesita VERSIONES?
+
+Hay negociación con el gestor, y negociar suele implicar mandar una versión
+corregida. **Hallazgos (verificados en código) para decidir:**
+
+**Cómo versiona el cotizador hoy**: un doc `cotizaciones/{id}` = un COT- con
+subcolección `versiones/{n}` — cada versión es un snapshot COMPLETO (ítems
+inline, totales, condiciones, descuento); el padre denormaliza la versión
+activa; `puedeNuevaVersion()` solo desde enviada/rechazada/vencida; un PDF
+inmutable por versión (`v{n}.pdf` + hash); etiqueta de cara al cliente
+`etiquetaVersion` (v1 sin sufijo, v≥2 "vN").
+
+**Hallazgo 1 — el generador ya soporta versiones GRATIS**: `DatosPdfCotizacion`
+trae `versionNum`; el PDF pinta "Versión N" discreta bajo el consecutivo y en el
+encabezado corrido de páginas 2+. Versionar la propuesta cuesta CERO en el PDF.
+
+**Hallazgo 2 — diferencia estructural con el cotizador**: en el cotizador la
+versión ES dueña de los ítems (el snapshot vive en la versión y se edita ahí);
+en la propuesta los ítems viven en las ACTIVIDADES y la propuesta es una
+fotografía derivada. Negociar cambia las actividades (cantidades, línea
+negociada, sacar una actividad del grupo) y re-emitir re-fotografía — **en ambos
+esquemas**. La diferencia real es de IDENTIDAD DOCUMENTAL:
+
+- **Versionar (mismo PEA, subcolección)**: el hilo con el gestor conserva UNA
+  referencia ("PEA-2026-005, va la v2"); no consume consecutivos por ronda;
+  requiere subcolección + denormalización en el padre (calco del cotizador).
+- **Propuesta nueva con `reemplaza_a`**: modelo más simple (docs planos
+  inmutables, sin subcolección); cada ronda consume un consecutivo y el gestor
+  ve un número nuevo por corrección; la trazabilidad obliga a seguir la cadena
+  `reemplaza_a` y a re-apuntar `actividad.propuesta_id`.
+
+**Matiz operativo**: si la negociación es frecuente (Giovanny dice que la hay),
+el costo de "un número nuevo por ronda" se paga en cada correo; si es ocasional,
+la subcolección es sobre-ingeniería. **Sin resolver — decide Giovanny.**
 
 ## 7. 📌 REGLA DEL ACTA — decisión registrada para el diseño de F2
 
