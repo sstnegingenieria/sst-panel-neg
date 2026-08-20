@@ -7,6 +7,13 @@ interface InputExpresionProps {
   /** Si se define, confirmar el campo VACÍO limpia el valor (en vez de
    *  restaurar el anterior) — p. ej. quitar el costo interno de un ítem. */
   onVacio?: () => void
+  /** OPCIONAL (F1.5, aditivo — los consumidores existentes no cambian):
+   *  emite el valor evaluado EN CADA TECLA (null si el texto no evalúa
+   *  todavía). Para previews en vivo — p. ej. el despeje de cantidad de la
+   *  línea negociada mientras se teclea el valor acordado. El contrato de
+   *  confirmación (blur/Enter → onValor) queda intacto. */
+  onVivo?: (n: number | null) => void
+  autoFocus?: boolean
   className?: string
   placeholder?: string
   titulo?: string
@@ -23,7 +30,7 @@ interface InputExpresionProps {
  * En reposo muestra el valor con precisión completa (coma decimal, sin miles)
  * para que confirmar sin editar jamás recorte el dato.
  */
-export default function InputExpresion({ valor, onValor, onVacio, className = '', placeholder, titulo }: InputExpresionProps) {
+export default function InputExpresion({ valor, onValor, onVacio, onVivo, autoFocus, className = '', placeholder, titulo }: InputExpresionProps) {
   const [texto, setTexto] = useState(() => numeroATexto(valor))
   const [editando, setEditando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -57,9 +64,17 @@ export default function InputExpresion({ valor, onValor, onVacio, className = ''
       inputMode="decimal"
       value={texto}
       placeholder={placeholder}
+      autoFocus={autoFocus}
       title={error ?? titulo ?? 'Acepta expresiones: 20.23*5 · 1/54 · (15+3)*2'}
       onFocus={() => setEditando(true)}
-      onChange={e => { setTexto(e.target.value); if (error) setError(null) }}
+      onChange={e => {
+        setTexto(e.target.value)
+        if (error) setError(null)
+        if (onVivo) {
+          const r = evaluarExpresion(e.target.value)
+          onVivo(r !== null && !('error' in r) ? r.valor : null)
+        }
+      }}
       onBlur={confirmar}
       onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
       className={`${className} ${error ? 'border-red-400 bg-red-50' : ''}`}
