@@ -113,6 +113,36 @@ describe('useConsecutivo (contra emulador)', () => {
   )
 
   it(
+    'LIC usa padding 4 y serie ANUAL: LIC-YYYY-0001',
+    async () => {
+      const { obtener } = useConsecutivo()
+      const a = await obtener('LIC')
+      const b = await obtener('LIC')
+
+      expect(a).toBe(`LIC-${YEAR}-0001`)
+      expect(b).toBe(`LIC-${YEAR}-0002`)
+      // Contador anual propio: consecutivos/LIC_{año} (no acumulativo como CAT).
+      expect(await leerUltimoConsecutivo('LIC', YEAR)).toBe(2)
+    },
+    TIMEOUT,
+  )
+
+  it(
+    'LIC no le mueve el padding a los prefijos de 3 dígitos',
+    async () => {
+      const { obtener } = useConsecutivo()
+      const lic = await obtener('LIC')
+      const pry = await obtener('PRY')
+      const cot = await obtener('COT')
+
+      expect(lic).toBe(`LIC-${YEAR}-0001`)
+      expect(pry).toBe(`PRY-${YEAR}-001`)
+      expect(cot).toBe(`COT-${YEAR}-001`)
+    },
+    TIMEOUT,
+  )
+
+  it(
     'rechaza un prefijo inválido con code invalid-argument',
     async () => {
       const { obtener } = useConsecutivo()

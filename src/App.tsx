@@ -28,6 +28,9 @@ import OrdenesCompraSigp from './pages/sigp/OrdenesCompraSigp'
 import { ROLES_CON_ACCESO_SIGP, accesoSST, accesoSIGP, accesoResidente, type Rol } from './types/sigp/roles'
 import ShellResidente from './components/ShellResidente'
 import ActividadesSigp from './pages/sigp/ActividadesSigp'
+import Licitaciones from './pages/licitaciones/Licitaciones'
+import LicitacionNueva from './pages/licitaciones/LicitacionNueva'
+import LicitacionDetalle from './pages/licitaciones/LicitacionDetalle'
 import {
   ROLES_VE_DASHBOARD_SST,
   ROLES_VE_TECNICOS,
@@ -43,6 +46,7 @@ import {
   ROLES_VE_PROYECTOS,
   ROLES_VE_HORARIO,
   ROLES_VE_TAREAS,
+  ROLES_VE_LICITACIONES,
 } from './types/sigp/permisos'
 import HorarioAsistencia from './pages/administrativa/HorarioAsistencia'
 import FacturacionPagos from './pages/administrativa/FacturacionPagos'
@@ -123,6 +127,19 @@ function ProtectedRoutes() {
             los 9 roles del panel. La ruta NO se gatea por el flag
             sigp_tareas_enabled (convención: el flag solo oculta el sidebar). */}
         <Route path="/tareas" element={<ProtectedRoute rolesPermitidos={ROLES_VE_TAREAS} redirectTo="/"><Tareas /></ProtectedRoute>} />
+
+        {/* Módulo LICITACIONES (1.4, 21-ago-2026) — grupo propio, fuera del
+            SIGP: el frente de Karen es la contratación pública, no la
+            operación de proyectos. La ruta NO se gatea por
+            sigp_licitaciones_enabled (convención de Tareas y Actividades: el
+            flag solo oculta el ítem del sidebar). La protección real son las
+            reglas — `gestionaLicitaciones()` en firestore.rules; ROLES_VE_
+            LICITACIONES es su espejo de UI.
+            redirectTo /sigp/panel: el default `/` haría bucle para comercial
+            (lección del Hotfix A). */}
+        <Route path="/licitaciones" element={<ProtectedRoute rolesPermitidos={ROLES_VE_LICITACIONES} redirectTo="/sigp/panel"><Licitaciones /></ProtectedRoute>} />
+        <Route path="/licitaciones/nueva" element={<ProtectedRoute rolesPermitidos={ROLES_VE_LICITACIONES} redirectTo="/sigp/panel"><LicitacionNueva /></ProtectedRoute>} />
+        <Route path="/licitaciones/:licitacionId" element={<ProtectedRoute rolesPermitidos={ROLES_VE_LICITACIONES} redirectTo="/sigp/panel"><LicitacionDetalle /></ProtectedRoute>} />
 
         {/* Rutas SIGP (placeholders F0). Protegidas por rol con ProtectedRoute
             ('admin' siempre incluido como fallback). La sección del Sidebar se

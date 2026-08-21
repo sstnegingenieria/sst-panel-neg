@@ -20,6 +20,20 @@ service firebase.storage {
       return esInterno()
              && request.auth.token.rol in ['gerencia_administrativa', 'admin'];
     }
+    // Licitaciones 1.2b (21-ago-2026): espejo EXACTO de veEconomiaLicitacion()
+    // de firestore.rules sobre los claims de C2.1. Existe porque
+    // esGerenciaAdminPorClaim() es más estrecho (solo gerencia_administrativa
+    // + admin) y dejaba a gerencia_general y director_proyectos leyendo el doc
+    // de economía en Firestore pero no sus PDFs. Helper NUEVO: los bloques que
+    // usan esGerenciaAdminPorClaim() (certificacion_bancaria, ausentismos)
+    // NO cambian — su alcance es otro y más restrictivo a propósito.
+    function esGerenciaOProyectosPorClaim() {
+      return esInterno()
+             && request.auth.token.rol in [
+               'gerencia_general', 'gerencia_administrativa',
+               'director_proyectos', 'admin'
+             ];
+    }
     // F1.2 (18-ago-2026): espejo del esResidenteDe de Firestore sobre los
     // claims de C2.1 — el residente_obra accede SOLO a las rutas de SU
     // cliente (el clienteId viaja en el path para autorizar sin lookups).
@@ -166,6 +180,46 @@ service firebase.storage {
       allow write: if (esInterno() || esResidenteDeStorage(clienteId))
                    && request.resource.contentType == 'application/pdf'
                    && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    // ── Licitaciones (1.2): documentos del proceso ──────────────────────────
+    // Ruta: licitaciones/{licitacionId}/{tipoDoc}/{fileName}
+    // SOLO perfil interno: los pliegos y las propuestas presentadas no salen
+    // del equipo. El discriminante viaja en el PATH porque Storage no puede
+    // leer Firestore (H-008); precedente: proveedores/{id}/certificacion_bancaria.
+    //
+    // ⚠ `tipoDoc != 'economia'` EN EL READ, y no es adorno: en Storage basta
+    // que UN match solape para CONCEDER, así que sin esta exclusión cualquier
+    // interno leería los PDFs de economía por este match genérico y el bloque
+    // dedicado de abajo no serviría de nada. Mismo split que se hizo en C2.1
+    // para certificacion_bancaria. En el write no hace falta: la whitelist de
+    // tipoDoc ya excluye 'economia'.
+    match /licitaciones/{licitacionId}/{tipoDoc}/{fileName} {
+      allow read: if esInterno()
+                  && tipoDoc != 'economia';
+      allow write: if esInterno()
+                   && tipoDoc in ['pliego', 'propuesta', 'evidencia', 'subsanacion']
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (request.resource.contentType == 'application/pdf'
+                       || request.resource.contentType.matches('image/.*'));
+    }
+
+    // ── Licitaciones (1.2): ECONOMÍA — espejo de veEconomiaLicitacion() ─────
+    // Sub-doc económico del proceso: oferta de NEG, márgenes, análisis del
+    // precio. Mismos cuatro roles que en Firestore (1.2b: la asimetría con
+    // `esGerenciaAdminPorClaim()` se cerró con un helper propio), y sin
+    // `operacion_comercial` por las dos vías.
+    //
+    // `create, update` en vez de `write`: SIN delete (restricción 5.1, cero
+    // borrado físico). El `update` se conserva a propósito — el patrón de
+    // emisión de la casa sube el PDF a una ruta DETERMINÍSTICA antes del batch
+    // (ver utils/sigp/propuestaActividad.ts), y el reintento tiene que poder
+    // sobreescribir el archivo huérfano de un intento fallido.
+    match /licitaciones/{licitacionId}/economia/{fileName} {
+      allow read: if esGerenciaOProyectosPorClaim();
+      allow create, update: if esGerenciaOProyectosPorClaim()
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType == 'application/pdf';
     }
   }
 }

@@ -198,6 +198,50 @@ service cloud.firestore {
       ];
     }
 
+    // 12. Módulo LICITACIONES — helper PROPIO del módulo (misma costumbre que
+    //     gestionaActividades: cada módulo trae el suyo; ningún helper
+    //     existente se toca). `operacion_comercial` ESTÁ dentro: las
+    //     licitaciones son su frente (decisión de negocio del PR #97).
+    function gestionaLicitaciones() {
+      return isAuthed() && rolActual() in [
+        'operacion_comercial', 'gerencia_general', 'gerencia_administrativa',
+        'director_proyectos', 'admin'
+      ];
+    }
+
+    // 13. ECONOMÍA de la licitación (subcolección): oferta de NEG, márgenes,
+    //     análisis del precio. SIN `operacion_comercial` — quien arma la
+    //     propuesta no ve el techo económico con el que se la evalúa. Mismo
+    //     principio de mínimo privilegio que puedeVerOC.
+    function veEconomiaLicitacion() {
+      return isAuthed() && rolActual() in [
+        'gerencia_general', 'gerencia_administrativa', 'director_proyectos',
+        'admin'
+      ];
+    }
+
+    // 14. Escritura del REGISTRO DEL CRITERIO del semáforo
+    //     (`configuracion/semaforo_versiones`). Segregación de funciones:
+    //     `operacion_comercial` LEE el criterio (vía el read de
+    //     `configuracion/{docId}`) y no lo ESCRIBE — quien es medido por el
+    //     criterio no lo redefine.
+    function escribeCriterioSemaforo() {
+      return isAuthed() && rolActual() in [
+        'gerencia_general', 'gerencia_administrativa', 'admin'
+      ];
+    }
+
+    // 15. Invariante 6 de licitaciones: los estados de COMPROMISO (donde NEG
+    //     gasta horas) y los de RESULTADO exigen consecutivo. Los tres de
+    //     triage — detectada, en_evaluacion, descartada — lo admiten vacío.
+    //     Espeja ESTADOS_EXIGEN_CONSECUTIVO de types/sigp/licitacion.ts.
+    function licExigeConsecutivo(estado) {
+      return estado in [
+        'en_preparacion', 'manifestada', 'presentada',
+        'adjudicada', 'perdida', 'rechazada', 'revocada', 'desierta'
+      ];
+    }
+
     // ────────────────────────────────────────────────────────────────
     // COLECCIÓN: users
     // ────────────────────────────────────────────────────────────────
@@ -756,6 +800,20 @@ service cloud.firestore {
       allow read: if isAuthed();
     }
 
+    // Licitaciones 1.2 — REGISTRO DEL CRITERIO del semáforo.
+    // Doc: configuracion/semaforo_versiones { versiones: {...}, version_actual }.
+    // LECTURA: la da el match genérico de arriba (`accesoSIGP()`), que ya
+    // incluye a operacion_comercial — no se re-declara aquí (patrón del match
+    // `configuracion/horario`: cada bloque declara solo lo que AMPLÍA).
+    // ESCRITURA: este match la extiende de [GG, admin] a
+    // escribeCriterioSemaforo() = [GG, gerencia_administrativa, admin].
+    // En Firestore los matches se UNEN, así que el resultado es exactamente
+    // esa lista — y `operacion_comercial` sigue fuera por ambas vías.
+    // Sin delete: el historial de versiones del criterio no se borra.
+    match /configuracion/semaforo_versiones {
+      allow create, update: if escribeCriterioSemaforo();
+    }
+
     // ────────────────────────────────────────────────────────────────
     // MÓDULO HORARIO / ASISTENCIA (#3) — SB2 (07-ago-2026)
     // ────────────────────────────────────────────────────────────────
@@ -901,6 +959,85 @@ service cloud.firestore {
                     && request.resource.data.get('balon_en', null) == null
                     );
       // sin delete — 'anulada' es el terminal suave (restricción 5.1)
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // MÓDULO LICITACIONES (1.2) — procesos de SECOP
+    // ────────────────────────────────────────────────────────────────
+    // El documento vive en `types/sigp/licitacion.ts`; la máquina de estados y
+    // las 5 invariantes las imponen los patch builders puros. Aquí se fijan
+    // SOLO los invariantes que un cliente no puede falsear: quién entra, quién
+    // dice ser, con qué estado nace y qué no se muta nunca.
+    match /licitaciones/{licitacionId} {
+      allow read: if gestionaLicitaciones();
+
+      // Nace SIEMPRE 'detectada' y activa, con creador real no suplantable
+      // (patrón OC/tareas). `numero_proceso` es la identidad del proceso en
+      // SECOP y `semaforo_version` el criterio con que se clasificó: sin
+      // ninguno de los dos el documento no es auditable.
+      // CONSECUTIVO DIFERIDO (1.2b): nace VACÍO y se quema al materializar
+      // (contigüidad ISO — un proceso detectado y descartado no gasta número).
+      allow create: if gestionaLicitaciones()
+                    && request.resource.data.get('creado_por', '') == request.auth.uid
+                    && request.resource.data.get('estado', '') == 'detectada'
+                    && request.resource.data.get('activa', false) == true
+                    && request.resource.data.get('consecutivo', '') == ''
+                    && request.resource.data.get('numero_proceso', '') != ''
+                    && request.resource.data.get('semaforo_version', '') != '';
+
+      // El actor no se suplanta; el creador es inmutable.
+      allow update: if gestionaLicitaciones()
+                    && request.resource.data.get('actualizado_por', '') == request.auth.uid
+                    && request.resource.data.get('creado_por', '')
+                         == resource.data.get('creado_por', '')
+
+                    // Invariante 7: el consecutivo es inmutable una vez
+                    // asignado. Exactamente dos casos legales — que no cambie,
+                    // o la asignación inicial desde '' con el formato de la
+                    // serie. Reescribir, limpiar o meter basura: denegado.
+                    && (
+                         request.resource.data.get('consecutivo', '')
+                           == resource.data.get('consecutivo', '')
+                         || (resource.data.get('consecutivo', '') == ''
+                             && request.resource.data.get('consecutivo', '')
+                                  .matches('^LIC-[0-9]{4}-[0-9]{4,}$'))
+                       )
+
+                    // `migrado` es inmutable: un histórico no se convierte en
+                    // numerado ni al revés (1.3).
+                    && request.resource.data.get('migrado', false)
+                         == resource.data.get('migrado', false)
+
+                    // Invariante 6: no se entra a un estado de compromiso o de
+                    // resultado sin número. Como `request.resource.data` es el
+                    // documento RESULTANTE, esto obliga a que el consecutivo
+                    // viaje EN EL MISMO update que la transición — nunca queda
+                    // un instante en `en_preparacion` sin número.
+                    // EXCEPCIÓN de los MIGRADOS (1.3): los ~350 históricos
+                    // entran en estados de resultado SIN número porque la serie
+                    // no existía. Sin esta salida, CUALQUIER update sobre un
+                    // histórico quedaría denegado para siempre.
+                    && (request.resource.data.get('migrado', false) == true
+                        || !licExigeConsecutivo(request.resource.data.get('estado', ''))
+                        || request.resource.data.get('consecutivo', '') != '');
+
+      // Sin delete — soft-delete vía `activa` (restricción 5.1). Denegado
+      // incluso para admin: un proceso de SECOP no se borra, se descarta.
+
+      // ── ECONOMÍA (subcolección): oferta, márgenes, análisis del precio ──
+      // Este match NO hereda del padre: en Firestore un `match` de un
+      // documento no cubre sus subcolecciones salvo con `{x=**}`, que aquí
+      // deliberadamente NO se usa. `operacion_comercial` tiene read del padre
+      // y NINGÚN acceso a esta subcolección — el test que importa es
+      // justamente ese (actor de mínimo privilegio: autenticado, con acceso
+      // pleno a la licitación, y 403 acá).
+      // `create, update` en vez de `write`: SIN delete (restricción 5.1, cero
+      // borrado físico). El análisis económico de un proceso es evidencia de
+      // cómo se decidió una oferta — se corrige con una versión nueva, no se
+      // borra. Denegado incluso para admin.
+      match /economia/{docId} {
+        allow read, create, update: if veEconomiaLicitacion();
+      }
     }
 
     // ────────────────────────────────────────────────────────────────
