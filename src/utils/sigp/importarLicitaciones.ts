@@ -191,6 +191,32 @@ export function claveProceso(v: Celda): string {
   return norm(v)
 }
 
+/**
+ * Doc id determinístico de un registro histórico.
+ *
+ * ⚠ EL PREFIJO LEGIBLE NO ES IDENTIDAD. Colapsa toda la puntuación a `_`,
+ * mientras que `claveProceso` —la clave de deduplicación— solo normaliza
+ * tildes, espacios y mayúsculas. Sin el sufijo, dos procesos DISTINTOS cuyos
+ * números difieren solo en puntuación sobreviven al dedupe como registros
+ * separados y caen en el MISMO id, donde el último pisa al primero EN
+ * SILENCIO. Pasó de verdad: la importación del 21-ago-2026 perdió 4 registros
+ * así ("MC-020-2026" de Magangué contra "MC 020-2026" de Ricaurte, entre
+ * otros) y solo se detectó al contar la colección en producción.
+ *
+ * El sufijo es el hash del número EXACTO ya normalizado: el id sigue siendo
+ * determinístico —el mismo número da el mismo id, así que re-importar
+ * actualiza y no duplica— pero dos números distintos jamás lo comparten.
+ *
+ * `hash` se inyecta porque este módulo es PURO y no importa `node:crypto`
+ * (corre también en el navegador vía la suite de tests).
+ */
+export function docIdHistorico(numero: string, hash: (s: string) => string): string {
+  const legible = numero
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 100)
+  return `hist_${legible}_${hash(claveProceso(numero))}`
+}
+
 // ── Números: los tres formatos que conviven en los archivos ──────────────────
 
 /**

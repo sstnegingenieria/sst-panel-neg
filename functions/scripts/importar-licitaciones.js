@@ -31,11 +31,13 @@
  * divergir de la testeada.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as XLSX from 'xlsx'
 import {
   importarLicitaciones, evaluarRetroactivo, estamparSemaforo, contarPorAnio,
+  docIdHistorico,
 } from '../../src/utils/sigp/importarLicitaciones.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -311,13 +313,40 @@ admin.initializeApp(
 )
 const db = getFirestore()
 
-/** Doc id determinístico → idempotencia por número de proceso. */
-const docId = numero => 'hist_' + numero
-  .normalize('NFD').replace(/[̀-ͯ]/g, '')
-  .toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 120)
+/**
+ * Doc id determinístico. La lógica vive en el parser PURO (con tests); aquí
+ * solo se le inyecta el hash de `node:crypto`.
+ */
+const docId = numero => docIdHistorico(numero, s => createHash('sha1').update(s, 'utf8').digest('hex').slice(0, 8))
 
 const aTs = iso => iso === null ? null : Timestamp.fromDate(new Date(`${iso}T12:00:00Z`))
 const ahora = Timestamp.now()
+
+// ── GUARDA DE COLISIÓN ──────────────────────────────────────────────────────
+// El escritor es `batch.set`: dos registros con el mismo doc id NO fallan, el
+// segundo PISA al primero y el conteo final sale corto sin una sola señal. Así
+// se perdieron 4 históricos el 21-ago-2026, y solo se supo contando la
+// colección en producción después.
+// Esta guarda hace que ese escenario sea imposible: si los ids no son tantos
+// como los registros, ABORTA nombrando los culpables y no escribe nada.
+const porId = new Map()
+for (const r of conSem) {
+  const id = docId(r.numero_proceso)
+  if (!porId.has(id)) porId.set(id, [])
+  porId.get(id).push(r.numero_proceso)
+}
+const colisiones = [...porId.entries()].filter(([, nums]) => nums.length > 1)
+if (colisiones.length > 0) {
+  console.error('\n✗ ABORTA: hay doc ids repetidos — escribir pisaría registros en silencio.\n')
+  for (const [id, nums] of colisiones) {
+    console.error(`   ${id}`)
+    for (const n of nums) console.error(`      · "${n}"`)
+  }
+  console.error(`\n   ${conSem.length} registros → ${porId.size} ids únicos (se perderían ${conSem.length - porId.size}).`)
+  console.error('   Revisar `docIdHistorico` antes de reintentar.\n')
+  process.exit(1)
+}
+console.log(`  guarda de colisión: ${conSem.length} registros → ${porId.size} ids únicos ✓`)
 
 let escritos = 0
 const LOTE = 450   // < 500, holgura como en el wizard de LPU

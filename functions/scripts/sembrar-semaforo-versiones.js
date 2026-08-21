@@ -38,12 +38,6 @@ const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const APLICAR = process.argv.includes('--apply');
 const MODO = APLICAR ? 'APPLY (escritura real)' : 'DRY-RUN (solo lectura)';
 
-const AUTOR_UID = process.env.AUTOR_UID;
-if (!AUTOR_UID) {
-  console.error('Falta la variable de entorno AUTOR_UID (uid de quien adopta el criterio).');
-  process.exit(1);
-}
-
 // ── Semilla: el TEXTO vive en semaforo-v1.0.json, no aquí ───────────────────
 // Este script corre en Node/CommonJS y no puede importar el módulo TS, así que
 // el dato se externaliza a JSON y lo consumen los DOS lados. El test
@@ -56,16 +50,67 @@ const VERSION_INICIAL = SEMILLA.version;
 const DEFINICION_V1_0 = SEMILLA.definicion;
 const MOTIVO_V1_0 = SEMILLA.motivo;
 const CALIBRACION_V1_0 = SEMILLA.calibracion;
+const LIMITACIONES_V1_0 = SEMILLA.limitaciones;
 
-admin.initializeApp({
-  credential: admin.credential.applicationDefault(),
-  projectId: 'neg-sst-app',
-});
+// Guarda anti-omisión: el JSON es la fuente y este script su ÚNICO consumidor
+// del lado servidor. Cuando el criterio gana un campo (como pasó con
+// `limitaciones` en el 1.3b), es fácil actualizar el JSON y olvidar este
+// archivo — y el documento se sembraría incompleto SIN que nada avise, con el
+// agravante de que la siembra aborta al reintentar. Este chequeo lo impide.
+const CAMPOS_ESPERADOS = ['version', 'definicion', 'motivo', 'calibracion', 'limitaciones'];
+function camposNoEscritos() {
+  return Object.keys(SEMILLA).filter((k) => !CAMPOS_ESPERADOS.includes(k));
+}
 
-const db = getFirestore();
 const REF = 'configuracion/semaforo_versiones';
 
+/**
+ * Construye el documento a sembrar. PURA: sin Firestore, sin `process`, sin
+ * reloj propio — para que un test pueda compararla contra el JSON campo por
+ * campo. El defecto que motivó esta extracción era INVISIBLE: el script
+ * omitía `limitaciones` y la pantalla del "rojo informado" habría mostrado
+ * vacía justamente la sección contra la que se diseñó.
+ */
+function construirDocSemilla(autorUid, ahora) {
+  return {
+    versiones: {
+      [VERSION_INICIAL]: {
+        vigente_desde: ahora,
+        vigente_hasta: null,
+        definicion: DEFINICION_V1_0,
+        motivo: MOTIVO_V1_0,
+        autor_uid: autorUid,
+        calibracion: CALIBRACION_V1_0,
+        // El texto que la UI del "rojo informado" lee EN VIVO de Firestore.
+        // Sin él, la pantalla que explica por qué el criterio frena un proceso
+        // —y que en 2023 la menor cuantía produjo tres adjudicaciones— queda
+        // vacía. Es el campo más importante del registro.
+        limitaciones: LIMITACIONES_V1_0,
+      },
+    },
+    version_actual: VERSION_INICIAL,
+  };
+}
+
 async function main() {
+  const AUTOR_UID = process.env.AUTOR_UID;
+  if (!AUTOR_UID) {
+    console.error('Falta la variable de entorno AUTOR_UID (uid de quien adopta el criterio).');
+    process.exit(1);
+  }
+
+  const faltantes = camposNoEscritos();
+  if (faltantes.length > 0) {
+    console.error(`ABORTA: semaforo-v1.0.json trae campos que este script no escribe: ${faltantes.join(', ')}`);
+    console.error('Agrégalos al documento y a CAMPOS_ESPERADOS antes de sembrar.');
+    process.exit(1);
+  }
+
+  admin.initializeApp({
+    credential: admin.credential.applicationDefault(),
+    projectId: 'neg-sst-app',
+  });
+  const db = getFirestore();
   console.log(`\n=== Semilla de ${REF} ===`);
   console.log(`Modo: ${MODO}`);
   console.log(`Autor: ${AUTOR_UID}\n`);
@@ -81,20 +126,7 @@ async function main() {
     process.exit(1);
   }
 
-  const ahora = Timestamp.now();
-  const doc = {
-    versiones: {
-      [VERSION_INICIAL]: {
-        vigente_desde: ahora,
-        vigente_hasta: null,
-        definicion: DEFINICION_V1_0,
-        motivo: MOTIVO_V1_0,
-        autor_uid: AUTOR_UID,
-        calibracion: CALIBRACION_V1_0,
-      },
-    },
-    version_actual: VERSION_INICIAL,
-  };
+  const doc = construirDocSemilla(AUTOR_UID, Timestamp.now());
 
   console.log('Documento a escribir:');
   console.log(JSON.stringify(doc, null, 2));
@@ -122,7 +154,13 @@ async function main() {
   console.log(`  limitaciones OK: ${v.limitaciones === LIMITACIONES_V1_0}\n`);
 }
 
-main().catch((e) => {
-  console.error('Error:', e);
-  process.exit(1);
-});
+// Solo corre al ejecutarse directamente: importarlo desde un test no debe
+// tocar Firestore ni leer variables de entorno.
+if (require.main === module) {
+  main().catch((e) => {
+    console.error('Error:', e);
+    process.exit(1);
+  });
+}
+
+module.exports = { construirDocSemilla, camposNoEscritos, SEMILLA, CAMPOS_ESPERADOS, REF };
