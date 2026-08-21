@@ -20,3 +20,7 @@ firebase-export-*/
 
 # Brainstorming companion (visual mockups)
 .superpowers/
+
+# Datos comerciales de licitaciones (fuentes de importación) — precios y
+# procesos reales. NUNCA se commitean.
+_datos/

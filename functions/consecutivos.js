@@ -7,7 +7,7 @@
  * Prefijos válidos: SOL (solicitudes), VIS (visitas técnicas),
  * COT (cotizaciones), OFR (cotizaciones legacy), PRY (proyectos),
  * ACT (actas), LIQ (liquidaciones), FAC (facturas), NC (no conformidades),
- * CAT (catálogo NEG de ítems propios).
+ * CAT (catálogo NEG de ítems propios), LIC (licitaciones).
  *
  * Cada prefijo tiene su propio contador anual en la colección
  * `consecutivos`, documento con ID `{prefijo}_{año}`.
@@ -30,7 +30,13 @@ const { FieldValue } = require('firebase-admin/firestore');
 
 // Nota: admin.initializeApp() ya se llama en index.js — no re-inicializar
 
-const PREFIJOS_VALIDOS = ['SOL', 'VIS', 'COT', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC', 'CAT', 'OC', 'PEA'];
+const PREFIJOS_VALIDOS = ['SOL', 'VIS', 'COT', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC', 'CAT', 'OC', 'PEA', 'LIC'];
+
+// Padding mínimo por prefijo en la serie ANUAL. El default es 3
+// (PRY-2026-001). LIC pide 4 porque el volumen anual de procesos de SECOP se
+// cuenta en miles, no en cientos: LIC-2026-0001. CAT no entra aquí — su serie
+// es acumulativa y su padding vive en la rama `esCatalogo`.
+const PADDING_MINIMO_ANUAL = { LIC: 4 };
 
 const generarConsecutivo = onCall(
   {
@@ -88,8 +94,9 @@ const generarConsecutivo = onCall(
           const numero = String(siguiente).padStart(Math.max(4, String(siguiente).length), '0');
           return `CAT-${numero}`;
         }
-        // Padding: mínimo 3 dígitos, se extiende naturalmente si crece
-        const padding = Math.max(3, String(siguiente).length);
+        // Padding: mínimo 3 dígitos (4 para los prefijos de PADDING_MINIMO_ANUAL),
+        // se extiende naturalmente si crece
+        const padding = Math.max(PADDING_MINIMO_ANUAL[prefijo] || 3, String(siguiente).length);
         const numero = String(siguiente).padStart(padding, '0');
         return `${prefijo}-${año}-${numero}`;
       });
@@ -105,4 +112,7 @@ const generarConsecutivo = onCall(
   }
 );
 
-module.exports = { generarConsecutivo };
+// PREFIJOS_VALIDOS y PADDING_MINIMO_ANUAL se exportan para los tests
+// (precedente: functions/horario.js exporta sus helpers puros). index.js solo
+// desestructura `generarConsecutivo`.
+module.exports = { generarConsecutivo, PREFIJOS_VALIDOS, PADDING_MINIMO_ANUAL };

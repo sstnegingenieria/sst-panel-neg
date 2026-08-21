@@ -19,6 +19,7 @@ import {
   puedeGestionarComprasUI,
   veOcUI,
   veTareasUI,
+  veLicitacionesUI,
   veActividadesUI,
 } from '../types/sigp/permisos'
 
@@ -230,6 +231,12 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   // hook que alimenta la página /tareas y el pop-up RecordatorioTareas).
   const tareasEnabled = useFeatureFlag('sigp_tareas_enabled', false)
   const mostrarTareas = tareasEnabled && veTareasUI(user?.rol)
+  // Módulo Licitaciones (1.4, 21-ago): grupo propio. Default in-app FALSE —
+  // sale oculto aunque el parámetro de Remote Config no exista todavía.
+  // El flag SOLO oculta el ítem: la ruta responde por URL directa si el rol
+  // lo permite, y quien protege de verdad son las reglas.
+  const licitacionesEnabled = useFeatureFlag('sigp_licitaciones_enabled', false)
+  const mostrarLicitaciones = licitacionesEnabled && veLicitacionesUI(user?.rol)
   const { misTareas, balones } = useTareasPendientes(mostrarTareas, user?.uid)
   const badgeTareas = misTareas + balones
   // Pipeline (23-jul): contadores vivos de pendientes sin código — badges
@@ -376,6 +383,39 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
                   )}
                 </span>
               )}
+            </NavLink>
+          </div>
+        )}
+
+        {/* Grupo LICITACIONES (1.4, 21-ago) — frente de contratación pública,
+            fuera del SIGP: no es operación de proyectos. Gateado por
+            sigp_licitaciones_enabled + veLicitacionesUI (espejo exacto de
+            gestionaLicitaciones() en firestore.rules). */}
+        {mostrarLicitaciones && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            {!collapsed && (
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                Licitaciones
+              </p>
+            )}
+            <NavLink
+              to="/licitaciones"
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  isActive
+                    ? 'bg-brand-50 text-brand-700 font-semibold'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                }`
+              }
+            >
+              <span className="flex-shrink-0">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6M9 11h.01M15 11h.01" />
+                </svg>
+              </span>
+              {!collapsed && <span>Licitaciones</span>}
             </NavLink>
           </div>
         )}

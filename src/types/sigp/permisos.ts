@@ -258,3 +258,37 @@ export const ROLES_GESTIONA_ACTIVIDADES: Rol[] = [
   'residente_obra',
 ]
 export const puedeGestionarActividadesUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_ACTIVIDADES)
+
+// ── Módulo LICITACIONES (1.4, 21-ago-2026) ──
+// Espejo EXACTO de los helpers de firestore.rules del sub-bloque 1.2:
+//
+//   ROLES_VE_LICITACIONES        ⟷ gestionaLicitaciones()
+//   ROLES_VE_ECONOMIA_LICITACION ⟷ veEconomiaLicitacion()
+//
+// `operacion_comercial` ESTÁ en el módulo (las licitaciones son su frente,
+// decisión del PR #97) y NO está en la economía: quien arma la propuesta no
+// ve el techo económico con el que se la evalúa.
+export const ROLES_VE_LICITACIONES: Rol[] = [
+  'operacion_comercial', 'gerencia_general', 'gerencia_administrativa',
+  'director_proyectos', 'admin',
+]
+export const veLicitacionesUI = (rol: string | undefined) => en(rol, ROLES_VE_LICITACIONES)
+
+// Mismos roles: quien ve el módulo lo opera. La granularidad fina (quién
+// aprueba qué) no aplica todavía — el ciclo de una licitación lo lleva una
+// sola persona de punta a punta.
+export const gestionaLicitacionesUI = (rol: string | undefined) => en(rol, ROLES_VE_LICITACIONES)
+
+// ⛔ CONFIDENCIALIDAD: sin `operacion_comercial`. La pestaña de economía no se
+// renderiza NI COMO PLACEHOLDER para quien no la puede ver — un "no tienes
+// acceso a Economía" ya revela que el análisis existe y que alguien lo mira,
+// que es justamente lo que la segregación quiere evitar. Para Karen la
+// pestaña sencillamente no está.
+//
+// `oferta_neg` NO entra en esta restricción: vive en el documento padre y ella
+// la necesita para subir la oferta a SECOP.
+export const ROLES_VE_ECONOMIA_LICITACION: Rol[] = [
+  'gerencia_general', 'gerencia_administrativa', 'director_proyectos', 'admin',
+]
+export const veEconomiaLicitacionUI = (rol: string | undefined) =>
+  en(rol, ROLES_VE_ECONOMIA_LICITACION)
