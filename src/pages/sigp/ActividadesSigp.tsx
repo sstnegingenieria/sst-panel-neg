@@ -21,7 +21,7 @@ import ActividadDetalle from '../../components/sigp/actividades/ActividadDetalle
 import PropuestaForm from '../../components/sigp/actividades/PropuestaForm'
 import PropuestasPanel from '../../components/sigp/actividades/PropuestasPanel'
 import { cargarPropuestasDe } from '../../utils/sigp/propuestaActividad'
-import { puedeProponerse, seriesDe } from '../../types/sigp/propuestaActividad'
+import { puedeProponerse, seriesDe, propuestaVigenteDe } from '../../types/sigp/propuestaActividad'
 import type { PropuestaActividad } from '../../types/sigp/propuestaActividad'
 import { fmtMoney } from '../../utils/sigp/formato'
 import { accesoResidente, type Rol } from '../../types/sigp/roles'
@@ -75,7 +75,7 @@ export default function ActividadesSigp() {
   const [propuestas, setPropuestas] = useState<PropuestaActividad[]>([])
   const [cargandoPropuestas, setCargandoPropuestas] = useState(false)
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
-  const [propForm, setPropForm] = useState<{ abierto: boolean; reemitirDe?: PropuestaActividad }>({ abierto: false })
+  const [propForm, setPropForm] = useState<{ abierto: boolean; reemitirDe?: PropuestaActividad; actividades?: Actividad[] }>({ abierto: false })
 
   // Clientes elegibles: interno → todos con usa_actividades + activo;
   // residente → SOLO el suyo (id resuelto por el hook desde users/{uid}).
@@ -206,7 +206,7 @@ export default function ActividadesSigp() {
           {!esResidente && <div className="mb-1 text-xs font-medium uppercase tracking-wide text-brand-600">SIGP · Actividades</div>}
           <h1 className="text-2xl font-bold text-gray-800">Actividades</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Operación por LPU{cliente ? ` · ${cliente.nombre}` : ''}
+            Operación por LPU — flujo normal y emergencias{cliente ? ` · ${cliente.nombre}` : ''}
           </p>
         </div>
         {puedeGestionar && cliente && (
@@ -375,7 +375,7 @@ export default function ActividadesSigp() {
 
       {cliente && user && propForm.abierto && (
         <PropuestaForm isOpen={propForm.abierto} onClose={() => setPropForm({ abierto: false })}
-          cliente={cliente} actividades={actividadesSeleccionadas} reemitirDe={propForm.reemitirDe}
+          cliente={cliente} actividades={propForm.actividades ?? actividadesSeleccionadas} reemitirDe={propForm.reemitirDe}
           firmante={{ nombre: user.nombre || user.email || 'NEG Ingeniería', ...(user.email ? { correo: user.email } : {}) }}
           uid={user.uid}
           onEmitida={() => {
@@ -384,10 +384,28 @@ export default function ActividadesSigp() {
           }} />
       )}
 
-      {detalle && user && (
-        <ActividadDetalle isOpen={!!detalle} onClose={() => setDetalle(null)} actividad={detalle} lpus={lpus}
-          puedeGestionar={puedeGestionar} uid={user.uid} onCambio={() => { reload() }}
-          propuestas={propuestas} />
+      {detalle && user && cliente && (
+        <ActividadDetalle isOpen={!!detalle} onClose={() => setDetalle(null)} actividad={detalle} cliente={cliente}
+          lpus={lpus} puedeGestionar={puedeGestionar} uid={user.uid} onCambio={() => { reload() }}
+          propuestas={propuestas}
+          onGenerarPropuesta={() => {
+            // F1.4 — desde el detalle: si una serie vigente ya la cubre, se
+            // RE-EMITE esa serie con SU conjunto actual (el caso "el gestor
+            // objetó → va la v2" conserva a las hermanas — cambiar el conjunto
+            // se hace por la selección del listado); sin serie → emisión nueva
+            // con esta sola actividad. El detalle se cierra para no apilar
+            // modales.
+            const vig = detalle.propuesta_consecutivo
+              ? propuestaVigenteDe(propuestas, detalle.propuesta_consecutivo)
+              : null
+            if (vig) {
+              const ids = new Set(vig.actividad_ids)
+              setPropForm({ abierto: true, reemitirDe: vig, actividades: actividades.filter(x => ids.has(x.id)) })
+            } else {
+              setPropForm({ abierto: true, actividades: [detalle] })
+            }
+            setDetalle(null)
+          }} />
       )}
     </div>
   )
