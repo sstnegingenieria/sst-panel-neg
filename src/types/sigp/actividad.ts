@@ -331,9 +331,15 @@ export function patchAnular(a: Actividad, por: string, fecha: Timestamp, motivo:
   return conDerivados({ anulacion }, { ...a, anulacion })
 }
 
-/** Edición de cabecera (descripción/sede/solicitante/referencia/fecha_solicitud).
- *  El ALCANCE (cliente/contrato/naturaleza) NO se edita con líneas cargadas —
- *  las líneas pertenecen a la LPU del alcance. */
+/** Edición de cabecera. GATE AFINADO (F1.4, decisión de Giovanny 19-ago):
+ *  - Campos DESCRIPTIVOS (descripción/sede/zona/solicitante/referencia/fecha):
+ *    editables incluso DESPUÉS de aprobar — corregir un dato mal escrito es
+ *    legítimo y el historial deja el rastro. Solo la anulación los congela.
+ *  - El ALCANCE (contrato/naturaleza) determina el PRECIO: congela con la
+ *    aprobación (como las líneas) y NO se edita por aquí con líneas cargadas
+ *    (pertenecen a la LPU del alcance) — para cambiarlo borrando las líneas
+ *    está patchCambiarAlcance, con confirmación explícita en la UI. Defensa
+ *    en profundidad: el builder no confía en que la UI oculte los campos. */
 export function patchCabecera(
   a: Actividad,
   campos: Partial<Pick<Actividad, 'descripcion' | 'sede_id' | 'sede_nombre' | 'zona' | 'solicitante' | 'referencia_cliente' | 'fecha_solicitud' | 'contrato' | 'naturaleza'>>,
@@ -341,6 +347,32 @@ export function patchCabecera(
   if (a.anulacion) return null
   const tocaAlcance = ('contrato' in campos && campos.contrato !== a.contrato)
     || ('naturaleza' in campos && campos.naturaleza !== a.naturaleza)
-  if (tocaAlcance && a.lineas.length > 0) return null
+  if (tocaAlcance && (a.lineas.length > 0 || a.aprobacion)) return null
   return conDerivados({ ...campos }, a)
+}
+
+/** Resumen textual de líneas para el HISTORIAL (cero borrado físico, regla
+ *  5.1): si un cambio de alcance las borra, su contenido — códigos,
+ *  cantidades, valores — queda en la traza y se puede reconstruir sin
+ *  memoria. Valores crudos a propósito (precisión completa, auditable). */
+export function resumenLineas(lineas: LineaActividad[]): string {
+  if (lineas.length === 0) return 'sin líneas'
+  return lineas
+    .map(l => `${l.codigo} "${l.descripcion}" ${l.cantidad} ${l.unidad} × $${l.valor_unitario} = $${l.total} (${l.origen_cantidad})`)
+    .join(' · ')
+}
+
+/** Cambia el ALCANCE (contrato/naturaleza) BORRANDO las líneas cargadas —
+ *  pertenecen a la lista de precios del alcance anterior. Solo mientras NO
+ *  esté aprobada (el alcance determina el precio: congela con la aprobación,
+ *  como las líneas) ni anulada; null si nada cambia. La UI DEBE confirmar
+ *  explícitamente qué se pierde y guardar resumenLineas() de las borradas en
+ *  el historial (cero borrado físico). */
+export function patchCambiarAlcance(
+  a: Actividad,
+  alcance: { contrato: string; naturaleza: 'opex' | 'capex' },
+): PatchActividad {
+  if (a.anulacion || a.aprobacion) return null
+  if (alcance.contrato === a.contrato && alcance.naturaleza === a.naturaleza) return null
+  return conDerivados({ contrato: alcance.contrato, naturaleza: alcance.naturaleza }, a, [])
 }

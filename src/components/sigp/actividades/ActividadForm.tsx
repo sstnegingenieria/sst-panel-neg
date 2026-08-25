@@ -132,6 +132,14 @@ export default function ActividadForm({ isOpen, onClose, cliente, lpus, onRegist
       ]}
     >
       <div className="space-y-4">
+        {/* F1.4 — la pantalla comunica los DOS caminos (Giovanny entendió que
+            el módulo era solo para emergencias): el flujo normal también se
+            registra aquí. */}
+        <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+          Aquí se registran los dos caminos. <b>Flujo normal</b>: registrá la actividad, generá la
+          propuesta y marcá la aprobación del gestor antes de ejecutar. <b>¿Emergencia ya ejecutada?</b>{' '}
+          Usá «Registrar como ejecutada (hoy)».
+        </p>
         <p className="text-xs text-gray-400">
           Cliente <b className="text-gray-600">{cliente.nombre}</b>{clienteFijo ? ' 🔒' : ''}
         </p>

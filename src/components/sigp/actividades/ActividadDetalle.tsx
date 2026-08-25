@@ -15,19 +15,24 @@ import LineasActividad from './LineasActividad'
 import { fmtMoney } from '../../../utils/sigp/formato'
 import { lpuVigente } from '../../../types/sigp/lpu'
 import type { LPU } from '../../../types/sigp/lpu'
+import SelectField from '../../shared/SelectField'
 import {
   ESTADO_ACTIVIDAD_LABEL, ESTADO_ACTIVIDAD_COLOR,
   estaValorizada, lineasCongeladas,
   patchAprobar, patchEjecutar, patchLineas, patchAnular, patchCabecera,
+  patchCambiarAlcance, resumenLineas,
 } from '../../../types/sigp/actividad'
 import type { Actividad, LineaActividad as TipoLineaActividad } from '../../../types/sigp/actividad'
-import { propuestaVigenteDe } from '../../../types/sigp/propuestaActividad'
+import { propuestaVigenteDe, puedeProponerse } from '../../../types/sigp/propuestaActividad'
 import type { PropuestaActividad } from '../../../types/sigp/propuestaActividad'
+import type { Cliente } from '../../../types/sigp/cliente'
 
 interface ActividadDetalleProps {
   isOpen: boolean
   onClose: () => void
   actividad: Actividad
+  /** F1.4: habilita sedes/zonas y el vocabulario de contratos en la edición. */
+  cliente: Cliente
   lpus: LPU[]
   puedeGestionar: boolean
   uid: string
@@ -35,6 +40,10 @@ interface ActividadDetalleProps {
   /** Propuestas del cliente (F1.2) — para el chip de la vigente que cubre la
    *  actividad y para CONGELAR consecutivo+versión al marcar la aprobación. */
   propuestas?: PropuestaActividad[]
+  /** F1.4: acción de propuesta DESDE el detalle (dos caminos al mismo lugar —
+   *  la selección múltiple del listado sigue viva). La página resuelve si es
+   *  emisión nueva o re-emisión de la serie que ya la cubre. */
+  onGenerarPropuesta?: () => void
 }
 
 const hoyISO = () => new Date().toISOString().slice(0, 10)
@@ -42,7 +51,7 @@ const aTimestamp = (fechaISO: string) => Timestamp.fromDate(new Date(`${fechaISO
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
 
-export default function ActividadDetalle({ isOpen, onClose, actividad, lpus, puedeGestionar, uid, onCambio, propuestas }: ActividadDetalleProps) {
+export default function ActividadDetalle({ isOpen, onClose, actividad, cliente, lpus, puedeGestionar, uid, onCambio, propuestas, onGenerarPropuesta }: ActividadDetalleProps) {
   const anulada = !!actividad.anulacion
   const soloLectura = !puedeGestionar || anulada
 
@@ -123,40 +132,84 @@ export default function ActividadDetalle({ isOpen, onClose, actividad, lpus, pue
     } finally { setGuardando(false) }
   }
 
-  // ── Cabecera ──
+  // ── Cabecera (F1.4: sede/zona con los selects del cliente + alcance
+  //    editable SOLO sin aprobación, con confirmación que dice qué se pierde) ──
+  const sedes = cliente.sedes ?? []
+  const contratosCliente = cliente.contratos ?? []
   const [editandoCabecera, setEditandoCabecera] = useState(false)
   const [descEdit, setDescEdit] = useState(actividad.descripcion)
-  const [sedeEdit, setSedeEdit] = useState(actividad.sede_nombre)
+  const [sedeIdEdit, setSedeIdEdit] = useState('')
+  const [sedeLibreEdit, setSedeLibreEdit] = useState('')
+  const [zonaEdit, setZonaEdit] = useState('')
   const [solicitanteEdit, setSolicitanteEdit] = useState(actividad.solicitante ?? '')
   const [refEdit, setRefEdit] = useState(actividad.referencia_cliente ?? '')
-  const [fechaSolEdit, setFechaSolEdit] = useState(
-    actividad.fecha_solicitud?.toDate ? actividad.fecha_solicitud.toDate().toISOString().slice(0, 10) : '',
-  )
+  const [fechaSolEdit, setFechaSolEdit] = useState('')
+  const [contratoEdit, setContratoEdit] = useState(actividad.contrato)
+  const [naturalezaEdit, setNaturalezaEdit] = useState<'opex' | 'capex'>(actividad.naturaleza)
+
+  const sedeSelEdit = sedes.find(s => s.id === sedeIdEdit)
+  const zonasSedeEdit = sedeSelEdit?.zonas ?? []
+  const zonaRequeridaEdit = zonasSedeEdit.length > 0
+  // El alcance congela con la aprobación (determina el precio, como las líneas).
+  const alcanceEditable = !actividad.aprobacion
 
   const abrirEdicionCabecera = () => {
-    setDescEdit(actividad.descripcion); setSedeEdit(actividad.sede_nombre)
+    setDescEdit(actividad.descripcion)
+    const sedeActual = sedes.find(s => s.id === actividad.sede_id) ?? sedes.find(s => s.nombre === actividad.sede_nombre)
+    setSedeIdEdit(sedeActual?.id ?? '')
+    setSedeLibreEdit(sedeActual ? '' : actividad.sede_nombre)
+    setZonaEdit(actividad.zona ?? '')
     setSolicitanteEdit(actividad.solicitante ?? ''); setRefEdit(actividad.referencia_cliente ?? '')
     setFechaSolEdit(actividad.fecha_solicitud?.toDate ? actividad.fecha_solicitud.toDate().toISOString().slice(0, 10) : '')
+    setContratoEdit(actividad.contrato); setNaturalezaEdit(actividad.naturaleza)
     setEditandoCabecera(true)
   }
 
   const guardarCabecera = async () => {
-    const patch = patchCabecera(actividad, {
+    const sedeNombreFinal = sedes.length > 0 ? (sedeSelEdit?.nombre ?? '') : sedeLibreEdit.trim()
+    if (!sedeNombreFinal) { toast('Selecciona la sede', 'error'); return }
+    if (zonaRequeridaEdit && !zonaEdit) { toast('Selecciona la zona — es la columna UBICACIÓN del acta', 'error'); return }
+
+    // Descriptivos: patchCabecera (jamás toca el alcance por esta vía).
+    const patchDesc = patchCabecera(actividad, {
       descripcion: descEdit.trim(),
-      sede_nombre: sedeEdit.trim(),
+      sede_nombre: sedeNombreFinal,
+      ...(sedeSelEdit ? { sede_id: sedeSelEdit.id } : {}),
+      ...(zonaEdit ? { zona: zonaEdit } : {}),
       ...(solicitanteEdit.trim() ? { solicitante: solicitanteEdit.trim() } : {}),
       ...(refEdit.trim() ? { referencia_cliente: refEdit.trim() } : {}),
       ...(fechaSolEdit ? { fecha_solicitud: aTimestamp(fechaSolEdit) } : {}),
     })
-    if (!patch) { toast('No se pudo guardar (¿actividad anulada?)', 'error'); return }
+    if (!patchDesc) { toast('No se pudo guardar (¿actividad anulada?)', 'error'); return }
+
+    // Alcance: builder propio, con confirmación EXPLÍCITA de qué se pierde.
+    const cambioAlcance = alcanceEditable
+      && (contratoEdit !== actividad.contrato || naturalezaEdit !== actividad.naturaleza)
+    let patchAlcance: Record<string, unknown> | null = null
+    let accionHistorial = 'cabecera editada'
+    if (cambioAlcance) {
+      const n = actividad.lineas.length
+      if (n > 0) {
+        const ok = window.confirm(
+          `Cambiar el alcance a "${contratoEdit} · ${naturalezaEdit.toUpperCase()}" borra las ${n} línea(s) cargadas (${fmtMoney(actividad.total || 0)}): pertenecen a la lista de precios del alcance actual. El detalle de las líneas queda guardado en el historial. ¿Continuar?`,
+        )
+        if (!ok) return
+      }
+      patchAlcance = patchCambiarAlcance(actividad, { contrato: contratoEdit, naturaleza: naturalezaEdit })
+      if (!patchAlcance) { toast('No se pudo cambiar el alcance (¿actividad aprobada o anulada?)', 'error'); return }
+      accionHistorial = `alcance cambiado a "${contratoEdit} · ${naturalezaEdit}"` + (n > 0
+        ? ` — ${n} línea(s) borrada(s): ${resumenLineas(actividad.lineas)}`
+        : ' (sin líneas cargadas)')
+    }
+
     setGuardando(true)
     try {
       const ahora = Timestamp.now()
       await updateDoc(doc(db, 'actividades', actividad.id), {
-        ...patch, fecha_actualizacion: ahora,
-        historial: arrayUnion({ fecha: ahora, por: uid, accion: 'cabecera editada' }),
+        ...patchDesc, ...(patchAlcance ?? {}), fecha_actualizacion: ahora,
+        historial: arrayUnion({ fecha: ahora, por: uid, accion: accionHistorial }),
       })
-      toast('Cambios guardados')
+      toast(cambioAlcance ? 'Alcance cambiado — las líneas quedaron en el historial' : 'Cambios guardados')
       setEditandoCabecera(false)
       onCambio()
     } catch (e) {
@@ -226,6 +279,31 @@ export default function ActividadDetalle({ isOpen, onClose, actividad, lpus, pue
           <span className="ml-auto text-lg font-bold text-gray-800">{fmtMoney(actividad.total || 0)}</span>
         </div>
 
+        {/* F1.4 — propuesta DESDE el detalle: el momento de pedir la aprobación
+            es mirando la actividad, no el listado. Si ya la cubre una serie
+            vigente, el botón OFRECE re-emitir (el caso más frecuente tras
+            emitir es que el gestor objete y vaya la v2) — cambia de etiqueta,
+            no de existencia. */}
+        {puedeGestionar && !anulada && onGenerarPropuesta && (
+          <div className="flex items-center gap-2">
+            <button onClick={onGenerarPropuesta}
+              disabled={!puedeProponerse(actividad, actividad.propuesta_consecutivo)}
+              title={!puedeProponerse(actividad, actividad.propuesta_consecutivo)
+                ? 'La actividad debe estar valorizada (con líneas) para entrar a una propuesta'
+                : propuestaVigente
+                  ? `Re-emite la ${propuestaVigente.consecutivo} (v${propuestaVigente.version + 1}) con las actividades de la serie`
+                  : 'Emite la propuesta económica de esta actividad para enviarla al gestor'}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium border border-brand-700 text-brand-700 hover:bg-brand-50 disabled:opacity-40">
+              {propuestaVigente
+                ? `↻ Re-emitir propuesta (v${propuestaVigente.version + 1})`
+                : '📄 Generar propuesta'}
+            </button>
+            {!propuestaVigente && actividad.propuesta_consecutivo && (
+              <span className="text-[11px] text-gray-400">serie {actividad.propuesta_consecutivo} sin vigente cargada</span>
+            )}
+          </div>
+        )}
+
         {/* Cabecera editable */}
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center justify-between">
@@ -243,10 +321,59 @@ export default function ActividadDetalle({ isOpen, onClose, actividad, lpus, pue
                 <textarea value={descEdit} onChange={e => setDescEdit(e.target.value)} rows={2}
                   className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
               </div>
-              <TextField label="Sede" value={sedeEdit} onChange={setSedeEdit} />
+              {sedes.length > 0 ? (
+                <SelectField label="Sede" value={sedeIdEdit}
+                  onChange={v => { setSedeIdEdit(v); setZonaEdit('') }}
+                  options={sedes.map(s => ({ value: s.id, label: s.ciudad ? `${s.nombre} · ${s.ciudad}` : s.nombre }))}
+                  placeholder="Selecciona la sede" />
+              ) : (
+                <TextField label="Sede" value={sedeLibreEdit} onChange={setSedeLibreEdit} />
+              )}
+              {zonaRequeridaEdit && (
+                <SelectField label="Zona (ubicación en la sede)" value={zonaEdit} onChange={setZonaEdit}
+                  options={zonasSedeEdit.map(z => ({ value: z, label: z }))}
+                  placeholder="Selecciona la zona" />
+              )}
               <TextField label="Solicitante" value={solicitanteEdit} onChange={setSolicitanteEdit} />
               <TextField label="Referencia del cliente" value={refEdit} onChange={setRefEdit} />
               <TextField label="Fecha de solicitud" type="date" value={fechaSolEdit} onChange={setFechaSolEdit} />
+
+              {/* F1.4 — ALCANCE: determina el precio → editable SOLO sin
+                  aprobación; cambiarlo con líneas cargadas las borra (con
+                  confirmación explícita — el detalle queda en el historial). */}
+              {alcanceEditable ? (
+                <div className="border-t border-gray-100 pt-3 space-y-3">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Alcance (contrato · naturaleza)</p>
+                  {contratosCliente.length > 0 ? (
+                    <SelectField label="Contrato" value={contratoEdit} onChange={setContratoEdit}
+                      options={contratosCliente.map(c => ({ value: c, label: c }))} placeholder="Selecciona el contrato" />
+                  ) : (
+                    <TextField label="Contrato" value={contratoEdit} onChange={setContratoEdit} />
+                  )}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-1">Naturaleza</label>
+                    <div className="flex gap-4">
+                      {(['opex', 'capex'] as const).map(n => (
+                        <label key={n} className="flex items-center gap-1.5 text-sm text-gray-700">
+                          <input type="radio" name="naturaleza-edit" checked={naturalezaEdit === n} onChange={() => setNaturalezaEdit(n)} />
+                          {n.toUpperCase()}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  {(contratoEdit !== actividad.contrato || naturalezaEdit !== actividad.naturaleza) && actividad.lineas.length > 0 && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                      ⚠ Cambiar el alcance borra las {actividad.lineas.length} línea(s) cargadas ({fmtMoney(actividad.total || 0)}) —
+                      pertenecen a la lista de precios del alcance actual. Su detalle queda en el historial.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 border-t border-gray-100 pt-3">
+                  El alcance ({actividad.contrato} · {actividad.naturaleza.toUpperCase()}) quedó congelado con la aprobación — determina el precio, como las líneas.
+                </p>
+              )}
+
               <div className="flex gap-2 justify-end">
                 <button onClick={() => setEditandoCabecera(false)} className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:bg-gray-50">Cancelar</button>
                 <button onClick={guardarCabecera} disabled={guardando} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50">Guardar</button>
@@ -273,10 +400,15 @@ export default function ActividadDetalle({ isOpen, onClose, actividad, lpus, pue
             soloLectura ? (
               <p className="text-sm text-gray-400">Sin aprobar.</p>
             ) : (
-              <button onClick={() => { setFechaAprob(hoyISO()); setRefAprob(''); setAprobando(true) }}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white">
-                ✔ Marcar aprobada
-              </button>
+              <div className="space-y-1.5">
+                <button onClick={() => { setFechaAprob(hoyISO()); setRefAprob(''); setAprobando(true) }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white">
+                  ✔ Marcar aprobada
+                </button>
+                <p className="text-[11px] text-gray-400">
+                  La decisión del gestor del cliente — en el flujo normal va antes de ejecutar; en una emergencia se registra después.
+                </p>
+              </div>
             )
           ) : (
             <div className="space-y-2">

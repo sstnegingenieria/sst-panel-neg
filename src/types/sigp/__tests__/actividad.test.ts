@@ -8,6 +8,7 @@ import {
   pendienteDesde, diasPendiente, UMBRAL_PENDIENTE_ACTA_DIAS,
   lpuValidaParaActividad, construirLinea, construirLineaNegociada,
   patchAprobar, patchEjecutar, patchLineas, patchAnular, patchCabecera,
+  patchCambiarAlcance, resumenLineas,
   type Actividad, type LineaActividad,
 } from '../actividad'
 
@@ -212,9 +213,14 @@ describe('congelamiento al aprobar — cantidad sigue editable', () => {
   })
 })
 
-describe('cabecera — el alcance no se mueve con líneas cargadas', () => {
+describe('cabecera — gate afinado F1.4 (descriptivos vs alcance)', () => {
+  const apr = { fecha: ts(), por: 'u1' }
   it('editar descripción/sede siempre pasa', () => {
     expect(patchCabecera(base({ lineas: [linea()] }), { descripcion: 'otra' })).not.toBeNull()
+  })
+  it('descriptivos siguen editables DESPUÉS de aprobar (corregir un dato es legítimo)', () => {
+    const a = base({ aprobacion: apr, lineas: [linea()], total: 70000, estado: 'aprobada' })
+    expect(patchCabecera(a, { descripcion: 'corregida', zona: 'Búnker X', solicitante: 'Miryam Forero' })).not.toBeNull()
   })
   it('cambiar contrato o naturaleza con líneas → null (pertenecen a la LPU del alcance)', () => {
     const a = base({ lineas: [linea()], total: 70000 })
@@ -222,6 +228,38 @@ describe('cabecera — el alcance no se mueve con líneas cargadas', () => {
     expect(patchCabecera(a, { contrato: 'Impermeabilización — 4600023644' })).toBeNull()
     // sin líneas sí se puede
     expect(patchCabecera(base(), { naturaleza: 'capex' })).not.toBeNull()
+  })
+  it('el alcance congela con la APROBACIÓN incluso sin líneas (determina el precio)', () => {
+    const a = base({ aprobacion: apr, estado: 'aprobada' })
+    expect(patchCabecera(a, { naturaleza: 'capex' })).toBeNull()
+  })
+})
+
+describe('patchCambiarAlcance — borra líneas con traza (F1.4)', () => {
+  const apr = { fecha: ts(), por: 'u1' }
+  it('cambia el alcance BORRANDO líneas y recalcula total/estado', () => {
+    const a = base({ lineas: [linea()], total: 70000, estado: 'registrada' })
+    const patch = patchCambiarAlcance(a, { contrato: 'Impermeabilización — 4600023644', naturaleza: 'capex' })!
+    expect(patch).toMatchObject({
+      contrato: 'Impermeabilización — 4600023644', naturaleza: 'capex',
+      lineas: [], total: 0, estado: 'registrada',
+    })
+  })
+  it('null si está aprobada (el alcance congela con la aprobación) o anulada', () => {
+    expect(patchCambiarAlcance(base({ aprobacion: apr, estado: 'aprobada' }), { contrato: 'X', naturaleza: 'capex' })).toBeNull()
+    expect(patchCambiarAlcance(base({ anulacion: { fecha: ts(), por: 'u', motivo: 'x' } }), { contrato: 'X', naturaleza: 'capex' })).toBeNull()
+  })
+  it('null si nada cambia (mismo contrato y naturaleza)', () => {
+    expect(patchCambiarAlcance(base(), { contrato: 'Obra Civil — 4600023645', naturaleza: 'opex' })).toBeNull()
+  })
+  it('resumenLineas conserva el contenido para el historial (cero borrado físico)', () => {
+    const r = resumenLineas([linea()])
+    expect(r).toContain('2.0.10')
+    expect(r).toContain('Resane de muro')
+    expect(r).toContain('$35000')
+    expect(r).toContain('$70000')
+    expect(r).toContain('(medida)')
+    expect(resumenLineas([])).toBe('sin líneas')
   })
 })
 
