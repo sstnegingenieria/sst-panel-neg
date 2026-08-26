@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Tecnico } from './UsuariosPendientes'
+import { ROL_LABEL } from '../types/sigp/roles'
 
 interface Props {
   isAdmin: boolean
@@ -8,6 +9,8 @@ interface Props {
   onCambiarRol: (t: Tecnico, nuevoRol: 'tecnico' | 'sst' | 'admin') => void
   onDesactivar: (t: Tecnico) => void
   onActivar: (t: Tecnico) => void
+  /** OC1 — cargo y celular del firmante (admin-only, modal). */
+  onEditarFirma: (t: Tecnico) => void
 }
 
 const rolBadge: Record<string, string> = {
@@ -16,11 +19,12 @@ const rolBadge: Record<string, string> = {
   tecnico: 'bg-gray-100 text-gray-700',
 }
 
-const rolLabel: Record<string, string> = {
-  sst: 'SST',
-  admin: 'Admin',
-  tecnico: 'Técnico',
-}
+// Los roles SIGP/residente muestran su etiqueta central (ROL_LABEL); el
+// selector ⇄ Rol queda SOLO para los legacy (tecnico/sst/admin) — cambiar
+// un rol SIGP desde acá rompería claims y accesos (se hace por decisión
+// aparte, no por un select de 3 opciones).
+const ROLES_LEGACY = new Set(['tecnico', 'sst', 'admin'])
+const rolLabel: Record<string, string> = ROL_LABEL
 
 const estadoBadge: Record<string, string> = {
   activo: 'bg-green-100 text-green-800',
@@ -60,17 +64,20 @@ function RolSelector({ tecnico, onCambiarRol }: { tecnico: Tecnico; onCambiarRol
   )
 }
 
-export default function UsuariosPanel({ isAdmin, usuarios, loading, onCambiarRol, onDesactivar, onActivar }: Props) {
+export default function UsuariosPanel({ isAdmin, usuarios, loading, onCambiarRol, onDesactivar, onActivar, onEditarFirma }: Props) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
       <div className="px-6 py-4 border-b border-gray-100 bg-brand-50 rounded-t-lg">
         <h2 className="font-bold text-brand-800">
-          Personal de panel (SST / Admin)
+          Personal de panel
           {!loading && (
             <span className="ml-2 text-xs font-normal text-brand-500">({usuarios.length})</span>
           )}
         </h2>
-        <p className="text-xs text-brand-600 mt-0.5">Usuarios con acceso al panel web</p>
+        <p className="text-xs text-brand-600 mt-0.5">
+          Usuarios con acceso al panel web (SST, SIGP y administración) — el botón ✎ Firma captura
+          cargo y celular del firmante de documentos
+        </p>
       </div>
 
       <div className="overflow-x-auto">
@@ -107,7 +114,14 @@ export default function UsuariosPanel({ isAdmin, usuarios, loading, onCambiarRol
             {!loading &&
               usuarios.map(u => (
                 <tr key={u.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                  <td className="py-3 px-4 font-medium text-gray-800">{u.nombre}</td>
+                  <td className="py-3 px-4">
+                    <div className="font-medium text-gray-800">{u.nombre}</div>
+                    {(u.cargo || u.celular) && (
+                      <div className="text-[11px] text-gray-400 mt-0.5">
+                        {[u.cargo, u.celular].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
+                  </td>
                   <td className="py-3 px-4 text-gray-600 text-xs">{u.email}</td>
                   <td className="py-3 px-4">
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${rolBadge[u.rol] ?? 'bg-gray-100 text-gray-700'}`}>
@@ -123,7 +137,14 @@ export default function UsuariosPanel({ isAdmin, usuarios, loading, onCambiarRol
                     <div className="flex items-center justify-end gap-1.5 flex-wrap">
                       {isAdmin ? (
                         <>
-                          <RolSelector tecnico={u} onCambiarRol={onCambiarRol} />
+                          <button
+                            onClick={() => onEditarFirma(u)}
+                            title="Cargo y celular para la firma de documentos (órdenes de compra)"
+                            className="text-xs px-2.5 py-1.5 rounded-lg border border-brand-200 text-brand-700 hover:bg-brand-50 transition font-medium"
+                          >
+                            ✎ Firma
+                          </button>
+                          {ROLES_LEGACY.has(u.rol) && <RolSelector tecnico={u} onCambiarRol={onCambiarRol} />}
                           {u.estado === 'activo' ? (
                             <button
                               onClick={() => onDesactivar(u)}

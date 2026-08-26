@@ -194,6 +194,13 @@ export const veOcUI = (rol: string | undefined) => en(rol, ROLES_VEN_OC)
 export const ROLES_EDITA_META_INDICADORES: Rol[] = ['gerencia_general', 'admin']
 export const editaMetaIndicadoresUI = (rol: string | undefined) => en(rol, ROLES_EDITA_META_INDICADORES)
 
+// ── OC1 — datos de empresa (`configuracion/empresa`, bloque RADICACIÓN del
+// PDF de orden de compra). Espeja la regla del match genérico
+// configuracion/{docId}: write gerencia_general + admin. Lectura = accesoSIGP
+// (la tarjeta se muestra en Gestión Administrativa; Marcela ve, no edita).
+export const ROLES_EDITA_CONFIG_EMPRESA: Rol[] = ['gerencia_general', 'admin']
+export const editaConfigEmpresaUI = (rol: string | undefined) => en(rol, ROLES_EDITA_CONFIG_EMPRESA)
+
 // ── Validador de horario / asistencia (#3, 07-ago) ──
 // Espejo EXACTO de veHorario()/gestionaHorario() de firestore.rules:
 // los reportes los ven TODAS las gerencias + admin (decisión Giovanny);

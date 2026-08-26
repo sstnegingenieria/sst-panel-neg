@@ -10,6 +10,7 @@ import AsignarObrasModal from '../components/AsignarObrasModal'
 import TecnicoPerfilModal from '../components/TecnicoPerfilModal'
 import InvitarUsuarioModal from '../components/InvitarUsuarioModal'
 import EditarDocumentosModal from '../components/EditarDocumentosModal'
+import EditarFirmaModal from '../components/EditarFirmaModal'
 import { Obra } from '../components/ObrasTable'
 import { useModal } from '../hooks/useModal'
 import { useFirestore } from '../hooks/useFirestore'
@@ -27,10 +28,12 @@ export default function Usuarios() {
   const [asignarTarget, setAsignarTarget] = useState<Tecnico | null>(null)
   const [perfilTarget, setPerfilTarget] = useState<Tecnico | null>(null)
   const [docsTarget, setDocsTarget] = useState<Tecnico | null>(null)
+  const [firmaTarget, setFirmaTarget] = useState<Tecnico | null>(null)
   const modalAsignar  = useModal()
   const modalPerfil   = useModal()
   const modalInvitar  = useModal()
   const modalDocs     = useModal()
+  const modalFirma    = useModal()
   const { getAllOrdered } = useFirestore()
 
   const load = useCallback(async () => {
@@ -50,7 +53,10 @@ export default function Usuarios() {
 
       setPendientes(todos.filter(t => t.estado === 'pendiente'))
       setActivos(todos.filter(t => t.rol === 'tecnico' && t.estado !== 'pendiente'))
-      setPanelUsers(todos.filter(t => (t.rol === 'sst' || t.rol === 'admin') && t.estado !== 'pendiente'))
+      // OC1: la sección de panel lista TODO el personal con acceso al panel
+      // (antes solo sst/admin — los roles SIGP eran invisibles acá y el
+      // admin no tenía dónde capturar cargo/celular del firmante de OCs).
+      setPanelUsers(todos.filter(t => t.rol !== 'tecnico' && t.estado !== 'pendiente'))
     } catch (err) {
       console.error(err)
       toast('Error al cargar usuarios', 'error')
@@ -203,6 +209,15 @@ export default function Usuarios() {
         onCambiarRol={handleCambiarRol}
         onDesactivar={handleDesactivar}
         onActivar={handleActivar}
+        onEditarFirma={(t) => { setFirmaTarget(t); modalFirma.open() }}
+      />
+
+      {/* Modal cargo/celular del firmante (OC1) */}
+      <EditarFirmaModal
+        isOpen={modalFirma.isOpen}
+        onClose={modalFirma.close}
+        usuario={firmaTarget}
+        onGuardado={() => { toast('Datos de firma actualizados'); load() }}
       />
 
       {/* Modal asignar obras */}

@@ -13,7 +13,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { ChangeEvent } from 'react'
 import {
-  collection, query, where, getDocs, addDoc, updateDoc, doc, arrayUnion, Timestamp,
+  collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, arrayUnion, Timestamp,
 } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
@@ -27,10 +27,14 @@ import InputExpresion from '../cotizaciones/InputExpresion'
 import { fmtMoney } from '../../../utils/sigp/formato'
 import {
   ESTADO_OC_LABEL, ESTADO_OC_COLOR,
-  valorLineaDe, totalDe, validarOcParaEmitir, requiereSalvedadAprobacion,
+  valorLineaDe, subtotalDe, ivaTotalDe, totalConIvaDe, validarOcParaEmitir,
+  requiereSalvedadAprobacion, construirSnapshotProveedor,
+  IVA_PCT_OPCIONES, IVA_PCT_DEFAULT,
 } from '../../../types/sigp/ordenCompra'
+import { CONFIG_EMPRESA_DOC, faltantesConfigEmpresa } from '../../../types/sigp/configEmpresa'
+import type { ConfigEmpresa } from '../../../types/sigp/configEmpresa'
 import { puedeCrearOcUI, apruebaOcUI, veOcUI } from '../../../types/sigp/permisos'
-import type { OrdenCompra, LineaOrdenCompra } from '../../../types/sigp/ordenCompra'
+import type { OrdenCompra, LineaOrdenCompra, DespachoOC, CondicionesOC } from '../../../types/sigp/ordenCompra'
 import type { Proveedor } from '../../../types/sigp/proveedor'
 import type { Proyecto } from '../../../types/sigp/proyecto'
 
@@ -55,18 +59,28 @@ const fFecha = (t?: { toDate?: () => Date }) =>
 /** Línea del formulario — cantidad/valor_unitario sin confirmar aún (InputExpresion). */
 interface LineaForm {
   descripcion: string
+  codigo: string
+  unidad: string
+  iva_pct: number
   cantidad?: number
   valor_unitario?: number
 }
 
-const lineaFormVacia = (): LineaForm => ({ descripcion: '', cantidad: undefined, valor_unitario: undefined })
+const lineaFormVacia = (): LineaForm => ({
+  descripcion: '', codigo: '', unidad: '', iva_pct: IVA_PCT_DEFAULT,
+  cantidad: undefined, valor_unitario: undefined,
+})
 
-/** Convierte las líneas del formulario a LineaOrdenCompra[] con valor derivado. */
+/** Convierte las líneas del formulario a LineaOrdenCompra[] con valor derivado
+ *  (valor = SIN IVA; el IVA vive por línea en iva_pct). */
 function lineasDe(form: LineaForm[]): LineaOrdenCompra[] {
   return form
     .filter(l => l.descripcion.trim() || l.cantidad || l.valor_unitario)
     .map(l => ({
       descripcion: l.descripcion.trim(),
+      ...(l.codigo.trim() ? { codigo: l.codigo.trim() } : {}),
+      unidad: l.unidad.trim(),
+      iva_pct: l.iva_pct,
       cantidad: l.cantidad ?? 0,
       valor_unitario: l.valor_unitario ?? 0,
       valor: valorLineaDe(l.cantidad ?? 0, l.valor_unitario ?? 0),
@@ -117,7 +131,10 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
   const [guardando, setGuardando] = useState(false)
 
   const proveedorSeleccionado = proveedoresActivos.find(p => p.id === proveedorId)
-  const totalForm = totalDe(lineasDe(lineasForm))
+  const lineasFormDerivadas = lineasDe(lineasForm)
+  const subtotalForm = subtotalDe(lineasFormDerivadas)
+  const ivaForm = ivaTotalDe(lineasFormDerivadas)
+  const totalForm = subtotalForm + ivaForm
 
   const abrirCrear = async () => {
     setFormTarget(null)
@@ -142,7 +159,14 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
       razon_social: oc.proveedor_snapshot?.razon_social ?? '—',
     } as Proveedor])
     setLineasForm((oc.lineas ?? []).length
-      ? oc.lineas.map(l => ({ descripcion: l.descripcion, cantidad: l.cantidad, valor_unitario: l.valor_unitario }))
+      ? oc.lineas.map(l => ({
+          descripcion: l.descripcion,
+          codigo: l.codigo ?? '',
+          unidad: l.unidad ?? '',
+          iva_pct: l.iva_pct ?? IVA_PCT_DEFAULT,
+          cantidad: l.cantidad,
+          valor_unitario: l.valor_unitario,
+        }))
       : [lineaFormVacia()])
     setFormOpen(true)
   }
@@ -159,7 +183,9 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
     setGuardando(true)
     try {
       const lineas = lineasDe(lineasForm)
-      const valorTotal = totalDe(lineas)
+      // OC1: el valor_total de las órdenes nuevas es el TOTAL CON IVA
+      // (subtotal + IVA por línea) — mejora el prefill de la compra (C3).
+      const valorTotal = totalConIvaDe(lineas)
       const ahora = Timestamp.now()
       if (formTarget) {
         // Editar (solo borrador — la regla también lo exige): líneas + total.
@@ -173,10 +199,9 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
           proyecto_id: proyecto.id,
           proyecto_consecutivo: proyecto.consecutivo,
           proveedor_id: proveedorSeleccionado.id,
-          proveedor_snapshot: {
-            identificacion: proveedorSeleccionado.identificacion,
-            razon_social: proveedorSeleccionado.razon_social,
-          },
+          // Whitelist (identidad + contacto del doc PÚBLICO) — los datos
+          // bancarios del sub-doc privado JAMÁS entran al snapshot.
+          proveedor_snapshot: construirSnapshotProveedor(proveedorSeleccionado),
           lineas, valor_total: valorTotal,
           cotizacion_proveedor_url: '',
           estado: 'borrador',
@@ -237,10 +262,53 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
     return c
   }
 
-  const emitir = async (oc: OrdenCompra) => {
-    const errores = validarOcParaEmitir(oc)
-    if (Object.keys(errores).length) return
-    if (!window.confirm(`¿Emitir la orden de compra a ${oc.proveedor_snapshot?.razon_social ?? 'el proveedor'} por ${fmtMoney(oc.valor_total)}? Se le asignará el consecutivo OC.`)) return
+  // OC1: la emisión captura el despacho (ENTREGAR EN — dato de la orden),
+  // las condiciones (forma de pago obligatoria; fecha límite de radicación y
+  // tiempo de entrega variables por orden) y la referencia de la cotización.
+  const [emitirTarget, setEmitirTarget] = useState<OrdenCompra | null>(null)
+  const [despachoForm, setDespachoForm] = useState({ direccion: '', contacto: '', telefono: '', fecha_despacho: '' })
+  const [condForm, setCondForm] = useState({ forma_pago: '', tiempo_entrega: '', fecha_limite_radicacion: '' })
+  const [refCotizacion, setRefCotizacion] = useState('')
+
+  const abrirEmitir = (oc: OrdenCompra) => {
+    setDespachoForm({
+      direccion: oc.despacho?.direccion ?? '',
+      contacto: oc.despacho?.contacto ?? '',
+      telefono: oc.despacho?.telefono ?? '',
+      fecha_despacho: oc.despacho?.fecha_despacho ?? '',
+    })
+    setCondForm({
+      forma_pago: oc.condiciones?.forma_pago ?? '',
+      tiempo_entrega: oc.condiciones?.tiempo_entrega ?? '',
+      fecha_limite_radicacion: oc.condiciones?.fecha_limite_radicacion ?? '',
+    })
+    setRefCotizacion(oc.cotizacion_referencia ?? '')
+    setEmitirTarget(oc)
+  }
+
+  const despachoDeForm = (): DespachoOC => ({
+    direccion: despachoForm.direccion.trim(),
+    contacto: despachoForm.contacto.trim(),
+    telefono: despachoForm.telefono.trim(),
+    ...(despachoForm.fecha_despacho.trim() ? { fecha_despacho: despachoForm.fecha_despacho.trim() } : {}),
+  })
+  const condicionesDeForm = (): CondicionesOC => ({
+    forma_pago: condForm.forma_pago.trim(),
+    ...(condForm.tiempo_entrega.trim() ? { tiempo_entrega: condForm.tiempo_entrega.trim() } : {}),
+    ...(condForm.fecha_limite_radicacion.trim() ? { fecha_limite_radicacion: condForm.fecha_limite_radicacion.trim() } : {}),
+  })
+
+  const emitirValido = emitirTarget
+    ? Object.keys(validarOcParaEmitir({ ...emitirTarget, despacho: despachoDeForm(), condiciones: condicionesDeForm() })).length === 0
+    : false
+
+  const confirmarEmision = async () => {
+    const oc = emitirTarget
+    if (!oc) return
+    const despacho = despachoDeForm()
+    const condiciones = condicionesDeForm()
+    const errores = validarOcParaEmitir({ ...oc, despacho, condiciones })
+    if (Object.keys(errores).length) { toast(Object.values(errores)[0], 'error'); return }
     setAplicandoId(oc.id)
     try {
       const consecutivo = await obtenerConsecutivoOC(oc.id)
@@ -248,6 +316,9 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
       await updateDoc(doc(db, 'ordenes_compra', oc.id), {
         estado: 'emitida',
         consecutivo,
+        despacho,
+        condiciones,
+        ...(refCotizacion.trim() ? { cotizacion_referencia: refCotizacion.trim() } : {}),
         fecha_actualizacion: ahora,
         historial: arrayUnion({
           de: 'borrador', a: 'emitida', por: user?.uid ?? '', fecha: ahora,
@@ -256,11 +327,74 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
       })
       delete pendientesRef.current[oc.id]
       toast(`${consecutivo} emitida`)
+      setEmitirTarget(null)
       await load()
       await reload?.()
     } catch {
       toast('Error al emitir la orden de compra — el consecutivo se conserva para reintentar', 'error')
     } finally { setAplicandoId(null) }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Descargar PDF (DC-FT-OC-00-19) — on-demand, solo desde aprobada/comprada
+  // ═══════════════════════════════════════════════════════════════════════
+  const [descargandoId, setDescargandoId] = useState<string | null>(null)
+
+  const descargarPdf = async (oc: OrdenCompra) => {
+    setDescargandoId(oc.id)
+    try {
+      const { cargarAssetsPdf, generarPdfOrdenCompra } = await import('../../../utils/sigp/ordenCompraPdf')
+      // Firmante = CREADOR de la orden (nombre/cargo/correo/celular de users).
+      let firmante: { nombre: string; cargo?: string; correo?: string; celular?: string } = { nombre: '—' }
+      try {
+        const u = await getDoc(doc(db, 'users', oc.creada_por))
+        const d = u.data()
+        if (d) firmante = {
+          nombre: (d.nombre as string) || (d.email as string) || '—',
+          cargo: (d.cargo as string) || undefined,
+          correo: (d.email as string) || undefined,
+          celular: ((d.celular ?? d.telefono) as string) || undefined,
+        }
+      } catch { /* sin perfil legible: firma con nombre — */ }
+      // configuracion/empresa — bloque RADICACIÓN + pie. Sin config: se omite
+      // el bloque y se advierte (los datos se editan en Gestión Administrativa).
+      let empresa: ConfigEmpresa | null = null
+      try {
+        const e = await getDoc(doc(db, 'configuracion', CONFIG_EMPRESA_DOC))
+        if (e.exists()) empresa = e.data() as ConfigEmpresa
+      } catch { /* sin lectura: degrada igual que sin config */ }
+      if (faltantesConfigEmpresa(empresa).length) {
+        toast('Faltan datos de empresa (configuración): el bloque de radicación saldrá incompleto', 'info')
+      }
+      const pdf = await generarPdfOrdenCompra({
+        consecutivo: oc.consecutivo,
+        proyectoConsecutivo: oc.proyecto_consecutivo,
+        fecha: oc.fecha_aprobacion?.toDate?.() ?? oc.fecha_creacion?.toDate?.() ?? new Date(),
+        proveedor: {
+          razonSocial: oc.proveedor_snapshot?.razon_social ?? '—',
+          identificacion: oc.proveedor_snapshot?.identificacion ?? '—',
+          contactoNombre: oc.proveedor_snapshot?.contacto_nombre,
+          contactoTelefono: oc.proveedor_snapshot?.contacto_telefono,
+          contactoCorreo: oc.proveedor_snapshot?.contacto_correo,
+        },
+        lineas: oc.lineas ?? [],
+        valorTotal: oc.valor_total,
+        despacho: oc.despacho,
+        condiciones: oc.condiciones,
+        cotizacionReferencia: oc.cotizacion_referencia,
+        firmante,
+        empresa,
+      }, await cargarAssetsPdf())
+      const url = URL.createObjectURL(new Blob([pdf as BlobPart], { type: 'application/pdf' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${oc.consecutivo} - Orden de compra ${oc.proveedor_snapshot?.razon_social ?? ''}.pdf`.replace(/[\\/:*?"<>|]/g, '')
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    } catch (e) {
+      console.error('Error generando el PDF de la orden de compra:', e)
+      toast('No se pudo generar el documento', 'error')
+    } finally { setDescargandoId(null) }
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -365,7 +499,13 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
         <div className="mt-4 divide-y divide-gray-100 border border-gray-100 rounded-lg">
           {ordenes.map(oc => {
             const aplicando = aplicandoId === oc.id
-            const erroresEmitir = oc.estado === 'borrador' ? validarOcParaEmitir(oc) : {}
+            // Gating del botón: solo líneas + cotización adjunta. El despacho y
+            // la forma de pago se capturan EN el modal de emisión — sus errores
+            // no deshabilitan el botón que abre ese modal.
+            const erroresEmitir = oc.estado === 'borrador'
+              ? Object.fromEntries(Object.entries(validarOcParaEmitir(oc))
+                  .filter(([k]) => !k.startsWith('despacho_') && k !== 'forma_pago'))
+              : {}
             const puedeEmitir = Object.keys(erroresEmitir).length === 0
 
             return (
@@ -432,7 +572,7 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
                         className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
                         📎 Cotización del proveedor
                       </button>
-                      <button onClick={() => emitir(oc)} disabled={aplicando || !puedeEmitir}
+                      <button onClick={() => abrirEmitir(oc)} disabled={aplicando || !puedeEmitir}
                         title={puedeEmitir ? undefined : Object.values(erroresEmitir).join(' · ')}
                         className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed">
                         {aplicando ? 'Emitiendo…' : 'Emitir →'}
@@ -461,6 +601,14 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
                     <button onClick={() => { setAnularTarget(oc); setAnularMotivo('') }} disabled={aplicando}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">
                       Anular
+                    </button>
+                  )}
+                  {/* OC1: el documento sale SOLO desde aprobada (incl. comprada) —
+                      el gate al proveedor es este botón. */}
+                  {(oc.estado === 'aprobada' || oc.estado === 'comprada') && (
+                    <button onClick={() => descargarPdf(oc)} disabled={descargandoId === oc.id}
+                      className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 disabled:opacity-50">
+                      {descargandoId === oc.id ? 'Generando…' : '📄 Descargar orden'}
                     </button>
                   )}
                 </div>
@@ -504,38 +652,61 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
             </div>
             <div className="space-y-2">
               {lineasForm.map((l, i) => (
-                <div key={i} className="grid grid-cols-12 gap-2 items-start bg-gray-50 rounded-lg p-2">
-                  <div className="col-span-12 sm:col-span-5">
-                    <TextField label={i === 0 ? 'Descripción' : ''} value={l.descripcion}
-                      onChange={v => patchLinea(i, { descripcion: v })} placeholder="Descripción de la línea" />
+                <div key={i} className="bg-gray-50 rounded-lg p-2 space-y-2">
+                  <div className="grid grid-cols-12 gap-2 items-start">
+                    <div className="col-span-3">
+                      <TextField label={i === 0 ? 'Código' : ''} value={l.codigo}
+                        onChange={v => patchLinea(i, { codigo: v })} placeholder="Opcional" />
+                    </div>
+                    <div className="col-span-8">
+                      <TextField label={i === 0 ? 'Descripción' : ''} value={l.descripcion}
+                        onChange={v => patchLinea(i, { descripcion: v })} placeholder="Descripción de la línea" />
+                    </div>
+                    <div className="col-span-1 flex items-end justify-end h-full pb-1">
+                      {lineasForm.length > 1 && (
+                        <button type="button" onClick={() => quitarLinea(i)}
+                          className="text-red-400 hover:text-red-600 text-lg leading-none px-1" title="Quitar línea">✕</button>
+                      )}
+                    </div>
                   </div>
-                  <div className="col-span-4 sm:col-span-2">
-                    {i === 0 && <label className="text-sm font-medium text-gray-700 block mb-1">Cantidad</label>}
-                    <InputExpresion valor={l.cantidad} onValor={v => patchLinea(i, { cantidad: v })}
-                      className="w-full text-sm px-3 py-2 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
-                  </div>
-                  <div className="col-span-4 sm:col-span-2">
-                    {i === 0 && <label className="text-sm font-medium text-gray-700 block mb-1">Vr. unitario</label>}
-                    <InputExpresion valor={l.valor_unitario} onValor={v => patchLinea(i, { valor_unitario: v })}
-                      className="w-full text-sm px-3 py-2 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
-                  </div>
-                  <div className="col-span-3 sm:col-span-2">
-                    {i === 0 && <label className="text-sm font-medium text-gray-700 block mb-1">Valor</label>}
-                    <p className="text-sm px-2 py-2 font-mono text-gray-600 text-right">
-                      {fmtMoney(valorLineaDe(l.cantidad ?? 0, l.valor_unitario ?? 0))}
-                    </p>
-                  </div>
-                  <div className="col-span-1 flex items-end justify-end h-full">
-                    {lineasForm.length > 1 && (
-                      <button type="button" onClick={() => quitarLinea(i)}
-                        className="text-red-400 hover:text-red-600 text-lg leading-none px-1" title="Quitar línea">✕</button>
-                    )}
+                  <div className="grid grid-cols-12 gap-2 items-start">
+                    <div className="col-span-2">
+                      <TextField label={i === 0 ? 'Unidad' : ''} value={l.unidad}
+                        onChange={v => patchLinea(i, { unidad: v })} placeholder="Und" />
+                    </div>
+                    <div className="col-span-2">
+                      {i === 0 && <label className="text-sm font-medium text-gray-700 block mb-1">Cantidad</label>}
+                      <InputExpresion valor={l.cantidad} onValor={v => patchLinea(i, { cantidad: v })}
+                        className="w-full text-sm px-3 py-2 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                    </div>
+                    <div className="col-span-3">
+                      {i === 0 && <label className="text-sm font-medium text-gray-700 block mb-1">Vr. unitario</label>}
+                      <InputExpresion valor={l.valor_unitario} onValor={v => patchLinea(i, { valor_unitario: v })}
+                        className="w-full text-sm px-3 py-2 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                    </div>
+                    <div className="col-span-2">
+                      {i === 0 && <label className="text-sm font-medium text-gray-700 block mb-1">IVA</label>}
+                      <select value={l.iva_pct}
+                        onChange={e => patchLinea(i, { iva_pct: Number(e.target.value) })}
+                        className="w-full text-sm px-2 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+                        {IVA_PCT_OPCIONES.map(p => <option key={p} value={p}>{p}%</option>)}
+                      </select>
+                    </div>
+                    <div className="col-span-3">
+                      {i === 0 && <label className="text-sm font-medium text-gray-700 block mb-1">Valor (sin IVA)</label>}
+                      <p className="text-sm px-2 py-2 font-mono text-gray-600 text-right">
+                        {fmtMoney(valorLineaDe(l.cantidad ?? 0, l.valor_unitario ?? 0))}
+                      </p>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
-            <div className="flex justify-end pt-1 border-t border-gray-100">
-              <span className="text-sm font-semibold text-gray-700">Total: <span className="font-mono">{fmtMoney(totalForm)}</span></span>
+            {/* OC1: IVA calculado línea a línea y sumado (jamás tarifa sobre el subtotal) */}
+            <div className="flex flex-col items-end gap-0.5 pt-1 border-t border-gray-100 text-sm">
+              <span className="text-gray-500">Subtotal: <span className="font-mono">{fmtMoney(subtotalForm)}</span></span>
+              <span className="text-gray-500">IVA: <span className="font-mono">{fmtMoney(ivaForm)}</span></span>
+              <span className="font-semibold text-gray-700">Total: <span className="font-mono">{fmtMoney(totalForm)}</span></span>
             </div>
           </div>
         </div>
@@ -569,6 +740,59 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
             <input type="file" accept=".pdf,image/*" onChange={onArchivoCotizacion}
               className="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
           </label>
+        </div>
+      </Modal>
+
+      {/* ── Modal: Emitir (despacho + condiciones + referencia — OC1) ─── */}
+      <Modal
+        isOpen={emitirTarget !== null}
+        title={`Emitir orden de compra — ${emitirTarget?.proveedor_snapshot?.razon_social ?? ''}`}
+        onClose={() => setEmitirTarget(null)}
+        size="lg"
+        actions={[
+          { label: 'Cancelar', onClick: () => setEmitirTarget(null), variant: 'secondary' },
+          {
+            label: aplicandoId === emitirTarget?.id ? 'Emitiendo…' : 'Emitir →',
+            onClick: confirmarEmision, variant: 'primary',
+            loading: aplicandoId === emitirTarget?.id, disabled: !emitirValido,
+          },
+        ]}
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">
+            Al emitir se asigna el consecutivo OC. Total de la orden:{' '}
+            <span className="font-mono font-semibold text-gray-700">{fmtMoney(emitirTarget?.valor_total ?? 0)}</span>
+          </p>
+          <div>
+            <p className="text-xs font-bold text-brand-700 uppercase tracking-wide mb-2">Entregar en (despacho de esta orden)</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <TextField label="Dirección de entrega" required value={despachoForm.direccion}
+                  onChange={v => setDespachoForm(f => ({ ...f, direccion: v }))} placeholder="Dónde se despacha esta compra" />
+              </div>
+              <TextField label="Contacto" required value={despachoForm.contacto}
+                onChange={v => setDespachoForm(f => ({ ...f, contacto: v }))} placeholder="Quién recibe" />
+              <TextField label="Teléfono" required value={despachoForm.telefono}
+                onChange={v => setDespachoForm(f => ({ ...f, telefono: v }))} placeholder="Del contacto" />
+              <div className="col-span-2">
+                <TextField label="Fecha de despacho" value={despachoForm.fecha_despacho}
+                  onChange={v => setDespachoForm(f => ({ ...f, fecha_despacho: v }))} placeholder="Opcional — ej: 5 días hábiles tras la orden" />
+              </div>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-brand-700 uppercase tracking-wide mb-2">Condiciones</p>
+            <div className="grid grid-cols-2 gap-3">
+              <TextField label="Forma de pago" required value={condForm.forma_pago}
+                onChange={v => setCondForm(f => ({ ...f, forma_pago: v }))} placeholder="Ej: crédito 30 días" />
+              <TextField label="Tiempo de entrega" value={condForm.tiempo_entrega}
+                onChange={v => setCondForm(f => ({ ...f, tiempo_entrega: v }))} placeholder="Opcional" />
+              <TextField label="Fecha límite de radicación" value={condForm.fecha_limite_radicacion}
+                onChange={v => setCondForm(f => ({ ...f, fecha_limite_radicacion: v }))} placeholder="Opcional — de la factura" />
+              <TextField label="Referencia de la cotización" value={refCotizacion}
+                onChange={setRefCotizacion} placeholder="Opcional — ej: CO52090" />
+            </div>
+          </div>
         </div>
       </Modal>
 
