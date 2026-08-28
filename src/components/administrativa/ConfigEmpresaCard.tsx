@@ -30,7 +30,7 @@ const CAMPOS: { clave: keyof FormEmpresa; label: string; placeholder: string; re
   { clave: 'movil_radicacion', label: 'Móvil de radicación', placeholder: 'Del contacto', requerido: true },
   { clave: 'direccion_factura', label: 'Entrega de la factura', placeholder: 'facturacion@negingenieria.com', requerido: true },
   { clave: 'ciudad', label: 'Ciudad', placeholder: 'Bogotá D.C.', requerido: true },
-  { clave: 'pie_direccion', label: 'Pie — dirección', placeholder: 'Carrera 10 # 18-47 Edificio Universal piso 6' },
+  { clave: 'pie_direccion', label: 'Pie — dirección', placeholder: 'Carrera 10 # 18-44 Edificio Universal piso 6' },
   { clave: 'pie_correo', label: 'Pie — correo', placeholder: 'facturacion@negingenieria.com' },
   { clave: 'pie_web', label: 'Pie — web', placeholder: 'www.negingenieria.com' },
   { clave: 'pie_ciudad', label: 'Pie — ciudad', placeholder: 'Bogotá D.C.' },
