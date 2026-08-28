@@ -37,6 +37,23 @@ export type RolResidente = 'residente_obra'
 // Cualquier rol válido del sistema (union de los tres orígenes)
 export type Rol = RolSST | RolSIGP | RolResidente
 
+/** Etiqueta legible de cada rol (UI del panel de Usuarios y badges). */
+export const ROL_LABEL: Record<Rol, string> = {
+  tecnico: 'Técnico',
+  sst: 'SST',
+  admin: 'Admin',
+  gerencia_general: 'Gerencia General',
+  gerencia_administrativa: 'Gerencia Administrativa',
+  operacion_comercial: 'Operación Comercial',
+  director_proyectos: 'Director de Proyectos',
+  auxiliar_proyectos: 'Auxiliar de Proyectos',
+  residente_sst: 'Residente SST',
+  gestion_integral: 'Gestión Integral',
+  contratista: 'Contratista',
+  cliente_final: 'Cliente',
+  residente_obra: 'Residente de Obra',
+}
+
 // Helper: roles con acceso al panel web (excluye tecnico y contratista,
 // que solo usan la app móvil)
 export const ROLES_PANEL_WEB: Rol[] = [

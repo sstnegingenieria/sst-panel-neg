@@ -39,3 +39,18 @@ export const LIQUIDACION: ControlDocumentalIso = {
   modificado: 'AGO-2026',
   nombre: 'LIQUIDACIÓN DEL CONTRATISTA',
 }
+
+// OC1 — orden de compra. El código DC-FT-OC-00-19 es el del formato REAL
+// vigente del SGI (versión anterior: 04 de ene-2025, diligenciada a mano).
+// Versión y fecha van como PROPUESTA 05/AGO-2026 porque el documento cambia
+// al generarse desde el panel — Ingrid (GI) debe RATIFICAR número de
+// versión, fecha Y área antes de darlo por oficial en el Listado Maestro
+// (frente Trinorma; la 04-2025 NO se reutiliza). Parametrizado aquí para
+// que el ajuste post-ratificación sea una línea.
+export const ORDEN_COMPRA: ControlDocumentalIso = {
+  area: 'GESTIÓN DE PROYECTOS',
+  codigo: 'DC-FT-OC-00-19',
+  version: '05',
+  modificado: 'AGO-2026',
+  nombre: 'ORDEN DE COMPRA Y/O SERVICIO',
+}

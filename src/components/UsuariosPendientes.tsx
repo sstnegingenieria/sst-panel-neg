@@ -19,6 +19,12 @@ export interface Tecnico {
   // claim `cliente_id` que deriva la CF sincronizarClaims (precedente de
   // campo de alcance en users: obras_asignadas). Ausente en roles internos.
   cliente_id?: string
+  // OC1 — datos del firmante en documentos que salen a terceros (PDF de
+  // orden de compra). Captura SOLO por el panel de Usuarios del admin
+  // (decisión de Giovanny: el cargo aparece en documentos externos, no
+  // puede escribírselo cada quien). Aditivos, opcionales.
+  cargo?: string
+  celular?: string
   // Documentos adjuntos subidos desde la app móvil
   cedula_url?: string
   seguridad_social_url?: string

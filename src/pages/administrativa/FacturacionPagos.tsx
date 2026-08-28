@@ -18,6 +18,7 @@ import Modal from '../../components/shared/Modal'
 import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
 import { fmtMoney } from '../../utils/sigp/formato'
 import LiquidacionModal from '../../components/administrativa/LiquidacionModal'
+import ConfigEmpresaCard from '../../components/administrativa/ConfigEmpresaCard'
 import {
   ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR,
   SECCIONES_ADMINISTRATIVA, enBandejaAdministrativa,
@@ -705,6 +706,9 @@ export default function FacturacionPagos() {
           onDone={load}
         />
       )}
+
+      {/* OC1 — datos de empresa (radicación + pie de las órdenes de compra) */}
+      <ConfigEmpresaCard />
     </div>
   )
 }
