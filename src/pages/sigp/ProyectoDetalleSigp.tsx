@@ -22,7 +22,7 @@ import SatisfaccionClienteCard from '../../components/sigp/proyectos/Satisfaccio
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
-import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion } from '../../types/sigp/proyecto'
+import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO } from '../../types/sigp/proyecto'
 import { TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR } from '../../types/sigp/cotizacion'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import { esCoordenadaValida, urlVerificarEnMaps } from '../../utils/geo'
@@ -186,7 +186,7 @@ export default function ProyectoDetalleSigp() {
             {s.contacto && <p className="text-xs text-gray-500">Contacto: {s.contacto}</p>}
           </div>
           <div>
-            <p className="text-xs text-gray-400">Valor de venta</p>
+            <p className="text-xs text-gray-400">Valor de venta{(proyecto.cambios_alcance?.length ?? 0) > 0 ? ' (vigente)' : ''}</p>
             <p className="font-mono font-bold text-gray-800">{fmtMoney(s.valor_venta)}</p>
             <p className="text-xs text-gray-500">{s.esquema_tributario === 'aiu' ? 'AIU' : 'IVA pleno'}</p>
           </div>
@@ -216,6 +216,61 @@ export default function ProyectoDetalleSigp() {
           </div>
         )}
       </div>
+
+      {/* P2-1 — Presupuesto y cambios: los TRES números (aprobado al inicio ·
+          aprobado hoy · costo ejecutado en la preliquidación) + el registro de
+          cambios de alcance (cada entrada = un registro PRC-Gestión del
+          Cambio). Visible solo cuando el proyecto TIENE cambios — sin cambios,
+          inicial == vigente y la tarjeta sería ruido. */}
+      {((proyecto.cambios_alcance?.length ?? 0) > 0 || proyecto.alcance_desactualizado) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Presupuesto y cambios · PRC-Gestión del Cambio</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p className="text-xs text-gray-400">Aprobado al inicio</p>
+              <p className="font-mono font-bold text-gray-800">{fmtMoney(ventaInicialDe(proyecto))}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Aprobado hoy</p>
+              <p className="font-mono font-bold text-gray-800">{fmtMoney(s.valor_venta)}</p>
+              {ventaInicialDe(proyecto) !== s.valor_venta && (
+                <p className={`text-xs font-medium ${s.valor_venta > ventaInicialDe(proyecto) ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {s.valor_venta > ventaInicialDe(proyecto) ? '+' : '−'}{fmtMoney(Math.abs(s.valor_venta - ventaInicialDe(proyecto)))} vs. inicial
+                </p>
+              )}
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Costo ejecutado</p>
+              <p className="font-mono font-bold text-gray-800">
+                {proyecto.preliquidacion?.costo_ejecutado ? fmtMoney(proyecto.preliquidacion.costo_ejecutado) : '—'}
+              </p>
+              <p className="text-[11px] text-gray-400">detalle en la sección Preliquidación</p>
+            </div>
+          </div>
+          {(proyecto.cambios_alcance?.length ?? 0) > 0 && (
+            <div className="border border-gray-100 rounded-lg divide-y divide-gray-50">
+              {proyecto.cambios_alcance!.map((c, i) => (
+                <div key={i} className="px-3 py-2 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-gray-400">{fFecha(c.fecha)}</span>
+                    <span className="text-xs font-mono text-gray-500">v{c.version}</span>
+                    <span className={`font-mono text-xs font-semibold ${c.delta_venta >= 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {c.delta_venta >= 0 ? '+' : '−'}{fmtMoney(Math.abs(c.delta_venta))}
+                    </span>
+                    {c.componentes.map((comp, j) => (
+                      <span key={j} className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600"
+                        title={`${comp.grupo}: ${comp.delta >= 0 ? '+' : '−'}${fmtMoney(Math.abs(comp.delta))} (CD)`}>
+                        {ETIQUETA_COMPONENTE_CAMBIO[comp.tipo]} · {comp.grupo}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">{c.motivo}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Asignación y permisos (F2.1.b) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">

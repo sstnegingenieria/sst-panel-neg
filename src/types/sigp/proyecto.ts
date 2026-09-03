@@ -849,6 +849,63 @@ export interface SnapshotProyecto {
   total_items: number
 }
 
+// ── P2-1 — Cambios de alcance del proyecto (03-sep) ──────────────────────────
+//
+// El alcance congelado se corrige desde una VERSIÓN DE CAMBIO de la cotización
+// (aprobada → vN+1 → re-aprobación con evidencia); la CF crearProyectoAlAprobar
+// APLICA el cambio al proyecto (snapshot vigente + registro). Tres números
+// siempre visibles: aprobado al inicio · aprobado hoy · costo ejecutado — con
+// uno solo no se distingue un proyecto que creció por adicionales legítimos de
+// uno que se desbordó. Cada entrada de `cambios_alcance` ES el registro del
+// PRC-GESTIÓN DEL CAMBIO del SGI (evidencia Trinorma sin formato paralelo).
+
+/** Tipos de componente del cambio, POR GRUPO del alcance.
+ *  ETIQUETAS NEUTRAS a propósito (decisión de Giovanny, 03-sep): el diff
+ *  compara subtotales por grupo, y un subtotal sube por dos razones
+ *  indistinguibles a este nivel — cambió la cantidad o cambió el precio.
+ *  'aumento'/'disminucion' no afirman lo que no se puede distinguir (misma
+ *  disciplina que la cantidad negociada y "pendientes para el acta").
+ *  'cancelacion' y 'adicional' SÍ son distinguibles (grupo removido/nuevo). */
+export type TipoComponenteCambio = 'cancelacion' | 'aumento' | 'disminucion' | 'adicional'
+
+export interface ComponenteCambioAlcance {
+  grupo: string
+  tipo: TipoComponenteCambio
+  /** Delta del subtotal del grupo (CD, antes de impuestos) — signo honesto. */
+  delta: number
+}
+
+/** Registro de UN cambio de alcance aprobado (= un registro PRC del SGI). */
+export interface CambioAlcance {
+  fecha: Timestamp
+  /** Versión de la cotización cuya aprobación produjo el cambio. */
+  version: number
+  /** Venta nueva − venta anterior (con impuestos) — signo honesto. */
+  delta_venta: number
+  componentes: ComponenteCambioAlcance[]
+  /** Obligatorio — lo escribe quien aprueba la versión de cambio. */
+  motivo: string
+  aprobado_por: string
+}
+
+/** Señal de sincronización (decisión 8 de P2): el alcance cambió DESPUÉS de
+ *  definir la preliquidación — hay que revisarla (corregirla o confirmarla
+ *  sin cambio, con motivo) antes de confiar en la utilidad. Mientras el flag
+ *  viva, las tarjetas de utilidad NO muestran número (ajuste 1 de Giovanny:
+ *  no mostrar una cifra creíble sobre datos que sabemos desactualizados). */
+export interface AlcanceDesactualizado {
+  version: number
+  fecha: Timestamp
+  grupos_afectados: string[]
+}
+
+export const ETIQUETA_COMPONENTE_CAMBIO: Record<TipoComponenteCambio, string> = {
+  cancelacion: 'Cancelación',
+  aumento: 'Aumento',
+  disminucion: 'Disminución',
+  adicional: 'Adicional',
+}
+
 export interface Proyecto {
   /** = id del doc de origen (cotización o solicitud preventivo) — idempotencia 1:1 */
   id: string
@@ -864,6 +921,17 @@ export interface Proyecto {
   cliente_id?: string
   prospecto_nombre?: string
   snapshot: SnapshotProyecto
+  /** P2-1 — venta aprobada AL INICIO (congelada al crear; jamás se reescribe;
+   *  para históricos la siembra la migración). GUARDA DURA en la CF: sin este
+   *  campo NO se aplica ningún cambio de alcance — si el cambio corriera
+   *  primero, el backfill tomaría la venta ya corregida y el número original
+   *  se perdería (los tres números contarían una historia falsa). */
+  valor_venta_inicial?: number
+  /** P2-1 — registro de cambios de alcance aprobados (PRC del SGI). */
+  cambios_alcance?: CambioAlcance[]
+  /** P2-1 — el alcance cambió con preliquidación definida: revisar antes de
+   *  confiar en la utilidad. Lo pone la CF; lo limpia corregir/confirmar. */
+  alcance_desactualizado?: AlcanceDesactualizado
   estado: EstadoProyecto
   asignacion?: AsignacionProyecto      // F2.1.b — congela la evidencia del proveedor
   permisos?: PermisosProyecto          // F2.1.b — permisos de ingreso
@@ -888,6 +956,13 @@ export interface Proyecto {
   fecha_creacion: Timestamp
   fecha_actualizacion?: Timestamp
 }
+
+/** Venta aprobada al inicio, con fallback pre-migración: un proyecto sin el
+ *  campo aún no tuvo cambios (la CF los rehúsa sin él), así que la venta
+ *  vigente ES la inicial. */
+export const ventaInicialDe = (
+  p: Pick<Proyecto, 'valor_venta_inicial' | 'snapshot'>,
+): number => p.valor_venta_inicial ?? p.snapshot.valor_venta
 
 // ── Constructor del snapshot (puro — testeable sin Firestore) ──
 

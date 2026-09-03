@@ -357,6 +357,19 @@ export interface Cotizacion {
   confirmacion_alcance?: ConfirmacionAlcance
   motivo_rechazo?: string
 
+  // ── P2-1 — Versión de CAMBIO (03-sep): corrige el alcance de un proyecto
+  // vivo desde la cotización. Solo desde `aprobada` CON proyecto; al aprobar
+  // la versión nueva, la CF aplica el cambio al proyecto (snapshot vigente +
+  // registro PRC). Distinta del "+ Nueva versión" comercial (que sigue
+  // prohibido desde aprobada).
+  /** Marca de cambio en curso — puesta al crear la versión de cambio,
+   *  limpiada al aprobarla (o al abandonar el intento con otra aprobación). */
+  cambio_en_curso?: { version: number; iniciado_por: string; fecha: Timestamp }
+  /** Motivo del cambio — obligatorio al APROBAR una versión de cambio; la CF
+   *  lo copia a la entrada de `cambios_alcance` del proyecto y luego el campo
+   *  se limpia junto con `cambio_en_curso`. */
+  motivo_cambio?: string
+
   // Enlace al proyecto nacido de esta cotización (F2.1.a; 1:1, id = id de la
   // cotización). Solo existe si se aprobó con sigp_f2_enabled activo.
   proyecto_id?: string
@@ -455,6 +468,28 @@ export const TRANSICIONES: Record<EstadoCotizacion, EstadoCotizacion[]> = {
 export function puedeNuevaVersion(estadoEfectivo: EstadoCotizacion): boolean {
   return estadoEfectivo === 'enviada' || estadoEfectivo === 'rechazada' || estadoEfectivo === 'vencida'
 }
+
+/**
+ * P2-1 — "Versión de cambio": el ÚNICO camino de versión desde `aprobada`,
+ * y solo cuando la cotización ya tiene proyecto (sin proyecto, un cambio de
+ * alcance no tiene a quién aplicarse — sería una nueva negociación, no un
+ * cambio). Quién la inicia: comercial Y proyectos (decisión de Giovanny —
+ * las mayores cantidades las detecta la obra, el cliente le avisa a
+ * comercial; los dos lados originan cambios; el control es la aprobación
+ * con evidencia, que no cambia).
+ */
+export function puedeVersionDeCambio(
+  estadoEfectivo: EstadoCotizacion,
+  tieneProyecto: boolean,
+): boolean {
+  return estadoEfectivo === 'aprobada' && tieneProyecto
+}
+
+/** ¿La versión activa es una versión de CAMBIO en curso? (gatea el motivo
+ *  obligatorio al aprobar y el chip informativo). */
+export const esVersionDeCambio = (
+  c: Pick<Cotizacion, 'cambio_en_curso' | 'version_activa'>,
+): boolean => c.cambio_en_curso?.version === c.version_activa
 
 // ── Lógica pura (totales + vencida) ───────────────────────────────────────────
 

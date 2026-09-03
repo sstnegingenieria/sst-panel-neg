@@ -7,7 +7,7 @@
 // cotizador) que deriva el valor del contratista — bidireccional. Derivados
 // con precisión completa; el render recorta a 2 decimales.
 import { Fragment, useState, useEffect, useMemo } from 'react'
-import { doc, updateDoc, arrayUnion, getDoc, Timestamp } from 'firebase/firestore'
+import { doc, updateDoc, arrayUnion, getDoc, deleteField, Timestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -286,12 +286,16 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
       await updateDoc(doc(db, 'proyectos', proyecto.id), {
         preliquidacion: nueva,
         ...(revierte ? { estado: 'preliquidacion_definida' } : {}),
+        // P2-1: revisar la preliquidación tras un cambio de alcance RESUELVE
+        // la señal — la corrección es justamente la revisión que el flag pedía.
+        ...(proyecto.alcance_desactualizado ? { alcance_desactualizado: deleteField() } : {}),
         fecha_actualizacion: ahora,
         historial: arrayUnion(entrada(proyecto.estado, revierte ? 'preliquidacion_definida' : proyecto.estado,
           `Corrección de preliquidación — ${detalle} — Motivo: ${corrMotivo.trim()}` +
           (revierte ? ' · REVIERTE la aprobación: requiere re-aprobación de Gerencia Administrativa' : '') +
           (ajuste ? ` · AJUSTE en ejecución (el proyecto continúa en «${ESTADO_PRY_LABEL[proyecto.estado]}») — pendiente de reconocer en la LIQUIDACIÓN por Gerencia Administrativa` : '') +
-          (pre.anticipo ? ` · anticipo ya girado ${fmtMoney(pre.anticipo.valor)} se mantiene (saldo recalculado contra el giro)` : ''))),
+          (pre.anticipo ? ` · anticipo ya girado ${fmtMoney(pre.anticipo.valor)} se mantiene (saldo recalculado contra el giro)` : '') +
+          (proyecto.alcance_desactualizado ? ` · resuelve la señal de alcance desactualizado (cambio v${proyecto.alcance_desactualizado.version})` : ''))),
       })
       toast(revierte
         ? 'Corregida — vuelve a "Definida", pendiente de re-aprobación'
@@ -301,6 +305,27 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
       setCorrForm(false)
       await reload()
     } catch { toast('Error al corregir la preliquidación', 'error') } finally { setAplicando(false) }
+  }
+
+  // ── P2-1: confirmar la preliquidación SIN cambios tras un cambio de
+  // alcance (el cambio no tocó el alcance de este contratista) — resuelve la
+  // señal con motivo y traza, sin mover valores.
+  const [confirmarSinCambioMotivo, setConfirmarSinCambioMotivo] = useState('')
+  const confirmarSinCambios = async () => {
+    if (!proyecto.alcance_desactualizado || !confirmarSinCambioMotivo.trim()) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      await updateDoc(doc(db, 'proyectos', proyecto.id), {
+        alcance_desactualizado: deleteField(),
+        fecha_actualizacion: ahora,
+        historial: arrayUnion(entrada(proyecto.estado, proyecto.estado,
+          `Preliquidación CONFIRMADA sin cambios tras el cambio de alcance v${proyecto.alcance_desactualizado.version} — Motivo: ${confirmarSinCambioMotivo.trim()}`)),
+      })
+      toast('Preliquidación confirmada — señal de alcance resuelta')
+      setConfirmarSinCambioMotivo('')
+      await reload()
+    } catch { toast('Error al confirmar (verifica tu rol)', 'error') } finally { setAplicando(false) }
   }
 
   const registrarAnticipo = async () => {
@@ -623,6 +648,32 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
         </div>
       )}
 
+      {/* ── P2-1: el alcance cambió DESPUÉS de definir la preliquidación —
+          hay que revisarla antes de confiar en la utilidad. Mientras el flag
+          viva, la utilidad NO muestra número (ajuste 1 de Giovanny). ── */}
+      {pre && proyecto.alcance_desactualizado && (
+        <div className="rounded-lg bg-amber-50 border border-amber-300 px-3 py-2.5 space-y-2">
+          <p className="text-sm text-amber-800">
+            ⚠ <strong>El alcance del proyecto cambió</strong> (versión v{proyecto.alcance_desactualizado.version},{' '}
+            {fFecha(proyecto.alcance_desactualizado.fecha)}) después de definir esta preliquidación
+            — grupos afectados: {proyecto.alcance_desactualizado.grupos_afectados.join(' · ') || '—'}.
+            Revísala: corrígela con «✎ Corregir preliquidación», o confírmala sin cambios si el
+            cambio no toca el alcance de este contratista.
+          </p>
+          {puedeGestionar && (
+            <div className="flex flex-wrap items-center gap-2">
+              <input value={confirmarSinCambioMotivo} onChange={e => setConfirmarSinCambioMotivo(e.target.value)}
+                placeholder="Motivo para confirmar sin cambios (obligatorio)…"
+                className="flex-1 min-w-[240px] px-2.5 py-1.5 border border-amber-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+              <button onClick={confirmarSinCambios} disabled={aplicando || !confirmarSinCambioMotivo.trim()}
+                className="text-xs px-3 py-1.5 rounded-lg font-medium border border-amber-400 text-amber-800 hover:bg-amber-100 disabled:opacity-50">
+                Confirmar sin cambios
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── DEFINIDA: resumen (interno) ── */}
       {pre && (
         <div className="space-y-1.5">
@@ -630,7 +681,9 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
           {filaDeriv('Modalidad', MODALIDAD_CONTRATISTA_LABEL[modalidadDe(pre)])}
           {filaDeriv('Valor contratista — mano de obra', fmtMoney(pre.valor_contratista), true)}
           {pre.valor_materiales !== undefined && filaDeriv('Presupuesto materiales (NEG)', fmtMoney(pre.valor_materiales))}
-          {filaDeriv('Utilidad esperada', `${fmtMoney(utilidadEsperadaDe(pre))} (${fmtNum(margenEsperadoPctDe(pre))}%)`)}
+          {proyecto.alcance_desactualizado
+            ? filaDeriv('Utilidad esperada', 'pendiente de revisar tras cambio de alcance')
+            : filaDeriv('Utilidad esperada', `${fmtMoney(utilidadEsperadaDe(pre))} (${fmtNum(margenEsperadoPctDe(pre))}%)`)}
           {pre.anticipo
             ? filaDeriv('Anticipo (girado)', fmtMoney(pre.anticipo.valor))
             : filaDeriv(`Anticipo (${fmtNum(pre.anticipo_pct)}%)`, fmtMoney(anticipoValorDe(pre)))}

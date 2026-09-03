@@ -14,8 +14,10 @@ import { useNacimientoProyecto } from '../../../hooks/sigp/useNacimientoProyecto
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import {
-  puedeNuevaVersion, subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, confirmacionAlcanceDe,
+  puedeNuevaVersion, puedeVersionDeCambio, esVersionDeCambio,
+  subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, confirmacionAlcanceDe,
 } from '../../../types/sigp/cotizacion'
+import { puedeGestionarProyectosUI } from '../../../types/sigp/permisos'
 import { etiquetaVersion, fmtMoney } from '../../../utils/sigp/formato'
 import type { Cotizacion, EstadoCotizacion, VersionCotizacion, SubtotalGrupo } from '../../../types/sigp/cotizacion'
 import type { SnapshotProyecto } from '../../../types/sigp/proyecto'
@@ -49,6 +51,9 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
   // "Pidió cambios" bloquea la aprobación y lleva a la versión nueva.
   const [alcanceAprobar, setAlcanceAprobar] = useState<{ grupos: SubtotalGrupo[]; total: number } | null>(null)
   const [eleccionAlcance, setEleccionAlcance] = useState<'tal_cual' | 'cambios' | null>(null)
+  // P2-1: motivo OBLIGATORIO al aprobar una versión de CAMBIO — la CF lo
+  // copia al registro `cambios_alcance` del proyecto (PRC del SGI).
+  const [motivoCambioTexto, setMotivoCambioTexto] = useState('')
 
   // ── §16 (ii) — el proyecto nace SERVER-SIDE (CF crearProyectoAlAprobar).
   // El cliente solo deja STAGED el snapshot (`snapshot_proyecto`) en el mismo
@@ -110,7 +115,15 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
     } finally { setAplicando(false) }
   }
 
-  if (!puedeGestionar) return null
+  // P2-1: la versión de CAMBIO la inician comercial Y proyectos (decisión de
+  // Giovanny — las mayores cantidades las detecta la obra, el cliente le
+  // avisa a comercial; el control sigue siendo la aprobación con evidencia).
+  // Las reglas ya lo permiten (write cotizaciones = puedeGestionarProyectos,
+  // helper amplio que incluye ambos lados); este gate es de UI.
+  const puedeIniciarCambio = puedeGestionar || puedeGestionarProyectosUI(user?.rol)
+  const enCambio = esVersionDeCambio(cotizacion)
+
+  if (!puedeGestionar && !puedeIniciarCambio) return null
 
   const entrada = (de: EstadoCotizacion, a: EstadoCotizacion, extra?: { motivo?: string; version?: number }) => ({
     de, a,
@@ -185,6 +198,7 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
     setEleccionAlcance(null)
     setEvidencia(null)
     setAlcanceAprobar(null)
+    setMotivoCambioTexto('')
     setModalAprobar(true)
     try {
       const vSnap = await getDoc(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(cotizacion.version_activa)))
@@ -201,8 +215,10 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
 
   const aprobar = async () => {
     // Validaciones DURAS: sin evidencia no hay aprobación; sin la afirmación
-    // explícita "el cliente aprobó esto tal cual" tampoco (guard P1).
+    // explícita "el cliente aprobó esto tal cual" tampoco (guard P1); y una
+    // versión de CAMBIO exige el motivo del cambio (P2-1).
     if (!evidencia || eleccionAlcance !== 'tal_cual' || !alcanceAprobar) return
+    if (enCambio && !motivoCambioTexto.trim()) return
     setAplicando(true)
     try {
       // §16 (ii): el snapshot se construye ANTES de subir nada — si falla,
@@ -233,6 +249,9 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
         confirmacion_alcance: confirmacionAlcanceDe(user?.uid ?? '', ahora, cotizacion.version_activa, {
           grupos: alcanceAprobar.grupos.length, total: alcanceAprobar.total,
         }),
+        // P2-1: el motivo viaja en el doc disparador; la CF lo copia al
+        // registro del cambio y limpia motivo_cambio + cambio_en_curso.
+        ...(enCambio ? { motivo_cambio: motivoCambioTexto.trim() } : {}),
         // Staging §16 (ii): mismo updateDoc que la aprobación (atómico). La CF
         // crearProyectoAlAprobarCotizacion copia este snapshot al proyecto,
         // asigna el PRY y pasa la solicitud enlazada a «aceptada».
@@ -271,15 +290,47 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
     } catch { toast('Error al crear la nueva versión', 'error') } finally { setAplicando(false) }
   }
 
+  /** P2-1 — versión de CAMBIO desde aprobada (única vía): igual mecánica que
+   *  nuevaVersion + marca `cambio_en_curso`. Al aprobarla, la CF aplica el
+   *  cambio al proyecto (snapshot vigente + registro PRC) y limpia la marca. */
+  const versionDeCambio = async () => {
+    const n = cotizacion.version_activa + 1
+    if (!window.confirm(`¿Crear la versión de CAMBIO ${etiquetaVersion(n)} de ${cotizacion.consecutivo}? Al aprobarla, la venta y el alcance de ${proyectoConsecutivo ?? 'su proyecto'} se ACTUALIZARÁN con registro del cambio.`)) return
+    setAplicando(true)
+    try {
+      const vSnap = await getDoc(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(cotizacion.version_activa)))
+      if (!vSnap.exists()) throw new Error('versión activa no encontrada')
+      const base = vSnap.data() as Omit<VersionCotizacion, 'id'>
+      const { fecha_envio: _fe, pdf_url: _pdf, pdf_hash: _ph, ...copia } = base
+      const ahora = Timestamp.now()
+      await setDoc(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(n)), {
+        ...copia, version: n, creada_por: user?.uid ?? '', fecha_creacion: ahora,
+      })
+      await updateDoc(doc(db, 'cotizaciones', cotizacion.id), {
+        estado: 'borrador', version_activa: n,
+        cambio_en_curso: { version: n, iniciado_por: user?.uid ?? '', fecha: ahora },
+        fecha_envio: deleteField(), motivo_rechazo: deleteField(),
+        pdf_desactualizado: deleteField(),
+        fecha_actualizacion: ahora,
+        historial: arrayUnion(entrada(efectivo, 'borrador', { motivo: `Versión de CAMBIO v${n} — corrige el alcance de ${proyectoConsecutivo ?? 'su proyecto'}`, version: n })),
+      })
+      toast(`Versión de cambio ${etiquetaVersion(n)} creada (borrador) — edita, envía y aprueba con la evidencia del cliente`)
+      await reload()
+    } catch { toast('Error al crear la versión de cambio', 'error') } finally { setAplicando(false) }
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {efectivo === 'borrador' && (
+      {/* Enviar: comercial siempre; en versión de CAMBIO también proyectos
+          (quien la inició debe poder completarla — la aprobación sigue
+          siendo el control). */}
+      {efectivo === 'borrador' && (puedeGestionar || (enCambio && puedeIniciarCambio)) && (
         <button onClick={enviar} disabled={aplicando}
           className="text-sm px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 disabled:opacity-50">
           Enviar →
         </button>
       )}
-      {efectivo === 'enviada' && (
+      {efectivo === 'enviada' && puedeGestionar && (
         <>
           <button onClick={abrirModalAprobar} disabled={aplicando}
             className="text-sm px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
@@ -291,11 +342,27 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
           </button>
         </>
       )}
-      {puedeNuevaVersion(efectivo) && (
+      {puedeNuevaVersion(efectivo) && puedeGestionar && (
         <button onClick={nuevaVersion} disabled={aplicando}
           className="text-sm px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
           + Nueva versión
         </button>
+      )}
+      {/* P2-1: versión de CAMBIO — el único camino desde aprobada, solo con
+          proyecto. Lo inician comercial Y proyectos. */}
+      {puedeVersionDeCambio(efectivo, !!proyectoId) && puedeIniciarCambio && (
+        <button onClick={versionDeCambio} disabled={aplicando}
+          title="Corrige el alcance del proyecto: crea una versión nueva de la cotización; al aprobarla, la venta y el alcance del proyecto se actualizan con registro del cambio"
+          className="text-sm px-3 py-1.5 rounded-lg font-medium border border-amber-300 text-amber-800 hover:bg-amber-50 disabled:opacity-50">
+          ± Versión de cambio
+        </button>
+      )}
+      {/* Chip informativo mientras el cambio está en curso */}
+      {enCambio && efectivo !== 'aprobada' && (
+        <span className="text-xs px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 font-semibold cursor-default"
+          title="Al aprobar esta versión, la venta y el alcance del proyecto se actualizarán con registro del cambio">
+          ± Cambio de alcance en curso{proyectoConsecutivo ? ` → 🏗 ${proyectoConsecutivo}` : ''}
+        </span>
       )}
       {efectivo === 'aprobada' && (
         f2Enabled ? (
@@ -409,6 +476,19 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
             </div>
           ) : (
             <div className="space-y-2">
+              {enCambio && (
+                <label className="block text-sm">
+                  <span className="font-medium text-amber-800">
+                    Motivo del cambio de alcance <span className="text-red-500">*</span>
+                  </span>
+                  <span className="block text-xs text-gray-500">
+                    Al aprobar, la venta y el alcance de {proyectoConsecutivo ?? 'su proyecto'} se actualizan — este motivo queda en el registro del cambio (PRC).
+                  </span>
+                  <textarea value={motivoCambioTexto} onChange={e => setMotivoCambioTexto(e.target.value)} rows={2}
+                    placeholder="Ej: el cliente canceló la actividad X — decisión del [fecha]…"
+                    className="mt-1 w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                </label>
+              )}
               <p className="text-sm text-gray-600">
                 Adjunta la <span className="font-semibold">evidencia de aprobación del cliente</span> (correo, orden de compra o contrato). Sin evidencia no es posible aprobar.
               </p>
@@ -420,7 +500,7 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
 
           <div className="flex justify-end gap-2">
             <button onClick={() => setModalAprobar(false)} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Cancelar</button>
-            <button onClick={aprobar} disabled={!evidencia || eleccionAlcance !== 'tal_cual' || !alcanceAprobar || aplicando}
+            <button onClick={aprobar} disabled={!evidencia || eleccionAlcance !== 'tal_cual' || !alcanceAprobar || (enCambio && !motivoCambioTexto.trim()) || aplicando}
               title={eleccionAlcance !== 'tal_cual' ? 'Confirma primero que el cliente aprobó el alcance tal cual' : undefined}
               className="text-sm px-3 py-1.5 rounded-lg font-medium bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50">
               {aplicando ? 'Aprobando…' : 'Aprobar'}

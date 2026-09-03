@@ -53,6 +53,55 @@ function formatearPry(año, siguiente) {
   return `PRY-${año}-${String(siguiente).padStart(padding, '0')}`;
 }
 
+// ── P2-1 — Cambios de alcance (03-sep) ──────────────────────────────────────
+
+/**
+ * Diff del alcance por GRUPO (arrays de {grupo, items, subtotal} del snapshot).
+ * ETIQUETAS NEUTRAS (decisión de Giovanny): a nivel de grupo un subtotal sube
+ * por cantidad O por precio — indistinguibles; 'aumento'/'disminucion' no
+ * afirman lo que no se puede distinguir. 'cancelacion' (grupo removido) y
+ * 'adicional' (grupo nuevo) sí son distinguibles.
+ */
+function diffAlcance(alcanceViejo, alcanceNuevo) {
+  const viejos = new Map((alcanceViejo || []).map((g) => [g.grupo, g.subtotal || 0]));
+  const nuevos = new Map((alcanceNuevo || []).map((g) => [g.grupo, g.subtotal || 0]));
+  const componentes = [];
+  for (const [grupo, sub] of viejos) {
+    if (!nuevos.has(grupo)) {
+      componentes.push({ grupo, tipo: 'cancelacion', delta: -sub });
+    } else {
+      const subNuevo = nuevos.get(grupo);
+      if (subNuevo > sub) componentes.push({ grupo, tipo: 'aumento', delta: subNuevo - sub });
+      else if (subNuevo < sub) componentes.push({ grupo, tipo: 'disminucion', delta: subNuevo - sub });
+    }
+  }
+  for (const [grupo, sub] of nuevos) {
+    if (!viejos.has(grupo)) componentes.push({ grupo, tipo: 'adicional', delta: sub });
+  }
+  return componentes;
+}
+
+/**
+ * Decide qué hace la CF con una cotización aprobada (PURA — testeable).
+ *  - 'crear': el proyecto no existe.
+ *  - 'cambio': existe y la versión aprobada es MAYOR que la del proyecto.
+ *  - 'bloqueado_migracion': sería cambio, pero el proyecto NO tiene
+ *    `valor_venta_inicial` — GUARDA DURA (restricción de secuencia de
+ *    Giovanny): si el cambio corriera antes de la migración, el backfill
+ *    tomaría la venta YA corregida y el número original se perdería.
+ *    No se aplica nada; se corrige corriendo la migración y re-tocando.
+ *  - 'reparar': todo lo demás (misma versión, versión del proyecto
+ *    desconocida, reintentos) — comportamiento histórico de reparar enlaces.
+ */
+function decidirAccion(proyectoData, versionActiva) {
+  if (!proyectoData) return 'crear';
+  const verProy = proyectoData.cotizacion_version;
+  if (typeof verProy === 'number' && typeof versionActiva === 'number' && versionActiva > verProy) {
+    return typeof proyectoData.valor_venta_inicial === 'number' ? 'cambio' : 'bloqueado_migracion';
+  }
+  return 'reparar';
+}
+
 /** Quién aceptó el preventivo: último eslabón a→'aceptada' del historial. */
 function quienAcepto(historial) {
   const h = Array.isArray(historial) ? historial : [];
@@ -103,9 +152,78 @@ async function nacerProyecto(origen, docId, data) {
 
     const ahora = Timestamp.now();
 
-    // ── Vía de REPARACIÓN: el proyecto ya existe (re-disparo/carrera) ──
+    // ── El proyecto ya existe: reparar, aplicar cambio, o bloquear ──
     if (proyectoSnap.exists) {
-      const consecutivo = proyectoSnap.data().consecutivo;
+      const proyecto = proyectoSnap.data();
+      const consecutivo = proyecto.consecutivo;
+      const accion = origen === 'cotizacion'
+        ? decidirAccion(proyecto, data.version_activa)
+        : 'reparar';   // preventivos no tienen versiones — siempre reparación
+
+      if (accion === 'bloqueado_migracion') {
+        // GUARDA DURA (secuencia CF → migración → Vercel): sin
+        // valor_venta_inicial NO se aplica el cambio — jamás se backfillea
+        // aquí (tomaría la venta ya corregida y borraría el número original).
+        console.error(`crearProyectoAlAprobar: cotización ${docId} v${data.version_activa} es un CAMBIO DE ALCANCE pero el proyecto no tiene valor_venta_inicial — MIGRACIÓN PENDIENTE, no se aplica (correr la migración y re-tocar el doc)`);
+        return;
+      }
+
+      if (accion === 'cambio') {
+        // ── P2-1: APLICAR CAMBIO DE ALCANCE ──
+        // Sanity idéntica a la creación: el staged debe corresponder a la
+        // versión aprobada.
+        if (!versionSnap || !versionSnap.exists) {
+          console.error(`crearProyectoAlAprobar: cambio ${docId} sin versión ${data.version_activa} — no se aplica`);
+          return;
+        }
+        const total = versionSnap.data().totales && versionSnap.data().totales.total;
+        if (snapshot.valor_venta !== total) {
+          console.error(`crearProyectoAlAprobar: cambio ${docId} — snapshot.valor_venta (${snapshot.valor_venta}) != total de la versión aprobada (${total}) — no se aplica`);
+          return;
+        }
+
+        const ventaAnterior = proyecto.snapshot && proyecto.snapshot.valor_venta;
+        const componentes = diffAlcance(proyecto.snapshot && proyecto.snapshot.alcance, snapshot.alcance);
+        const cambio = {
+          fecha: ahora,
+          version: data.version_activa,
+          delta_venta: snapshot.valor_venta - (ventaAnterior || 0),
+          componentes,
+          motivo: data.motivo_cambio || 'Cambio de alcance aprobado (sin motivo registrado)',
+          aprobado_por: data.aprobada_por || 'sistema',
+        };
+        const patchProyecto = {
+          snapshot,
+          cotizacion_version: data.version_activa,
+          cambios_alcance: FieldValue.arrayUnion(cambio),
+          fecha_actualizacion: ahora,
+          historial: FieldValue.arrayUnion({
+            a: proyecto.estado, por: 'sistema', fecha: ahora,
+            motivo: `Cambio de alcance aplicado — ${data.consecutivo} v${data.version_activa}: venta ${ventaAnterior} → ${snapshot.valor_venta}. ${cambio.motivo}`,
+          }),
+        };
+        // Decisión 8 (señalización): con preliquidación definida, el cambio
+        // la deja DESACTUALIZADA — la ficha exige revisarla (corregir o
+        // confirmar sin cambio); mientras tanto la utilidad no muestra número.
+        if (proyecto.preliquidacion) {
+          patchProyecto.alcance_desactualizado = {
+            version: data.version_activa,
+            fecha: ahora,
+            grupos_afectados: componentes.map((c) => c.grupo),
+          };
+        }
+        tx.update(proyectoRef, patchProyecto);
+        // Limpia la marca de cambio en curso y el motivo del doc disparador
+        // (y asegura enlaces, por si el intento venía de una reparación).
+        tx.update(origenRef, {
+          proyecto_id: docId, proyecto_consecutivo: consecutivo,
+          cambio_en_curso: FieldValue.delete(),
+          motivo_cambio: FieldValue.delete(),
+        });
+        return;
+      }
+
+      // ── Vía de REPARACIÓN (comportamiento histórico) ──
       if (data.proyecto_id !== docId || data.proyecto_consecutivo !== consecutivo) {
         tx.update(origenRef, { proyecto_id: docId, proyecto_consecutivo: consecutivo });
       }
@@ -154,6 +272,8 @@ async function nacerProyecto(origen, docId, data) {
           ...(data.cliente_id ? { cliente_id: data.cliente_id } : {}),
           ...(data.prospecto_nombre ? { prospecto_nombre: data.prospecto_nombre } : {}),
           snapshot,
+          // P2-1: la venta INICIAL se congela al nacer (los tres números).
+          valor_venta_inicial: snapshot.valor_venta,
           estado: 'creado',
           historial: [{
             a: 'creado', por: 'sistema', fecha: ahora,
@@ -169,6 +289,7 @@ async function nacerProyecto(origen, docId, data) {
           solicitud_consecutivo: data.consecutivo,
           ...(data.cliente_id ? { cliente_id: data.cliente_id } : {}),
           snapshot,
+          valor_venta_inicial: snapshot.valor_venta,   // P2-1
           estado: 'creado',
           historial: [{
             a: 'creado', por: 'sistema', fecha: ahora,
@@ -225,4 +346,8 @@ const crearProyectoAlAceptarPreventivo = onDocumentWritten(
   },
 );
 
-module.exports = { crearProyectoAlAprobarCotizacion, crearProyectoAlAceptarPreventivo };
+module.exports = {
+  crearProyectoAlAprobarCotizacion, crearProyectoAlAceptarPreventivo,
+  // P2-1 — exportados para tests (patrón claims/horario)
+  diffAlcance, decidirAccion,
+};
