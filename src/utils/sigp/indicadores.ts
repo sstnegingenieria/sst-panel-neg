@@ -158,8 +158,14 @@ export function indSst(valorManual: number | null): ValorIndicador {
 
 /** Utilidad REAL por proyecto (operativo): venta pactada − costo ejecutado
  *  derivado. Hereda de costoEjecutadoDe el gate desde 'ejecutado', el manual
- *  histórico y la canasta completa (mano de obra + OCs + menores + reembolsos). */
+ *  histórico y la canasta completa (mano de obra + OCs + menores + reembolsos).
+ *  P2-1 (ajuste 1 de Giovanny): con `alcance_desactualizado` puesto,
+ *  `preliquidacion.valor_venta` quedó VIEJA respecto del cambio aprobado —
+ *  calcular utilidad con ella sería el mismo error que el bloque arregla, en
+ *  chico → null (pendiente de revisar), nunca una cifra creíble con datos
+ *  que sabemos desactualizados. */
 export function utilidadRealDe(p: Proyecto, comprasTotal: number): number | null {
+  if (p.alcance_desactualizado) return null
   const ce = costoEjecutadoDe(p, comprasTotal)
   if (ce == null || !p.preliquidacion) return null
   return p.preliquidacion.valor_venta - ce

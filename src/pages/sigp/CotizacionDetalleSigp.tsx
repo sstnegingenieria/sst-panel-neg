@@ -13,7 +13,7 @@ import { useCotizacionDetalle } from '../../hooks/sigp/useCotizacionDetalle'
 import { useAuth } from '../../contexts/AuthContext'
 import { useConsecutivo } from '../../hooks/sigp/useConsecutivo'
 import { toast } from '../../components/shared/Toast'
-import { puedeGestionarCotizacionesUI } from '../../types/sigp/permisos'
+import { puedeGestionarCotizacionesUI, puedeGestionarProyectosUI } from '../../types/sigp/permisos'
 import {
   calcularTotales, valorTotalItem, estadoEfectivo, valorNegDe,
   ESTADO_COT_LABEL, ESTADO_COT_COLOR, ESQUEMA_LABEL, ESQUEMAS,
@@ -23,7 +23,7 @@ import {
   conInstanciaIds, nuevaInstanciaId, sembrarActividadesDesdeCapitulos,
   PRESETS_FORMA_PAGO, PRESETS_TIEMPO_EJECUCION, PRESETS_GARANTIA, OBSERVACIONES_BASE,
   esTransporteZona, esItemTransporte, aplicarTransporte, sugerirTransporteZona,
-  totalDescuentosDe, observacionesConNotaDescuento,
+  totalDescuentosDe, observacionesConNotaDescuento, esVersionDeCambio,
 } from '../../types/sigp/cotizacion'
 import type { ModoAgrupacion, Actividad, TipoInversion, TipoDescuento, ModoDescuento, DescuentoCotizacion } from '../../types/sigp/cotizacion'
 import type { CatalogoItem } from '../../types/sigp/catalogo'
@@ -235,7 +235,12 @@ export default function CotizacionDetalleSigp() {
   // editable como un borrador; el COT se asigna al PRIMER guardado (persistir
   // lo materializa) — "al empezar a llenarla".
   const esPendiente = cotizacion?.estado === 'pendiente_diligenciar'
-  const editable = (cotizacion?.estado === 'borrador' || esPendiente) && puedeGestionar
+  // P2-1: un borrador de VERSIÓN DE CAMBIO también lo edita el lado de
+  // proyectos (quien detecta las mayores cantidades es la obra — decisión de
+  // Giovanny); la aprobación con evidencia sigue siendo el control.
+  const enCambio = !!cotizacion && esVersionDeCambio(cotizacion)
+  const editable = (cotizacion?.estado === 'borrador' || esPendiente)
+    && (puedeGestionar || (enCambio && puedeGestionarProyectosUI(user?.rol)))
   const capitulos = useMemo(() => [...new Set(items.map(i => i.capitulo?.trim()).filter(Boolean))] as string[], [items])
   const itemsCero = items.filter(i => (i.valor_unitario || 0) <= 0).length
   const actividadesOrdenadas = useMemo(() => [...actividades].sort((a, b) => a.orden - b.orden), [actividades])
