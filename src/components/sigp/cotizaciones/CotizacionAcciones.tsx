@@ -13,9 +13,11 @@ import { veProyectosUI } from '../../../types/sigp/permisos'
 import { useNacimientoProyecto } from '../../../hooks/sigp/useNacimientoProyecto'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
-import { puedeNuevaVersion } from '../../../types/sigp/cotizacion'
-import { etiquetaVersion } from '../../../utils/sigp/formato'
-import type { Cotizacion, EstadoCotizacion, VersionCotizacion } from '../../../types/sigp/cotizacion'
+import {
+  puedeNuevaVersion, subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, confirmacionAlcanceDe,
+} from '../../../types/sigp/cotizacion'
+import { etiquetaVersion, fmtMoney } from '../../../utils/sigp/formato'
+import type { Cotizacion, EstadoCotizacion, VersionCotizacion, SubtotalGrupo } from '../../../types/sigp/cotizacion'
 import type { SnapshotProyecto } from '../../../types/sigp/proyecto'
 
 interface CotizacionAccionesProps {
@@ -42,6 +44,11 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
   const [motivo, setMotivo] = useState('')
   const [modalAprobar, setModalAprobar] = useState(false)
   const [evidencia, setEvidencia] = useState<File | null>(null)
+  // ── P1 — guard al aprobar (03-sep): el modal muestra el alcance que se va a
+  // congelar (grupos con valores) y exige una elección explícita SIN default.
+  // "Pidió cambios" bloquea la aprobación y lleva a la versión nueva.
+  const [alcanceAprobar, setAlcanceAprobar] = useState<{ grupos: SubtotalGrupo[]; total: number } | null>(null)
+  const [eleccionAlcance, setEleccionAlcance] = useState<'tal_cual' | 'cambios' | null>(null)
 
   // ── §16 (ii) — el proyecto nace SERVER-SIDE (CF crearProyectoAlAprobar).
   // El cliente solo deja STAGED el snapshot (`snapshot_proyecto`) en el mismo
@@ -172,8 +179,30 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
     } catch { toast('Error al rechazar', 'error') } finally { setAplicando(false) }
   }
 
+  /** P1: abre el modal de aprobar CARGANDO el alcance de la versión activa —
+   *  sin alcance en pantalla no hay guard, y sin guard no se aprueba a ciegas. */
+  const abrirModalAprobar = async () => {
+    setEleccionAlcance(null)
+    setEvidencia(null)
+    setAlcanceAprobar(null)
+    setModalAprobar(true)
+    try {
+      const vSnap = await getDoc(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(cotizacion.version_activa)))
+      if (!vSnap.exists()) throw new Error('versión activa no encontrada')
+      const v = vSnap.data() as VersionCotizacion
+      const grupos = subtotalesPorGrupo(v.items ?? [], modoAgrupacionDe(v), actividadesDe(v))
+      setAlcanceAprobar({ grupos, total: v.totales?.total ?? 0 })
+    } catch (e) {
+      console.error('No se pudo cargar el alcance para el guard de aprobación:', e)
+      toast('No se pudo cargar el alcance de la versión — reintenta', 'error')
+      setModalAprobar(false)
+    }
+  }
+
   const aprobar = async () => {
-    if (!evidencia) return  // validación DURA: sin evidencia no hay aprobación
+    // Validaciones DURAS: sin evidencia no hay aprobación; sin la afirmación
+    // explícita "el cliente aprobó esto tal cual" tampoco (guard P1).
+    if (!evidencia || eleccionAlcance !== 'tal_cual' || !alcanceAprobar) return
     setAplicando(true)
     try {
       // §16 (ii): el snapshot se construye ANTES de subir nada — si falla,
@@ -200,11 +229,17 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
           tamano: evidencia.size, subido_en: ahora,
         },
         aprobada_por: user?.uid ?? '', fecha_aprobacion: ahora, fecha_actualizacion: ahora,
+        // P1: la afirmación de quien aprueba, tras VER el alcance en pantalla.
+        confirmacion_alcance: confirmacionAlcanceDe(user?.uid ?? '', ahora, cotizacion.version_activa, {
+          grupos: alcanceAprobar.grupos.length, total: alcanceAprobar.total,
+        }),
         // Staging §16 (ii): mismo updateDoc que la aprobación (atómico). La CF
         // crearProyectoAlAprobarCotizacion copia este snapshot al proyecto,
         // asigna el PRY y pasa la solicitud enlazada a «aceptada».
         ...(snapshotProyecto ? { snapshot_proyecto: snapshotProyecto } : {}),
-        historial: arrayUnion(entrada('enviada', 'aprobada', { motivo: `Evidencia: ${evidencia.name}` })),
+        historial: arrayUnion(entrada('enviada', 'aprobada', {
+          motivo: `Evidencia: ${evidencia.name} · Alcance confirmado tal cual (${alcanceAprobar.grupos.length} grupos, ${fmtMoney(alcanceAprobar.total)})`,
+        })),
       })
       toast(`${cotizacion.consecutivo} aprobada 🎉${snapshotProyecto ? ' — el sistema está creando el proyecto' : ''}`)
       setModalAprobar(false); setEvidencia(null)
@@ -246,7 +281,7 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
       )}
       {efectivo === 'enviada' && (
         <>
-          <button onClick={() => setModalAprobar(true)} disabled={aplicando}
+          <button onClick={abrirModalAprobar} disabled={aplicando}
             className="text-sm px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
             ✓ Aprobar
           </button>
@@ -316,18 +351,77 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
         </div>
       </Modal>
 
-      {/* Modal aprobar (evidencia OBLIGATORIA — botón deshabilitado sin adjunto) */}
-      <Modal isOpen={modalAprobar} onClose={() => setModalAprobar(false)} title={`Aprobar ${cotizacion.consecutivo}`}>
-        <div className="space-y-3">
-          <p className="text-sm text-gray-600">
-            Adjunta la <span className="font-semibold">evidencia de aprobación del cliente</span> (correo, orden de compra o contrato). Sin evidencia no es posible aprobar.
-          </p>
-          <input type="file" onChange={e => setEvidencia(e.target.files?.[0] ?? null)}
-            className="block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
-          {evidencia && <p className="text-xs text-gray-500">📎 {evidencia.name} ({Math.round(evidencia.size / 1024)} KB)</p>}
+      {/* Modal aprobar — P1: guard de RECONOCIMIENTO del alcance + evidencia
+          obligatoria. La elección es explícita, sin default: aprobar exige
+          afirmar "el cliente aprobó esto tal cual" con el alcance a la vista. */}
+      <Modal isOpen={modalAprobar} onClose={() => setModalAprobar(false)} title={`Aprobar ${cotizacion.consecutivo}`} size="lg">
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-semibold text-gray-800">
+              Este es el alcance que se va a congelar{etiquetaVersion(cotizacion.version_activa) ? ` (versión ${etiquetaVersion(cotizacion.version_activa)})` : ''}:
+            </p>
+            {alcanceAprobar === null ? (
+              <p className="mt-2 text-sm text-gray-400">Cargando el alcance…</p>
+            ) : (
+              <div className="mt-2 border border-gray-200 rounded-lg divide-y divide-gray-100">
+                {alcanceAprobar.grupos.map(g => (
+                  <div key={g.grupo_id} className="flex items-center justify-between px-3 py-2 text-sm">
+                    <span className="text-gray-700">{g.grupo_nombre}</span>
+                    <span className="font-mono text-gray-700">{fmtMoney(g.subtotal)}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between px-3 py-2 text-sm bg-brand-50">
+                  <span className="font-semibold text-brand-800">Total (con impuestos)</span>
+                  <span className="font-mono font-bold text-brand-800">{fmtMoney(alcanceAprobar.total)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
+              <input type="radio" name="eleccion-alcance" className="mt-0.5 accent-brand-700"
+                checked={eleccionAlcance === 'tal_cual'} onChange={() => setEleccionAlcance('tal_cual')} />
+              <span className="text-sm text-gray-800">
+                <span className="font-semibold">El cliente aprobó esto tal cual.</span>{' '}
+                <span className="text-gray-500">Todas las actividades listadas hacen parte de lo aprobado.</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
+              <input type="radio" name="eleccion-alcance" className="mt-0.5 accent-brand-700"
+                checked={eleccionAlcance === 'cambios'} onChange={() => setEleccionAlcance('cambios')} />
+              <span className="text-sm text-gray-800">
+                <span className="font-semibold">El cliente pidió cambios.</span>{' '}
+                <span className="text-gray-500">Quitar o modificar algo — no se aprueba esta versión.</span>
+              </span>
+            </label>
+          </div>
+
+          {eleccionAlcance === 'cambios' ? (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 space-y-2">
+              <p className="text-sm text-amber-800">
+                Esta versión no refleja lo que el cliente aprobó — genera la versión nueva con los cambios y apruébala cuando esté enviada.
+              </p>
+              <button onClick={() => { setModalAprobar(false); nuevaVersion() }} disabled={aplicando}
+                className="text-sm px-3 py-1.5 rounded-lg font-medium border border-amber-300 text-amber-800 hover:bg-amber-100 disabled:opacity-50">
+                + Generar versión nueva →
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-gray-600">
+                Adjunta la <span className="font-semibold">evidencia de aprobación del cliente</span> (correo, orden de compra o contrato). Sin evidencia no es posible aprobar.
+              </p>
+              <input type="file" onChange={e => setEvidencia(e.target.files?.[0] ?? null)}
+                className="block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
+              {evidencia && <p className="text-xs text-gray-500">📎 {evidencia.name} ({Math.round(evidencia.size / 1024)} KB)</p>}
+            </div>
+          )}
+
           <div className="flex justify-end gap-2">
             <button onClick={() => setModalAprobar(false)} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Cancelar</button>
-            <button onClick={aprobar} disabled={!evidencia || aplicando}
+            <button onClick={aprobar} disabled={!evidencia || eleccionAlcance !== 'tal_cual' || !alcanceAprobar || aplicando}
+              title={eleccionAlcance !== 'tal_cual' ? 'Confirma primero que el cliente aprobó el alcance tal cual' : undefined}
               className="text-sm px-3 py-1.5 rounded-lg font-medium bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50">
               {aplicando ? 'Aprobando…' : 'Aprobar'}
             </button>
