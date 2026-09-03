@@ -349,6 +349,12 @@ export interface Cotizacion {
   evidencia_aprobacion?: Adjunto   // correo/OC/contrato — obligatorio para aprobar
   aprobada_por?: string
   fecha_aprobacion?: Timestamp
+  /** P1 (03-sep): afirmación de quien aprueba tras VER el alcance en pantalla
+   *  — "el cliente aprobó esto tal cual". Guard contra aprobar de memoria una
+   *  versión que el cliente pidió cambiar (caso Megacenter: se aprobó la v4
+   *  completa cuando el cliente había pedido quitar una actividad por
+   *  teléfono). Es evidencia de la aprobación, junto a la del cliente. */
+  confirmacion_alcance?: ConfirmacionAlcance
   motivo_rechazo?: string
 
   // Enlace al proyecto nacido de esta cotización (F2.1.a; 1:1, id = id de la
@@ -542,6 +548,44 @@ export const GRUPO_OTROS_ID = '__otros__'
  *  las anteriores a F1.5.2) se comporta como 'capitulo'. Sin migración. */
 export function modoAgrupacionDe(v: Pick<VersionCotizacion, 'modo_agrupacion'>): ModoAgrupacion {
   return v.modo_agrupacion ?? 'capitulo'
+}
+
+// ── P1 — guard al aprobar: confirmación del alcance (03-sep) ─────────────────
+//
+// El guard NO es un "¿está seguro?": muestra el alcance que se va a congelar
+// (grupos con valores, en pantalla — la memoria falla al recordar, casi nunca
+// al reconocer) y exige una ELECCIÓN explícita sin default: "el cliente aprobó
+// esto tal cual" (procede) o "el cliente pidió cambios" (no deja aprobar y
+// lleva a la versión nueva). La respuesta se registra como afirmación de quien
+// aprueba en el doc de la cotización.
+
+export interface ConfirmacionAlcance {
+  /** Afirmación literal: quien aprueba VIO el alcance y confirma que el
+   *  cliente lo aprobó tal cual (la otra opción no llega a este registro:
+   *  bloquea la aprobación). */
+  alcance_tal_cual: true
+  por: string                  // uid de quien afirma
+  fecha: Timestamp
+  version: number              // versión cuyo alcance se confirmó
+  grupos: number               // cuántos grupos/actividades vio en pantalla
+  total: number                // total (con impuestos) que vio en pantalla
+}
+
+/** Builder puro (testeable) de la afirmación registrada al aprobar. */
+export function confirmacionAlcanceDe(
+  uid: string,
+  fecha: Timestamp,
+  version: number,
+  resumen: { grupos: number; total: number },
+): ConfirmacionAlcance {
+  return {
+    alcance_tal_cual: true,
+    por: uid,
+    fecha,
+    version,
+    grupos: resumen.grupos,
+    total: resumen.total,
+  }
 }
 
 /** Default lazy: versión sin `actividades` → []. */
