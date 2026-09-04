@@ -271,11 +271,28 @@ export const costoContratistasDe = (asigs: AsignacionContratista[]): number =>
 // dice CUÁLES mirar en vez de depender de que alguien se acuerde. NO excluye
 // del indicador (un margen alto puede ser legítimo; decide un humano).
 //
-// UMBRAL calibrado CON EL DATO (03-sep, 40 preliquidaciones reales): la
-// distribución de márgenes implícitos corta naturalmente entre 70,1% y 63,9%
-// — con 70 caen 7 (Megacenter 94,1% · PRY-015 92,5% · Triara 92,0% ·
-// PRY-001 86,5% · PRY-040 79,5% · PRY-024 79,0% · PRY-026 70,1%) y el bloque
-// legítimo de 40–64% (preventivos IHS incluidos) queda fuera. Ajustable.
+// UMBRAL calibrado CON EL DATO (03-sep, 40 preliquidaciones reales; corte
+// natural de la distribución entre ~70% y ~64%): con 70 caen CINCO —
+// Megacenter 94,1% · Triara 92,0% · PRY-001 86,5% · PRY-040 79,5% ·
+// PRY-026 70,1% — y el bloque legítimo de 40–64% (preventivos IHS
+// incluidos) queda fuera. Ajustable.
+//
+// ⚠ POR QUÉ 5 Y NO 7 (corrección 04-sep, dictada por Giovanny): la primera
+// calibración listó 7 porque el script crudo de análisis NO restaba los
+// materiales NEG en solo_mano_obra; este motor SÍ los resta (un margen alto
+// ahí sería falso). Esa diferencia convierte dos falsos positivos en cero:
+// PRY-024 (materiales $380M sobre CD $572M → margen real 12,6%) y
+// PRY-015 (materiales $22M sobre CD $21,5M → margen real −10,9%).
+//
+// ⚠ PUNTO CIEGO CONOCIDO (lo más importante del hallazgo — no
+// redescubrirlo): PRY-2026-024 salió de la lista con 12,6% y AUN ASÍ tiene
+// un problema real — Giovanny confirmó que ahí hay varios contratistas cuya
+// mano de obra no está registrada en ninguna parte (se registran como
+// asignaciones de REGISTRO HISTÓRICO). Con materiales de $380M el
+// presupuesto SE VE razonable aunque falte la mano de obra de dos o tres
+// contratistas. Esta señal detecta contratistas que NO CUBREN su alcance;
+// NO detecta contratistas que NO EXISTEN en el sistema. Herramienta útil
+// con un límite conocido.
 
 export const UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT = 70
 
