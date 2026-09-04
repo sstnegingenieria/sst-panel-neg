@@ -39,6 +39,9 @@ export const ESTADOS_ASIGNACION = [
   'preliquidacion_definida',
   'preliquidacion_aprobada',
   'anticipo_girado',
+  // P2-4: SOLO alcanzable por tipo 'administracion_directa' — costo propio
+  // estimado y cargado (habilita la ejecución; entra al presupuesto).
+  'estimada',
   'liquidada',
   'cancelada',
 ] as const
@@ -49,15 +52,37 @@ export const ESTADO_ASIG_LABEL: Record<EstadoAsignacion, string> = {
   preliquidacion_definida: 'Preliquidación definida',
   preliquidacion_aprobada: 'Preliquidación aprobada',
   anticipo_girado: 'Anticipo girado',
+  estimada: 'Costo propio estimado',
   liquidada: 'Liquidada',
   cancelada: 'Cancelada',
 }
+
+// ── P2-4: ADMINISTRACIÓN DIRECTA (ejecución con personal propio) ─────────────
+//
+// El tipo marca la AUSENCIA DEL CICLO DE PAGO — sin aprobación de giro, sin
+// anticipo, sin liquidación conciliada (no hay contraparte a quien pagarle).
+// NO dice quién ejecuta: la identidad la lleva el CONTRATISTA REAL de la
+// asignación — para el personal propio es el registro vivo de NEG
+// (contratista_neg_001), la misma identidad con la que los colaboradores se
+// habilitan en la app SST. El gate de habilitación APLICA sin excepción
+// (decisión Giovanny 04-sep): si la documentación SST propia de NEG cae, que
+// la asignación se bloquee es exactamente la señal que ISO 45001 quiere.
+// El equivalente de pactado vs. liquidado es ESTIMADO vs. REAL — y ambos se
+// conservan (la línea base no se mueve, filosofía Hotfix B).
+export const TIPOS_ASIGNACION = ['contratista', 'administracion_directa'] as const
+export type TipoAsignacion = (typeof TIPOS_ASIGNACION)[number]
+
+/** Fuente de verdad del tipo — AUSENTE = contratista (42 migradas y las
+ *  nuevas: cero backfill). Jamás decidir por el nombre del contratista. */
+export const tipoDe = (a: Pick<AsignacionContratista, 'tipo'>): TipoAsignacion =>
+  a.tipo ?? 'contratista'
 
 export const ESTADO_ASIG_COLOR: Record<EstadoAsignacion, string> = {
   asignada: 'bg-gray-100 text-gray-600',
   preliquidacion_definida: 'bg-amber-100 text-amber-800',
   preliquidacion_aprobada: 'bg-emerald-100 text-emerald-800',
   anticipo_girado: 'bg-brand-100 text-brand-800',
+  estimada: 'bg-brand-100 text-brand-800',
   liquidada: 'bg-gray-200 text-gray-700',
   cancelada: 'bg-rose-100 text-rose-800',
 }
@@ -66,10 +91,14 @@ export const ESTADO_ASIG_COLOR: Record<EstadoAsignacion, string> = {
  *  anticipado es el caso general con ceros — al cancelar se registra lo
  *  incurrido y, si hay saldo, se le cuelga el paso de liquidación después. */
 export const TRANSICIONES_ASIGNACION: Record<EstadoAsignacion, EstadoAsignacion[]> = {
-  asignada: ['preliquidacion_definida', 'cancelada'],
+  // 'estimada' desde asignada: SOLO tipo administracion_directa (builder);
+  // los builders de contratista jamás la producen y los de directa jamás
+  // producen definida/aprobada/anticipo_girado — fijado por test.
+  asignada: ['preliquidacion_definida', 'estimada', 'cancelada'],
   preliquidacion_definida: ['preliquidacion_aprobada', 'cancelada'],
   preliquidacion_aprobada: ['anticipo_girado', 'preliquidacion_definida', 'cancelada'],
   anticipo_girado: ['liquidada', 'preliquidacion_definida', 'cancelada'],
+  estimada: ['liquidada', 'cancelada'],   // re-estimar no cambia de estado
   liquidada: [],
   cancelada: ['liquidada'],   // solo con incurrido > 0 (lo valida el builder)
 }
@@ -158,10 +187,38 @@ export interface EntradaHistorialAsignacion {
 /** Doc de `proyectos/{pid}/asignaciones/{aid}`. */
 export interface AsignacionContratista {
   id: string
+  /** P2-4: 'administracion_directa' = SIN ciclo de pago (ni aprobación, ni
+   *  anticipo, ni liquidación conciliada). Ausente = 'contratista'. Leer
+   *  SIEMPRE con tipoDe(). Se FIJA al nacer o con patchMarcarAdministracion-
+   *  Directa (solo sin economía cargada); después es INMUTABLE (reglas). */
+  tipo?: TipoAsignacion
   contratista_id: string
   contratista_nombre: string
   contratista_documento?: string
   habilitacion_snapshot: { estado: string; fuente: string; fecha_consulta: Timestamp }
+  /** P2-4 · REGLA DURA DE DATOS (Giovanny, 04-sep): DÍAS TOTALES DEL EQUIPO,
+   *  SIN NOMBRES NI DESGLOSE POR PERSONA — un colaborador del panel no tiene
+   *  por qué poder deducir el salario de otro (dato personal protegido,
+   *  Ley 1581/2012). El panel JAMÁS almacena tarifas: el costo se carga como
+   *  TOTAL y quien estima hace la cuenta afuera. La composición del equipo,
+   *  si hace falta, va en la NOTA LIBRE (acto deliberado, no campo
+   *  estructurado que invite a hacerlo). ⚠ AVISO: nombrar a UNA sola persona
+   *  junto a los días y el costo revela su tarifa por división. */
+  dias_equipo?: number
+  /** P2-4: cierre de la administración directa — los días que REALMENTE se
+   *  ocuparon y su costo real. El estimado (preliquidacion.valor_contratista)
+   *  queda intacto: presupuestado = estimado, ejecutado = real. El cierre NO
+   *  consulta verificaciones_sst (no hay pago que bloquear) — y por decisión
+   *  de Giovanny (04-sep) la proyección SST NO SE CREA para administración
+   *  directa: el cambio en verificacionesSst.js es superficie de la sesión
+   *  SST (avisada, decisión tomada). */
+  cierre_directa?: {
+    costo_real: number
+    dias_reales?: number
+    nota?: string
+    cerrada_por: string
+    fecha: Timestamp
+  }
   evaluacion_snapshot?: { puntaje?: number; fecha?: Timestamp; detalle?: string }
   nota_criterio?: string
   /** Átomos = NOMBRES de grupo del alcance de la versión aprobada. Cada átomo
@@ -257,10 +314,15 @@ export const costoPresupuestadoAsignaciones = (asigs: AsignacionContratista[]): 
   }, 0)
 
 /** Mano de obra + reembolsos de las asignaciones (el componente de contratistas
- *  del costo ejecutado; OCs/menores siguen llegando por compras_proyecto). */
+ *  del costo ejecutado; OCs/menores siguen llegando por compras_proyecto).
+ *  P2-4: en una administración directa CERRADA, el costo REAL reemplaza al
+ *  estimado en el EJECUTADO (mientras corre, cuenta el estimado — misma
+ *  convención del contratista, donde cuenta el pactado). El PRESUPUESTADO
+ *  sigue siendo el estimado siempre (costoPresupuestadoAsignaciones). */
 export const costoContratistasDe = (asigs: AsignacionContratista[]): number =>
   asignacionesVivas(asigs).reduce((s, a) =>
-    s + (a.preliquidacion?.valor_contratista ?? 0) + totalComprasReembolsos(a.compras_reembolsos), 0)
+    s + (a.cierre_directa ? a.cierre_directa.costo_real : (a.preliquidacion?.valor_contratista ?? 0))
+      + totalComprasReembolsos(a.compras_reembolsos), 0)
 
 // ── Señal de IMPLAUSIBILIDAD (agregado de Giovanny al SB2) ───────────────────
 //
@@ -346,6 +408,10 @@ export function resumenAsignacionesDe(
     costo_ejecutado_manual: asignacionesVivas(asigs)
       .reduce((s, a) => s + (a.preliquidacion?.costo_ejecutado ?? 0), 0),
     revisar_cobertura: asigs.filter(a => requiereRevisionCobertura(a, alcance)).length,
+    // P2-4: directas vivas SIN estimar (para la sub-etapa "costo propio por
+    // estimar" — por_estado no distingue tipos)
+    directas_por_estimar: asignacionesVivas(asigs)
+      .filter(a => tipoDe(a) === 'administracion_directa' && a.estado === 'asignada').length,
   }
 }
 
@@ -384,6 +450,7 @@ export const SUB_ETAPAS_PREPARACION = [
   'sin_contratista',
   'permisos_en_tramite',
   'preliquidacion_pendiente',
+  'costo_propio_por_estimar',
   'por_aprobar',
   'por_girar_anticipo',
   'lista_para_ejecutar',
@@ -394,13 +461,17 @@ export const SUB_ETAPA_LABEL: Record<SubEtapaPreparacion, string> = {
   sin_contratista: 'Sin contratista',
   permisos_en_tramite: 'Permisos en trámite',
   preliquidacion_pendiente: 'Preliquidación pendiente',
+  costo_propio_por_estimar: 'Costo propio por estimar',
   por_aprobar: 'Preliquidación por aprobar',
   por_girar_anticipo: 'Por girar anticipo',
   lista_para_ejecutar: 'Lista para ejecutar',
 }
 
 /** Sub-etapa operativa de un proyecto en preparación. Cobertura TOTAL por
- *  construcción (cadena de ifs excluyentes — fijada por test). */
+ *  construcción (cadena de ifs excluyentes — fijada por test).
+ *  P2-4: si TODO lo pendiente-de-economía son directas sin estimar, el chip
+ *  dice la verdad ("Costo propio por estimar"); mixto → manda el contratista
+ *  (lo más atrasado con acción de terceros). */
 export function subEtapaDe(
   p: Pick<Proyecto, 'permisos'> & { resumen_asignaciones?: ResumenAsignaciones },
 ): SubEtapaPreparacion {
@@ -408,11 +479,21 @@ export function subEtapaDe(
   if (!r || r.total === 0) return 'sin_contratista'
   if (p.permisos?.estado === 'solicitado') return 'permisos_en_tramite'
   const pe = r.por_estado
-  if ((pe.asignada ?? 0) > 0) return 'preliquidacion_pendiente'
+  if ((pe.asignada ?? 0) > 0) {
+    return (r.directas_por_estimar ?? 0) >= (pe.asignada ?? 0)
+      ? 'costo_propio_por_estimar'
+      : 'preliquidacion_pendiente'
+  }
   if ((pe.preliquidacion_definida ?? 0) > 0) return 'por_aprobar'
   if ((pe.preliquidacion_aprobada ?? 0) > 0) return 'por_girar_anticipo'
   return 'lista_para_ejecutar'
 }
+
+/** P2-4 — gate a EJECUCIÓN del proyecto (decisión 3 ampliada): ≥1 anticipo
+ *  girado O ≥1 administración directa ESTIMADA. Sin la segunda vía, un
+ *  proyecto 100% personal propio (caso Microlink) jamás podría arrancar. */
+export const habilitaEjecucionDe = (r?: ResumenAsignaciones): boolean =>
+  (r?.anticipos_girados ?? 0) >= 1 || ((r?.por_estado?.estimada ?? 0) >= 1)
 
 /** Estados del PROYECTO que pertenecen a la etapa de preparación (v2 los
  *  colapsa en `en_preparacion`). */
@@ -583,6 +664,116 @@ export function construirAsignacionHistorica(
   }
 }
 
+// ── P2-4: builders de la ADMINISTRACIÓN DIRECTA ──────────────────────────────
+//
+// ⚠ SIN APROBACIÓN DE GERENCIA — POR DISEÑO, NO POR DESCUIDO (decisión de
+// Giovanny, 04-sep): no hay giro a terceros ni orden de pago que derive de la
+// estimación; pedir aprobación agregaría fricción a algo que no mueve plata
+// (y ya sabemos qué le pasa a lo que tiene fricción de más — lección de
+// Compras). EL CONTROL EN AUSENCIA DE APROBACIÓN ES: (1) la señal de
+// implausibilidad, que actúa justo en la dirección peligrosa — "estimé tres
+// días de mi gente para un alcance de $50 millones" dispara el margen
+// implícito y cae en 'revisar' —; y (2) la traza completa del historial
+// (quién estimó/cerró, cuándo, con qué números y por qué se re-estimó).
+
+/** Marca como administración directa una asignación EXISTENTE (caso Microlink:
+ *  el dato no está mal, está INCOMPLETO — el contratista es correcto, falta el
+ *  tipo). Solo donde el tipo no estaba fijado y SIN economía cargada; después
+ *  el tipo es inmutable (reglas). Jamás se cancela/recrea: el historial de la
+ *  migración se conserva. */
+export function patchMarcarAdministracionDirecta(
+  a: AsignacionContratista, uid: string, fecha: Timestamp,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion } | null {
+  if (a.tipo !== undefined) return null
+  if (a.preliquidacion || a.liquidacion || a.cierre_directa) return null
+  if (a.estado !== 'asignada') return null
+  return {
+    sub: { tipo: 'administracion_directa', fecha_actualizacion: fecha },
+    entradaHistorial: entrada('asignada', 'asignada', uid, fecha,
+      'Marcada como ADMINISTRACIÓN DIRECTA (personal propio) — sin ciclo de pago: ' +
+      'ni aprobación de giro, ni anticipo, ni liquidación conciliada. ' +
+      'La identidad la lleva el contratista de la asignación.'),
+  }
+}
+
+/** Estimar (o RE-estimar, con motivo) el costo del equipo propio. El costo se
+ *  carga como TOTAL — el panel jamás almacena tarifas (regla dura del campo
+ *  dias_equipo). Siembra la preliquidación con base cd_atomos y anticipo 0;
+ *  SIN aprobada_por y SIN anticipo, jamás. Resuelve la señal de alcance si
+ *  estaba puesta (estimar de nuevo ES revisar — patrón corregir). */
+export function patchEstimarDirecta(
+  a: AsignacionContratista,
+  costoEstimado: number,
+  diasEquipo: number | undefined,
+  alcance: AlcanceGrupo[],
+  uid: string,
+  fecha: Timestamp,
+  motivo?: string,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; resuelveSenal: boolean } | null {
+  if (tipoDe(a) !== 'administracion_directa') return null
+  if (a.estado !== 'asignada' && a.estado !== 'estimada') return null
+  if (!(costoEstimado > 0)) return null
+  const reEstima = a.estado === 'estimada'
+  if (reEstima && !motivo?.trim()) return null   // re-estimar exige motivo
+  const pre: PreliquidacionAsignacion = {
+    valor_alcance: valorAlcanceDe(a.atomos, alcance),
+    base_margen: 'cd_atomos',
+    valor_contratista: costoEstimado,
+    anticipo_pct: 0,
+    definida_por: uid,
+    fecha_definicion: fecha,
+  }
+  return {
+    sub: {
+      estado: 'estimada', preliquidacion: pre,
+      ...(diasEquipo !== undefined && diasEquipo > 0 ? { dias_equipo: diasEquipo } : {}),
+      fecha_actualizacion: fecha,
+    },
+    resuelveSenal: !!a.alcance_desactualizado,
+    entradaHistorial: entrada(a.estado, 'estimada', uid, fecha,
+      (reEstima
+        ? `RE-estimación del costo propio — ${a.preliquidacion?.valor_contratista ?? '—'} → ${costoEstimado} · Motivo: ${motivo!.trim()}`
+        : `Costo propio ESTIMADO: ${costoEstimado}`) +
+      (diasEquipo ? ` · ${diasEquipo} días del equipo (referencia)` : '') +
+      (a.alcance_desactualizado ? ' · resuelve la señal de alcance desactualizado' : '') +
+      ' · sin aprobación por diseño: el control es la señal de implausibilidad + esta traza'),
+  }
+}
+
+/** Cerrar la administración directa con el costo REAL (los días que realmente
+ *  se ocuparon — el equivalente del pactado vs. liquidado). El estimado queda
+ *  intacto; el ejecutado pasa a usar el real (costoContratistasDe). SIN gate
+ *  SST y SIN gate financiero: no sale dinero a terceros. */
+export function patchCerrarDirecta(
+  a: AsignacionContratista,
+  costoReal: number,
+  diasReales: number | undefined,
+  nota: string | undefined,
+  uid: string,
+  fecha: Timestamp,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion } | null {
+  if (tipoDe(a) !== 'administracion_directa') return null
+  if (a.estado !== 'estimada') return null
+  if (!(costoReal >= 0)) return null
+  const estimado = a.preliquidacion?.valor_contratista ?? 0
+  return {
+    sub: {
+      estado: 'liquidada',
+      cierre_directa: {
+        costo_real: costoReal,
+        ...(diasReales !== undefined && diasReales > 0 ? { dias_reales: diasReales } : {}),
+        ...(nota?.trim() ? { nota: nota.trim() } : {}),
+        cerrada_por: uid, fecha,
+      },
+      fecha_actualizacion: fecha,
+    },
+    entradaHistorial: entrada('estimada', 'liquidada', uid, fecha,
+      `Administración directa CERRADA — estimado ${estimado} · real ${costoReal}` +
+      (diasReales ? ` · ${diasReales} días reales` : '') +
+      (nota?.trim() ? ` · ${nota.trim()}` : '')),
+  }
+}
+
 /** Definir (o redefinir antes de aprobar) la preliquidación de la asignación.
  *  `valor_alcance` = CD de SUS átomos, congelado aquí (base del margen). */
 export function patchDefinirPreliquidacion(
@@ -592,6 +783,9 @@ export function patchDefinirPreliquidacion(
   uid: string,
   fecha: Timestamp,
 ): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion } | null {
+  // P2-4: una administración directa no lleva el ciclo de pago — su economía
+  // entra por patchEstimarDirecta (los builders de cada tipo no se cruzan).
+  if (tipoDe(a) === 'administracion_directa') return null
   if (a.estado !== 'asignada' && a.estado !== 'preliquidacion_definida') return null
   if (!(datos.valor_contratista > 0)) return null
   const pre: PreliquidacionAsignacion = {

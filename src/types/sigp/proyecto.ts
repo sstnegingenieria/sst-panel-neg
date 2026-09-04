@@ -963,6 +963,10 @@ export interface ResumenAsignaciones {
    *  NO cubre todo lo que se le atribuyó. NO excluye del indicador (un margen
    *  alto puede ser legítimo — decide un humano); el sistema dice CUÁLES mirar. */
   revisar_cobertura: number
+  /** P2-4: administraciones directas vivas SIN estimar (sub-etapa "costo
+   *  propio por estimar" — por_estado no distingue tipos). Opcional:
+   *  resúmenes anteriores a P2-4 no lo traen. */
+  directas_por_estimar?: number
 }
 
 export interface Proyecto {
