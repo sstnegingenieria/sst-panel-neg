@@ -6,7 +6,7 @@
 // Todo es cálculo PURO client-side sobre las colecciones existentes; los
 // componentes solo pintan lo que sale de aquí.
 
-import { costoPresupuestadoDe, costoEjecutadoDe } from '../../types/sigp/proyecto'
+import { costoPresupuestadoProyectoDe, costoEjecutadoDe } from '../../types/sigp/proyecto'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import type { Solicitud } from '../../types/sigp/solicitud'
 
@@ -123,18 +123,46 @@ export function indCalidad(proyectos: Proyecto[], p: Periodo): ValorIndicador {
  *  solo. `comprasPorProyecto` es el mapa proyecto.id → compras_ejecutadas_total
  *  (vacío si el rol no puede verlas — el caller decide si calcula o no; nunca
  *  se calcula a medias). */
+/** P2-2 (decisión 3): un proyecto con COBERTURA INCOMPLETA no aporta un
+ *  número creíble — se EXCLUYE del agregado y el Panel muestra cuánto valor
+ *  está sin costear. Solo aplica a proyectos migrados (con resumen); los
+ *  legacy en lectura dual entran como siempre. */
+export const excluidoPorCobertura = (p: Pick<Proyecto, 'resumen_asignaciones'>): boolean =>
+  !!p.resumen_asignaciones && !p.resumen_asignaciones.cobertura_completa
+
 export function indPresupuesto(
   proyectos: Proyecto[], comprasPorProyecto: Record<string, number>,
 ): ValorIndicador {
   const entradas = proyectos
-    .map(p => ({ p, ce: p.preliquidacion ? costoEjecutadoDe(p, comprasPorProyecto[p.id] ?? 0) : null }))
+    .filter(p => !excluidoPorCobertura(p))
+    .map(p => ({ p, ce: costoEjecutadoDe(p, comprasPorProyecto[p.id] ?? 0) }))
     .filter((x): x is { p: Proyecto; ce: number } =>
-      x.ce != null && !!x.p.preliquidacion && costoPresupuestadoDe(x.p.preliquidacion) > 0)
+      x.ce != null && costoPresupuestadoProyectoDe(x.p) > 0)
   if (entradas.length === 0) return sinDatos
   const ejecutado = entradas.reduce((s, x) => s + x.ce, 0)
-  const proyectado = entradas.reduce((s, x) => s + costoPresupuestadoDe(x.p.preliquidacion!), 0)
+  const proyectado = entradas.reduce((s, x) => s + costoPresupuestadoProyectoDe(x.p), 0)
   const v = pct(ejecutado, proyectado)
   return { valor: v, semaforo: semaforoPresupuesto(v), numerador: ejecutado, denominador: proyectado }
+}
+
+/** P2-2 — el contexto de cobertura que acompaña a los indicadores en el
+ *  Panel: cuántos proyectos quedaron fuera y cuánto valor está sin costear,
+ *  más la lista de IMPLAUSIBILIDAD (revisar cobertura — el sistema dice
+ *  cuáles mirar; NO excluye, decide un humano). */
+export interface ContextoCoberturaPanel {
+  excluidos_cobertura: number
+  valor_sin_costear: number
+  revisar_cobertura: number
+}
+export function contextoCoberturaPanel(proyectos: Proyecto[]): ContextoCoberturaPanel {
+  let excluidos = 0, valor = 0, revisar = 0
+  for (const p of proyectos) {
+    const r = p.resumen_asignaciones
+    if (!r) continue
+    if (!r.cobertura_completa) { excluidos++; valor += r.valor_sin_costear }
+    revisar += r.revisar_cobertura
+  }
+  return { excluidos_cobertura: excluidos, valor_sin_costear: valor, revisar_cobertura: revisar }
 }
 
 /** Ind. 4 — Satisfacción del cliente (encuestas ≥4/5), consolidado del
@@ -164,11 +192,24 @@ export function indSst(valorManual: number | null): ValorIndicador {
  *  calcular utilidad con ella sería el mismo error que el bloque arregla, en
  *  chico → null (pendiente de revisar), nunca una cifra creíble con datos
  *  que sabemos desactualizados. */
+/** Venta base del margen real: migrado → la VIGENTE del snapshot; legacy →
+ *  la de su preliquidación (iguales salvo cambios de alcance sin revisar,
+ *  que de todos modos anulan el número). */
+export const ventaBaseDe = (p: Proyecto): number | null =>
+  p.resumen_asignaciones ? p.snapshot.valor_venta : (p.preliquidacion?.valor_venta ?? null)
+
 export function utilidadRealDe(p: Proyecto, comprasTotal: number): number | null {
   if (p.alcance_desactualizado) return null
+  // P2-2: señal de alcance viva en alguna asignación, o cobertura incompleta
+  // → sin número (mismo principio, ahora por-asignación).
+  if ((p.resumen_asignaciones?.alcance_desactualizado ?? 0) > 0) return null
+  if (excluidoPorCobertura(p)) return null
   const ce = costoEjecutadoDe(p, comprasTotal)
-  if (ce == null || !p.preliquidacion) return null
-  return p.preliquidacion.valor_venta - ce
+  if (ce == null) return null
+  // Venta: migrado → la vigente del snapshot; legacy → la de su preliquidación.
+  const venta = p.resumen_asignaciones ? p.snapshot.valor_venta : p.preliquidacion?.valor_venta
+  if (venta == null || venta <= 0) return null
+  return venta - ce
 }
 
 export interface ValorMargenReal {
@@ -186,12 +227,11 @@ export function indMargenReal(
   proyectos: Proyecto[], comprasPorProyecto: Record<string, number>, metaPct: number | null,
 ): ValorMargenReal {
   const entradas = proyectos
-    .map(p => ({ p, ur: utilidadRealDe(p, comprasPorProyecto[p.id] ?? 0) }))
-    .filter((x): x is { p: Proyecto; ur: number } =>
-      x.ur != null && !!x.p.preliquidacion && x.p.preliquidacion.valor_venta > 0)
+    .map(p => ({ p, ur: utilidadRealDe(p, comprasPorProyecto[p.id] ?? 0), vb: ventaBaseDe(p) }))
+    .filter((x): x is { p: Proyecto; ur: number; vb: number } => x.ur != null && x.vb != null && x.vb > 0)
   if (entradas.length === 0) return { valor: null, semaforo: null, utilidad: 0, venta: 0, proyectos: 0 }
   const utilidad = entradas.reduce((s, x) => s + x.ur, 0)
-  const venta = entradas.reduce((s, x) => s + x.p.preliquidacion!.valor_venta, 0)
+  const venta = entradas.reduce((s, x) => s + x.vb, 0)
   const margen = (utilidad / venta) * 100
   const semaforo: Semaforo | null =
     metaPct == null ? null : margen >= metaPct ? 'verde' : margen >= metaPct - 5 ? 'ambar' : 'rojo'

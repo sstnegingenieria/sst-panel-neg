@@ -579,13 +579,34 @@ export const alcanzoEjecutado = (estado: EstadoProyecto): boolean =>
  *  contratista que NEG le reconoce) son DISJUNTAS por diseño — sin riesgo
  *  de doble conteo. */
 export function costoEjecutadoDe(
-  p: Pick<Proyecto, 'estado' | 'preliquidacion' | 'compras_reembolsos'>,
+  p: Pick<Proyecto, 'estado' | 'preliquidacion' | 'compras_reembolsos' | 'resumen_asignaciones'>,
   comprasEjecutadasTotal: number,
 ): number | null {
+  if (!alcanzoEjecutado(p.estado)) return null
+  // P2-2: proyecto migrado → el componente de contratistas sale del RESUMEN
+  // (Σ mano de obra + reembolsos de las asignaciones vivas); el manual
+  // histórico sigue GANANDO íntegro (semántica C3 conservada).
+  const r = p.resumen_asignaciones
+  if (r) {
+    if (r.total === 0) return null
+    if (r.costo_ejecutado_manual > 0) return r.costo_ejecutado_manual
+    return r.costo_contratistas + comprasEjecutadasTotal
+  }
+  // Vía LEGACY (pre-migración — lectura dual a nivel de campos del padre):
   const pre = p.preliquidacion
-  if (!pre || !alcanzoEjecutado(p.estado)) return null
+  if (!pre) return null
   if ((pre.costo_ejecutado ?? 0) > 0) return pre.costo_ejecutado!
   return pre.valor_contratista + comprasEjecutadasTotal + totalComprasReembolsos(p.compras_reembolsos)
+}
+
+/** P2-2 — costo PRESUPUESTADO del proyecto: resumen (Σ asignaciones vivas por
+ *  modalidad) con vía legacy al campo del padre. */
+export function costoPresupuestadoProyectoDe(
+  p: Pick<Proyecto, 'preliquidacion' | 'resumen_asignaciones'>,
+): number {
+  const r = p.resumen_asignaciones
+  if (r) return r.costo_presupuestado
+  return p.preliquidacion ? costoPresupuestadoDe(p.preliquidacion) : 0
 }
 
 /** Utilidad esperada REAL (24-jul) = venta − costo presupuestado total.
@@ -906,6 +927,35 @@ export const ETIQUETA_COMPONENTE_CAMBIO: Record<TipoComponenteCambio, string> = 
   adicional: 'Adicional',
 }
 
+// ── P2-2 — Resumen de asignaciones denormalizado en el padre ─────────────────
+// (vive aquí y no en asignacion.ts para evitar el import circular: es un
+// CAMPO del proyecto; asignacion.ts lo importa y lo calcula.)
+// Lo mantienen los builders en el mismo writeBatch; la ficha lee la
+// subcolección y DETECTA discrepancias (detectarDesincronizacion) — un
+// resumen que miente sin avisar es peor que no tenerlo.
+export interface ResumenAsignaciones {
+  total: number
+  por_estado: Partial<Record<string, number>>
+  items: { aid: string; contratista_nombre: string; estado: string; valor_contratista: number }[]
+  cobertura_completa: boolean
+  atomos_sin_asignar: number
+  valor_sin_costear: number
+  alcance_desactualizado: number
+  anticipos_girados: number
+  /** Σ vivas: contratista + materiales NEG (solo_mano_obra) — entrada del ind. 3. */
+  costo_presupuestado: number
+  /** Σ vivas: mano de obra + reembolsos — componente contratistas del ejecutado. */
+  costo_contratistas: number
+  /** Σ de `costo_ejecutado` MANUAL de las vivas (histórico legacy — era el
+   *  costo real TOTAL y GANA íntegro, semántica C3 conservada). 0 = sin manual. */
+  costo_ejecutado_manual: number
+  /** Señal de IMPLAUSIBILIDAD (03-sep): asignaciones cuyo margen implícito
+   *  sobre el CD de sus átomos supera el umbral — el contratista probablemente
+   *  NO cubre todo lo que se le atribuyó. NO excluye del indicador (un margen
+   *  alto puede ser legítimo — decide un humano); el sistema dice CUÁLES mirar. */
+  revisar_cobertura: number
+}
+
 export interface Proyecto {
   /** = id del doc de origen (cotización o solicitud preventivo) — idempotencia 1:1 */
   id: string
@@ -932,6 +982,10 @@ export interface Proyecto {
   /** P2-1 — el alcance cambió con preliquidación definida: revisar antes de
    *  confiar en la utilidad. Lo pone la CF; lo limpia corregir/confirmar. */
   alcance_desactualizado?: AlcanceDesactualizado
+  /** P2-2 — resumen de la subcolección `asignaciones` (bandejas de una sola
+   *  query, patrón `activa` de Tareas). Ausente = proyecto pre-migración
+   *  (lectura dual vía asignacionesDe). */
+  resumen_asignaciones?: ResumenAsignaciones
   estado: EstadoProyecto
   asignacion?: AsignacionProyecto      // F2.1.b — congela la evidencia del proveedor
   permisos?: PermisosProyecto          // F2.1.b — permisos de ingreso

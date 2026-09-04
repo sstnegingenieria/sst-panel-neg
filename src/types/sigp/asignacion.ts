@@ -28,7 +28,7 @@
 import type { Timestamp } from 'firebase/firestore'
 import type {
   AlcanceGrupo, CompraReembolso, RetencionLiquidacion, ModalidadContratista,
-  Proyecto, EstadoProyecto, AnticipoGirado,
+  Proyecto, EstadoProyecto, AnticipoGirado, ResumenAsignaciones,
 } from './proyecto'
 import { modalidadDe, totalComprasReembolsos, anticipoValorDe } from './proyecto'
 
@@ -181,20 +181,9 @@ export interface AsignacionContratista {
   fecha_actualizacion?: Timestamp
 }
 
-/** Resumen denormalizado en el PADRE (bandejas de una sola query — patrón
- *  `activa` de Tareas). Lo mantienen los builders vía `resumenAsignacionesDe`
- *  en el MISMO writeBatch; la ficha lee la subcolección y compara
- *  (`detectarDesincronizacion`) — si discrepan, SE VE. */
-export interface ResumenAsignaciones {
-  total: number
-  por_estado: Partial<Record<EstadoAsignacion, number>>
-  items: { aid: string; contratista_nombre: string; estado: EstadoAsignacion; valor_contratista: number }[]
-  cobertura_completa: boolean
-  atomos_sin_asignar: number
-  valor_sin_costear: number
-  alcance_desactualizado: number   // asignaciones con señal viva
-  anticipos_girados: number
-}
+// El tipo ResumenAsignaciones vive en proyecto.ts (es un campo del proyecto);
+// acá se CALCULA (resumenAsignacionesDe) y se AUDITA (detectarDesincronizacion).
+export type { ResumenAsignaciones }
 
 // ── Helpers puros ────────────────────────────────────────────────────────────
 
@@ -254,6 +243,50 @@ export const costoContratistasDe = (asigs: AsignacionContratista[]): number =>
   asignacionesVivas(asigs).reduce((s, a) =>
     s + (a.preliquidacion?.valor_contratista ?? 0) + totalComprasReembolsos(a.compras_reembolsos), 0)
 
+// ── Señal de IMPLAUSIBILIDAD (agregado de Giovanny al SB2) ───────────────────
+//
+// Post-migración las legacy llevan TODOS los átomos → cobertura "completa" y
+// márgenes inflados invisibles. Esta señal DERIVADA los aflora: si el margen
+// implícito de una asignación sobre el CD de sus átomos supera el umbral, el
+// contratista probablemente NO cubre todo lo que se le atribuyó — el sistema
+// dice CUÁLES mirar en vez de depender de que alguien se acuerde. NO excluye
+// del indicador (un margen alto puede ser legítimo; decide un humano).
+//
+// UMBRAL calibrado CON EL DATO (03-sep, 40 preliquidaciones reales): la
+// distribución de márgenes implícitos corta naturalmente entre 70,1% y 63,9%
+// — con 70 caen 7 (Megacenter 94,1% · PRY-015 92,5% · Triara 92,0% ·
+// PRY-001 86,5% · PRY-040 79,5% · PRY-024 79,0% · PRY-026 70,1%) y el bloque
+// legítimo de 40–64% (preventivos IHS incluidos) queda fuera. Ajustable.
+
+export const UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT = 70
+
+/** Margen implícito de la asignación sobre el CD de SUS átomos (recalculado
+ *  del alcance VIVO — no de valor_alcance, que en legacy trae la base vieja):
+ *  (CD − costo presupuestado de la asignación) / CD × 100. En solo_mano_obra
+ *  el costo incluye los materiales NEG (un margen alto ahí sería falso).
+ *  null sin preliquidación o sin CD. */
+export function margenImplicitoDe(
+  a: Pick<AsignacionContratista, 'atomos' | 'modalidad' | 'valor_materiales' | 'preliquidacion'>,
+  alcance: AlcanceGrupo[],
+): number | null {
+  const pre = a.preliquidacion
+  if (!pre) return null
+  const cd = valorAlcanceDe(a.atomos, alcance)
+  if (cd <= 0) return null
+  const costo = pre.valor_contratista + (a.modalidad === 'solo_mano_obra' ? (a.valor_materiales ?? 0) : 0)
+  return ((cd - costo) / cd) * 100
+}
+
+/** ¿Entra a la lista "revisar cobertura"? (viva, con margen implícito sobre
+ *  el umbral). */
+export function requiereRevisionCobertura(
+  a: AsignacionContratista, alcance: AlcanceGrupo[],
+): boolean {
+  if (a.estado === 'cancelada') return false
+  const m = margenImplicitoDe(a, alcance)
+  return m != null && m >= UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT
+}
+
 export function resumenAsignacionesDe(
   asigs: AsignacionContratista[], alcance: AlcanceGrupo[],
 ): ResumenAsignaciones {
@@ -272,6 +305,11 @@ export function resumenAsignacionesDe(
     valor_sin_costear: cob.valor_sin_costear,
     alcance_desactualizado: asigs.filter(a => !!a.alcance_desactualizado && a.estado !== 'cancelada').length,
     anticipos_girados: asigs.filter(a => !!a.preliquidacion?.anticipo && a.estado !== 'cancelada').length,
+    costo_presupuestado: costoPresupuestadoAsignaciones(asigs),
+    costo_contratistas: costoContratistasDe(asigs),
+    costo_ejecutado_manual: asignacionesVivas(asigs)
+      .reduce((s, a) => s + (a.preliquidacion?.costo_ejecutado ?? 0), 0),
+    revisar_cobertura: asigs.filter(a => requiereRevisionCobertura(a, alcance)).length,
   }
 }
 
@@ -289,6 +327,10 @@ export function detectarDesincronizacion(
     d.push(`valor sin costear: resumen ${resumen.valor_sin_costear} vs real ${real.valor_sin_costear}`)
   if (resumen.anticipos_girados !== real.anticipos_girados)
     d.push(`anticipos: resumen ${resumen.anticipos_girados} vs real ${real.anticipos_girados}`)
+  if (resumen.costo_presupuestado !== real.costo_presupuestado)
+    d.push(`costo presupuestado: resumen ${resumen.costo_presupuestado} vs real ${real.costo_presupuestado}`)
+  if (resumen.costo_contratistas !== real.costo_contratistas)
+    d.push(`costo contratistas: resumen ${resumen.costo_contratistas} vs real ${real.costo_contratistas}`)
   for (const e of ESTADOS_ASIGNACION) {
     if ((resumen.por_estado[e] ?? 0) !== (real.por_estado[e] ?? 0))
       d.push(`${e}: resumen ${resumen.por_estado[e] ?? 0} vs real ${real.por_estado[e] ?? 0}`)
