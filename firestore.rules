@@ -753,6 +753,15 @@ service cloud.firestore {
       match /asignaciones/{asignacionId} {
         allow read: if puedeVerProyectos();
 
+        // P2-4: COHERENCIA de la administración directa — el estado
+        // 'estimada' SOLO existe en el tipo 'administracion_directa' (si un
+        // write dejara 'estimada' en un contratista, abriría el gate de
+        // ejecución sin anticipo — la vía nueva no ablanda la vieja).
+        function estadoCoherenteAsig() {
+          return request.resource.data.get('estado', '') != 'estimada'
+              || request.resource.data.get('tipo', '') == 'administracion_directa';
+        }
+
         // CREATE — tres nacimientos, cada uno con su guardia:
         // (a) REGISTRO HISTÓRICO retroactivo (condición Giovanny 03-sep):
         //     afirmar "se pagó por fuera del panel" es una DECLARACIÓN DE
@@ -765,8 +774,11 @@ service cloud.firestore {
         //     dispara el primer write económico (gestores o gerencia).
         // (c) NORMAL: gestores; nace 'asignada' SIN economía ni marcas —
         //     aprobación/giro/liquidación llegan después por sus vías.
+        //     P2-4: la administración directa nace por ESTA vía (tipo
+        //     permitido al nacer; si viene, con valor conocido).
         allow create: if
-          (request.resource.data.keys().hasAny(['registro_historico'])
+          estadoCoherenteAsig()
+          && ((request.resource.data.keys().hasAny(['registro_historico'])
             && isAuthed()
             && rolActual() in ['gerencia_administrativa', 'admin', 'gerencia_general', 'gestion_integral']
             && request.resource.data.get('registro_historico', {}).get('motivo', '') != ''
@@ -777,22 +789,43 @@ service cloud.firestore {
                 || (isAuthed() && rolActual() == 'gerencia_administrativa')))
           || (puedeCrearProyectos()
             && request.resource.data.get('estado', '') == 'asignada'
+            && (!request.resource.data.keys().hasAny(['tipo'])
+                || request.resource.data.get('tipo', '') in ['contratista', 'administracion_directa'])
             && !request.resource.data.keys().hasAny(
-                 ['registro_historico', 'legacy', 'preliquidacion', 'liquidacion', 'cancelacion']));
+                 ['registro_historico', 'legacy', 'preliquidacion', 'liquidacion', 'cancelacion', 'cierre_directa'])));
 
         // UPDATE — dos vías POR CAMPO (espejo del padre):
         // GESTORES definen/corrigen/ajustan/cancelan/resuelven señal — JAMÁS
         // fijan aprobación (retirarla en la reversión sí), jamás CREAN un
         // anticipo (conservar el existente en una corrección sí), jamás
         // tocan las marcas ni llevan a 'liquidada' (liquidar es de gerencia).
+        // P2-4: EXCEPCIONES acotadas por tipo —
+        //  · gestores SÍ cierran una ADMINISTRACIÓN DIRECTA (→ liquidada con
+        //    cierre_directa): no sale dinero a terceros, el control es la
+        //    señal de implausibilidad + la traza (decisión Giovanny 04-sep);
+        //    el candado del contratista queda intacto.
+        //  · `tipo` es INMUTABLE, con UNA excepción (caso Microlink): FIJARLO
+        //    donde no había — solo a 'administracion_directa', solo en
+        //    'asignada' y SIN economía cargada (el dato estaba incompleto,
+        //    no equivocado).
+        //  · `cierre_directa` solo se toca en el tipo directa.
         allow update: if
-          (puedeCrearProyectos()
+          estadoCoherenteAsig()
+          && ((puedeCrearProyectos()
             && !request.resource.data.diff(resource.data).affectedKeys()
                  .hasAny(['registro_historico', 'legacy'])
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['tipo'])
+                || (resource.data.get('tipo', null) == null
+                    && resource.data.get('estado', '') == 'asignada'
+                    && !resource.data.keys().hasAny(['preliquidacion', 'liquidacion', 'cierre_directa'])
+                    && request.resource.data.get('tipo', '') == 'administracion_directa'))
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['cierre_directa'])
+                || resource.data.get('tipo', '') == 'administracion_directa')
             && !fijaAprobacionPreliq()
             && (('anticipo' in resource.data.get('preliquidacion', {}).keys())
                 || !('anticipo' in request.resource.data.get('preliquidacion', {}).keys()))
-            && request.resource.data.get('estado', '') != 'liquidada')
+            && (request.resource.data.get('estado', '') != 'liquidada'
+                || resource.data.get('tipo', '') == 'administracion_directa'))
           ||
           // GERENCIA (+ respaldo): aprueba/gira/liquida, acotada por-campo;
           // fijar aprobación exige la titular o salvedad escrita (PR #45).
@@ -802,7 +835,7 @@ service cloud.firestore {
                  .hasOnly(['estado', 'preliquidacion', 'liquidacion', 'compras_reembolsos', 'historial', 'fecha_actualizacion'])
             && (!fijaAprobacionPreliq()
                 || rolActual() == 'gerencia_administrativa'
-                || salvedadPreliq() != ''));
+                || salvedadPreliq() != '')));
         // sin delete (cancelación = soft, restricción 5.1)
       }
 
