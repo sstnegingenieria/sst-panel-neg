@@ -737,21 +737,73 @@ service cloud.firestore {
                                     && request.resource.data.get('liquidacion', {}).get('liquidacion_anticipada', false) == true
                                     && request.resource.data.get('liquidacion', {}).get('justificacion_anticipada', '') != ''))));
 
-      // ── P2-2: asignaciones múltiples de contratista ────────────────
-      // Subcolección {aid} — cada asignación con su contratista, átomos
-      // (grupos del alcance), preliquidación y liquidación PROPIAS. La
-      // economía baja del padre a la asignación (migración P2-2); el padre
-      // conserva `asignacion` como espejo de identidad y el resumen
-      // denormalizado `resumen_asignaciones` (bandejas de una query).
-      // Vías: gestores operan (asignar/ajustar/cancelar/definir preliq);
-      // gerencia_administrativa aprueba/gira/liquida. El hardening por-campo
-      // de la vía de gerencia (patrón fijaAprobacionPreliq del padre) va en
-      // el sub-bloque de reglas de P2-2 con su batería — esta versión es la
-      // base ADITIVA. Sin delete (cancelación = soft, restricción 5.1).
+      // ── P2-2: asignaciones múltiples de contratista (SB5 endurecido) ──
+      // Subcolección {aid} — cada asignación con su contratista, átomos,
+      // preliquidación y liquidación PROPIAS. La economía baja del padre a
+      // la asignación; el padre conserva `asignacion` (espejo de identidad)
+      // y el caché `resumen_asignaciones`.
+      //
+      // ⚠ RIESGO CONOCIDO ACEPTADO (Giovanny, 03-sep): `resumen_asignaciones`
+      // del padre es un CACHÉ y las reglas NO pueden validarlo contra la
+      // subcolección (Firestore no consulta colecciones desde reglas) —
+      // alguien con acceso de escritura podría dejarlo mintiendo. MITIGACIÓN:
+      // la ficha (detectarDesincronizacion) compara resumen ↔ subcolección y
+      // MUESTRA la discrepancia con botón de reparación — el control es la
+      // detección visible, no la prevención imposible.
       match /asignaciones/{asignacionId} {
         allow read: if puedeVerProyectos();
-        allow create, update: if puedeCrearProyectos()
-                              || (isAuthed() && rolActual() == 'gerencia_administrativa');
+
+        // CREATE — tres nacimientos, cada uno con su guardia:
+        // (a) REGISTRO HISTÓRICO retroactivo (condición Giovanny 03-sep):
+        //     afirmar "se pagó por fuera del panel" es una DECLARACIÓN DE
+        //     GERENCIA — mismo perfil que aprueba preliquidaciones, con el
+        //     motivo obligatorio validado AQUÍ (no solo en la UI) y la
+        //     coherencia de nacer `liquidada` y marcada. Un gestor NO puede
+        //     (el desvío del control de aprobación se cierra en reglas).
+        // (b) MIGRACIÓN lazy/masiva: el sub-doc de id FIJO 'legacy' con la
+        //     marca — UN solo cupo por proyecto (el id lo garantiza); lo
+        //     dispara el primer write económico (gestores o gerencia).
+        // (c) NORMAL: gestores; nace 'asignada' SIN economía ni marcas —
+        //     aprobación/giro/liquidación llegan después por sus vías.
+        allow create: if
+          (request.resource.data.keys().hasAny(['registro_historico'])
+            && isAuthed()
+            && rolActual() in ['gerencia_administrativa', 'admin', 'gerencia_general', 'gestion_integral']
+            && request.resource.data.get('registro_historico', {}).get('motivo', '') != ''
+            && request.resource.data.get('estado', '') == 'liquidada')
+          || (asignacionId == 'legacy'
+            && request.resource.data.get('legacy', false) == true
+            && (puedeCrearProyectos()
+                || (isAuthed() && rolActual() == 'gerencia_administrativa')))
+          || (puedeCrearProyectos()
+            && request.resource.data.get('estado', '') == 'asignada'
+            && !request.resource.data.keys().hasAny(
+                 ['registro_historico', 'legacy', 'preliquidacion', 'liquidacion', 'cancelacion']));
+
+        // UPDATE — dos vías POR CAMPO (espejo del padre):
+        // GESTORES definen/corrigen/ajustan/cancelan/resuelven señal — JAMÁS
+        // fijan aprobación (retirarla en la reversión sí), jamás CREAN un
+        // anticipo (conservar el existente en una corrección sí), jamás
+        // tocan las marcas ni llevan a 'liquidada' (liquidar es de gerencia).
+        allow update: if
+          (puedeCrearProyectos()
+            && !request.resource.data.diff(resource.data).affectedKeys()
+                 .hasAny(['registro_historico', 'legacy'])
+            && !fijaAprobacionPreliq()
+            && (('anticipo' in resource.data.get('preliquidacion', {}).keys())
+                || !('anticipo' in request.resource.data.get('preliquidacion', {}).keys()))
+            && request.resource.data.get('estado', '') != 'liquidada')
+          ||
+          // GERENCIA (+ respaldo): aprueba/gira/liquida, acotada por-campo;
+          // fijar aprobación exige la titular o salvedad escrita (PR #45).
+          (isAuthed()
+            && rolActual() in ['gerencia_administrativa', 'admin', 'gerencia_general', 'gestion_integral']
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['estado', 'preliquidacion', 'liquidacion', 'compras_reembolsos', 'historial', 'fecha_actualizacion'])
+            && (!fijaAprobacionPreliq()
+                || rolActual() == 'gerencia_administrativa'
+                || salvedadPreliq() != ''));
+        // sin delete (cancelación = soft, restricción 5.1)
       }
 
       // ── Compras C3: compras menores del proyecto (sin OC) ──────────

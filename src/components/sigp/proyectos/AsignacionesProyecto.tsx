@@ -108,7 +108,10 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
 
   const abrirAsignar = async () => {
     setContratistaId(''); setAtomosSel(new Set()); setModalidad('todo_costo'); setMateriales(undefined); setNota('')
-    setEsHistorica(false); setValorPagado(undefined); setMotivoHistorico('')
+    // Condición 03-sep: el registro histórico es DECLARACIÓN DE GERENCIA —
+    // gerencia sin gestión abre el modal DIRECTO en modo histórico (es lo
+    // único que puede crear); las reglas lo exigen del lado del servidor.
+    setEsHistorica(!puedeGestionar); setValorPagado(undefined); setMotivoHistorico('')
     setFormOpen(true)
     try {
       // TODOS los contratistas: el flujo normal filtra habilitados en el
@@ -396,10 +399,10 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
             Cada actividad del alcance pertenece a UNA asignación — lo sin asignar se ve, con su valor.
           </p>
         </div>
-        {puedeGestionar && (
+        {(puedeGestionar || puedeAprobar) && (
           <button onClick={abrirAsignar}
             className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 flex-shrink-0">
-            ＋ Asignar contratista
+            {puedeGestionar ? '＋ Asignar contratista' : '＋ Registro histórico'}
           </button>
         )}
       </div>
@@ -600,19 +603,26 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                 <option key={c.id} value={c.id}>{c.nombre}{c.estado !== 'activo' ? ' (inactivo)' : ''}</option>)}
             </select>
           </label>
-          <label className="flex items-start gap-2 text-sm p-2.5 rounded-lg border border-amber-200 bg-amber-50/60 cursor-pointer">
-            <input type="checkbox" checked={esHistorica} onChange={e => setEsHistorica(e.target.checked)}
-              className="mt-0.5 rounded border-amber-400 text-amber-600 focus:ring-amber-300" />
-            <span>
-              <span className="font-medium text-amber-900">Registro histórico (retroactivo)</span>
-              <span className="block text-xs text-amber-800 mt-0.5">
-                Para contratistas a los que YA se les pagó por fuera del panel. Se registra con el
-                valor pagado y un motivo — el costo entra al indicador y al presupuesto, pero queda
-                marcado explícitamente: NO pasa por definir → aprobar → girar anticipo → liquidar.
-                Un registro histórico honesto vale más que un flujo simulado.
+          {/* Registro histórico: DECLARACIÓN DE GERENCIA (condición 03-sep) —
+              el toggle solo existe para el perfil que aprueba preliquidaciones;
+              la regla lo exige también del lado del servidor (gestor → 403). */}
+          {puedeAprobar && (
+            <label className={`flex items-start gap-2 text-sm p-2.5 rounded-lg border border-amber-200 bg-amber-50/60 ${puedeGestionar ? 'cursor-pointer' : ''}`}>
+              <input type="checkbox" checked={esHistorica} disabled={!puedeGestionar}
+                onChange={e => setEsHistorica(e.target.checked)}
+                className="mt-0.5 rounded border-amber-400 text-amber-600 focus:ring-amber-300 disabled:opacity-60" />
+              <span>
+                <span className="font-medium text-amber-900">Registro histórico (retroactivo)</span>
+                <span className="block text-xs text-amber-800 mt-0.5">
+                  Para contratistas a los que YA se les pagó por fuera del panel. Se registra con el
+                  valor pagado y un motivo — el costo entra al indicador y al presupuesto, pero queda
+                  marcado explícitamente: NO pasa por definir → aprobar → girar anticipo → liquidar.
+                  Afirmar el pago es una declaración de gerencia (los gestores no pueden — regla dura).
+                  Un registro histórico honesto vale más que un flujo simulado.
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          )}
           {esHistorica && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="block text-sm">

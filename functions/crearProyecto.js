@@ -93,6 +93,24 @@ function diffAlcance(alcanceViejo, alcanceNuevo) {
  *  - 'reparar': todo lo demás (misma versión, versión del proyecto
  *    desconocida, reintentos) — comportamiento histórico de reparar enlaces.
  */
+/**
+ * P2-2 (SB5): señal de alcance POR ASIGNACIÓN. En un proyecto migrado la
+ * preliquidación vive en la subcolección — el cambio de alcance señala las
+ * asignaciones VIVAS con preliquidación cuyos átomos INTERSECTAN los grupos
+ * afectados (las demás no tienen nada que revisar). Devuelve, por asignación
+ * a señalar, sus átomos afectados. Puro — testeado con el patrón claims.
+ */
+function asignacionesASenalar(asigs, gruposAfectados) {
+  const afectados = new Set(gruposAfectados || []);
+  const res = [];
+  for (const a of asigs || []) {
+    if (!a || a.estado === 'cancelada' || !a.preliquidacion) continue;
+    const inter = (a.atomos || []).filter((at) => afectados.has(at));
+    if (inter.length > 0) res.push({ id: a.id, atomos_afectados: inter });
+  }
+  return res;
+}
+
 function decidirAccion(proyectoData, versionActiva) {
   if (!proyectoData) return 'crear';
   const verProy = proyectoData.cotizacion_version;
@@ -184,6 +202,11 @@ async function nacerProyecto(origen, docId, data) {
 
         const ventaAnterior = proyecto.snapshot && proyecto.snapshot.valor_venta;
         const componentes = diffAlcance(proyecto.snapshot && proyecto.snapshot.alcance, snapshot.alcance);
+        // P2-2: leer la subcolección de asignaciones (READ antes de todo
+        // write — regla de transacciones). En migrados la señal apunta a la
+        // ASIGNACIÓN afectada, no al padre.
+        const asigsSnap = await tx.get(proyectoRef.collection('asignaciones'));
+        const asigs = asigsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         const cambio = {
           fecha: ahora,
           version: data.version_activa,
@@ -205,6 +228,9 @@ async function nacerProyecto(origen, docId, data) {
         // Decisión 8 (señalización): con preliquidación definida, el cambio
         // la deja DESACTUALIZADA — la ficha exige revisarla (corregir o
         // confirmar sin cambio); mientras tanto la utilidad no muestra número.
+        // El flag del PADRE queda solo para proyectos legacy sin migrar
+        // (tienen preliquidacion en el padre); en migrados la señal va a las
+        // ASIGNACIONES afectadas (abajo).
         if (proyecto.preliquidacion) {
           patchProyecto.alcance_desactualizado = {
             version: data.version_activa,
@@ -212,7 +238,33 @@ async function nacerProyecto(origen, docId, data) {
             grupos_afectados: componentes.map((c) => c.grupo),
           };
         }
+        // P2-2 (SB5): señal POR ASIGNACIÓN — vivas con preliquidación cuyos
+        // átomos intersectan los grupos afectados. El contador del resumen se
+        // actualiza aquí (exacto y barato); la COBERTURA del resumen puede
+        // quedar desfasada frente al alcance NUEVO — eso lo atrapa el
+        // detector de desincronización de la ficha (control aceptado: la
+        // utilidad ya está en "pendiente de revisar" mientras tanto).
+        const senalar = asignacionesASenalar(asigs, componentes.map((c) => c.grupo));
+        if (senalar.length > 0 && proyecto.resumen_asignaciones) {
+          const yaSenaladas = asigs.filter((a) =>
+            a.estado !== 'cancelada' && a.alcance_desactualizado
+            && !senalar.some((s) => s.id === a.id)).length;
+          patchProyecto['resumen_asignaciones.alcance_desactualizado'] = yaSenaladas + senalar.length;
+        }
         tx.update(proyectoRef, patchProyecto);
+        for (const s of senalar) {
+          const est = (asigs.find((a) => a.id === s.id) || {}).estado || null;
+          tx.update(proyectoRef.collection('asignaciones').doc(s.id), {
+            alcance_desactualizado: {
+              version: data.version_activa, fecha: ahora, atomos_afectados: s.atomos_afectados,
+            },
+            fecha_actualizacion: ahora,
+            historial: FieldValue.arrayUnion({
+              de: est, a: est, por: 'sistema', fecha: ahora,
+              motivo: `Cambio de alcance v${data.version_activa} — afecta: ${s.atomos_afectados.join(' · ')} · preliquidación PENDIENTE DE REVISAR`,
+            }),
+          });
+        }
         // Limpia la marca de cambio en curso y el motivo del doc disparador
         // (y asegura enlaces, por si el intento venía de una reparación).
         tx.update(origenRef, {
@@ -348,6 +400,6 @@ const crearProyectoAlAceptarPreventivo = onDocumentWritten(
 
 module.exports = {
   crearProyectoAlAprobarCotizacion, crearProyectoAlAceptarPreventivo,
-  // P2-1 — exportados para tests (patrón claims/horario)
-  diffAlcance, decidirAccion,
+  // P2-1/P2-2 — exportados para tests (patrón claims/horario)
+  diffAlcance, decidirAccion, asignacionesASenalar,
 };
