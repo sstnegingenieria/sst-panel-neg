@@ -92,6 +92,11 @@ export interface PreliquidacionAsignacion {
    *  congelado al definir. En LEGACY migradas: el `valor_venta` viejo del
    *  proyecto (base anterior) — ver `baseMargenDe`. */
   valor_alcance: number
+  /** Base EXPLÍCITA del margen cuando difiere de la que implica `legacy` —
+   *  la fija `patchAjustarAtomos` al recalcular `valor_alcance` a CD de los
+   *  átomos sobre una migrada (condición A: si la base cambió, el rótulo
+   *  cambia con ella; `legacy` queda solo como PROCEDENCIA del badge). */
+  base_margen?: BaseMargenAsignacion
   valor_contratista: number
   anticipo_pct: number
   observaciones?: Record<string, string>
@@ -204,9 +209,14 @@ export const valorAlcanceDe = (atomos: string[], alcance: AlcanceGrupo[]): numbe
   return atomos.reduce((s, at) => s + (porGrupo.get(at) ?? 0), 0)
 }
 
-/** CONDICIÓN A: contra qué base está calculado el margen de esta asignación. */
-export const baseMargenDe = (a: Pick<AsignacionContratista, 'legacy'>): BaseMargenAsignacion =>
-  a.legacy ? 'venta_total_legacy' : 'cd_atomos'
+/** CONDICIÓN A: contra qué base está calculado el margen de esta asignación.
+ *  La preliquidación puede declarar la suya (`base_margen` — un ajuste de
+ *  átomos sobre una migrada recalcula `valor_alcance` a CD y la fija);
+ *  sin declaración, `legacy` implica la base anterior. */
+export const baseMargenDe = (
+  a: Pick<AsignacionContratista, 'legacy' | 'preliquidacion'>,
+): BaseMargenAsignacion =>
+  a.preliquidacion?.base_margen ?? (a.legacy ? 'venta_total_legacy' : 'cd_atomos')
 
 export interface CoberturaProyecto {
   sin_asignar: { grupo: string; subtotal: number }[]
@@ -689,7 +699,13 @@ export function patchAjustarAtomos(
   const sub: Partial<AsignacionContratista> = {
     atomos: [...atomosNuevos], fecha_actualizacion: fecha,
     ...(a.preliquidacion ? {
-      preliquidacion: { ...a.preliquidacion, valor_alcance: valorAlcanceDe(atomosNuevos, alcance) },
+      // La base pasa a ser CD de los átomos — se DECLARA (condición A: el
+      // rótulo viaja con la base, aunque la asignación siga siendo `legacy`).
+      preliquidacion: {
+        ...a.preliquidacion,
+        valor_alcance: valorAlcanceDe(atomosNuevos, alcance),
+        base_margen: 'cd_atomos' as BaseMargenAsignacion,
+      },
       alcance_desactualizado: { version: 0, fecha, atomos_afectados: afectados },
     } : {}),
   }

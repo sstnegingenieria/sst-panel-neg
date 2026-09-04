@@ -9,7 +9,7 @@ import { db } from '../../firebase/config'
 import { useAuth } from '../../contexts/AuthContext'
 import { useFeatureFlag } from '../../hooks/useFeatureFlag'
 import { puedeGestionarProyectosUI, puedeAprobarPreliquidacionUI } from '../../types/sigp/permisos'
-import AsignacionContratista from '../../components/sigp/proyectos/AsignacionContratista'
+import AsignacionesProyecto from '../../components/sigp/proyectos/AsignacionesProyecto'
 import PermisosIngreso from '../../components/sigp/proyectos/PermisosIngreso'
 import PreliquidacionProyecto from '../../components/sigp/proyectos/PreliquidacionProyecto'
 import EjecucionProyecto from '../../components/sigp/proyectos/EjecucionProyecto'
@@ -272,11 +272,9 @@ export default function ProyectoDetalleSigp() {
         </div>
       )}
 
-      {/* Asignación y permisos (F2.1.b) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <AsignacionContratista proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
-        <PermisosIngreso proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
-      </div>
+      {/* P2-2: asignaciones múltiples + cobertura (reemplaza a la singular) */}
+      <AsignacionesProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+      <PermisosIngreso proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
 
       {/* Preliquidación (F2.1.c) */}
       <PreliquidacionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} puedeAprobar={puedeAprobar} reload={load} />

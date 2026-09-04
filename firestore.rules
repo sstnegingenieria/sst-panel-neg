@@ -735,6 +735,23 @@ service cloud.firestore {
                                     && request.resource.data.get('liquidacion', {}).get('liquidacion_anticipada', false) == true
                                     && request.resource.data.get('liquidacion', {}).get('justificacion_anticipada', '') != ''))));
 
+      // ── P2-2: asignaciones múltiples de contratista ────────────────
+      // Subcolección {aid} — cada asignación con su contratista, átomos
+      // (grupos del alcance), preliquidación y liquidación PROPIAS. La
+      // economía baja del padre a la asignación (migración P2-2); el padre
+      // conserva `asignacion` como espejo de identidad y el resumen
+      // denormalizado `resumen_asignaciones` (bandejas de una query).
+      // Vías: gestores operan (asignar/ajustar/cancelar/definir preliq);
+      // gerencia_administrativa aprueba/gira/liquida. El hardening por-campo
+      // de la vía de gerencia (patrón fijaAprobacionPreliq del padre) va en
+      // el sub-bloque de reglas de P2-2 con su batería — esta versión es la
+      // base ADITIVA. Sin delete (cancelación = soft, restricción 5.1).
+      match /asignaciones/{asignacionId} {
+        allow read: if puedeVerProyectos();
+        allow create, update: if puedeCrearProyectos()
+                              || esRol('gerencia_administrativa');
+      }
+
       // ── Compras C3: compras menores del proyecto (sin OC) ──────────
       // Subcolección con reglas PROPIAS (no hereda del padre). Las registra
       // gerencia_administrativa/admin; el agregado de la CF las suma igual

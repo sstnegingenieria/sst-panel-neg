@@ -252,6 +252,13 @@ describe('ajustar átomos — el caso Megacenter tras la migración', () => {
     // y la cobertura del proyecto pasa a mostrar la verdad:
     const despues = { ...legacy, ...r.sub } as AsignacionContratista
     expect(coberturaDe(ALCANCE_MEGACENTER, [despues]).valor_sin_costear).toBe(45_427_976)
+    // CONDICIÓN A tras el ajuste: la base cambió a CD de átomos y el rótulo
+    // viaja con ella — `legacy` queda solo como procedencia (badge migrada).
+    expect(r.sub.preliquidacion!.base_margen).toBe('cd_atomos')
+    expect(baseMargenDe(despues)).toBe('cd_atomos')
+    expect(despues.legacy).toBe(true)
+    // sin ajuste, la migrada sigue rotulada con la base anterior:
+    expect(baseMargenDe(legacy)).toBe('venta_total_legacy')
   })
   it('átomo tomado por otra viva → lanza; sin cambio → null', () => {
     const otra = base({ id: 'a2', atomos: ['Protección de equipos y limpieza'] })
