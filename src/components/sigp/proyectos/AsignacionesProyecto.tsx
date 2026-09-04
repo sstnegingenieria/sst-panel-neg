@@ -13,7 +13,7 @@
 // asigna ve cuánto CD pone en manos de cada contratista, no solo el nombre).
 import { useState, useEffect, useCallback } from 'react'
 import {
-  collection, getDocs, doc, updateDoc, arrayUnion, deleteField, Timestamp,
+  collection, getDocs, getDoc, doc, updateDoc, arrayUnion, deleteField, Timestamp,
 } from 'firebase/firestore'
 import { db } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -25,16 +25,16 @@ import {
   construirAsignacionMulti, construirAsignacionHistorica,
   patchCancelarAsignacion, patchAjustarAtomos, patchResolverSenal,
   patchDefinirPreliquidacion, patchAprobarPreliquidacion, patchGirarAnticipo,
-  patchCorregirPreliquidacion, valorAlcanceDe,
+  patchCorregirPreliquidacion, patchLiquidarAsignacion, valorAlcanceDe,
   margenImplicitoDe, requiereRevisionCobertura, UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT,
   baseMargenDe, ETIQUETA_BASE_MARGEN, atomosTomados,
   ESTADO_ASIG_LABEL, ESTADO_ASIG_COLOR,
 } from '../../../types/sigp/asignacion'
 import type { AsignacionContratista } from '../../../types/sigp/asignacion'
 import { cargarAsignaciones, asegurarMigrado, crearAsignacion, escribirAsignacion } from '../../../utils/sigp/asignaciones'
-import { MODALIDAD_CONTRATISTA_LABEL, MODALIDADES_CONTRATISTA, anticipoValorDe } from '../../../types/sigp/proyecto'
-import type { Proyecto, ModalidadContratista } from '../../../types/sigp/proyecto'
-import { aprobacionRequiereSalvedad } from '../../../types/sigp/permisos'
+import { MODALIDAD_CONTRATISTA_LABEL, MODALIDADES_CONTRATISTA, anticipoValorDe, sstGateAlDia, totalComprasReembolsos } from '../../../types/sigp/proyecto'
+import type { Proyecto, ModalidadContratista, RetencionLiquidacion } from '../../../types/sigp/proyecto'
+import { aprobacionRequiereSalvedad, puedeLiquidarUI } from '../../../types/sigp/permisos'
 import InputExpresion from '../cotizaciones/InputExpresion'
 
 interface Props {
@@ -359,6 +359,54 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     } catch { toast('Error al corregir', 'error') } finally { setAplicando(false) }
   }
 
+  // ═══════════════ Liquidar POR ASIGNACIÓN (SB6 — B3b: el camino que nunca
+  // ha corrido en prod; el builder valida los gates, la regla también) ═══════
+  const puedeLiquidar = puedeLiquidarUI(user?.rol)
+  const [liquidarTarget, setLiquidarTarget] = useState<AsignacionContratista | null>(null)
+  const [gateSst, setGateSst] = useState<boolean | null>(null)
+  const [retenciones, setRetenciones] = useState<RetencionLiquidacion[]>([])
+  const [retConcepto, setRetConcepto] = useState('')
+  const [retValor, setRetValor] = useState<number | undefined>(undefined)
+  const [obsLiq, setObsLiq] = useState('')
+  const [justifAnticipada, setJustifAnticipada] = useState('')
+  const [acuerdoCon, setAcuerdoCon] = useState('')
+  const esAnticipada = proyecto.estado === 'facturado'
+
+  const abrirLiquidar = async (a: AsignacionContratista) => {
+    setRetenciones([]); setRetConcepto(''); setRetValor(undefined); setObsLiq('')
+    setJustifAnticipada(''); setAcuerdoCon(''); setGateSst(null)
+    setLiquidarTarget(a)
+    try {
+      // Gate SST leído de la PROYECCIÓN (gerencia la lee; sin doc = sin aval)
+      const snap = await getDoc(doc(db, 'verificaciones_sst', proyecto.id))
+      setGateSst(snap.exists() ? sstGateAlDia(snap.data() as Parameters<typeof sstGateAlDia>[0]) : false)
+    } catch { setGateSst(false) }
+  }
+  const liquidar = async () => {
+    if (!liquidarTarget || gateSst !== true) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      const vigentes = await asegurarMigrado(proyecto, subdocs)
+      const target = vigentes.find(x => x.id === liquidarTarget.id) ?? liquidarTarget
+      const r = patchLiquidarAsignacion(target, proyecto.estado, {
+        retenciones,
+        ...(obsLiq.trim() ? { observaciones: obsLiq.trim() } : {}),
+        ...(esAnticipada ? {
+          justificacion_anticipada: justifAnticipada, acuerdo_con: acuerdoCon, acuerdo_fecha: ahora,
+        } : {}),
+      }, gateSst, user?.uid ?? '', ahora)
+      if (!r) { toast('La liquidación no procede en este estado (gates del builder)', 'error'); return }
+      const trasPatch = vigentes.map(x => x.id === target.id
+        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+      await escribirAsignacion(proyecto.id, alcance, target.id,
+        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+      toast(`Liquidada — saldo ${fmtMoney(r.liquidacion.saldo_final)}`)
+      setLiquidarTarget(null)
+      await recargarTodo()
+    } catch (e) { toast(e instanceof Error ? e.message : 'Error al liquidar', 'error') } finally { setAplicando(false) }
+  }
+
   const selectorAtomos = (sel: Set<string>, setSel: (s: Set<string>) => void, exceptoId?: string) => {
     const tomadosPorOtras = atomosTomados(asigs.filter(a => a.id !== exceptoId))
     const duenoDe = (grupo: string) =>
@@ -488,6 +536,31 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                     Cancelada el {fFecha(a.cancelacion.fecha)} — {a.cancelacion.motivo} · incurrido {fmtMoney(a.cancelacion.incurrido.total)}
                     {a.cancelacion.incurrido.total > 0 && a.estado === 'cancelada' && ' (pendiente de liquidar)'}
                   </p>
+                )}
+                {a.liquidacion && (
+                  <p className="text-xs text-gray-600 bg-gray-50 rounded px-2 py-1.5">
+                    {a.liquidacion.liquidacion_anticipada && '⏩ ANTICIPADA · '}
+                    {a.liquidacion.es_cancelacion && 'Cierre de cancelada · '}
+                    Liquidada: {fmtMoney(a.liquidacion.mano_obra)} + reembolsos {fmtMoney(a.liquidacion.diferencia)}
+                    {' = '}{fmtMoney(a.liquidacion.total_final)} − anticipo {fmtMoney(a.liquidacion.anticipo_girado)}
+                    {a.liquidacion.retenciones.length > 0 && <> − retenciones {fmtMoney(a.liquidacion.retenciones.reduce((s, r) => s + r.valor, 0))}</>}
+                    {' → '}<span className={`font-mono font-semibold ${a.liquidacion.saldo_final < 0 ? 'text-red-700' : ''}`}>SALDO {fmtMoney(a.liquidacion.saldo_final)}</span>
+                    {a.liquidacion.saldo_final < 0 && ' (pagado de más — sobre-giro visible, jamás recortado)'}
+                  </p>
+                )}
+                {/* SB6 — liquidar por asignación: solo gerencia, solo con el
+                    proyecto en pagado_cliente (normal) o facturado (anticipada);
+                    cubre anticipo_girado y cancelada CON incurrido. */}
+                {puedeLiquidar && !a.liquidacion
+                  && (proyecto.estado === 'pagado_cliente' || proyecto.estado === 'facturado')
+                  && (a.estado === 'anticipo_girado'
+                      || (a.estado === 'cancelada' && (a.cancelacion?.incurrido.total ?? 0) > 0)) && (
+                  <div className="pt-0.5">
+                    <button onClick={() => abrirLiquidar(a)} disabled={aplicando}
+                      className="text-[11px] px-2.5 py-1 rounded-lg border border-brand-400 text-brand-700 hover:bg-brand-50 font-semibold disabled:opacity-50">
+                      {esAnticipada ? '⏩ Liquidar anticipado' : '🧮 Liquidar asignación'}
+                    </button>
+                  </div>
                 )}
                 {a.alcance_desactualizado && puedeGestionar && a.estado !== 'cancelada' && (
                   <div className="flex flex-wrap items-center gap-2">
@@ -852,6 +925,93 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
           <input value={corregirMotivo} onChange={e => setCorregirMotivo(e.target.value)}
             placeholder="Motivo de la corrección (obligatorio)…"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+        </div>
+      </Modal>
+
+      {/* ── Modal: liquidar asignación (SB6 — gerencia, gate SST) ── */}
+      <Modal isOpen={liquidarTarget !== null} onClose={() => setLiquidarTarget(null)}
+        title={`${esAnticipada ? 'Liquidación ANTICIPADA' : 'Liquidar asignación'} — ${liquidarTarget?.contratista_nombre ?? ''}`} size="lg"
+        actions={[
+          { label: 'Volver', onClick: () => setLiquidarTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Liquidando…' : 'Liquidar', onClick: liquidar, variant: 'primary',
+            loading: aplicando,
+            disabled: gateSst !== true
+              || (esAnticipada && !(justifAnticipada.trim() && acuerdoCon.trim())),
+          },
+        ]}>
+        <div className="space-y-3">
+          {gateSst === null && <p className="text-xs text-gray-400">Consultando el aval de SST…</p>}
+          {gateSst === false && (
+            <p className="text-sm text-red-700 bg-red-50 rounded px-2.5 py-1.5">
+              Bloqueada: falta el aval de SST (gate "al día" en Verificación de contratistas) — la regla también la rechaza.
+            </p>
+          )}
+          {liquidarTarget && (() => {
+            const a = liquidarTarget
+            const esCanc = a.estado === 'cancelada'
+            const manoObra = esCanc ? (a.cancelacion?.incurrido.anticipo ?? 0) : (a.preliquidacion?.valor_contratista ?? 0)
+            const reemb = totalComprasReembolsos(a.compras_reembolsos)
+            const giro = a.preliquidacion?.anticipo?.valor ?? 0
+            const totRet = retenciones.reduce((s, r) => s + r.valor, 0)
+            const saldo = manoObra + reemb - giro - totRet
+            return (
+              <div className="text-sm text-gray-700 bg-gray-50 rounded-lg px-3 py-2 space-y-0.5">
+                {esCanc && <p className="text-xs text-rose-700">Cierre de asignación CANCELADA — se concilia lo INCURRIDO, no el pactado completo.</p>}
+                <p>{esCanc ? 'Incurrido (anticipo)' : 'Mano de obra pactada'}: <span className="font-mono">{fmtMoney(manoObra)}</span>
+                  {' '}+ reembolsos <span className="font-mono">{fmtMoney(reemb)}</span>
+                  {' '}= <span className="font-mono font-semibold">{fmtMoney(manoObra + reemb)}</span></p>
+                <p>− anticipo girado <span className="font-mono">{fmtMoney(giro)}</span>
+                  {totRet > 0 && <> − retenciones <span className="font-mono">{fmtMoney(totRet)}</span></>}</p>
+                <p className={`font-semibold ${saldo < 0 ? 'text-red-700' : 'text-brand-700'}`}>
+                  SALDO A PAGAR: <span className="font-mono">{fmtMoney(saldo)}</span>
+                  {saldo < 0 && ' — pagado de más (sobre-giro, visible y jamás recortado)'}
+                </p>
+                {a.preliquidacion?.ajuste_pendiente_liquidacion && (
+                  <p className="text-xs text-amber-700">Reconoce el ajuste de ejecución pendiente (queda snapshot en la liquidación).</p>
+                )}
+              </div>
+            )
+          })()}
+          <div>
+            <p className="text-xs font-medium text-gray-600 mb-1">Retenciones (moldeables — concepto libre)</p>
+            {retenciones.map((r, i) => (
+              <p key={i} className="text-xs text-gray-600 flex justify-between">
+                <span>{r.concepto}</span>
+                <span className="font-mono">{fmtMoney(r.valor)}
+                  <button onClick={() => setRetenciones(rs => rs.filter((_, j) => j !== i))} className="ml-2 text-red-500">✕</button>
+                </span>
+              </p>
+            ))}
+            <div className="flex gap-2 mt-1">
+              <input value={retConcepto} onChange={e => setRetConcepto(e.target.value)} placeholder="Concepto…"
+                className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs" />
+              <InputExpresion valor={retValor} onValor={setRetValor}
+                className="w-32 px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs text-right font-mono" />
+              <button onClick={() => {
+                if (retConcepto.trim() && retValor !== undefined && retValor > 0) {
+                  setRetenciones(rs => [...rs, { concepto: retConcepto.trim(), valor: retValor }])
+                  setRetConcepto(''); setRetValor(undefined)
+                }
+              }} className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">＋</button>
+            </div>
+          </div>
+          {esAnticipada && (
+            <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50/60 p-2.5">
+              <p className="text-xs text-amber-800">
+                ANTICIPADA: se paga al contratista ANTES de cobrar — exige acuerdo con Gerencia de Proyectos.
+              </p>
+              <input value={justifAnticipada} onChange={e => setJustifAnticipada(e.target.value)}
+                placeholder="Justificación (obligatoria)…"
+                className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs" />
+              <input value={acuerdoCon} onChange={e => setAcuerdoCon(e.target.value)}
+                placeholder="Acuerdo con (quién de Gerencia de Proyectos)…"
+                className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs" />
+            </div>
+          )}
+          <input value={obsLiq} onChange={e => setObsLiq(e.target.value)}
+            placeholder="Observaciones (opcional)…"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
         </div>
       </Modal>
     </div>
