@@ -177,6 +177,15 @@ export interface AsignacionContratista {
   compras_reembolsos: CompraReembolso[]
   alcance_desactualizado?: SenalAlcanceAsignacion
   cancelacion?: CancelacionAsignacion
+  /** REGISTRO HISTÓRICO retroactivo (decisión de Giovanny, 03-sep): el pago
+   *  ocurrió POR FUERA del panel (la contabilidad lo tiene, el panel no —
+   *  caso PRY-2026-024). Se registra con valores cargados y motivo
+   *  OBLIGATORIO, en estado `liquidada` (económicamente cerrada), y JAMÁS
+   *  simula el flujo de control: sin aprobada_por, sin anticipo, sin objeto
+   *  liquidacion — esta marca dice cómo llegó el dato. El costo entra al
+   *  indicador y al presupuesto (el objetivo), la honestidad queda escrita.
+   *  Mismo principio que `costo_ejecutado` manual, un nivel arriba. */
+  registro_historico?: { motivo: string; registrado_por: string; fecha: Timestamp }
   /** Migrada del modelo singular (su preliquidación trae la base ANTERIOR). */
   legacy?: boolean
   asignado_por: string
@@ -388,6 +397,32 @@ export function subEtapaDe(
   return 'lista_para_ejecutar'
 }
 
+/** Estados del PROYECTO que pertenecen a la etapa de preparación (v2 los
+ *  colapsa en `en_preparacion`). */
+export const ESTADOS_PREPARACION_PROYECTO = new Set([
+  'creado', 'contratista_asignado', 'permisos_en_tramite',
+  'preliquidacion_definida', 'preliquidacion_aprobada', 'anticipo_girado',
+])
+
+/** Sub-etapa de un proyecto EN PREPARACIÓN, unificada para ambos mundos —
+ *  con resumen (migrado/multi) deriva de las asignaciones (subEtapaDe);
+ *  legacy deriva del estado del padre. Un solo filtro responde "¿por qué no
+ *  arranca?" sin importar si el proyecto migró. null fuera de preparación. */
+export function subEtapaProyectoDe(
+  p: Pick<Proyecto, 'permisos' | 'estado'> & { resumen_asignaciones?: ResumenAsignaciones },
+): SubEtapaPreparacion | null {
+  if (!ESTADOS_PREPARACION_PROYECTO.has(p.estado)) return null
+  if (p.resumen_asignaciones) return subEtapaDe(p)
+  switch (p.estado) {
+    case 'creado': return 'sin_contratista'
+    case 'contratista_asignado': return 'preliquidacion_pendiente'
+    case 'permisos_en_tramite': return 'permisos_en_tramite'
+    case 'preliquidacion_definida': return 'por_aprobar'
+    case 'preliquidacion_aprobada': return 'por_girar_anticipo'
+    default: return 'lista_para_ejecutar'   // anticipo_girado
+  }
+}
+
 // ── Builders (todos puros: validan y devuelven el patch exacto, o lanzan/null) ─
 
 const entrada = (
@@ -447,6 +482,86 @@ export function construirAsignacionMulti(
       `Asignación de ${contratista.nombre} — ${atomos.length} actividad(es): ${atomos.join(' · ')}` +
       (notaCriterio?.trim() ? ` · Criterio: ${notaCriterio.trim()}` : ''))],
     ...(notaCriterio?.trim() ? { nota_criterio: notaCriterio.trim() } : {}),
+    fecha_creacion: fecha,
+  }
+}
+
+/**
+ * REGISTRO HISTÓRICO retroactivo — contratista al que YA se le pagó por fuera
+ * del panel (caso PRY-2026-024: el pago ocurrió, la contabilidad lo tiene, el
+ * panel no). Hacerlo pasar por definir → aprobar → girar → liquidar sería
+ * FINGIR que un control ocurrió cuando no ocurrió; este builder registra el
+ * hecho sin simular el flujo:
+ *  - nace `liquidada` (económicamente cerrada — cubre sus átomos, entra a
+ *    costo presupuestado/contratistas, cero pendientes en bandeja)
+ *  - SIN aprobada_por, SIN anticipo, SIN objeto liquidacion — la marca
+ *    `registro_historico` (con motivo OBLIGATORIO) dice cómo llegó el dato
+ *  - solo para lo YA pagado y cerrado; un contratista aún activo/con saldo
+ *    entra por el flujo normal de aquí en adelante
+ *  - NO exige contratista habilitado: el gate controla decisiones futuras,
+ *    no hechos pasados — el snapshot registra el estado ACTUAL, honesto
+ *  - en solo_mano_obra los materiales NEG son opcionales (si no se conocen,
+ *    0 y el motivo lo explica — jamás un número inventado)
+ * Invariantes de átomos idénticos al builder normal (≤1 asignación viva).
+ * Mismo principio que `costo_ejecutado` manual, un nivel arriba.
+ */
+export function construirAsignacionHistorica(
+  contratista: { id: string; nombre: string; nit?: string; cedula?: string; estado: string },
+  atomos: string[],
+  modalidad: ModalidadContratista,
+  valorMateriales: number | undefined,
+  valorPagado: number,
+  motivo: string,
+  alcance: AlcanceGrupo[],
+  existentes: AsignacionContratista[],
+  uid: string,
+  fecha: Timestamp,
+): Omit<AsignacionContratista, 'id'> {
+  if (!motivo.trim())
+    throw new Error('El registro histórico exige un motivo (por qué el pago ocurrió por fuera del panel)')
+  if (!(valorPagado > 0))
+    throw new Error('El registro histórico exige el valor realmente pagado (> 0)')
+  if (atomos.length === 0)
+    throw new Error('La asignación necesita al menos una actividad del alcance')
+  const enAlcance = new Set(alcance.map(g => g.grupo))
+  for (const at of atomos) {
+    if (!enAlcance.has(at)) throw new Error(`La actividad «${at}» no existe en el alcance vigente`)
+  }
+  const tomados = atomosTomados(existentes)
+  for (const at of atomos) {
+    if (tomados.has(at)) throw new Error(`La actividad «${at}» ya está asignada a otro contratista`)
+  }
+  const documento = contratista.nit || contratista.cedula
+  return {
+    contratista_id: contratista.id,
+    contratista_nombre: contratista.nombre,
+    ...(documento ? { contratista_documento: documento } : {}),
+    habilitacion_snapshot: {
+      estado: contratista.estado,
+      fuente: 'contratistas.estado — estado ACTUAL al registrar (histórico: no aplica gate)',
+      fecha_consulta: fecha,
+    },
+    atomos: [...atomos],
+    modalidad,
+    ...(modalidad === 'solo_mano_obra' ? { valor_materiales: valorMateriales ?? 0 } : {}),
+    estado: 'liquidada',
+    preliquidacion: {
+      valor_alcance: valorAlcanceDe(atomos, alcance),
+      base_margen: 'cd_atomos',
+      valor_contratista: valorPagado,
+      anticipo_pct: 0,
+      definida_por: uid,
+      fecha_definicion: fecha,
+      // SIN aprobada_por / SIN anticipo — esos controles NO ocurrieron.
+    },
+    compras_reembolsos: [],
+    registro_historico: { motivo: motivo.trim(), registrado_por: uid, fecha },
+    asignado_por: uid,
+    fecha,
+    historial: [entrada(null, 'liquidada', uid, fecha,
+      `REGISTRO HISTÓRICO retroactivo — pagado por fuera del panel (${atomos.join(' · ')}, ` +
+      `valor pagado cargado a mano). Motivo: ${motivo.trim()}. ` +
+      'No siguió el flujo definir → aprobar → girar → liquidar.')],
     fecha_creacion: fecha,
   }
 }

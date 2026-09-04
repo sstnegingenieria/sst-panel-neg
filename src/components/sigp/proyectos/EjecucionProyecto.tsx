@@ -48,7 +48,17 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
   const [formSoporte, setFormSoporte] = useState(false)
 
   const est = proyecto.estado
-  const visible = proyecto.ejecucion || ['anticipo_girado', 'en_ejecucion', 'ejecutado', 'entregado_cliente', 'soporte_recibido', 'enviado_a_facturacion'].includes(est)
+  // P2-2 (decisión 3): en un proyecto MIGRADO los económicos viven por
+  // asignación — el gate a ejecución es ≥1 anticipo girado en la subcolección
+  // (SIN exigir cobertura completa), venga el proyecto en el estado que venga
+  // de la etapa de preparación.
+  const migrado = !!proyecto.resumen_asignaciones
+  const gateAnticipoMulti = migrado && (proyecto.resumen_asignaciones?.anticipos_girados ?? 0) >= 1
+  const enPreparacion = ['creado', 'contratista_asignado', 'permisos_en_tramite',
+    'preliquidacion_definida', 'preliquidacion_aprobada', 'anticipo_girado'].includes(est)
+  const puedeIniciar = migrado ? (gateAnticipoMulti && enPreparacion) : est === 'anticipo_girado'
+  const visible = proyecto.ejecucion || gateAnticipoMulti
+    || ['anticipo_girado', 'en_ejecucion', 'ejecutado', 'entregado_cliente', 'soporte_recibido', 'enviado_a_facturacion'].includes(est)
 
   const transicion = async (de: EstadoProyecto, a: EstadoProyecto, motivo: string, extra: Record<string, unknown> = {}) => {
     const ahora = Timestamp.now()
@@ -73,7 +83,10 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
     if (!window.confirm('¿Iniciar la ejecución del proyecto?')) return
     setAplicando(true)
     try {
-      await transicion('anticipo_girado', 'en_ejecucion', 'Ejecución iniciada', {
+      await transicion(est, 'en_ejecucion',
+        migrado && est !== 'anticipo_girado'
+          ? 'Ejecución iniciada (P2-2: gate por anticipo girado en asignaciones)'
+          : 'Ejecución iniciada', {
         ejecucion: { fecha_inicio: Timestamp.now(), iniciada_por: user?.uid ?? '' },
         // ISO ind. 1 — el plan de trabajo nace del alcance pactado (un renglón
         // por grupo del snapshot); el checkbox `ejecutada` alimenta el indicador.
@@ -199,11 +212,17 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
       {/* 1 · Ejecución */}
       {paso('1 · Ejecución', !!e?.fecha_ejecutado, (
         <div className="space-y-2 text-xs text-gray-600">
-          {!e && est === 'anticipo_girado' && puedeGestionar && (
+          {!e && puedeIniciar && puedeGestionar && (
             <button onClick={iniciar} disabled={aplicando}
               className="text-sm px-3 py-1.5 rounded-lg font-medium bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50">
               ▶ Iniciar ejecución
             </button>
+          )}
+          {!e && migrado && !gateAnticipoMulti && enPreparacion && (
+            <p className="text-gray-500">
+              La ejecución se habilita con al menos UN anticipo girado en las asignaciones
+              (no exige cobertura completa del alcance).
+            </p>
           )}
           {e && <p>Iniciada el {fFecha(e.fecha_inicio)}{e.fecha_ejecutado && <> · ejecutado el {fFecha(e.fecha_ejecutado)}</>}</p>}
           {e?.nota && <p className="bg-gray-50 rounded px-2 py-1.5">{e.nota}</p>}

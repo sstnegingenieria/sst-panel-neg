@@ -7,6 +7,8 @@ import { useFeatureFlag } from '../../hooks/useFeatureFlag'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney } from '../../utils/sigp/formato'
 import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR } from '../../types/sigp/proyecto'
+import { subEtapaProyectoDe, SUB_ETAPAS_PREPARACION, SUB_ETAPA_LABEL } from '../../types/sigp/asignacion'
+import type { SubEtapaPreparacion } from '../../types/sigp/asignacion'
 import type { Proyecto } from '../../types/sigp/proyecto'
 
 export default function ProyectosSigp() {
@@ -16,6 +18,9 @@ export default function ProyectosSigp() {
   const [loading, setLoading] = useState(true)
   const [filtroEstado, setFiltroEstado] = useState('')
   const [busqueda, setBusqueda] = useState('')
+  // P2-2: chips de sub-etapa FILTRABLES, no decorativos — "¿por qué este
+  // proyecto no arranca?" se responde filtrando (condición de Giovanny).
+  const [filtroSubEtapa, setFiltroSubEtapa] = useState<SubEtapaPreparacion | ''>('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -32,10 +37,20 @@ export default function ProyectosSigp() {
 
   useEffect(() => { if (f2Enabled) load() }, [f2Enabled, load])
 
+  const conteoSubEtapas = useMemo(() => {
+    const c: Partial<Record<SubEtapaPreparacion, number>> = {}
+    for (const p of proyectos) {
+      const se = subEtapaProyectoDe(p)
+      if (se) c[se] = (c[se] ?? 0) + 1
+    }
+    return c
+  }, [proyectos])
+
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
     return proyectos.filter(p =>
       (!filtroEstado || p.estado === filtroEstado) &&
+      (!filtroSubEtapa || subEtapaProyectoDe(p) === filtroSubEtapa) &&
       (!q ||
         p.consecutivo.toLowerCase().includes(q) ||
         p.snapshot.cliente.toLowerCase().includes(q) ||
@@ -45,7 +60,7 @@ export default function ProyectosSigp() {
         (p.cotizacion_consecutivo ?? '').toLowerCase().includes(q) ||
         (p.solicitud_consecutivo ?? '').toLowerCase().includes(q)),
     )
-  }, [proyectos, filtroEstado, busqueda])
+  }, [proyectos, filtroEstado, filtroSubEtapa, busqueda])
 
   if (!f2Enabled) {
     return (
@@ -81,6 +96,31 @@ export default function ProyectosSigp() {
             </select>
           </div>
         </div>
+
+        {/* P2-2 · sub-etapas de preparación — chips FILTRABLES (clic = filtrar,
+            re-clic = quitar): "¿por qué no arranca?" se responde aquí */}
+        {!loading && Object.keys(conteoSubEtapas).length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-gray-100 bg-gray-50/60">
+            <span className="text-[11px] text-gray-400 uppercase tracking-wide mr-1">En preparación:</span>
+            {SUB_ETAPAS_PREPARACION.filter(se => (conteoSubEtapas[se] ?? 0) > 0).map(se => (
+              <button key={se}
+                onClick={() => setFiltroSubEtapa(f => f === se ? '' : se)}
+                className={`text-[11px] px-2 py-0.5 rounded-full border font-medium transition-colors ${
+                  filtroSubEtapa === se
+                    ? 'bg-brand-600 border-brand-600 text-white'
+                    : 'bg-white border-gray-300 text-gray-600 hover:border-brand-400 hover:text-brand-700'
+                }`}>
+                {SUB_ETAPA_LABEL[se]} · {conteoSubEtapas[se]}
+              </button>
+            ))}
+            {filtroSubEtapa && (
+              <button onClick={() => setFiltroSubEtapa('')}
+                className="text-[11px] text-gray-400 hover:text-gray-600 underline underline-offset-2 ml-1">
+                quitar filtro
+              </button>
+            )}
+          </div>
+        )}
 
         {loading ? (
           <p className="px-4 py-10 text-center text-sm text-gray-400">Cargando…</p>
@@ -127,6 +167,12 @@ export default function ProyectosSigp() {
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${ESTADO_PRY_COLOR[p.estado]}`}>
                         {ESTADO_PRY_LABEL[p.estado]}
                       </span>
+                      {(() => {
+                        const se = subEtapaProyectoDe(p)
+                        return se ? (
+                          <span className="block mt-0.5 text-[11px] text-gray-400">{SUB_ETAPA_LABEL[se]}</span>
+                        ) : null
+                      })()}
                     </td>
                     <td className="px-4 py-2.5 text-gray-500">
                       {p.fecha_creacion?.toDate?.().toLocaleDateString('es-CO') ?? '—'}

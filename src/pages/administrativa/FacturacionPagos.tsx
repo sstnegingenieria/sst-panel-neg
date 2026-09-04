@@ -25,6 +25,7 @@ import {
   enCaminoAdministrativa, ETIQUETA_EN_CAMINO, narrativaAdministrativa,
   enColaVerificacionSst, estadoSstGate, sstGateAlDia, SST_GATE_LABEL, SST_GATE_COLOR,
   completitudCierre, pagoClientePendiente, puedeCerrarseProyecto,
+  asignacionesPorAprobar, asignacionesPorGirar,
   MEDIOS_PAGO, MEDIO_PAGO_LABEL,
 } from '../../types/sigp/proyecto'
 import { puedeRegistrarFacturaUI, puedeLiquidarUI, puedeCerrarProyectoUI, puedeAprobarPreliquidacionUI } from '../../types/sigp/permisos'
@@ -178,8 +179,12 @@ export default function FacturacionPagos() {
     // "Por cobrar" usa PREDICADO, no estado: incluye el liquidado ANTICIPADO
     // cuyo pago sigue pendiente (23-jul).
     const estadoSeccion = SECCIONES_ADMINISTRATIVA.find(s => s.clave === seccion)?.estado
+    // P2-2: "Por aprobar"/"Por girar" suman las asignaciones de los proyectos
+    // MIGRADOS (contadas del resumen denormalizado) a la vía de estado legacy.
     const base = proyectos.filter(p =>
       seccion === 'por_cobrar' ? pagoClientePendiente(p)
+      : seccion === 'por_aprobar' ? (p.estado === 'preliquidacion_definida' || asignacionesPorAprobar(p) > 0)
+      : seccion === 'por_anticipo' ? (p.estado === 'preliquidacion_aprobada' || asignacionesPorGirar(p) > 0)
       : seccion === 'en_camino' ? enCaminoAdministrativa(p.estado)
       : estadoSeccion ? p.estado === estadoSeccion
       : p.estado !== 'cerrado')
@@ -208,7 +213,10 @@ export default function FacturacionPagos() {
 
   const conteo = useMemo(() => Object.fromEntries(
     SECCIONES_ADMINISTRATIVA.map(s => [s.clave, proyectos.filter(p =>
-      s.clave === 'por_cobrar' ? pagoClientePendiente(p) : p.estado === s.estado).length]),
+      s.clave === 'por_cobrar' ? pagoClientePendiente(p)
+      : s.clave === 'por_aprobar' ? (p.estado === s.estado || asignacionesPorAprobar(p) > 0)
+      : s.clave === 'por_anticipo' ? (p.estado === s.estado || asignacionesPorGirar(p) > 0)
+      : p.estado === s.estado).length]),
   ) as Record<string, number>, [proyectos])
   const enCamino = useMemo(() => proyectos.filter(p => enCaminoAdministrativa(p.estado)).length, [proyectos])
 
@@ -432,6 +440,14 @@ export default function FacturacionPagos() {
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${ESTADO_PRY_COLOR[p.estado]}`}>
                     {ESTADO_PRY_LABEL[p.estado]}
                   </span>
+                  {/* P2-2: por qué un migrado aparece en Por aprobar/Por girar */}
+                  {(asignacionesPorAprobar(p) > 0 || asignacionesPorGirar(p) > 0) && (
+                    <span className="block mt-0.5 text-[11px] text-amber-700">
+                      {asignacionesPorAprobar(p) > 0 && `${asignacionesPorAprobar(p)} asignación(es) por aprobar`}
+                      {asignacionesPorAprobar(p) > 0 && asignacionesPorGirar(p) > 0 && ' · '}
+                      {asignacionesPorGirar(p) > 0 && `${asignacionesPorGirar(p)} por girar anticipo`}
+                    </span>
+                  )}
                   {/* Bloque 3a: estado del gate SST — SOLO LECTURA para gerencia,
                       leído de la proyección verificaciones_sst (el gate lo marca
                       SST en /verificacion-contratistas); sin 'al_dia' la
@@ -450,10 +466,17 @@ export default function FacturacionPagos() {
                   {/* Las acciones de preliquidación YA existen en la ficha del
                       proyecto (F2.1.c) — aquí se SURFACEAN con enlace directo,
                       no se reinventan. */}
-                  {(p.estado === 'preliquidacion_definida' || p.estado === 'preliquidacion_aprobada') && puedeAprobarPreliquidacionUI(user?.rol) ? (
+                  {(p.estado === 'preliquidacion_definida' || p.estado === 'preliquidacion_aprobada'
+                    || asignacionesPorAprobar(p) > 0 || asignacionesPorGirar(p) > 0) && puedeAprobarPreliquidacionUI(user?.rol) ? (
+                    // P2-2: en migrados la acción vive POR ASIGNACIÓN en la ficha
+                    // (surfacear, no reinventar — mismo patrón de siempre)
                     <Link to={`/sigp/proyectos/${p.id}`}
                       className="inline-block text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
-                      {p.estado === 'preliquidacion_definida' ? '✓ Aprobar preliquidación →' : '💸 Registrar anticipo →'}
+                      {asignacionesPorAprobar(p) > 0
+                        ? `✓ Aprobar preliquidación (${asignacionesPorAprobar(p)} asig.) →`
+                        : asignacionesPorGirar(p) > 0
+                          ? `💸 Registrar anticipo (${asignacionesPorGirar(p)} asig.) →`
+                          : p.estado === 'preliquidacion_definida' ? '✓ Aprobar preliquidación →' : '💸 Registrar anticipo →'}
                     </Link>
                   ) : p.estado === 'enviado_a_facturacion' && puedeRegistrar ? (
                     <button onClick={() => abrirRegistro(p)}

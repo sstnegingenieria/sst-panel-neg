@@ -13,7 +13,7 @@
 // asigna ve cuánto CD pone en manos de cada contratista, no solo el nombre).
 import { useState, useEffect, useCallback } from 'react'
 import {
-  collection, query, where, getDocs, doc, updateDoc, arrayUnion, deleteField, Timestamp,
+  collection, getDocs, doc, updateDoc, arrayUnion, deleteField, Timestamp,
 } from 'firebase/firestore'
 import { db } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -22,27 +22,40 @@ import Modal from '../../shared/Modal'
 import { fmtMoney, fmtNum } from '../../../utils/sigp/formato'
 import {
   asignacionesDe, coberturaDe, detectarDesincronizacion, resumenAsignacionesDe,
-  construirAsignacionMulti, patchCancelarAsignacion, patchAjustarAtomos, patchResolverSenal,
+  construirAsignacionMulti, construirAsignacionHistorica,
+  patchCancelarAsignacion, patchAjustarAtomos, patchResolverSenal,
+  patchDefinirPreliquidacion, patchAprobarPreliquidacion, patchGirarAnticipo,
+  patchCorregirPreliquidacion, valorAlcanceDe,
   margenImplicitoDe, requiereRevisionCobertura, UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT,
   baseMargenDe, ETIQUETA_BASE_MARGEN, atomosTomados,
   ESTADO_ASIG_LABEL, ESTADO_ASIG_COLOR,
 } from '../../../types/sigp/asignacion'
 import type { AsignacionContratista } from '../../../types/sigp/asignacion'
 import { cargarAsignaciones, asegurarMigrado, crearAsignacion, escribirAsignacion } from '../../../utils/sigp/asignaciones'
-import { MODALIDAD_CONTRATISTA_LABEL, MODALIDADES_CONTRATISTA } from '../../../types/sigp/proyecto'
+import { MODALIDAD_CONTRATISTA_LABEL, MODALIDADES_CONTRATISTA, anticipoValorDe } from '../../../types/sigp/proyecto'
 import type { Proyecto, ModalidadContratista } from '../../../types/sigp/proyecto'
+import { aprobacionRequiereSalvedad } from '../../../types/sigp/permisos'
 import InputExpresion from '../cotizaciones/InputExpresion'
 
 interface Props {
   proyecto: Proyecto
   puedeGestionar: boolean
+  /** Aprueba preliquidación / registra anticipo (gerencia titular + respaldo). */
+  puedeAprobar: boolean
   reload: () => Promise<void>
 }
+
+/** Tramo de ejecución del PROYECTO (Hotfix B): la corrección de una
+ *  preliquidación ahí es AJUSTE trazable, no reversión. Desde `facturado`
+ *  es territorio administrativo. */
+const ESTADOS_TRAMO_EJECUCION = new Set([
+  'en_ejecucion', 'ejecutado', 'entregado_cliente', 'soporte_recibido', 'enviado_a_facturacion',
+])
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
 
-export default function AsignacionesProyecto({ proyecto, puedeGestionar, reload }: Props) {
+export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAprobar, reload }: Props) {
   const { user } = useAuth()
   const alcance = proyecto.snapshot.alcance ?? []
   const [subdocs, setSubdocs] = useState<AsignacionContratista[]>([])
@@ -87,14 +100,23 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, reload 
   const [modalidad, setModalidad] = useState<ModalidadContratista>('todo_costo')
   const [materiales, setMateriales] = useState<number | undefined>(undefined)
   const [nota, setNota] = useState('')
+  // Registro histórico retroactivo (decisión Giovanny 03-sep): pago que ya
+  // ocurrió por fuera del panel — valores cargados + motivo, sin simular flujo.
+  const [esHistorica, setEsHistorica] = useState(false)
+  const [valorPagado, setValorPagado] = useState<number | undefined>(undefined)
+  const [motivoHistorico, setMotivoHistorico] = useState('')
 
   const abrirAsignar = async () => {
     setContratistaId(''); setAtomosSel(new Set()); setModalidad('todo_costo'); setMateriales(undefined); setNota('')
+    setEsHistorica(false); setValorPagado(undefined); setMotivoHistorico('')
     setFormOpen(true)
     try {
-      const snap = await getDocs(query(collection(db, 'contratistas'), where('estado', '==', 'activo')))
+      // TODOS los contratistas: el flujo normal filtra habilitados en el
+      // selector; el registro histórico admite inactivos (hechos pasados —
+      // el gate controla decisiones futuras).
+      const snap = await getDocs(collection(db, 'contratistas'))
       setContratistas(snap.docs.map(d => ({ id: d.id, ...d.data() }) as { id: string; nombre: string; estado: string }))
-    } catch { toast('Error al cargar contratistas habilitados', 'error') }
+    } catch { toast('Error al cargar contratistas', 'error') }
   }
 
   const cdSeleccionado = alcance.filter(g => atomosSel.has(g.grupo)).reduce((s, g) => s + (g.subtotal || 0), 0)
@@ -107,8 +129,12 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, reload 
       const ahora = Timestamp.now()
       // Migración lazy (decisión 2): el primer write económico migra el proyecto.
       const vigentes = await asegurarMigrado(proyecto, subdocs)
-      const nuevo = construirAsignacionMulti(
-        c, [...atomosSel], modalidad, materiales, alcance, vigentes, user?.uid ?? '', ahora, nota)
+      const nuevo = esHistorica
+        ? construirAsignacionHistorica(
+            c, [...atomosSel], modalidad, materiales, valorPagado ?? 0, motivoHistorico,
+            alcance, vigentes, user?.uid ?? '', ahora)
+        : construirAsignacionMulti(
+            c, [...atomosSel], modalidad, materiales, alcance, vigentes, user?.uid ?? '', ahora, nota)
       await crearAsignacion(proyecto.id, alcance, nuevo, vigentes)
       // Transición del proyecto (máquina actual, sin cambios hasta el switch):
       if (proyecto.estado === 'creado') {
@@ -117,7 +143,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, reload 
           historial: arrayUnion({ de: 'creado', a: 'contratista_asignado', por: user?.uid ?? '', fecha: ahora, motivo: `Contratista asignado: ${c.nombre}` }),
         })
       }
-      toast(`${c.nombre} asignado — ${atomosSel.size} actividad(es), CD ${fmtMoney(cdSeleccionado)}`)
+      toast(esHistorica
+        ? `${c.nombre} registrado como HISTÓRICO — ${fmtMoney(valorPagado ?? 0)} entra al indicador sin simular el flujo`
+        : `${c.nombre} asignado — ${atomosSel.size} actividad(es), CD ${fmtMoney(cdSeleccionado)}`)
       setFormOpen(false)
       await recargarTodo()
     } catch (e) {
@@ -199,6 +227,133 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, reload 
       toast('Señal resuelta — preliquidación confirmada sin cambios')
       await recargarTodo()
     } catch { toast('Error al resolver la señal', 'error') } finally { setAplicando(false) }
+  }
+
+  // ═══════════════ Economía POR ASIGNACIÓN (SB4 — v2: los económicos bajan
+  // a la asignación; estas acciones NO mueven el estado del PROYECTO) ═══════
+  const [definirTarget, setDefinirTarget] = useState<AsignacionContratista | null>(null)
+  const [definirValor, setDefinirValor] = useState<number | undefined>(undefined)
+  const [definirPct, setDefinirPct] = useState<number | undefined>(50)
+
+  const abrirDefinir = (a: AsignacionContratista) => {
+    setDefinirValor(a.preliquidacion?.valor_contratista)
+    setDefinirPct(a.preliquidacion?.anticipo_pct ?? 50)
+    setDefinirTarget(a)
+  }
+  const definir = async () => {
+    if (!definirTarget || !(definirValor !== undefined && definirValor > 0)) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      const vigentes = await asegurarMigrado(proyecto, subdocs)
+      const target = vigentes.find(x => x.id === definirTarget.id) ?? definirTarget
+      const r = patchDefinirPreliquidacion(target,
+        { valor_contratista: definirValor, anticipo_pct: definirPct ?? 50 }, alcance, user?.uid ?? '', ahora)
+      if (!r) { toast('La preliquidación solo se define antes de aprobar', 'error'); return }
+      const trasPatch = vigentes.map(x => x.id === target.id
+        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+      await escribirAsignacion(proyecto.id, alcance, target.id,
+        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+      toast(`Preliquidación definida — ${fmtMoney(definirValor)} · pendiente de aprobación de Gerencia Administrativa`)
+      setDefinirTarget(null)
+      await recargarTodo()
+    } catch (e) { toast(e instanceof Error ? e.message : 'Error al definir', 'error') } finally { setAplicando(false) }
+  }
+
+  const [aprobarTarget, setAprobarTarget] = useState<AsignacionContratista | null>(null)
+  const [salvedad, setSalvedad] = useState('')
+  const esRespaldo = aprobacionRequiereSalvedad(user?.rol)
+  const aprobar = async () => {
+    if (!aprobarTarget) return
+    if (esRespaldo && !salvedad.trim()) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      const vigentes = await asegurarMigrado(proyecto, subdocs)
+      const target = vigentes.find(x => x.id === aprobarTarget.id) ?? aprobarTarget
+      const r = patchAprobarPreliquidacion(target, user?.uid ?? '', ahora,
+        esRespaldo ? salvedad.trim() : undefined)
+      if (!r) { toast('Solo se aprueba una preliquidación definida', 'error'); return }
+      const trasPatch = vigentes.map(x => x.id === target.id
+        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+      await escribirAsignacion(proyecto.id, alcance, target.id,
+        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+      toast(esRespaldo ? 'Aprobada como RESPALDO — salvedad registrada' : 'Preliquidación aprobada')
+      setAprobarTarget(null); setSalvedad('')
+      await recargarTodo()
+    } catch { toast('Error al aprobar', 'error') } finally { setAplicando(false) }
+  }
+
+  const [girarTarget, setGirarTarget] = useState<AsignacionContratista | null>(null)
+  const [girarValor, setGirarValor] = useState<number | undefined>(undefined)
+  const [girarFecha, setGirarFecha] = useState('')
+  const abrirGirar = (a: AsignacionContratista) => {
+    setGirarValor(a.preliquidacion ? Math.round(anticipoValorDe(a.preliquidacion)) : undefined)
+    setGirarFecha(new Date().toISOString().slice(0, 10))
+    setGirarTarget(a)
+  }
+  const girar = async () => {
+    if (!girarTarget || !(girarValor !== undefined && girarValor > 0) || !girarFecha) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      const vigentes = await asegurarMigrado(proyecto, subdocs)
+      const target = vigentes.find(x => x.id === girarTarget.id) ?? girarTarget
+      const r = patchGirarAnticipo(target, {
+        fecha: Timestamp.fromDate(new Date(`${girarFecha}T12:00:00`)),
+        valor: girarValor, registrado_por: user?.uid ?? '',
+      }, user?.uid ?? '', ahora)
+      if (!r) { toast('El anticipo se registra sobre una preliquidación aprobada', 'error'); return }
+      const trasPatch = vigentes.map(x => x.id === target.id
+        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+      await escribirAsignacion(proyecto.id, alcance, target.id,
+        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+      toast(`Anticipo registrado — ${fmtMoney(girarValor)}`)
+      setGirarTarget(null)
+      await recargarTodo()
+    } catch { toast('Error al registrar el anticipo', 'error') } finally { setAplicando(false) }
+  }
+
+  const [corregirTarget, setCorregirTarget] = useState<AsignacionContratista | null>(null)
+  const [corregirValor, setCorregirValor] = useState<number | undefined>(undefined)
+  const [corregirPct, setCorregirPct] = useState<number | undefined>(undefined)
+  const [corregirMotivo, setCorregirMotivo] = useState('')
+  const proyectoEnEjecucion = ESTADOS_TRAMO_EJECUCION.has(proyecto.estado)
+  const abrirCorregir = (a: AsignacionContratista) => {
+    setCorregirValor(a.preliquidacion?.valor_contratista)
+    setCorregirPct(a.preliquidacion?.anticipo_pct)
+    setCorregirMotivo('')
+    setCorregirTarget(a)
+  }
+  const corregir = async () => {
+    if (!corregirTarget || corregirValor === undefined || !corregirMotivo.trim()) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      const vigentes = await asegurarMigrado(proyecto, subdocs)
+      const target = vigentes.find(x => x.id === corregirTarget.id) ?? corregirTarget
+      const r = patchCorregirPreliquidacion(target, proyectoEnEjecucion,
+        { valor_contratista: corregirValor, anticipo_pct: corregirPct ?? target.preliquidacion?.anticipo_pct ?? 50 },
+        corregirMotivo, user?.uid ?? '', ahora)
+      if (!r) { toast('Sin cambios que corregir', 'error'); return }
+      const patchSub: Record<string, unknown> = {
+        ...r.sub, historial: arrayUnion(r.entradaHistorial),
+        ...(r.resuelveSenal ? { alcance_desactualizado: deleteField() } : {}),
+      }
+      const trasPatch = vigentes.map(x => x.id === target.id
+        ? {
+            ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial],
+            ...(r.resuelveSenal ? { alcance_desactualizado: undefined } : {}),
+          } as AsignacionContratista : x)
+      await escribirAsignacion(proyecto.id, alcance, target.id, patchSub, trasPatch)
+      toast(r.revierte
+        ? 'Corregida — REVIERTE la aprobación: requiere re-aprobación de Gerencia'
+        : r.ajuste
+          ? 'Corregida — AJUSTE en ejecución, pendiente de reconocer en la liquidación'
+          : 'Preliquidación corregida')
+      setCorregirTarget(null)
+      await recargarTodo()
+    } catch { toast('Error al corregir', 'error') } finally { setAplicando(false) }
   }
 
   const selectorAtomos = (sel: Set<string>, setSel: (s: Set<string>) => void, exceptoId?: string) => {
@@ -285,6 +440,12 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, reload 
                       migrada
                     </span>
                   )}
+                  {a.registro_historico && (
+                    <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 border border-amber-300"
+                      title={`Registrada RETROACTIVAMENTE — pagada por fuera del panel, no siguió el flujo definir → aprobar → girar → liquidar. Motivo: ${a.registro_historico.motivo}`}>
+                      registro histórico
+                    </span>
+                  )}
                   {/* Condición: el badge DICE POR QUÉ — el número que lo disparó */}
                   {revisar && margen != null && (
                     <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800"
@@ -309,6 +470,14 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, reload 
                     {' · '}{MODALIDAD_CONTRATISTA_LABEL[a.modalidad]}
                     {a.preliquidacion.anticipo && <> · anticipo girado <span className="font-mono">{fmtMoney(a.preliquidacion.anticipo.valor)}</span></>}
                     {a.legacy && <span className="text-gray-400"> · margen {ETIQUETA_BASE_MARGEN[baseMargenDe(a)]}</span>}
+                    {a.preliquidacion.salvedad && (
+                      <span className="text-amber-700" title={`Aprobó un rol de respaldo, no la titular: ${a.preliquidacion.salvedad}`}>
+                        {' '}· ⚠ aprobada con salvedad
+                      </span>
+                    )}
+                    {a.preliquidacion.ajuste_pendiente_liquidacion && (
+                      <span className="text-amber-700"> · ajuste pendiente de reconocer en liquidación</span>
+                    )}
                   </p>
                 )}
                 {a.cancelacion && (
@@ -328,16 +497,49 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, reload 
                     </button>
                   </div>
                 )}
-                {puedeGestionar && a.estado !== 'liquidada' && a.estado !== 'cancelada' && (
+                {a.estado !== 'liquidada' && a.estado !== 'cancelada' && (
                   <div className="flex flex-wrap gap-2 pt-0.5">
-                    <button onClick={() => abrirAjustar(a)} disabled={aplicando}
-                      className="text-[11px] px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50">
-                      ✂ Ajustar átomos
-                    </button>
-                    <button onClick={() => { setCancelarTarget(a); setCancelarMotivo('') }} disabled={aplicando}
-                      className="text-[11px] px-2.5 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-medium disabled:opacity-50">
-                      Cancelar asignación
-                    </button>
+                    {/* Economía v2: baja a la asignación — no mueve el estado del proyecto */}
+                    {puedeGestionar && (a.estado === 'asignada' || a.estado === 'preliquidacion_definida') && (
+                      <button onClick={() => abrirDefinir(a)} disabled={aplicando}
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-brand-600 text-brand-700 hover:bg-brand-50 font-semibold disabled:opacity-50">
+                        {a.estado === 'asignada' ? '💰 Definir preliquidación' : '✎ Redefinir preliquidación'}
+                      </button>
+                    )}
+                    {puedeAprobar && a.estado === 'preliquidacion_definida' && (
+                      <button onClick={() => { setSalvedad(''); setAprobarTarget(a) }} disabled={aplicando}
+                        title={esRespaldo ? 'Aprobación de RESPALDO: exige salvedad (la titular es Gerencia Administrativa)' : undefined}
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-emerald-500 text-emerald-700 hover:bg-emerald-50 font-semibold disabled:opacity-50">
+                        {esRespaldo ? '✓ Aprobar como respaldo' : '✓ Aprobar preliquidación'}
+                      </button>
+                    )}
+                    {puedeAprobar && a.estado === 'preliquidacion_aprobada' && (
+                      <button onClick={() => abrirGirar(a)} disabled={aplicando}
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-emerald-500 text-emerald-700 hover:bg-emerald-50 font-semibold disabled:opacity-50">
+                        💸 Registrar anticipo girado
+                      </button>
+                    )}
+                    {puedeGestionar && (a.estado === 'preliquidacion_aprobada' || a.estado === 'anticipo_girado') && (
+                      <button onClick={() => abrirCorregir(a)} disabled={aplicando}
+                        title={proyectoEnEjecucion
+                          ? 'Proyecto en ejecución: la corrección es AJUSTE trazable (se reconoce en la liquidación)'
+                          : 'Antes de ejecutar: la corrección REVIERTE la aprobación y exige re-aprobación'}
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-amber-400 text-amber-800 hover:bg-amber-50 font-medium disabled:opacity-50">
+                        ✎ Corregir preliquidación
+                      </button>
+                    )}
+                    {puedeGestionar && (
+                      <>
+                        <button onClick={() => abrirAjustar(a)} disabled={aplicando}
+                          className="text-[11px] px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50">
+                          ✂ Ajustar átomos
+                        </button>
+                        <button onClick={() => { setCancelarTarget(a); setCancelarMotivo('') }} disabled={aplicando}
+                          className="text-[11px] px-2.5 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-medium disabled:opacity-50">
+                          Cancelar asignación
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -376,20 +578,56 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, reload 
         actions={[
           { label: 'Cancelar', onClick: () => setFormOpen(false), variant: 'secondary' },
           {
-            label: aplicando ? 'Asignando…' : `Asignar (${atomosSel.size} · ${fmtMoney(cdSeleccionado)})`,
+            label: aplicando
+              ? (esHistorica ? 'Registrando…' : 'Asignando…')
+              : esHistorica
+                ? `Registrar histórico (${atomosSel.size} · ${fmtMoney(valorPagado ?? 0)})`
+                : `Asignar (${atomosSel.size} · ${fmtMoney(cdSeleccionado)})`,
             onClick: asignar, variant: 'primary', loading: aplicando,
-            disabled: !contratistaId || atomosSel.size === 0 || (modalidad === 'solo_mano_obra' && materiales === undefined),
+            disabled: !contratistaId || atomosSel.size === 0
+              || (esHistorica
+                ? !(valorPagado !== undefined && valorPagado > 0) || !motivoHistorico.trim()
+                : (modalidad === 'solo_mano_obra' && materiales === undefined)),
           },
         ]}>
         <div className="space-y-4">
           <label className="block text-sm">
-            <span className="font-medium text-gray-700">Contratista (habilitados) <span className="text-red-500">*</span></span>
+            <span className="font-medium text-gray-700">Contratista {esHistorica ? '(todos — histórico no aplica gate)' : '(habilitados)'} <span className="text-red-500">*</span></span>
             <select value={contratistaId} onChange={e => setContratistaId(e.target.value)}
               className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
               <option value="">Selecciona…</option>
-              {contratistas.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              {(esHistorica ? contratistas : contratistas.filter(c => c.estado === 'activo')).map(c =>
+                <option key={c.id} value={c.id}>{c.nombre}{c.estado !== 'activo' ? ' (inactivo)' : ''}</option>)}
             </select>
           </label>
+          <label className="flex items-start gap-2 text-sm p-2.5 rounded-lg border border-amber-200 bg-amber-50/60 cursor-pointer">
+            <input type="checkbox" checked={esHistorica} onChange={e => setEsHistorica(e.target.checked)}
+              className="mt-0.5 rounded border-amber-400 text-amber-600 focus:ring-amber-300" />
+            <span>
+              <span className="font-medium text-amber-900">Registro histórico (retroactivo)</span>
+              <span className="block text-xs text-amber-800 mt-0.5">
+                Para contratistas a los que YA se les pagó por fuera del panel. Se registra con el
+                valor pagado y un motivo — el costo entra al indicador y al presupuesto, pero queda
+                marcado explícitamente: NO pasa por definir → aprobar → girar anticipo → liquidar.
+                Un registro histórico honesto vale más que un flujo simulado.
+              </span>
+            </span>
+          </label>
+          {esHistorica && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Valor realmente pagado <span className="text-red-500">*</span></span>
+                <InputExpresion valor={valorPagado} onValor={setValorPagado}
+                  className="mt-1 w-full px-3 py-2 border border-amber-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-amber-300" />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Motivo del registro retroactivo <span className="text-red-500">*</span></span>
+                <input value={motivoHistorico} onChange={e => setMotivoHistorico(e.target.value)}
+                  placeholder="Por qué el pago ocurrió por fuera del panel…"
+                  className="mt-1 w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+              </label>
+            </div>
+          )}
           <div>
             <p className="text-sm font-medium text-gray-700 mb-1.5">
               Actividades que ejecuta <span className="text-red-500">*</span>
@@ -407,7 +645,11 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, reload 
             </label>
             {modalidad === 'solo_mano_obra' && (
               <label className="block text-sm">
-                <span className="font-medium text-gray-700">Presupuesto materiales NEG <span className="text-red-500">*</span></span>
+                <span className="font-medium text-gray-700">
+                  Presupuesto materiales NEG {esHistorica
+                    ? <span className="text-gray-400 font-normal">(opcional — si no se conoce, queda $0)</span>
+                    : <span className="text-red-500">*</span>}
+                </span>
                 <InputExpresion valor={materiales} onValor={setMateriales}
                   className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
               </label>
@@ -465,6 +707,141 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, reload 
           <input value={ajustarMotivo} onChange={e => setAjustarMotivo(e.target.value)}
             placeholder="Motivo del ajuste (obligatorio)…"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+        </div>
+      </Modal>
+
+      {/* ── Modal: definir preliquidación (gestores) ── */}
+      <Modal isOpen={definirTarget !== null} onClose={() => setDefinirTarget(null)}
+        title={`Definir preliquidación — ${definirTarget?.contratista_nombre ?? ''}`}
+        actions={[
+          { label: 'Volver', onClick: () => setDefinirTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Guardando…' : 'Definir preliquidación', onClick: definir, variant: 'primary',
+            loading: aplicando, disabled: !(definirValor !== undefined && definirValor > 0),
+          },
+        ]}>
+        <div className="space-y-3">
+          {definirTarget && (
+            <p className="text-sm text-gray-600">
+              CD de sus actividades: <span className="font-mono font-semibold">{fmtMoney(valorAlcanceDe(definirTarget.atomos, alcance))}</span>
+              {' '}· {MODALIDAD_CONTRATISTA_LABEL[definirTarget.modalidad]}
+              {definirTarget.modalidad === 'solo_mano_obra' && <> · materiales NEG {fmtMoney(definirTarget.valor_materiales ?? 0)}</>}
+              . La aprueba Gerencia Administrativa (segregación de funciones).
+            </p>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Valor del contratista <span className="text-red-500">*</span></span>
+              <InputExpresion valor={definirValor} onValor={setDefinirValor}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Anticipo %</span>
+              <InputExpresion valor={definirPct} onValor={setDefinirPct}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+          </div>
+          {definirValor !== undefined && definirValor > 0 && (
+            <p className="text-xs text-gray-500">
+              Anticipo derivado: <span className="font-mono">{fmtMoney(definirValor * ((definirPct ?? 50) / 100))}</span>
+            </p>
+          )}
+        </div>
+      </Modal>
+
+      {/* ── Modal: aprobar preliquidación (gerencia titular / respaldo con salvedad) ── */}
+      <Modal isOpen={aprobarTarget !== null} onClose={() => { setAprobarTarget(null); setSalvedad('') }}
+        title={`Aprobar preliquidación — ${aprobarTarget?.contratista_nombre ?? ''}`}
+        actions={[
+          { label: 'Volver', onClick: () => { setAprobarTarget(null); setSalvedad('') }, variant: 'secondary' },
+          {
+            label: aplicando ? 'Aprobando…' : esRespaldo ? 'Aprobar con salvedad' : 'Aprobar',
+            onClick: aprobar, variant: 'primary', loading: aplicando,
+            disabled: esRespaldo && !salvedad.trim(),
+          },
+        ]}>
+        <div className="space-y-3">
+          {aprobarTarget?.preliquidacion && (
+            <p className="text-sm text-gray-600">
+              {aprobarTarget.contratista_nombre} · <span className="font-mono font-semibold">{fmtMoney(aprobarTarget.preliquidacion.valor_contratista)}</span>
+              {' '}· anticipo {aprobarTarget.preliquidacion.anticipo_pct}% ({fmtMoney(anticipoValorDe(aprobarTarget.preliquidacion))})
+              {' '}· {aprobarTarget.atomos.length} actividad(es).
+            </p>
+          )}
+          {esRespaldo && (
+            <div>
+              <p className="text-xs text-amber-800 bg-amber-50 rounded px-2.5 py-1.5 mb-2">
+                Aprobación de RESPALDO — la titular es Gerencia Administrativa. Justifica por qué apruebas tú.
+              </p>
+              <textarea value={salvedad} onChange={e => setSalvedad(e.target.value)} rows={2} autoFocus
+                placeholder="Salvedad (obligatoria)…"
+                className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* ── Modal: registrar anticipo girado (gerencia) ── */}
+      <Modal isOpen={girarTarget !== null} onClose={() => setGirarTarget(null)}
+        title={`Registrar anticipo girado — ${girarTarget?.contratista_nombre ?? ''}`}
+        actions={[
+          { label: 'Volver', onClick: () => setGirarTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Registrando…' : 'Registrar giro', onClick: girar, variant: 'primary',
+            loading: aplicando, disabled: !(girarValor !== undefined && girarValor > 0) || !girarFecha,
+          },
+        ]}>
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">
+            El giro ya ocurrió por tesorería — aquí se REGISTRA (el SIGP no ejecuta dinero).
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Valor girado <span className="text-red-500">*</span></span>
+              <InputExpresion valor={girarValor} onValor={setGirarValor}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Fecha del giro <span className="text-red-500">*</span></span>
+              <input type="date" value={girarFecha} onChange={e => setGirarFecha(e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Modal: corregir preliquidación (Hotfix B por asignación) ── */}
+      <Modal isOpen={corregirTarget !== null} onClose={() => setCorregirTarget(null)}
+        title={`Corregir preliquidación — ${corregirTarget?.contratista_nombre ?? ''}`}
+        actions={[
+          { label: 'Volver', onClick: () => setCorregirTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Corrigiendo…' : 'Aplicar corrección', onClick: corregir, variant: 'primary',
+            loading: aplicando, disabled: corregirValor === undefined || !corregirMotivo.trim(),
+          },
+        ]}>
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">
+            {proyectoEnEjecucion
+              ? 'Proyecto en ejecución: la corrección es un AJUSTE trazable — conserva la aprobación (válida para el anticipo) y queda pendiente de reconocer en la liquidación.'
+              : 'Antes de ejecutar: la corrección REVIERTE la aprobación (queda en el historial) y exige re-aprobación de Gerencia Administrativa.'}
+            {corregirTarget?.alcance_desactualizado && ' Corregir también resuelve la señal de alcance desactualizado.'}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Nuevo valor del contratista <span className="text-red-500">*</span></span>
+              <InputExpresion valor={corregirValor} onValor={setCorregirValor}
+                className="mt-1 w-full px-3 py-2 border border-amber-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            </label>
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Anticipo %</span>
+              <InputExpresion valor={corregirPct} onValor={setCorregirPct}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+          </div>
+          <input value={corregirMotivo} onChange={e => setCorregirMotivo(e.target.value)}
+            placeholder="Motivo de la corrección (obligatorio)…"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
         </div>
       </Modal>
     </div>

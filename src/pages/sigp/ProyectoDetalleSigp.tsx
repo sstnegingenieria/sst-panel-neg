@@ -273,11 +273,24 @@ export default function ProyectoDetalleSigp() {
       )}
 
       {/* P2-2: asignaciones múltiples + cobertura (reemplaza a la singular) */}
-      <AsignacionesProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+      <AsignacionesProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} puedeAprobar={puedeAprobar} reload={load} />
       <PermisosIngreso proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
 
-      {/* Preliquidación (F2.1.c) */}
-      <PreliquidacionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} puedeAprobar={puedeAprobar} reload={load} />
+      {/* Preliquidación (F2.1.c) — SOLO legacy sin migrar: en un proyecto
+          MIGRADO la economía vive POR ASIGNACIÓN (sección de arriba) y editar
+          el padre crearía divergencia. */}
+      {proyecto.resumen_asignaciones ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <h3 className="text-sm font-semibold text-gray-700">Preliquidación</h3>
+          <p className="mt-1 text-sm text-gray-500">
+            Este proyecto ya opera con asignaciones múltiples: la preliquidación, la aprobación,
+            el anticipo y la liquidación viven <strong>por asignación</strong> en la sección
+            "Contratistas y cobertura del alcance".
+          </p>
+        </div>
+      ) : (
+        <PreliquidacionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} puedeAprobar={puedeAprobar} reload={load} />
+      )}
 
       {/* Administrativa B3b — compras/reembolsos del contratista (línea
           separada de la mano de obra; las capturan los gestores) */}

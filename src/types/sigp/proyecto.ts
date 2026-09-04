@@ -427,6 +427,15 @@ export const SECCIONES_ADMINISTRATIVA = [
 export const enBandejaAdministrativa = (estado: EstadoProyecto): boolean =>
   SECCIONES_ADMINISTRATIVA.some(s => s.estado === estado)
 
+// P2-2 (SB4): en un proyecto MIGRADO las preliquidaciones viven POR
+// ASIGNACIÓN — "por aprobar"/"por girar" se cuentan del resumen denormalizado
+// (una query, cero índices nuevos). El estado del proyecto ya no pasa por los
+// estados económicos, así que la bandeja suma estas vías a las de estado.
+export const asignacionesPorAprobar = (p: Pick<Proyecto, 'resumen_asignaciones'>): number =>
+  p.resumen_asignaciones?.por_estado?.preliquidacion_definida ?? 0
+export const asignacionesPorGirar = (p: Pick<Proyecto, 'resumen_asignaciones'>): number =>
+  p.resumen_asignaciones?.por_estado?.preliquidacion_aprobada ?? 0
+
 // ── Mapa proactivo (23-jul): "En camino" — lo que AÚN no le toca a gerencia ──
 //
 // Proyectos vivos en preparación/ejecución (territorio de proyectos): se

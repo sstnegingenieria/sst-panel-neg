@@ -6,7 +6,8 @@
 import { describe, it, expect } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
 import {
-  construirAsignacionMulti, patchDefinirPreliquidacion, patchAprobarPreliquidacion,
+  construirAsignacionMulti, construirAsignacionHistorica,
+  patchDefinirPreliquidacion, patchAprobarPreliquidacion,
   patchGirarAnticipo, patchCorregirPreliquidacion, patchLiquidarAsignacion,
   patchCancelarAsignacion, patchAjustarAtomos, patchResolverSenal,
   valorAlcanceDe, coberturaDe, baseMargenDe, ETIQUETA_BASE_MARGEN,
@@ -15,7 +16,9 @@ import {
   mapearEstadoV2, asignacionesLiquidadas, costoPresupuestadoAsignaciones, costoContratistasDe,
   atomosTomados, TRANSICIONES_ASIGNACION, ESTADOS_ASIGNACION,
 } from '../asignacion'
-import type { AsignacionContratista } from '../asignacion'
+import { subEtapaProyectoDe, ESTADOS_PREPARACION_PROYECTO } from '../asignacion'
+import { asignacionesPorAprobar, asignacionesPorGirar } from '../proyecto'
+import type { AsignacionContratista, ResumenAsignaciones } from '../asignacion'
 import type { AlcanceGrupo, Proyecto } from '../proyecto'
 
 const ts = Timestamp.fromDate(new Date('2026-09-03T12:00:00Z'))
@@ -61,6 +64,55 @@ describe('construirAsignacionMulti — invariante duro de átomos', () => {
     expect(() => construirAsignacionMulti(hector, ['No existe'], 'todo_costo', undefined, ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/no existe en el alcance/)
     expect(() => construirAsignacionMulti(hector, [], 'todo_costo', undefined, ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/al menos una/)
     expect(() => construirAsignacionMulti(hector, ['Ensayos y diagnóstico estructural'], 'solo_mano_obra', undefined, ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/materiales/)
+  })
+})
+
+describe('construirAsignacionHistorica — registro retroactivo SIN simular el flujo (caso PRY-2026-024)', () => {
+  const otroContratista = { id: 'cX', nombre: 'CONTRATISTA PAGADO AFUERA', estado: 'inactivo' }
+  const atomosH = ['Apertura de grietas o fisuras', 'Reparación de grietas o fisuras']
+
+  it('nace liquidada, marcada retroactiva, SIN aprobación / SIN anticipo / SIN objeto liquidacion', () => {
+    const a = construirAsignacionHistorica(otroContratista, atomosH, 'solo_mano_obra', undefined,
+      12_000_000, 'Pago de 2026-07 por fuera del panel — la contabilidad lo tiene', ALCANCE_MEGACENTER, [], 'u', ts)
+    expect(a.estado).toBe('liquidada')
+    expect(a.registro_historico).toEqual({ motivo: 'Pago de 2026-07 por fuera del panel — la contabilidad lo tiene', registrado_por: 'u', fecha: ts })
+    expect(a.preliquidacion!.valor_contratista).toBe(12_000_000)
+    expect(a.preliquidacion!.base_margen).toBe('cd_atomos')
+    expect(a.preliquidacion!.valor_alcance).toBe(13_132_251 + 30_330_605)
+    // los controles que NO ocurrieron no se fabrican:
+    expect(a.preliquidacion!.aprobada_por).toBeUndefined()
+    expect(a.preliquidacion!.anticipo).toBeUndefined()
+    expect(a.liquidacion).toBeUndefined()
+    // solo_mano_obra sin materiales conocidos → 0 honesto, no un número inventado
+    expect(a.valor_materiales).toBe(0)
+    // el historial dice cómo llegó el dato:
+    expect(a.historial[0].motivo).toMatch(/REGISTRO HISTÓRICO retroactivo/)
+    expect(a.historial[0].motivo).toMatch(/No siguió el flujo/)
+  })
+  it('NO exige contratista habilitado (hechos pasados) pero el snapshot registra el estado ACTUAL', () => {
+    const a = construirAsignacionHistorica(otroContratista, atomosH, 'todo_costo', undefined,
+      1_000_000, 'motivo', ALCANCE_MEGACENTER, [], 'u', ts)
+    expect(a.habilitacion_snapshot.estado).toBe('inactivo')
+    expect(a.habilitacion_snapshot.fuente).toMatch(/histórico: no aplica gate/)
+  })
+  it('motivo vacío / valor 0 / átomo tomado o inexistente → LANZAN (invariantes intactos)', () => {
+    expect(() => construirAsignacionHistorica(otroContratista, atomosH, 'todo_costo', undefined, 1, '  ', ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/motivo/)
+    expect(() => construirAsignacionHistorica(otroContratista, atomosH, 'todo_costo', undefined, 0, 'm', ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/valor realmente pagado/)
+    const viva = base({ atomos: ['Apertura de grietas o fisuras'] })
+    expect(() => construirAsignacionHistorica(otroContratista, atomosH, 'todo_costo', undefined, 1, 'm', ALCANCE_MEGACENTER, [viva], 'u', ts)).toThrow(/ya está asignada/)
+    expect(() => construirAsignacionHistorica(otroContratista, ['No existe'], 'todo_costo', undefined, 1, 'm', ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/no existe en el alcance/)
+  })
+  it('el costo ENTRA al indicador y al presupuesto (el objetivo) y cubre sus átomos', () => {
+    const a = { ...construirAsignacionHistorica(otroContratista, atomosH, 'solo_mano_obra', 3_000_000,
+      12_000_000, 'm', ALCANCE_MEGACENTER, [], 'u', ts), id: 'h1' } as AsignacionContratista
+    expect(costoPresupuestadoAsignaciones([a])).toBe(15_000_000)   // pagado + materiales NEG
+    expect(costoContratistasDe([a])).toBe(12_000_000)
+    const r = resumenAsignacionesDe([a], ALCANCE_MEGACENTER)
+    expect(r.costo_presupuestado).toBe(15_000_000)
+    expect(r.costo_contratistas).toBe(12_000_000)
+    expect(atomosTomados([a]).has('Apertura de grietas o fisuras')).toBe(true)
+    // liquidada = terminal: cero pendientes en bandeja por esta asignación
+    expect(TRANSICIONES_ASIGNACION.liquidada).toEqual([])
   })
 })
 
@@ -359,6 +411,37 @@ describe('sub-etapas filtrables (condición 1) — cobertura total', () => {
     // mixto: lo MÁS atrasado manda (una asignada pendiente pesa más que un giro hecho)
     expect(subEtapaDe(conResumen({ asignada: 1, anticipo_girado: 1 }, 2))).toBe('preliquidacion_pendiente')
     expect(SUB_ETAPAS_PREPARACION.length).toBe(6)
+  })
+})
+
+describe('SB4 — sub-etapa UNIFICADA del proyecto + contadores de bandeja', () => {
+  const res = (pe: Record<string, number>, total = 1) =>
+    ({ ...resumenAsignacionesDe([], []), total, por_estado: pe }) as ResumenAsignaciones
+
+  it('migrado: deriva de las asignaciones; legacy: deriva del estado — un solo filtro', () => {
+    // migrado en estado "viejo" contratista_asignado con una asignación definida:
+    expect(subEtapaProyectoDe({ estado: 'contratista_asignado', resumen_asignaciones: res({ preliquidacion_definida: 1 }) } as never)).toBe('por_aprobar')
+    // legacy sin resumen — el estado del padre manda:
+    expect(subEtapaProyectoDe({ estado: 'creado' } as never)).toBe('sin_contratista')
+    expect(subEtapaProyectoDe({ estado: 'contratista_asignado' } as never)).toBe('preliquidacion_pendiente')
+    expect(subEtapaProyectoDe({ estado: 'permisos_en_tramite' } as never)).toBe('permisos_en_tramite')
+    expect(subEtapaProyectoDe({ estado: 'preliquidacion_definida' } as never)).toBe('por_aprobar')
+    expect(subEtapaProyectoDe({ estado: 'preliquidacion_aprobada' } as never)).toBe('por_girar_anticipo')
+    expect(subEtapaProyectoDe({ estado: 'anticipo_girado' } as never)).toBe('lista_para_ejecutar')
+    // fuera de preparación → null (no ensucia bandejas de ejecución/cierre)
+    expect(subEtapaProyectoDe({ estado: 'en_ejecucion' } as never)).toBeNull()
+    expect(subEtapaProyectoDe({ estado: 'cerrado' } as never)).toBeNull()
+    // TODO estado de preparación produce sub-etapa (cobertura total)
+    for (const e of ESTADOS_PREPARACION_PROYECTO) {
+      expect(subEtapaProyectoDe({ estado: e } as never)).not.toBeNull()
+    }
+  })
+  it('bandeja administrativa: por aprobar / por girar se cuentan del resumen', () => {
+    const p = { resumen_asignaciones: res({ preliquidacion_definida: 2, preliquidacion_aprobada: 1 }, 3) }
+    expect(asignacionesPorAprobar(p)).toBe(2)
+    expect(asignacionesPorGirar(p)).toBe(1)
+    expect(asignacionesPorAprobar({})).toBe(0)   // legacy → 0 (su vía es el estado)
+    expect(asignacionesPorGirar({})).toBe(0)
   })
 })
 
