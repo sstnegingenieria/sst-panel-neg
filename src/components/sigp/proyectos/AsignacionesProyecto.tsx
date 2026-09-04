@@ -32,7 +32,9 @@ import {
 } from '../../../types/sigp/asignacion'
 import type { AsignacionContratista } from '../../../types/sigp/asignacion'
 import { cargarAsignaciones, asegurarMigrado, crearAsignacion, escribirAsignacion } from '../../../utils/sigp/asignaciones'
-import { MODALIDAD_CONTRATISTA_LABEL, MODALIDADES_CONTRATISTA, anticipoValorDe, sstGateAlDia, totalComprasReembolsos } from '../../../types/sigp/proyecto'
+import { MODALIDAD_CONTRATISTA_LABEL, MODALIDADES_CONTRATISTA, anticipoValorDe, sstGateAlDia, totalComprasReembolsos, claveItemAlcance } from '../../../types/sigp/proyecto'
+import { modoAgrupacionDe, actividadesDe, subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../../types/sigp/cotizacion'
+import type { VersionCotizacion } from '../../../types/sigp/cotizacion'
 import type { Proyecto, ModalidadContratista, RetencionLiquidacion } from '../../../types/sigp/proyecto'
 import { aprobacionRequiereSalvedad, puedeLiquidarUI } from '../../../types/sigp/permisos'
 import InputExpresion from '../cotizaciones/InputExpresion'
@@ -359,6 +361,75 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     } catch { toast('Error al corregir', 'error') } finally { setAplicando(false) }
   }
 
+  // ═══════════════ PDF del contratista POR ASIGNACIÓN (los grupos del
+  // alcance se FILTRAN a sus átomos; valores/anticipo/saldo de SU
+  // preliquidación — jamás venta ni utilidad, igual que siempre) ═══════════
+  const docContratista = async (a: AsignacionContratista) => {
+    const pre = a.preliquidacion
+    if (!pre) return
+    setAplicando(true)
+    try {
+      const { cargarAssetsPdf, generarPdfPreliquidacion } = await import('../../../utils/sigp/preliquidacionPdf')
+      const atomos = new Set(a.atomos)
+      const buckets = new Map<string, { nombre: string; items: { codigo?: string; descripcion: string; cantidad: number; unidad: string; observacion?: string }[] }>()
+      if (proyecto.cotizacion_id) {
+        const vSnap = await getDoc(doc(db, 'cotizaciones', proyecto.cotizacion_id, 'versiones', String(proyecto.cotizacion_version ?? 1)))
+        if (!vSnap.exists()) throw new Error('versión de origen no encontrada')
+        const version = vSnap.data() as VersionCotizacion
+        const modo = modoAgrupacionDe(version)
+        const actividades = actividadesDe(version)
+        const nombres = new Map(subtotalesPorGrupo(version.items, modo, actividades).map(g => [g.grupo_id, g.grupo_nombre]))
+        version.items.forEach((it, idx) => {
+          const id = modo === 'actividad'
+            ? (it.actividad_id && nombres.has(it.actividad_id) ? it.actividad_id : GRUPO_OTROS_ID)
+            : (it.capitulo?.trim() || GRUPO_OTROS_ID)
+          const nombre = nombres.get(id) ?? 'Otros'
+          if (!atomos.has(nombre)) return   // átomo de OTRA asignación — fuera
+          if (!buckets.has(id)) buckets.set(id, { nombre, items: [] })
+          const observacion = pre.observaciones?.[claveItemAlcance(it, idx)]
+          buckets.get(id)!.items.push({
+            ...(it.codigo ? { codigo: it.codigo } : {}),
+            descripcion: it.descripcion, cantidad: it.cantidad, unidad: it.unidad,
+            ...(observacion ? { observacion } : {}),
+          })
+        })
+      } else {
+        proyecto.snapshot.alcance?.forEach((g, idx) => {
+          if (!atomos.has(g.grupo)) return
+          const observacion = pre.observaciones?.[`idx:${idx}`]
+          buckets.set(String(idx), {
+            nombre: 'Alcance',
+            items: [{ descripcion: g.grupo, cantidad: 1, unidad: 'glb', ...(observacion ? { observacion } : {}) }],
+          })
+        })
+      }
+      const anticipoVal = pre.anticipo?.valor ?? anticipoValorDe(pre)
+      const pdf = await generarPdfPreliquidacion({
+        proyectoConsecutivo: proyecto.consecutivo,
+        contratistaNombre: a.contratista_nombre,
+        clienteNombre: proyecto.snapshot.cliente,
+        asunto: proyecto.snapshot.asunto,
+        fecha: new Date(),
+        grupos: [...buckets.values()].filter(g => g.items.length > 0),
+        valorContratista: pre.valor_contratista,
+        modalidad: a.modalidad,
+        anticipoPct: pre.anticipo_pct,
+        anticipoValor: anticipoVal,
+        // saldo contra el GIRO real cuando existe (hecho consumado — Bloque 4)
+        saldoValor: pre.valor_contratista - anticipoVal,
+      }, await cargarAssetsPdf())
+      const url = URL.createObjectURL(new Blob([pdf as BlobPart], { type: 'application/pdf' }))
+      const el = document.createElement('a')
+      el.href = url
+      el.download = `${proyecto.consecutivo} - Preliquidación ${a.contratista_nombre}.pdf`.replace(/[\\/:*?"<>|]/g, '')
+      el.click()
+      setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    } catch (e) {
+      console.error('Error generando la preliquidación del contratista:', e)
+      toast('No se pudo generar el documento', 'error')
+    } finally { setAplicando(false) }
+  }
+
   // ═══════════════ Liquidar POR ASIGNACIÓN (SB6 — B3b: el camino que nunca
   // ha corrido en prod; el builder valida los gates, la regla también) ═══════
   const puedeLiquidar = puedeLiquidarUI(user?.rol)
@@ -547,6 +618,15 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                     {' → '}<span className={`font-mono font-semibold ${a.liquidacion.saldo_final < 0 ? 'text-red-700' : ''}`}>SALDO {fmtMoney(a.liquidacion.saldo_final)}</span>
                     {a.liquidacion.saldo_final < 0 && ' (pagado de más — sobre-giro visible, jamás recortado)'}
                   </p>
+                )}
+                {a.preliquidacion && a.estado !== 'cancelada' && (puedeGestionar || puedeAprobar) && (
+                  <div className="pt-0.5">
+                    <button onClick={() => docContratista(a)} disabled={aplicando}
+                      title="El documento que se le manda al contratista: SU alcance con observaciones + anticipo y saldo — jamás valor de venta ni utilidad"
+                      className="text-[11px] px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50">
+                      📄 Doc del contratista
+                    </button>
+                  </div>
                 )}
                 {/* SB6 — liquidar por asignación: solo gerencia, solo con el
                     proyecto en pagado_cliente (normal) o facturado (anticipada);
