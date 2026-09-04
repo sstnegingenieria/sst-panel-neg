@@ -11,9 +11,10 @@ import type { Proyecto } from '../proyecto'
 
 // La CF REAL (implementación única, patrón claims.test) — require CJS.
 const require = createRequire(import.meta.url)
-const { diffAlcance, decidirAccion } = require('../../../../functions/crearProyecto.js') as {
+const { diffAlcance, decidirAccion, asignacionesASenalar } = require('../../../../functions/crearProyecto.js') as {
   diffAlcance: (v?: { grupo: string; subtotal: number }[], n?: { grupo: string; subtotal: number }[]) => { grupo: string; tipo: string; delta: number }[]
   decidirAccion: (p: Record<string, unknown> | null, v: number) => string
+  asignacionesASenalar: (asigs: Record<string, unknown>[], grupos: string[]) => { id: string; atomos_afectados: string[] }[]
 }
 
 const g = (grupo: string, subtotal: number) => ({ grupo, items: 1, subtotal })
@@ -101,6 +102,29 @@ describe('puedeVersionDeCambio / esVersionDeCambio', () => {
     expect(esVersionDeCambio({ cambio_en_curso: { version: 5, iniciado_por: 'u', fecha: ts }, version_activa: 5 })).toBe(true)
     expect(esVersionDeCambio({ cambio_en_curso: { version: 5, iniciado_por: 'u', fecha: ts }, version_activa: 6 })).toBe(false)
     expect(esVersionDeCambio({ version_activa: 5 })).toBe(false)
+  })
+})
+
+describe('P2-2 SB5 — asignacionesASenalar: la señal apunta a la ASIGNACIÓN afectada', () => {
+  const asig = (id: string, atomos: string[], over: Record<string, unknown> = {}) => ({
+    id, atomos, estado: 'anticipo_girado', preliquidacion: { valor_contratista: 1 }, ...over,
+  })
+  it('solo vivas con preliquidación cuyos átomos INTERSECTAN los grupos afectados', () => {
+    const asigs = [
+      asig('a1', ['Ensayos y diagnóstico estructural']),
+      asig('a2', ['Protección', 'Fibra']),
+      asig('a3', ['Fibra'], { estado: 'cancelada' }),          // cancelada → fuera
+      asig('a4', ['Fibra'], { preliquidacion: undefined }),    // sin preliq → nada que revisar
+      asig('a5', ['Apertura']),                                // no intersecta → fuera
+    ]
+    expect(asignacionesASenalar(asigs, ['Fibra', 'Ensayos y diagnóstico estructural'])).toEqual([
+      { id: 'a1', atomos_afectados: ['Ensayos y diagnóstico estructural'] },
+      { id: 'a2', atomos_afectados: ['Fibra'] },
+    ])
+  })
+  it('sin afectados o sin asignaciones → vacío (el flag del padre queda para legacy)', () => {
+    expect(asignacionesASenalar([], ['Fibra'])).toEqual([])
+    expect(asignacionesASenalar([asig('a1', ['Ensayos'])], [])).toEqual([])
   })
 })
 
