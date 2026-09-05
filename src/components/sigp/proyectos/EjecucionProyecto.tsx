@@ -14,6 +14,7 @@ import { db, storage } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
 import { TIPOS_SOPORTE, TIPO_SOPORTE_LABEL, entregablesIhsFaltantes } from '../../../types/sigp/proyecto'
+import { habilitaEjecucionDe } from '../../../types/sigp/asignacion'
 import type { Proyecto, TipoSoporte, FotoEvidencia, EstadoProyecto } from '../../../types/sigp/proyecto'
 import { sincronizarObraEspejo } from '../../../utils/sigp/obraEspejo'
 
@@ -52,8 +53,10 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
   // asignación — el gate a ejecución es ≥1 anticipo girado en la subcolección
   // (SIN exigir cobertura completa), venga el proyecto en el estado que venga
   // de la etapa de preparación.
+  // P2-4: la vía de administración directa (≥1 estimada) también habilita —
+  // un proyecto 100% personal propio (Microlink) no tiene anticipos jamás.
   const migrado = !!proyecto.resumen_asignaciones
-  const gateAnticipoMulti = migrado && (proyecto.resumen_asignaciones?.anticipos_girados ?? 0) >= 1
+  const gateAnticipoMulti = migrado && habilitaEjecucionDe(proyecto.resumen_asignaciones)
   const enPreparacion = ['creado', 'contratista_asignado', 'permisos_en_tramite',
     'preliquidacion_definida', 'preliquidacion_aprobada', 'anticipo_girado'].includes(est)
   const puedeIniciar = migrado ? (gateAnticipoMulti && enPreparacion) : est === 'anticipo_girado'
@@ -220,8 +223,8 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
           )}
           {!e && migrado && !gateAnticipoMulti && enPreparacion && (
             <p className="text-gray-500">
-              La ejecución se habilita con al menos UN anticipo girado en las asignaciones
-              (no exige cobertura completa del alcance).
+              La ejecución se habilita con al menos UN anticipo girado — o una administración
+              directa con su costo estimado — en las asignaciones (no exige cobertura completa).
             </p>
           )}
           {e && <p>Iniciada el {fFecha(e.fecha_inicio)}{e.fecha_ejecutado && <> · ejecutado el {fFecha(e.fecha_ejecutado)}</>}</p>}

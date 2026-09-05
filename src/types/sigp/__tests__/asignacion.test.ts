@@ -17,6 +17,10 @@ import {
   atomosTomados, TRANSICIONES_ASIGNACION, ESTADOS_ASIGNACION,
 } from '../asignacion'
 import { subEtapaProyectoDe, ESTADOS_PREPARACION_PROYECTO } from '../asignacion'
+import {
+  tipoDe, patchMarcarAdministracionDirecta, patchEstimarDirecta, patchCerrarDirecta,
+  habilitaEjecucionDe,
+} from '../asignacion'
 import { asignacionesPorAprobar, asignacionesPorGirar } from '../proyecto'
 import type { AsignacionContratista, ResumenAsignaciones } from '../asignacion'
 import type { AlcanceGrupo, Proyecto } from '../proyecto'
@@ -113,6 +117,82 @@ describe('construirAsignacionHistorica — registro retroactivo SIN simular el f
     expect(atomosTomados([a]).has('Apertura de grietas o fisuras')).toBe(true)
     // liquidada = terminal: cero pendientes en bandeja por esta asignación
     expect(TRANSICIONES_ASIGNACION.liquidada).toEqual([])
+  })
+})
+
+describe('P2-4 — ADMINISTRACIÓN DIRECTA: sin ciclo de pago, identidad del contratista real (caso Microlink)', () => {
+  const directaBase = (over: Partial<AsignacionContratista> = {}): AsignacionContratista => base({
+    id: 'd1', tipo: 'administracion_directa',
+    contratista_id: 'contratista_neg_001', contratista_nombre: 'NEG INGENIERÍA S.A.S. BIC',
+    atomos: ['Ensayos y diagnóstico estructural'], ...over,
+  })
+
+  it('marcar una existente (Microlink): solo sin tipo fijado, SIN economía y en asignada — el historial de la migración se conserva', () => {
+    const microlink = base({ id: 'ml', legacy: true })   // migrada, contratista correcto, sin economía
+    const r = patchMarcarAdministracionDirecta(microlink, 'u', ts)!
+    expect(r.sub.tipo).toBe('administracion_directa')
+    expect(r.entradaHistorial.motivo).toMatch(/sin ciclo de pago/)
+    // guardas: tipo ya fijado / con economía / fuera de asignada → null
+    expect(patchMarcarAdministracionDirecta(directaBase(), 'u', ts)).toBeNull()
+    expect(patchMarcarAdministracionDirecta(base({ preliquidacion: { valor_alcance: 1, valor_contratista: 1, anticipo_pct: 50, definida_por: 'g', fecha_definicion: ts } }), 'u', ts)).toBeNull()
+    expect(patchMarcarAdministracionDirecta(base({ estado: 'cancelada' }), 'u', ts)).toBeNull()
+  })
+
+  it('estimar: siembra preliquidación con base cd_atomos y anticipo 0 — SIN aprobación por diseño (control = implausibilidad + traza)', () => {
+    const r = patchEstimarDirecta(directaBase(), 4_500_000, 12, ALCANCE_MEGACENTER, 'u', ts)!
+    expect(r.sub.estado).toBe('estimada')
+    expect(r.sub.preliquidacion!.valor_contratista).toBe(4_500_000)
+    expect(r.sub.preliquidacion!.valor_alcance).toBe(6_463_735)
+    expect(r.sub.preliquidacion!.base_margen).toBe('cd_atomos')
+    expect(r.sub.preliquidacion!.anticipo_pct).toBe(0)
+    expect(r.sub.preliquidacion!.aprobada_por).toBeUndefined()
+    expect(r.sub.preliquidacion!.anticipo).toBeUndefined()
+    expect(r.sub.dias_equipo).toBe(12)
+    expect(r.entradaHistorial.motivo).toMatch(/sin aprobación por diseño/)
+    // re-estimar exige motivo; con motivo pasa y resuelve la señal
+    const estimada = { ...directaBase(), ...r.sub } as AsignacionContratista
+    expect(patchEstimarDirecta(estimada, 5_000_000, undefined, ALCANCE_MEGACENTER, 'u', ts)).toBeNull()
+    const conSenal = { ...estimada, alcance_desactualizado: { version: 2, fecha: ts, atomos_afectados: [] } } as AsignacionContratista
+    const r2 = patchEstimarDirecta(conSenal, 5_000_000, undefined, ALCANCE_MEGACENTER, 'u', ts, 'subió el alcance')!
+    expect(r2.resuelveSenal).toBe(true)
+    // los builders no se cruzan: estimar un CONTRATISTA → null; definir una DIRECTA → null
+    expect(patchEstimarDirecta(base(), 1, undefined, ALCANCE_MEGACENTER, 'u', ts)).toBeNull()
+    expect(patchDefinirPreliquidacion(directaBase(), { valor_contratista: 1, anticipo_pct: 50 }, ALCANCE_MEGACENTER, 'u', ts)).toBeNull()
+  })
+
+  it('cerrar: estimado INTACTO + costo real al ejecutado (pactado vs. liquidado del personal propio)', () => {
+    const est = { ...directaBase(), ...patchEstimarDirecta(directaBase(), 4_500_000, 12, ALCANCE_MEGACENTER, 'u', ts)!.sub } as AsignacionContratista
+    const r = patchCerrarDirecta(est, 5_100_000, 14, 'se ocuparon 2 días más', 'u', ts)!
+    expect(r.sub.estado).toBe('liquidada')
+    expect(r.sub.cierre_directa!.costo_real).toBe(5_100_000)
+    expect(r.sub.cierre_directa!.dias_reales).toBe(14)
+    expect(r.entradaHistorial.motivo).toMatch(/estimado 4500000 · real 5100000/)
+    const cerrada = { ...est, ...r.sub } as AsignacionContratista
+    // presupuestado = estimado (línea base no se mueve); ejecutado = REAL
+    expect(costoPresupuestadoAsignaciones([cerrada])).toBe(4_500_000)
+    expect(costoContratistasDe([cerrada])).toBe(5_100_000)
+    expect(costoContratistasDe([est])).toBe(4_500_000)   // mientras corre, el estimado
+    // cerrar solo desde estimada
+    expect(patchCerrarDirecta(directaBase(), 1, undefined, undefined, 'u', ts)).toBeNull()
+    expect(patchCerrarDirecta(base({ estado: 'anticipo_girado' }), 1, undefined, undefined, 'u', ts)).toBeNull()
+  })
+
+  it('gate a ejecución (Microlink): ≥1 estimada habilita sin anticipos; sub-etapa y resumen dicen la verdad', () => {
+    const sinEstimar = directaBase()
+    const est = { ...directaBase(), ...patchEstimarDirecta(directaBase(), 4_500_000, undefined, ALCANCE_MEGACENTER, 'u', ts)!.sub } as AsignacionContratista
+    const rSin = resumenAsignacionesDe([sinEstimar], ALCANCE_MEGACENTER)
+    const rEst = resumenAsignacionesDe([est], ALCANCE_MEGACENTER)
+    expect(habilitaEjecucionDe(rSin)).toBe(false)
+    expect(habilitaEjecucionDe(rEst)).toBe(true)
+    expect(habilitaEjecucionDe(undefined)).toBe(false)
+    expect(rSin.directas_por_estimar).toBe(1)
+    expect(rEst.directas_por_estimar).toBe(0)
+    // sub-etapa: SOLO directas sin estimar → chip propio; mixta → manda el contratista
+    expect(subEtapaDe({ resumen_asignaciones: rSin } as never)).toBe('costo_propio_por_estimar')
+    const mixta = resumenAsignacionesDe([sinEstimar, base({ id: 'c2', atomos: ['Protección de equipos y limpieza'] })], ALCANCE_MEGACENTER)
+    expect(subEtapaDe({ resumen_asignaciones: mixta } as never)).toBe('preliquidacion_pendiente')
+    expect(tipoDe(base())).toBe('contratista')
+    expect(tipoDe(directaBase())).toBe('administracion_directa')
   })
 })
 
@@ -410,7 +490,7 @@ describe('sub-etapas filtrables (condición 1) — cobertura total', () => {
     expect(subEtapaDe(conResumen({ anticipo_girado: 2 }, 2))).toBe('lista_para_ejecutar')
     // mixto: lo MÁS atrasado manda (una asignada pendiente pesa más que un giro hecho)
     expect(subEtapaDe(conResumen({ asignada: 1, anticipo_girado: 1 }, 2))).toBe('preliquidacion_pendiente')
-    expect(SUB_ETAPAS_PREPARACION.length).toBe(6)
+    expect(SUB_ETAPAS_PREPARACION.length).toBe(7)   // +costo_propio_por_estimar (P2-4)
   })
 })
 
