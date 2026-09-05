@@ -544,6 +544,10 @@ export function construirAsignacionMulti(
   uid: string,
   fecha: Timestamp,
   notaCriterio?: string,
+  // P2-4: 'administracion_directa' = sin ciclo de pago. La identidad la
+  // lleva el contratista REAL igual (para personal propio: el registro de
+  // NEG) y el gate de habilitación aplica SIN excepción.
+  tipo?: TipoAsignacion,
 ): Omit<AsignacionContratista, 'id'> {
   if (contratista.estado !== 'activo')
     throw new Error('Solo se pueden asignar contratistas habilitados (estado activo)')
@@ -561,6 +565,7 @@ export function construirAsignacionMulti(
     throw new Error('La modalidad solo mano de obra exige el presupuesto de materiales de NEG')
   const documento = contratista.nit || contratista.cedula
   return {
+    ...(tipo ? { tipo } : {}),
     contratista_id: contratista.id,
     contratista_nombre: contratista.nombre,
     ...(documento ? { contratista_documento: documento } : {}),
@@ -577,6 +582,7 @@ export function construirAsignacionMulti(
     asignado_por: uid,
     fecha,
     historial: [entrada(null, 'asignada', uid, fecha,
+      (tipo === 'administracion_directa' ? 'ADMINISTRACIÓN DIRECTA (personal propio, sin ciclo de pago) — ' : '') +
       `Asignación de ${contratista.nombre} — ${atomos.length} actividad(es): ${atomos.join(' · ')}` +
       (notaCriterio?.trim() ? ` · Criterio: ${notaCriterio.trim()}` : ''))],
     ...(notaCriterio?.trim() ? { nota_criterio: notaCriterio.trim() } : {}),
