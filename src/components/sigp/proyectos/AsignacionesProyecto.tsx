@@ -27,6 +27,7 @@ import {
   patchDefinirPreliquidacion, patchAprobarPreliquidacion, patchGirarAnticipo,
   patchCorregirPreliquidacion, patchLiquidarAsignacion, valorAlcanceDe,
   tipoDe, patchMarcarAdministracionDirecta, patchEstimarDirecta, patchCerrarDirecta,
+  puenteLiquidadoContratista,
   margenImplicitoDe, requiereRevisionCobertura, UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT,
   baseMargenDe, ETIQUETA_BASE_MARGEN, atomosTomados,
   ESTADO_ASIG_LABEL, ESTADO_ASIG_COLOR,
@@ -507,9 +508,21 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       if (!r) { toast('Solo se cierra una administración directa estimada', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+      // Puente materializado (07-sep): si el cierre de la directa deja TODO
+      // liquidado y el ciclo administrativo ya llegó (pagado/facturado), el
+      // padre transiciona en el mismo batch.
+      const puente = puenteLiquidadoContratista(trasPatch, proyecto.estado)
       await escribirAsignacion(proyecto.id, alcance, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
-      toast(`Cerrada — estimado ${fmtMoney(target.preliquidacion?.valor_contratista ?? 0)} · real ${fmtMoney(cerrarCostoReal)}`)
+        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch,
+        puente ? {
+          estado: 'liquidado_contratista',
+          historial: arrayUnion({
+            de: proyecto.estado, a: 'liquidado_contratista', por: user?.uid ?? '', fecha: ahora,
+            motivo: 'Todas las asignaciones liquidadas — hito del proyecto (puente v2 materializado)',
+          }),
+        } : undefined)
+      toast(`Cerrada — estimado ${fmtMoney(target.preliquidacion?.valor_contratista ?? 0)} · real ${fmtMoney(cerrarCostoReal)}`
+        + (puente ? ' · TODAS liquidadas: el proyecto pasa a Por cerrar' : ''))
       setCerrarDTarget(null)
       await recargarTodo()
     } catch { toast('Error al cerrar', 'error') } finally { setAplicando(false) }
@@ -555,9 +568,21 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       if (!r) { toast('La liquidación no procede en este estado (gates del builder)', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+      // Puente materializado (07-sep): la ÚLTIMA liquidación transiciona el
+      // padre en el MISMO batch — la bandeja "Por cerrar" y la proyección
+      // SST lo heredan; la guarda del padre (gate al_dia) protege el batch.
+      const puente = puenteLiquidadoContratista(trasPatch, proyecto.estado)
       await escribirAsignacion(proyecto.id, alcance, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
-      toast(`Liquidada — saldo ${fmtMoney(r.liquidacion.saldo_final)}`)
+        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch,
+        puente ? {
+          estado: 'liquidado_contratista',
+          historial: arrayUnion({
+            de: proyecto.estado, a: 'liquidado_contratista', por: user?.uid ?? '', fecha: ahora,
+            motivo: 'Todas las asignaciones liquidadas — hito del proyecto (puente v2 materializado)',
+          }),
+        } : undefined)
+      toast(`Liquidada — saldo ${fmtMoney(r.liquidacion.saldo_final)}`
+        + (puente ? ' · TODAS liquidadas: el proyecto pasa a Por cerrar' : ''))
       setLiquidarTarget(null)
       await recargarTodo()
     } catch (e) { toast(e instanceof Error ? e.message : 'Error al liquidar', 'error') } finally { setAplicando(false) }

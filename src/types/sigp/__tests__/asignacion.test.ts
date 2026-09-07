@@ -21,7 +21,8 @@ import {
   tipoDe, patchMarcarAdministracionDirecta, patchEstimarDirecta, patchCerrarDirecta,
   habilitaEjecucionDe,
 } from '../asignacion'
-import { asignacionesPorAprobar, asignacionesPorGirar } from '../proyecto'
+import { asignacionesPorAprobar, asignacionesPorGirar, pendientesVerificacionDe } from '../proyecto'
+import { puenteLiquidadoContratista } from '../asignacion'
 import type { AsignacionContratista, ResumenAsignaciones } from '../asignacion'
 import type { AlcanceGrupo, Proyecto } from '../proyecto'
 
@@ -193,6 +194,42 @@ describe('P2-4 — ADMINISTRACIÓN DIRECTA: sin ciclo de pago, identidad del con
     expect(subEtapaDe({ resumen_asignaciones: mixta } as never)).toBe('preliquidacion_pendiente')
     expect(tipoDe(base())).toBe('contratista')
     expect(tipoDe(directaBase())).toBe('administracion_directa')
+  })
+})
+
+describe('07-sep — puente materializado a liquidado_contratista (hallazgo Tesoro III)', () => {
+  const liq = (over: Partial<AsignacionContratista> = {}) => base({ estado: 'liquidada', ...over })
+  it('última liquidada + proyecto en pagado_cliente → puente; con una viva → no', () => {
+    expect(puenteLiquidadoContratista([liq()], 'pagado_cliente')).toBe(true)
+    expect(puenteLiquidadoContratista([liq(), base({ id: 'a2', estado: 'anticipo_girado' })], 'pagado_cliente')).toBe(false)
+  })
+  it('canceladas SIN incurrido no bloquean; CON incurrido sí (queda pendiente de liquidar)', () => {
+    const cancelSin = base({ id: 'c1', estado: 'cancelada', cancelacion: { fecha: ts, por: 'u', motivo: 'x', incurrido: { anticipo: 0, reembolsos: 0, total: 0 } } })
+    const cancelCon = base({ id: 'c2', estado: 'cancelada', cancelacion: { fecha: ts, por: 'u', motivo: 'x', incurrido: { anticipo: 100, reembolsos: 0, total: 100 } } })
+    expect(puenteLiquidadoContratista([liq(), cancelSin], 'pagado_cliente')).toBe(true)
+    expect(puenteLiquidadoContratista([liq(), cancelCon], 'pagado_cliente')).toBe(false)
+  })
+  it('directa cerrada como última → puente; fuera del ciclo administrativo → NO transiciona', () => {
+    const directaCerrada = liq({ id: 'd1', tipo: 'administracion_directa', cierre_directa: { costo_real: 1, cerrada_por: 'u', fecha: ts } })
+    expect(puenteLiquidadoContratista([directaCerrada], 'pagado_cliente')).toBe(true)
+    expect(puenteLiquidadoContratista([directaCerrada], 'facturado')).toBe(true)   // anticipada
+    expect(puenteLiquidadoContratista([directaCerrada], 'en_ejecucion')).toBe(false)
+    expect(puenteLiquidadoContratista([directaCerrada], 'ejecutado')).toBe(false)
+    expect(puenteLiquidadoContratista([], 'pagado_cliente')).toBe(false)   // sin asignaciones no hay evidencia
+  })
+})
+
+describe('07-sep — pendientesVerificacionDe (el predicado del badge de la cola)', () => {
+  it('pendiente = en cola (facturado|pagado) y SIN aval al día', () => {
+    const vs = [
+      { estado: 'facturado' },                                                    // sin gate → pendiente
+      { estado: 'pagado_cliente', sst_gate: { estado: 'con_novedad', verificado_por: 'x', fecha: ts } },  // novedad → pendiente
+      { estado: 'pagado_cliente', sst_gate: { estado: 'al_dia', verificado_por: 'x', fecha: ts } },       // avalado → fuera
+      { estado: 'liquidado_contratista' },                                        // fuera de cola
+      { estado: 'cerrado' },
+    ] as never[]
+    expect(pendientesVerificacionDe(vs)).toBe(2)
+    expect(pendientesVerificacionDe([])).toBe(0)
   })
 })
 

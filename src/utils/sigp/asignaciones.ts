@@ -74,12 +74,17 @@ export async function escribirAsignacion(
   asignacionId: string,
   patchSub: Record<string, unknown>,
   todasTrasPatch: AsignacionContratista[],
+  // 07-sep — puente materializado: campos EXTRA del padre en el MISMO batch
+  // (p. ej. estado → liquidado_contratista + historial cuando la última
+  // asignación viva queda liquidada). Atómico: sub + resumen + padre.
+  patchPadreExtra?: Record<string, unknown>,
 ): Promise<void> {
   const batch = writeBatch(db)
   batch.update(doc(db, 'proyectos', proyectoId, 'asignaciones', asignacionId), patchSub)
   batch.update(doc(db, 'proyectos', proyectoId), {
     resumen_asignaciones: resumenAsignacionesDe(todasTrasPatch, alcance ?? []),
     fecha_actualizacion: Timestamp.now(),
+    ...(patchPadreExtra ?? {}),
   })
   await batch.commit()
 }
