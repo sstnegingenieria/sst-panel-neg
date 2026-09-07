@@ -492,11 +492,19 @@ export const puedeCerrarseEn = (estado: EstadoProyecto): boolean =>
  *  del ciclo quedó capturada. La satisfacción del cliente pendiente se
  *  ofrece capturar — jamás bloquea el cierre. */
 export const completitudCierre = (
-  p: Pick<Proyecto, 'facturacion' | 'pago_cliente' | 'liquidacion' | 'evaluacion_contratista' | 'evaluacion_cliente'>,
+  p: Pick<Proyecto, 'facturacion' | 'pago_cliente' | 'liquidacion' | 'evaluacion_contratista' | 'evaluacion_cliente'>
+    & Partial<Pick<Proyecto, 'estado'>>,
 ): { clave: string; etiqueta: string; ok: boolean }[] => [
   { clave: 'facturacion', etiqueta: 'Factura registrada', ok: !!p.facturacion },
   { clave: 'pago_cliente', etiqueta: 'Pago del cliente registrado', ok: !!p.pago_cliente },
-  { clave: 'liquidacion', etiqueta: 'Contratista liquidado', ok: !!p.liquidacion },
+  // P2-2/07-sep: en el camino POR ASIGNACIÓN la liquidación vive en los
+  // sub-docs y el padre NO tiene `liquidacion` — pero llegar a
+  // `liquidado_contratista` (el puente solo lo fija con TODAS liquidadas y
+  // la regla exige el gate SST) ES el hecho "contratista liquidado". Sin el
+  // estado, el resumen decía "pendiente" sobre un hecho consumado (E2E
+  // Tesoro III — otro consumidor que leía el modelo viejo como dato).
+  { clave: 'liquidacion', etiqueta: 'Contratista liquidado',
+    ok: !!p.liquidacion || p.estado === 'liquidado_contratista' || p.estado === 'cerrado' },
   { clave: 'evaluacion_contratista', etiqueta: 'Evaluación del contratista', ok: !!p.evaluacion_contratista },
   { clave: 'evaluacion_cliente', etiqueta: 'Satisfacción del cliente', ok: !!p.evaluacion_cliente },
 ]
@@ -543,6 +551,14 @@ export const sstGateAlDia = (p: { sst_gate?: SstGateProyecto }): boolean =>
  *  administrativo previo a la liquidación. */
 export const enColaVerificacionSst = (estado: EstadoProyecto): boolean =>
   estado === 'facturado' || estado === 'pagado_cliente'
+
+/** 07-sep — el predicado del BADGE de la cola de verificación (hallazgo
+ *  Tesoro III: 7 proyectos esperaron 6 semanas sin que nadie se enterara —
+ *  la cola nació sin señal). Pendiente = en cola Y sin aval al día. */
+export const pendientesVerificacionDe = (
+  vs: { estado: EstadoProyecto; sst_gate?: SstGateProyecto }[],
+): number =>
+  vs.filter(v => enColaVerificacionSst(v.estado) && !sstGateAlDia(v)).length
 
 /** ¿El proyecto pertenece a la bandeja de Facturación y Pagos? (desde el
  *  handoff en adelante — territorio del módulo administrativo). */

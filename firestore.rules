@@ -860,15 +860,21 @@ service cloud.firestore {
     // leen para el chip del gate en su bandeja.
 
     match /verificaciones_sst/{proyectoId} {
+      // 07-sep (decisión Giovanny): gestion_integral ENTRA al módulo — la
+      // Caracterización asigna la habilitación de contratistas al SGI y el
+      // módulo contradecía el procedimiento documentado (el 3a se construyó
+      // como cola del rol sst; a GI nunca se la contempló — ni en lectura).
+      // "Gestión Integral marcó la verificación" es evidencia; "admin marcó"
+      // no lo es → admin SIGUE en solo lectura (decisión 3a intacta).
       allow read: if isAuthed() && rolActual() in [
-        'sst', 'residente_sst', 'admin',
+        'sst', 'residente_sst', 'gestion_integral', 'admin',
         'gerencia_administrativa', 'gerencia_general'
       ];
-      // sst/residente_sst marcan el gate — su ÚNICO campo de escritura
-      // (patrón hasOnly, como contratistas.estado). Nadie más escribe el
-      // gate; create/delete solo la Cloud Function.
+      // sst/residente_sst/gestion_integral marcan el gate — su ÚNICO campo
+      // de escritura (patrón hasOnly, como contratistas.estado). Nadie más
+      // escribe el gate; create/delete solo la Cloud Function.
       allow update: if isAuthed()
-                    && rolActual() in ['sst', 'residente_sst']
+                    && rolActual() in ['sst', 'residente_sst', 'gestion_integral']
                     && request.resource.data.diff(resource.data)
                         .affectedKeys().hasOnly(['sst_gate', 'historial', 'fecha_actualizacion']);
     }

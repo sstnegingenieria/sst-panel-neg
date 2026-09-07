@@ -57,6 +57,18 @@ describe('completitudCierre — resumen informativo de los 5 hitos', () => {
       evaluacion_contratista: false, evaluacion_cliente: false,
     })
   })
+
+  // P2-2/07-sep: en el camino por asignación el padre no tiene `liquidacion`
+  // — el estado liquidado_contratista (que el puente solo fija con TODAS
+  // liquidadas + gate) cuenta como el hecho. Antes decía "pendiente" sobre
+  // un hecho consumado (visto en el E2E de Tesoro III).
+  it('liquidación POR ASIGNACIÓN: el estado liquidado_contratista marca el hito ✓', () => {
+    const items = completitudCierre({ estado: 'liquidado_contratista' })
+    expect(items.find(i => i.clave === 'liquidacion')?.ok).toBe(true)
+    // pero un estado anterior NO lo marca (sin liquidacion ni estado terminal)
+    expect(completitudCierre({ estado: 'pagado_cliente' })
+      .find(i => i.clave === 'liquidacion')?.ok).toBe(false)
+  })
 })
 
 describe('mapa proactivo — "En camino" + narrativa (23-jul)', () => {

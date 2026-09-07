@@ -138,9 +138,15 @@ export const puedeCerrarProyectoUI = (rol: string | undefined) =>
 // La cola "Verificación de contratistas" la VEN sst/residente_sst (opera) y
 // admin (lectura de infraestructura). MARCAR el gate: SOLO sst/residente_sst
 // (respaldado por reglas: su único campo de escritura en proyectos).
-export const ROLES_VE_VERIFICACION_SST: Rol[] = ['admin', 'sst', 'residente_sst']
+// 07-sep (decisión Giovanny): gestion_integral OPERA la verificación — la
+// habilitación de contratistas es del SGI según la Caracterización; el 3a la
+// dejó afuera por descuido de contemplación (a diferencia del respaldo de
+// preliquidación del PR #45, donde GI sí se incluyó a propósito). Admin sigue
+// en SOLO LECTURA: una traza "admin" no dice quién actuó ni con qué autoridad.
+export const ROLES_VE_VERIFICACION_SST: Rol[] = ['admin', 'sst', 'residente_sst', 'gestion_integral']
 export const veVerificacionSstUI = (rol: string | undefined) => en(rol, ROLES_VE_VERIFICACION_SST)
-export const puedeMarcarSstGateUI = (rol: string | undefined) => rol === 'sst' || rol === 'residente_sst'
+export const puedeMarcarSstGateUI = (rol: string | undefined) =>
+  rol === 'sst' || rol === 'residente_sst' || rol === 'gestion_integral'
 
 // Aprobación de preliquidación (23-jul-2026, respaldo controlado): la titular
 // es gerencia_administrativa; gerencia_general, gestion_integral y admin son

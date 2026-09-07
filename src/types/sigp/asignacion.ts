@@ -1181,3 +1181,42 @@ export function asignacionesLiquidadas(asigs: AsignacionContratista[]): boolean 
     a.estado === 'liquidada' ||
     (a.estado === 'cancelada' && (a.cancelacion?.incurrido.total ?? 0) === 0))
 }
+
+/**
+ * PUENTE MATERIALIZADO hacia `liquidado_contratista` (07-sep, decisión de
+ * Giovanny — sale del diagnóstico de Tesoro III):
+ *
+ * ⚠ EL NOMBRE DEL ESTADO AHORA MIENTE — LEER ANTES DE USARLO.
+ * `liquidado_contratista` significaba "se liquidó AL contratista" (singular).
+ * Con asignaciones múltiples significa "TODAS las asignaciones están
+ * liquidadas" — un hito del PROYECTO, no de un contratista. No se renombra
+ * (el ripple no vale la pena: bandeja, reglas, CF de SST, históricos), pero
+ * quien lo lea debe saber qué afirma hoy.
+ *
+ * ⚠ TENSIÓN CONSCIENTE, NO CAMBIO SILENCIOSO: P2-2 declaró este estado
+ * DERIVADO (mapearEstadoV2) y aquí se vuelve a ALMACENAR — es una reversión
+ * deliberada. Por qué es la elección pragmática correcta: la bandeja "Por
+ * cerrar" de Marcela y la CF sincronizarVerificacionSst lo consumen como
+ * dato almacenado (sin el write, el cierre del ciclo era INALCANZABLE para
+ * los 42 migrados), y al escribirlo heredamos GRATIS la guarda desplegada
+ * del padre (liquidado_contratista exige gate SST al_dia) como defensa en
+ * profundidad del batch completo.
+ *
+ * 📚 LECCIÓN (bitácora): convertir un estado en derivado no basta si algo
+ * aguas abajo lo consume como dato almacenado. El censo de consumidores de
+ * P2-2 miró las reglas y la máquina, pero no las bandejas que filtran por
+ * ese valor.
+ *
+ * true ⟺ el conjunto TRAS el patch queda todo liquidado (canceladas sin
+ * incurrido no bloquean) Y el proyecto está en un origen válido de la
+ * máquina vieja hacia liquidado (pagado_cliente, o facturado = anticipada).
+ * Una directa cerrada con el proyecto aún en ejecución NO transiciona: el
+ * hito administrativo llega cuando el ciclo administrativo llegó.
+ */
+export function puenteLiquidadoContratista(
+  asigsTrasPatch: AsignacionContratista[],
+  estadoProyecto: string,
+): boolean {
+  if (estadoProyecto !== 'pagado_cliente' && estadoProyecto !== 'facturado') return false
+  return asignacionesLiquidadas(asigsTrasPatch)
+}

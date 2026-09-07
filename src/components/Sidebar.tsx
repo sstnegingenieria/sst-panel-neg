@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useNotificaciones } from '../contexts/NotificacionesContext'
 import { usePendientesSigp } from '../hooks/sigp/usePendientesSigp'
 import { useTareasPendientes } from '../hooks/sigp/useTareasPendientes'
+import { usePendientesVerificacionSst } from '../hooks/usePendientesVerificacionSst'
 import { useFeatureFlag } from '../hooks/useFeatureFlag'
 import { accesoSIGP, type Rol } from '../types/sigp/roles'
 import {
@@ -238,6 +239,9 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   const licitacionesEnabled = useFeatureFlag('sigp_licitaciones_enabled', false)
   const mostrarLicitaciones = licitacionesEnabled && veLicitacionesUI(user?.rol)
   const { misTareas, balones } = useTareasPendientes(mostrarTareas, user?.uid)
+  // 07-sep — badge de la cola de Verificación SST (hallazgo Tesoro III):
+  // montado SOLO para quien puede LEER la proyección (cero lecturas ajenas).
+  const pendientesVerificacion = usePendientesVerificacionSst(veVerificacionSstUI(user?.rol))
   const badgeTareas = misTareas + balones
   // Pipeline (23-jul): contadores vivos de pendientes sin código — badges
   // clickeables en Visitas y Cotizaciones.
@@ -320,6 +324,11 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
                   {pendientesTecnicos > 9 ? '9+' : pendientesTecnicos}
                 </span>
               )}
+              {collapsed && item.to === '/verificacion-contratistas' && pendientesVerificacion > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 text-white rounded-full text-[10px] font-bold flex items-center justify-center">
+                  {pendientesVerificacion > 9 ? '9+' : pendientesVerificacion}
+                </span>
+              )}
             </span>
             {!collapsed && (
               <span className="flex items-center justify-between flex-1">
@@ -332,6 +341,12 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
                 {item.to === '/usuarios' && pendientesTecnicos > 0 && (
                   <span className="ml-auto bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
                     {pendientesTecnicos > 99 ? '99+' : pendientesTecnicos}
+                  </span>
+                )}
+                {item.to === '/verificacion-contratistas' && pendientesVerificacion > 0 && (
+                  <span className="ml-auto bg-orange-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center"
+                    title="Contratistas por verificar — el aval habilita la liquidación">
+                    {pendientesVerificacion > 99 ? '99+' : pendientesVerificacion}
                   </span>
                 )}
               </span>
