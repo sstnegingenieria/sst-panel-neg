@@ -28,6 +28,30 @@ interface Props {
 export default function ComprasReembolsos({ proyecto, puedeGestionar, reload }: Props) {
   const { user } = useAuth()
   const compras = proyecto.compras_reembolsos ?? []
+
+  // ⛔ MITIGACIÓN (14-sep, barrido post-P2-2): en un proyecto MIGRADO los
+  // reembolsos viven EN cada asignación (la migración movió los históricos al
+  // sub-doc y borró este campo del padre) — un registro NUEVO aquí caería al
+  // padre, donde NI el indicador NI la liquidación por asignación lo leen:
+  // pérdida silenciosa de dato con consecuencia financiera. La captura queda
+  // CERRADA hasta que exista el formulario por asignación (PR en curso).
+  if (proyecto.resumen_asignaciones) {
+    if (!puedeGestionar) return null
+    return (
+      <div className="bg-white rounded-lg border border-amber-200 shadow-sm p-5">
+        <h2 className="font-semibold text-gray-800">Compras y reembolsos del contratista</h2>
+        <p className="mt-1 text-sm text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
+          ⚠ Este proyecto opera con asignaciones múltiples: los reembolsos pertenecen a
+          <strong> cada asignación</strong> y se reconocen en <strong>su</strong> liquidación
+          (los históricos no se borraron — se migraron a la asignación, sección
+          "Contratistas y cobertura del alcance"). La captura desde aquí quedó cerrada:
+          escribía al proyecto, donde la liquidación por asignación no la lee.
+          El registro por asignación llega en el próximo despliegue; mientras tanto,
+          guarda el soporte y regístralo apenas esté disponible.
+        </p>
+      </div>
+    )
+  }
   const [form, setForm] = useState(false)
   const [concepto, setConcepto] = useState('')
   const [valor, setValor] = useState<number | undefined>(undefined)
