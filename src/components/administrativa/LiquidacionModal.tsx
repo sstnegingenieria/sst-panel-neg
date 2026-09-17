@@ -64,6 +64,25 @@ export default function LiquidacionModal({ proyecto, verificacion, onClose, onDo
   )
   const esIgual = diferencia === 0 && !pre?.ajuste_pendiente_liquidacion
 
+  // ⛔ 17-sep (arreglo #1 del barrido post-P2-2): este modal es SOLO-LEGACY.
+  // En un proyecto migrado los campos económicos del padre no existen (la
+  // migración los borró) y el modal conciliaba en $0 con el botón muerto —
+  // la bandeja ya enlaza a la ficha; esto es defensa en profundidad.
+  // (Después de todos los hooks — regla de hooks intacta.)
+  if (proyecto.resumen_asignaciones) {
+    return (
+      <Modal isOpen title={`Liquidación — ${proyecto.consecutivo}`} onClose={onClose} size="md"
+        actions={[{ label: 'Cerrar', onClick: onClose, variant: 'secondary' }]}>
+        <p className="text-sm text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
+          ⚠ Este proyecto opera con asignaciones múltiples: la liquidación se hace
+          <strong> por asignación</strong> desde la ficha del proyecto (sección
+          "Contratistas y cobertura del alcance"). Este formulario solo aplica a
+          proyectos del modelo anterior.
+        </p>
+      </Modal>
+    )
+  }
+
   const agregarRetencion = () => {
     if (!retConcepto.trim() || !retValor || retValor <= 0) return
     setRetenciones(r => [...r, { concepto: retConcepto.trim(), valor: retValor }])
