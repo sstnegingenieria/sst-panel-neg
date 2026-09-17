@@ -973,6 +973,30 @@ export function patchLiquidarAsignacion(
   }
 }
 
+/** REEMBOLSO CON DUEÑO (17-sep — hallazgo #2 del barrido post-P2-2): el
+ *  contratista compró y NEG le reconoce — la línea pertenece a ESTA
+ *  asignación y se paga en SU liquidación (el formulario viejo escribía al
+ *  padre, donde ni el indicador ni la liquidación por asignación leen).
+ *  Solo asignaciones vivas de tipo contratista: liquidada = conciliación
+ *  cerrada; cancelada = lo incurrido quedó congelado en la cancelación;
+ *  directa = no hay pago a tercero que reconocer. */
+export function patchAgregarReembolso(
+  a: AsignacionContratista, compra: CompraReembolso,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion } | null {
+  if (a.estado === 'liquidada' || a.estado === 'cancelada') return null
+  if (tipoDe(a) === 'administracion_directa') return null
+  if (!compra.concepto.trim() || !(compra.valor > 0)) return null
+  return {
+    sub: {
+      compras_reembolsos: [...(a.compras_reembolsos ?? []), compra],
+      fecha_actualizacion: compra.fecha,
+    },
+    entradaHistorial: entrada(a.estado, a.estado, compra.registrado_por, compra.fecha,
+      `Compra/reembolso del contratista — ${compra.concepto.trim()}: ${compra.valor}`
+      + ' (con dueño: se reconoce en la liquidación de ESTA asignación)'),
+  }
+}
+
 /** CANCELAR — el cierre anticipado como caso general con valores en cero:
  *  registra lo incurrido y libera los átomos. Con incurrido 0 → terminal;
  *  con incurrido > 0 → queda esperando su liquidación (cancelada→liquidada). */

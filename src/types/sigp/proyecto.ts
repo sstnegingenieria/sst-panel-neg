@@ -435,6 +435,17 @@ export const asignacionesPorAprobar = (p: Pick<Proyecto, 'resumen_asignaciones'>
   p.resumen_asignaciones?.por_estado?.preliquidacion_definida ?? 0
 export const asignacionesPorGirar = (p: Pick<Proyecto, 'resumen_asignaciones'>): number =>
   p.resumen_asignaciones?.por_estado?.preliquidacion_aprobada ?? 0
+/** 17-sep (barrido post-P2-2, arreglo #1): asignaciones VIVAS aún sin
+ *  liquidar — la acción de "Por liquidar" en migrados vive POR ASIGNACIÓN en
+ *  la ficha (patrón PorAprobar/PorGirar; el modal del padre quedó solo-legacy).
+ *  Nota: una cancelada CON incurrido también se liquida en la ficha pero acá
+ *  se resta (el resumen no distingue incurrido) — el enlace sale igual por
+ *  estado del proyecto, solo sin contador exacto en ese borde. */
+export const asignacionesPorLiquidar = (p: Pick<Proyecto, 'resumen_asignaciones'>): number => {
+  const r = p.resumen_asignaciones
+  if (!r) return 0
+  return Math.max(0, (r.total ?? 0) - (r.por_estado?.liquidada ?? 0) - (r.por_estado?.cancelada ?? 0))
+}
 
 // ── Mapa proactivo (23-jul): "En camino" — lo que AÚN no le toca a gerencia ──
 //

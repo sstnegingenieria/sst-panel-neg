@@ -15,7 +15,8 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   collection, getDocs, getDoc, doc, updateDoc, arrayUnion, deleteField, Timestamp,
 } from 'firebase/firestore'
-import { db } from '../../../firebase/config'
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
+import { db, storage } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
@@ -25,7 +26,7 @@ import {
   construirAsignacionMulti, construirAsignacionHistorica,
   patchCancelarAsignacion, patchAjustarAtomos, patchResolverSenal,
   patchDefinirPreliquidacion, patchAprobarPreliquidacion, patchGirarAnticipo,
-  patchCorregirPreliquidacion, patchLiquidarAsignacion, valorAlcanceDe,
+  patchCorregirPreliquidacion, patchLiquidarAsignacion, patchAgregarReembolso, valorAlcanceDe,
   tipoDe, patchMarcarAdministracionDirecta, patchEstimarDirecta, patchCerrarDirecta,
   puenteLiquidadoContratista,
   margenImplicitoDe, requiereRevisionCobertura, UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT,
@@ -37,7 +38,7 @@ import { cargarAsignaciones, asegurarMigrado, crearAsignacion, escribirAsignacio
 import { MODALIDAD_CONTRATISTA_LABEL, MODALIDADES_CONTRATISTA, anticipoValorDe, sstGateAlDia, totalComprasReembolsos, claveItemAlcance } from '../../../types/sigp/proyecto'
 import { modoAgrupacionDe, actividadesDe, subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../../types/sigp/cotizacion'
 import type { VersionCotizacion } from '../../../types/sigp/cotizacion'
-import type { Proyecto, ModalidadContratista, RetencionLiquidacion } from '../../../types/sigp/proyecto'
+import type { Proyecto, ModalidadContratista, RetencionLiquidacion, CompraReembolso } from '../../../types/sigp/proyecto'
 import { aprobacionRequiereSalvedad, puedeLiquidarUI } from '../../../types/sigp/permisos'
 import InputExpresion from '../cotizaciones/InputExpresion'
 
@@ -438,6 +439,95 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     } finally { setAplicando(false) }
   }
 
+  // ═══════════════ REEMBOLSO CON DUEÑO (17-sep — arreglo #2 del barrido):
+  // la captura vive EN la asignación (el form del padre quedó solo-legacy).
+  // El formulario abre TITULADO con el contratista — elegir mal exigiría
+  // abrir la tarjeta equivocada con el nombre en frente (pedido Giovanny). ═══
+  const [reembTarget, setReembTarget] = useState<AsignacionContratista | null>(null)
+  const [reembConcepto, setReembConcepto] = useState('')
+  const [reembValor, setReembValor] = useState<number | undefined>(undefined)
+  const [reembSoporte, setReembSoporte] = useState<File | null>(null)
+  const abrirReembolso = (a: AsignacionContratista) => {
+    setReembConcepto(''); setReembValor(undefined); setReembSoporte(null); setReembTarget(a)
+  }
+  const agregarReembolso = async () => {
+    if (!reembTarget || !reembConcepto.trim() || !reembValor || reembValor <= 0) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      const vigentes = await asegurarMigrado(proyecto, subdocs)
+      const target = vigentes.find(x => x.id === reembTarget.id) ?? reembTarget
+      let adjunto: Pick<CompraReembolso, 'soporte_url' | 'soporte_nombre'> = {}
+      if (reembSoporte) {
+        const nombre = `${Date.now()}-${reembSoporte.name}`.replace(/[^\w.\-]/g, '_')
+        const snap = await uploadBytes(ref(storage, `proyectos/${proyecto.id}/compras/${nombre}`), reembSoporte)
+        adjunto = { soporte_url: await getDownloadURL(snap.ref), soporte_nombre: reembSoporte.name }
+      }
+      const compra: CompraReembolso = {
+        concepto: reembConcepto.trim(), valor: reembValor, registrado_por: user?.uid ?? '', fecha: ahora, ...adjunto,
+      }
+      const r = patchAgregarReembolso(target, compra)
+      if (!r) { toast('Solo en asignaciones vivas de contratista (no liquidadas/canceladas/directas)', 'error'); return }
+      const trasPatch = vigentes.map(x => x.id === target.id
+        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+      // Mismo batch sub + resumen: el reembolso entra al indicador al instante
+      await escribirAsignacion(proyecto.id, alcance, target.id,
+        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+      toast(`Reembolso de ${target.contratista_nombre} registrado — ${fmtMoney(reembValor)} · se reconoce en SU liquidación`)
+      setReembTarget(null)
+      await recargarTodo()
+    } catch { toast('Error al registrar el reembolso', 'error') } finally { setAplicando(false) }
+  }
+
+  // ═══════════════ PDF de LIQUIDACIÓN por asignación (17-sep — arreglo #4:
+  // el entregable SGI-FT-LIQ-26 se perdió en el camino por-asignación; mismo
+  // generador del 3b, DTO plano — cero cambios de layout). Directas no
+  // generan documento: no hay pago a tercero que entregar. ═══════════════════
+  const docLiquidacion = async (a: AsignacionContratista) => {
+    const liq = a.liquidacion
+    if (!liq) return
+    setAplicando(true)
+    try {
+      const { cargarAssetsPdf, generarPdfLiquidacion } = await import('../../../utils/sigp/liquidacionPdf')
+      const atomos = new Set(a.atomos)
+      const pdf = await generarPdfLiquidacion({
+        proyectoConsecutivo: proyecto.consecutivo,
+        contratistaNombre: a.contratista_nombre,
+        clienteNombre: proyecto.snapshot.nombre_sitio
+          ? `${proyecto.snapshot.cliente} — ${proyecto.snapshot.nombre_sitio}` : proyecto.snapshot.cliente,
+        asunto: proyecto.snapshot.asunto,
+        fecha: liq.fecha.toDate(),
+        gruposAlcance: (proyecto.snapshot.alcance ?? [])
+          .filter(g => atomos.has(g.grupo))
+          .map(g => ({ nombre: g.grupo, items: g.items })),
+        manoObra: liq.mano_obra,
+        compras: liq.compras_reembolsos.map(c => ({ concepto: c.concepto, valor: c.valor })),
+        retenciones: liq.retenciones,
+        totalFinal: liq.total_final,
+        anticipoGirado: liq.anticipo_girado,
+        saldoFinal: liq.saldo_final,
+        esIgual: liq.es_igual,
+        diferencia: liq.diferencia,
+        ajustesReconocidos: liq.ajustes_reconocidos,
+        ...(liq.observaciones ? { observaciones: liq.observaciones } : {}),
+        ...(liq.liquidacion_anticipada ? { anticipada: {
+          justificacion: liq.justificacion_anticipada ?? '',
+          acuerdoCon: liq.acuerdo_con ?? '—',
+          acuerdoFecha: liq.acuerdo_fecha?.toDate() ?? liq.fecha.toDate(),
+        } } : {}),
+      }, await cargarAssetsPdf())
+      const url = URL.createObjectURL(new Blob([pdf as BlobPart], { type: 'application/pdf' }))
+      const el = document.createElement('a')
+      el.href = url
+      el.download = `${proyecto.consecutivo} - Liquidación ${a.contratista_nombre}.pdf`.replace(/[\\/:*?"<>|]/g, '')
+      el.click()
+      setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    } catch (e) {
+      console.error('Error generando la liquidación del contratista:', e)
+      toast('No se pudo generar el documento', 'error')
+    } finally { setAplicando(false) }
+  }
+
   // ═══════════════ P2-4: ADMINISTRACIÓN DIRECTA (sin ciclo de pago) ═════════
   // Sin aprobación POR DISEÑO (Giovanny 04-sep): no hay giro a terceros; el
   // control es la señal de implausibilidad + la traza del historial.
@@ -722,6 +812,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                     Contratista <span className="font-mono font-semibold">{fmtMoney(a.preliquidacion.valor_contratista)}</span>
                     {' · '}{MODALIDAD_CONTRATISTA_LABEL[a.modalidad]}
                     {a.preliquidacion.anticipo && <> · anticipo girado <span className="font-mono">{fmtMoney(a.preliquidacion.anticipo.valor)}</span></>}
+                    {!a.liquidacion && totalComprasReembolsos(a.compras_reembolsos) > 0 && (
+                      <> · reembolsos <span className="font-mono">{fmtMoney(totalComprasReembolsos(a.compras_reembolsos))}</span> ({(a.compras_reembolsos ?? []).length})</>
+                    )}
                     {a.legacy && <span className="text-gray-400"> · margen {ETIQUETA_BASE_MARGEN[baseMargenDe(a)]}</span>}
                     {a.preliquidacion.salvedad && (
                       <span className="text-amber-700" title={`Aprobó un rol de respaldo, no la titular: ${a.preliquidacion.salvedad}`}>
@@ -749,6 +842,17 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                     {' → '}<span className={`font-mono font-semibold ${a.liquidacion.saldo_final < 0 ? 'text-red-700' : ''}`}>SALDO {fmtMoney(a.liquidacion.saldo_final)}</span>
                     {a.liquidacion.saldo_final < 0 && ' (pagado de más — sobre-giro visible, jamás recortado)'}
                   </p>
+                )}
+                {/* 17-sep (arreglo #4): el entregable de la liquidación
+                    (SGI-FT-LIQ-26) por asignación — directas no lo generan */}
+                {a.liquidacion && !dir && (puedeGestionar || puedeAprobar || puedeLiquidar) && (
+                  <div className="pt-0.5">
+                    <button onClick={() => docLiquidacion(a)} disabled={aplicando}
+                      title="El documento de liquidación que se le entrega al contratista: SU alcance + conciliación (mano de obra + reembolsos − anticipo − retenciones = saldo) — jamás venta ni utilidad"
+                      className="text-[11px] px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50">
+                      📄 Liquidación (doc del contratista)
+                    </button>
+                  </div>
                 )}
                 {/* P2-4: el doc del contratista NO aplica a la administración
                     directa — no hay contraparte a quien mandarle documento */}
@@ -836,6 +940,15 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                           : 'Antes de ejecutar: la corrección REVIERTE la aprobación y exige re-aprobación'}
                         className="text-[11px] px-2.5 py-1 rounded-lg border border-amber-400 text-amber-800 hover:bg-amber-50 font-medium disabled:opacity-50">
                         ✎ Corregir preliquidación
+                      </button>
+                    )}
+                    {/* 17-sep (arreglo #2): reembolso CON DUEÑO — el botón vive
+                        DENTRO de la tarjeta del contratista, sin selector */}
+                    {puedeGestionar && !dir && (
+                      <button onClick={() => abrirReembolso(a)} disabled={aplicando}
+                        title={`Compra del contratista que NEG le reconoce — pertenece a ${a.contratista_nombre} y se paga en SU liquidación`}
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-gray-400 text-gray-700 hover:bg-gray-50 font-medium disabled:opacity-50">
+                        ＋ Reembolso
                       </button>
                     )}
                     {puedeGestionar && (
@@ -1157,6 +1270,45 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
             </label>
           </div>
+        </div>
+      </Modal>
+
+      {/* ── Modal: reembolso CON DUEÑO (17-sep) — titulado con el contratista:
+          no hay selector de asignación; el dueño es la tarjeta que lo abrió ── */}
+      <Modal isOpen={reembTarget !== null} onClose={() => setReembTarget(null)}
+        title={`Reembolso para ${reembTarget?.contratista_nombre ?? ''}`}
+        actions={[
+          { label: 'Volver', onClick: () => setReembTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Registrando…' : `Registrar reembolso de ${reembTarget?.contratista_nombre ?? ''}`,
+            onClick: agregarReembolso, variant: 'primary', loading: aplicando,
+            disabled: !reembConcepto.trim() || !reembValor || reembValor <= 0,
+          },
+        ]}>
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">
+            Compra que hizo <strong>{reembTarget?.contratista_nombre}</strong> y NEG le reconoce —
+            línea separada de su mano de obra; se paga en <strong>su</strong> liquidación
+            (y entra al indicador presupuestal de inmediato).
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Concepto <span className="text-red-500">*</span></span>
+              <input value={reembConcepto} onChange={e => setReembConcepto(e.target.value)}
+                placeholder="Ej: tornillería galvanizada para la torre"
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Valor <span className="text-red-500">*</span></span>
+              <InputExpresion valor={reembValor} onValor={setReembValor}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+          </div>
+          <label className="block text-sm">
+            <span className="font-medium text-gray-700">Soporte (factura/recibo, opcional)</span>
+            <input type="file" accept=".pdf,image/*" onChange={e => setReembSoporte(e.target.files?.[0] ?? null)}
+              className="mt-1 block text-xs text-gray-600" />
+          </label>
         </div>
       </Modal>
 

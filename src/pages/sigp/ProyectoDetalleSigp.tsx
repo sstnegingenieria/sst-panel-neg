@@ -22,7 +22,7 @@ import SatisfaccionClienteCard from '../../components/sigp/proyectos/Satisfaccio
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
-import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO } from '../../types/sigp/proyecto'
+import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO, costoEjecutadoDe } from '../../types/sigp/proyecto'
 import { TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR } from '../../types/sigp/cotizacion'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import { esCoordenadaValida, urlVerificarEnMaps } from '../../utils/geo'
@@ -42,6 +42,10 @@ export default function ProyectoDetalleSigp() {
   const puedeGestionar = puedeGestionarProyectosUI(user?.rol) && !cerrado
   const puedeAprobar = puedeAprobarPreliquidacionUI(user?.rol) && !cerrado
   const [loading, setLoading] = useState(true)
+  // 17-sep (arreglo #5): compras agregadas por la CF (C3) para la vía dual
+  // del costo ejecutado en la tarjeta PRC; best-effort — sin permiso o sin
+  // doc, la canasta sigue con $0 de compras (mismo criterio del Panel).
+  const [comprasEjecutadas, setComprasEjecutadas] = useState(0)
 
   const load = useCallback(async () => {
     if (!proyectoId) return
@@ -49,6 +53,10 @@ export default function ProyectoDetalleSigp() {
     try {
       const snap = await getDoc(doc(db, 'proyectos', proyectoId))
       setProyecto(snap.exists() ? ({ id: snap.id, ...snap.data() } as Proyecto) : null)
+      try {
+        const cSnap = await getDoc(doc(db, 'compras_proyecto', proyectoId))
+        setComprasEjecutadas((cSnap.data()?.compras_ejecutadas_total as number | undefined) ?? 0)
+      } catch { setComprasEjecutadas(0) }
     } catch {
       toast('Error al cargar el proyecto', 'error')
     } finally {
@@ -242,9 +250,14 @@ export default function ProyectoDetalleSigp() {
             <div>
               <p className="text-xs text-gray-400">Costo ejecutado</p>
               <p className="font-mono font-bold text-gray-800">
-                {proyecto.preliquidacion?.costo_ejecutado ? fmtMoney(proyecto.preliquidacion.costo_ejecutado) : '—'}
+                {/* 17-sep (arreglo #5): vía DUAL — resumen de asignaciones en
+                    migrados, preliquidación del padre en legacy (antes leía
+                    solo el campo del padre y en migrados mostraba '—') */}
+                {(() => { const c = costoEjecutadoDe(proyecto, comprasEjecutadas); return c != null ? fmtMoney(c) : '—' })()}
               </p>
-              <p className="text-[11px] text-gray-400">detalle en la sección Preliquidación</p>
+              <p className="text-[11px] text-gray-400">
+                {proyecto.resumen_asignaciones ? 'detalle por asignación' : 'detalle en la sección Preliquidación'}
+              </p>
             </div>
           </div>
           {(proyecto.cambios_alcance?.length ?? 0) > 0 && (

@@ -25,7 +25,7 @@ import {
   enCaminoAdministrativa, ETIQUETA_EN_CAMINO, narrativaAdministrativa,
   enColaVerificacionSst, estadoSstGate, sstGateAlDia, SST_GATE_LABEL, SST_GATE_COLOR,
   completitudCierre, pagoClientePendiente, puedeCerrarseProyecto,
-  asignacionesPorAprobar, asignacionesPorGirar,
+  asignacionesPorAprobar, asignacionesPorGirar, asignacionesPorLiquidar,
   MEDIOS_PAGO, MEDIO_PAGO_LABEL,
 } from '../../types/sigp/proyecto'
 import { puedeRegistrarFacturaUI, puedeLiquidarUI, puedeCerrarProyectoUI, puedeAprobarPreliquidacionUI } from '../../types/sigp/permisos'
@@ -490,8 +490,19 @@ export default function FacturacionPagos() {
                         💰 Registrar pago del cliente
                       </button>
                       {/* Anticipada (23-jul): pagar al contratista ANTES de
-                          cobrar, por acuerdo — gate SST innegociable */}
-                      {puedeLiquidar && (
+                          cobrar, por acuerdo — gate SST innegociable.
+                          17-sep: en migrados la liquidación vive POR ASIGNACIÓN
+                          en la ficha (el modal del padre leía campos borrados
+                          por la migración y conciliaba en $0). */}
+                      {puedeLiquidar && (p.resumen_asignaciones ? (
+                        <Link to={`/sigp/proyectos/${p.id}`}
+                          title="En este proyecto la liquidación es por asignación — se hace desde la ficha (anticipada: requiere acuerdo con Gerencia de Proyectos; gate SST innegociable)"
+                          className="inline-block text-xs px-3 py-1.5 rounded-lg font-medium border border-amber-300 text-amber-700 hover:bg-amber-50">
+                          {asignacionesPorLiquidar(p) > 0
+                            ? `⏩ Liquidar anticipado (${asignacionesPorLiquidar(p)} asig.) →`
+                            : '⏩ Liquidar anticipado →'}
+                        </Link>
+                      ) : (
                         <button onClick={() => setLiquidacionTarget(p)}
                           disabled={!sstGateAlDia(gates[p.id] ?? {})}
                           title={sstGateAlDia(gates[p.id] ?? {})
@@ -500,17 +511,29 @@ export default function FacturacionPagos() {
                           className="text-xs px-3 py-1.5 rounded-lg font-medium border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed">
                           ⏩ Liquidar anticipado
                         </button>
-                      )}
+                      ))}
                     </div>
                   ) : p.estado === 'pagado_cliente' && puedeLiquidar ? (
-                    // 3b — liquidar exige el gate SST al día (la regla también);
-                    // sin aval el botón lo dice y el modal explica la novedad.
-                    <button onClick={() => setLiquidacionTarget(p)}
-                      disabled={!sstGateAlDia(gates[p.id] ?? {})}
-                      title={sstGateAlDia(gates[p.id] ?? {}) ? undefined : 'Bloqueada: falta el aval de SST (gate al día)'}
-                      className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 disabled:opacity-40 disabled:cursor-not-allowed">
-                      🧮 Liquidar contratista
-                    </button>
+                    // 3b — liquidar exige el gate SST al día (la regla también).
+                    // 17-sep: en migrados la acción vive POR ASIGNACIÓN en la
+                    // ficha (surfacear, no reinventar — patrón aprobar/girar);
+                    // el modal del padre queda solo-legacy.
+                    p.resumen_asignaciones ? (
+                      <Link to={`/sigp/proyectos/${p.id}`}
+                        title="En este proyecto la liquidación es por asignación — se hace desde la ficha (el gate SST se exige allá y en la regla)"
+                        className="inline-block text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
+                        {asignacionesPorLiquidar(p) > 0
+                          ? `🧮 Liquidar asignaciones (${asignacionesPorLiquidar(p)}) →`
+                          : '🧮 Liquidar asignaciones →'}
+                      </Link>
+                    ) : (
+                      <button onClick={() => setLiquidacionTarget(p)}
+                        disabled={!sstGateAlDia(gates[p.id] ?? {})}
+                        title={sstGateAlDia(gates[p.id] ?? {}) ? undefined : 'Bloqueada: falta el aval de SST (gate al día)'}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                        🧮 Liquidar contratista
+                      </button>
+                    )
                   ) : p.estado === 'liquidado_contratista' || p.estado === 'cerrado' ? (
                     <div className="flex items-center justify-end gap-2">
                       {p.liquidacion && (
@@ -518,6 +541,14 @@ export default function FacturacionPagos() {
                           className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50">
                           📄 Liquidación
                         </button>
+                      )}
+                      {/* 17-sep: liquidado POR ASIGNACIÓN — los PDFs viven en
+                          la ficha, uno por contratista */}
+                      {!p.liquidacion && p.resumen_asignaciones && (
+                        <Link to={`/sigp/proyectos/${p.id}`}
+                          className="inline-block text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50">
+                          📄 Liquidaciones (en la ficha) →
+                        </Link>
                       )}
                       {/* Anticipada: el cobro pendiente se registra DESPUÉS
                           (llena pago_cliente sin cambiar el estado) */}

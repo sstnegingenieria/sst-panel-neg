@@ -599,3 +599,42 @@ describe('máquina v2 y derivados', () => {
     expect(atomosTomados([base()]).size).toBe(1)
   })
 })
+
+// ═══ 17-sep — barrido post-P2-2: reembolso CON DUEÑO + contador por liquidar ═══
+import { patchAgregarReembolso } from '../asignacion'
+import { asignacionesPorLiquidar } from '../proyecto'
+
+describe('patchAgregarReembolso — el reembolso pertenece a UNA asignación', () => {
+  const compra = { concepto: 'tornillería', valor: 150_000, registrado_por: 'u', fecha: ts }
+  it('viva de contratista → APPEND al sub (jamás al padre) + historial', () => {
+    const a = base({ estado: 'anticipo_girado', compras_reembolsos: [{ concepto: 'previa', valor: 50_000, registrado_por: 'u', fecha: ts }] })
+    const r = patchAgregarReembolso(a, compra)
+    expect(r).not.toBeNull()
+    expect(r!.sub.compras_reembolsos).toHaveLength(2)
+    expect(r!.sub.compras_reembolsos![1].concepto).toBe('tornillería')
+    expect(r!.entradaHistorial.motivo).toContain('ESTA asignación')
+  })
+  it('liquidada → null (conciliación cerrada) · cancelada → null (incurrido congelado)', () => {
+    expect(patchAgregarReembolso(base({ estado: 'liquidada' }), compra)).toBeNull()
+    expect(patchAgregarReembolso(base({ estado: 'cancelada' }), compra)).toBeNull()
+  })
+  it('administración directa → null (no hay pago a tercero que reconocer)', () => {
+    expect(patchAgregarReembolso(base({ tipo: 'administracion_directa', estado: 'estimada' }), compra)).toBeNull()
+  })
+  it('valida el dato: concepto vacío o valor ≤ 0 → null', () => {
+    expect(patchAgregarReembolso(base({ estado: 'anticipo_girado' }), { ...compra, concepto: '  ' })).toBeNull()
+    expect(patchAgregarReembolso(base({ estado: 'anticipo_girado' }), { ...compra, valor: 0 })).toBeNull()
+  })
+})
+
+describe('asignacionesPorLiquidar — la acción de la bandeja en migrados (arreglo #1)', () => {
+  const res = (por_estado: Record<string, number>, total: number) =>
+    ({ resumen_asignaciones: { total, por_estado } } as unknown as Pick<Proyecto, 'resumen_asignaciones'>)
+  it('vivas sin liquidar = total − liquidadas − canceladas', () => {
+    expect(asignacionesPorLiquidar(res({ anticipo_girado: 2, liquidada: 1 }, 3))).toBe(2)
+    expect(asignacionesPorLiquidar(res({ liquidada: 2, cancelada: 1 }, 3))).toBe(0)
+  })
+  it('sin resumen (legacy) → 0: el modal del padre sigue siendo su camino', () => {
+    expect(asignacionesPorLiquidar({} as Pick<Proyecto, 'resumen_asignaciones'>)).toBe(0)
+  })
+})
