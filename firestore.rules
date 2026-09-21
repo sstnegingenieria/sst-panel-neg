@@ -338,12 +338,17 @@ service cloud.firestore {
         allow write: if puedeGestionarProyectos();
       }
 
-      // gerencia_administrativa: habilitar/deshabilitar contratistas. SOLO puede
-      // cambiar el campo `estado`. El panel (useFirestore) inyecta
-      // `fecha_actualizacion` en cada update, así que se permite junto a `estado`.
-      // No puede crear ni eliminar ni tocar ningún otro campo.
+      // Habilitar/deshabilitar contratistas (SOLO el campo `estado`; el panel
+      // inyecta `fecha_actualizacion` en cada update). No crea, no elimina,
+      // no toca ningún otro campo.
+      // 21-sep (decisión Giovanny): entra `gestion_integral` — la
+      // Caracterización asigna la habilitación de contratistas al SGI y el
+      // módulo lo contradecía desde F0.6.a-ter (solo gerencia); segunda vez
+      // que un módulo contradice el procedimiento documentado (la primera:
+      // la verificación SST). "GI habilitó" es la evidencia que el
+      // procedimiento espera.
       allow update: if isAuthed()
-                    && rolActual() == 'gerencia_administrativa'
+                    && rolActual() in ['gerencia_administrativa', 'gestion_integral']
                     && request.resource.data.diff(resource.data)
                         .affectedKeys().hasOnly(['estado', 'fecha_actualizacion']);
     }
