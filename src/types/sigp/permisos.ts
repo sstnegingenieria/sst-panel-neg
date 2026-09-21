@@ -55,6 +55,11 @@ export const ROLES_VE_CONTRATISTAS: Rol[] = [
   'admin', 'gerencia_general',
   'auxiliar_proyectos', 'director_proyectos', 'operacion_comercial',
   'gerencia_administrativa',
+  // 21-sep: GI necesita la página para ejercer la habilitación (abajo) —
+  // sin verla, el botón restaurado no existe. Como admin, Ingrid la veía;
+  // el cambio de rol se la quitó sin restituirla (contratistas no estuvo
+  // en la auditoría de uso pre-cambio).
+  'gestion_integral',
 ]
 
 export const veDashboardSST = (rol: string | undefined) => en(rol, ROLES_VE_DASHBOARD_SST)
@@ -77,8 +82,10 @@ export const ROLES_APROBAR_REGISTROS: Rol[] = ['admin', 'sst', 'gestion_integral
 // reglas a propósito — defensa en profundidad).
 export const ROLES_GESTIONA_CONTRATISTAS: Rol[] = ['admin']
 
-// Habilitar/deshabilitar contratistas: admin + gerencia_administrativa.
-export const ROLES_HABILITA_CONTRATISTAS: Rol[] = ['admin', 'gerencia_administrativa']
+// Habilitar/deshabilitar contratistas: admin + gerencia_administrativa +
+// gestion_integral (21-sep, decisión Giovanny — la Caracterización asigna la
+// habilitación al SGI; espejo de la vía por-campo `estado` en reglas).
+export const ROLES_HABILITA_CONTRATISTAS: Rol[] = ['admin', 'gerencia_administrativa', 'gestion_integral']
 
 // Crear/editar/desactivar clientes (dominio comercial, F1). Alineado con
 // `puedeGestionarProyectos()` de firestore.rules — los mismos roles que
