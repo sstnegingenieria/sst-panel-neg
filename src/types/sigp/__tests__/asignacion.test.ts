@@ -638,3 +638,72 @@ describe('asignacionesPorLiquidar — la acción de la bandeja en migrados (arre
     expect(asignacionesPorLiquidar({} as Pick<Proyecto, 'resumen_asignaciones'>)).toBe(0)
   })
 })
+
+// ═══ 21-sep — 3a/3b fuera de P2-3: evaluación por contratista + singular restaurado ═══
+import { patchEvaluarContratista, elegirSingular, construirSingularDesde } from '../asignacion'
+import { completitudCierre } from '../proyecto'
+
+describe('patchEvaluarContratista — reevaluación de proveedores POR contratista (3a)', () => {
+  const pj = { calidad: 5, cumplimiento: 4, sst: 5, documentacion: 4 } as const
+  it('viva de contratista con 4 puntajes → evaluación con promedio + historial', () => {
+    const r = patchEvaluarContratista(base({ estado: 'anticipo_girado' }), pj, 'buen trabajo', 'u', ts)
+    expect(r).not.toBeNull()
+    expect(r!.evaluacion.promedio).toBe(4.5)
+    expect(r!.sub.evaluacion_contratista?.comentario).toBe('buen trabajo')
+  })
+  it('directa → null (NEG no se reevalúa a sí misma) · cancelada → null · ya evaluada → null', () => {
+    expect(patchEvaluarContratista(base({ tipo: 'administracion_directa', estado: 'estimada' }), pj, undefined, 'u', ts)).toBeNull()
+    expect(patchEvaluarContratista(base({ estado: 'cancelada' }), pj, undefined, 'u', ts)).toBeNull()
+    const ya = base({ estado: 'liquidada', evaluacion_contratista: { criterios: pj, promedio: 4.5, evaluado_por: 'u', fecha: ts } as never })
+    expect(patchEvaluarContratista(ya, pj, undefined, 'u', ts)).toBeNull()
+  })
+  it('puntaje faltante → null (evidencia completa o nada)', () => {
+    expect(patchEvaluarContratista(base({ estado: 'anticipo_girado' }), { calidad: 5 }, undefined, 'u', ts)).toBeNull()
+  })
+})
+
+describe('resumen — contadores de evaluación (el hito de cierre los consume)', () => {
+  it('evaluables excluye directas y canceladas; evaluados cuenta las que tienen evaluación', () => {
+    const r = resumenAsignacionesDe([
+      base({ id: 'a', estado: 'liquidada', evaluacion_contratista: { criterios: { calidad: 5, cumplimiento: 5, sst: 5, documentacion: 5 }, promedio: 5, evaluado_por: 'u', fecha: ts } as never }),
+      base({ id: 'b', estado: 'anticipo_girado', atomos: ['Apertura de grietas o fisuras'] }),
+      base({ id: 'c', estado: 'cancelada', atomos: [] }),
+      base({ id: 'd', tipo: 'administracion_directa', estado: 'estimada', atomos: ['Protección de equipos y limpieza'] }),
+    ], ALCANCE_MEGACENTER)
+    expect(r.contratistas_evaluables).toBe(2)
+    expect(r.contratistas_evaluados).toBe(1)
+  })
+  it('completitudCierre multi: hito ✓ solo con TODOS evaluados', () => {
+    const con = (evaluados: number) => completitudCierre({
+      resumen_asignaciones: { contratistas_evaluables: 2, contratistas_evaluados: evaluados } as never,
+    }).find(i => i.clave === 'evaluacion_contratista')!.ok
+    expect(con(1)).toBe(false)
+    expect(con(2)).toBe(true)
+    // sin resumen ni singular → pendiente (legacy intacto)
+    expect(completitudCierre({}).find(i => i.clave === 'evaluacion_contratista')!.ok).toBe(false)
+  })
+})
+
+describe('singular restaurado (3b/3c — restauración deliberada, no diseño final)', () => {
+  it('elegirSingular: primera NO histórica NO cancelada por fecha; históricas jamás', () => {
+    const h = base({ id: 'h', registro_historico: { motivo: 'x', registrado_por: 'u', fecha: ts }, estado: 'liquidada', fecha_creacion: Timestamp.fromMillis(1) })
+    const c = base({ id: 'c', estado: 'cancelada', fecha_creacion: Timestamp.fromMillis(2) })
+    const v1 = base({ id: 'v1', fecha_creacion: Timestamp.fromMillis(3) })
+    const v2 = base({ id: 'v2', contratista_nombre: 'OTRO', fecha_creacion: Timestamp.fromMillis(4), atomos: [] })
+    expect(elegirSingular([h, c, v1, v2])?.id).toBe('v1')
+    expect(elegirSingular([h, c, v1, v2], 'v1')?.id).toBe('v2')  // el borde del cancelar
+    expect(elegirSingular([h, c])).toBeNull()
+    // una DIRECTA sí califica: es quien ejecuta la obra
+    const d = base({ id: 'd', tipo: 'administracion_directa', fecha_creacion: Timestamp.fromMillis(5) })
+    expect(elegirSingular([h, d])?.id).toBe('d')
+  })
+  it('construirSingularDesde: shape exacto de F2.1.b (sin campos extra del sub)', () => {
+    const s = construirSingularDesde(base({ contratista_documento: '123' }))
+    expect(s).toEqual({
+      contratista_id: 'c7DH', contratista_nombre: 'HECTOR', contratista_documento: '123',
+      habilitacion_snapshot: { estado: 'activo', fuente: 'x', fecha_consulta: ts },
+      asignado_por: 'u', fecha: ts,
+    })
+    expect('atomos' in s).toBe(false)
+  })
+})

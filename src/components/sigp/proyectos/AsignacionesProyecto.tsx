@@ -28,7 +28,7 @@ import {
   patchDefinirPreliquidacion, patchAprobarPreliquidacion, patchGirarAnticipo,
   patchCorregirPreliquidacion, patchLiquidarAsignacion, patchAgregarReembolso, valorAlcanceDe,
   tipoDe, patchMarcarAdministracionDirecta, patchEstimarDirecta, patchCerrarDirecta,
-  puenteLiquidadoContratista,
+  puenteLiquidadoContratista, elegirSingular, construirSingularDesde,
   margenImplicitoDe, requiereRevisionCobertura, UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT,
   baseMargenDe, ETIQUETA_BASE_MARGEN, atomosTomados,
   ESTADO_ASIG_LABEL, ESTADO_ASIG_COLOR,
@@ -150,12 +150,23 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
             esDirectaNueva ? undefined : materiales, alcance, vigentes, user?.uid ?? '', ahora, nota,
             esDirectaNueva ? 'administracion_directa' : undefined)
       await crearAsignacion(proyecto.id, alcance, nuevo, vigentes)
-      // Transición del proyecto (máquina actual, sin cambios hasta el switch):
+      // Transición del proyecto (máquina actual, sin cambios hasta el switch)
+      // + 21-sep (3b/3c — RESTAURACIÓN deliberada, no diseño final): la
+      // primera asignación NO histórica fija el campo SINGULAR del padre,
+      // como antes de P2-2 — de él viven la obra espejo (contratista_id →
+      // técnico vía CF), la proyección SST y los PDFs de bandeja. Con varios
+      // contratistas el singular es el PRIMERO (limitación conocida — P2-3
+      // decide el modelo multi con la sesión SST). Históricas no lo fijan.
+      const patchPadre: Record<string, unknown> = {}
       if (proyecto.estado === 'creado') {
-        await updateDoc(doc(db, 'proyectos', proyecto.id), {
-          estado: 'contratista_asignado',
-          historial: arrayUnion({ de: 'creado', a: 'contratista_asignado', por: user?.uid ?? '', fecha: ahora, motivo: `Contratista asignado: ${c.nombre}` }),
-        })
+        patchPadre.estado = 'contratista_asignado'
+        patchPadre.historial = arrayUnion({ de: 'creado', a: 'contratista_asignado', por: user?.uid ?? '', fecha: ahora, motivo: `Contratista asignado: ${c.nombre}` })
+      }
+      if (!esHistorica && !proyecto.asignacion) {
+        patchPadre.asignacion = construirSingularDesde({ ...nuevo, id: 'pendiente' } as AsignacionContratista)
+      }
+      if (Object.keys(patchPadre).length > 0) {
+        await updateDoc(doc(db, 'proyectos', proyecto.id), patchPadre)
       }
       toast(esHistorica
         ? `${c.nombre} registrado como HISTÓRICO — ${fmtMoney(valorPagado ?? 0)} entra al indicador sin simular el flujo`
@@ -182,8 +193,26 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       if (!r) { toast('No se puede cancelar esta asignación', 'error'); return }
       const trasPatch = vigentes.map(a => a.id === target.id
         ? { ...a, ...r.sub, historial: [...a.historial, r.entradaHistorial] } as AsignacionContratista : a)
+      // 21-sep (3b, borde del cancelar — pedido Giovanny): si la cancelada es
+      // la del SINGULAR del padre, se re-apunta a otra viva en el MISMO batch
+      // (sin viva → se limpia: la próxima asignación lo vuelve a fijar). Sin
+      // esto, la obra espejo nacería con el contratista equivocado y la CF
+      // asignaría al técnico equivocado.
+      let patchSingular: Record<string, unknown> | undefined
+      if (proyecto.asignacion?.contratista_id === target.contratista_id) {
+        const siguiente = elegirSingular(trasPatch, target.id)
+        patchSingular = {
+          asignacion: siguiente ? construirSingularDesde(siguiente) : deleteField(),
+          historial: arrayUnion({
+            de: proyecto.estado, a: proyecto.estado, por: user?.uid ?? '', fecha: ahora,
+            motivo: siguiente
+              ? `Contratista principal re-apuntado a ${siguiente.contratista_nombre} (la asignación de ${target.contratista_nombre} se canceló)`
+              : `Contratista principal retirado (se canceló ${target.contratista_nombre} y no queda otra asignación viva)`,
+          }),
+        }
+      }
       await escribirAsignacion(proyecto.id, alcance, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch, patchSingular)
       toast(r.incurrido.total > 0
         ? `Cancelada — queda PENDIENTE de liquidar lo incurrido (${fmtMoney(r.incurrido.total)})`
         : 'Cancelada — sin plata afuera, sus actividades quedan libres')

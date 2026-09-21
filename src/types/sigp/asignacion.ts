@@ -29,8 +29,9 @@ import type { Timestamp } from 'firebase/firestore'
 import type {
   AlcanceGrupo, CompraReembolso, RetencionLiquidacion, ModalidadContratista,
   Proyecto, EstadoProyecto, AnticipoGirado, ResumenAsignaciones,
+  EvaluacionContratista, CriterioEvaluacion, AsignacionProyecto,
 } from './proyecto'
-import { modalidadDe, totalComprasReembolsos, anticipoValorDe } from './proyecto'
+import { modalidadDe, totalComprasReembolsos, anticipoValorDe, promedioEvaluacion, esPuntajeValido, CRITERIOS_EVALUACION } from './proyecto'
 
 // ── Máquina de la asignación ─────────────────────────────────────────────────
 
@@ -232,6 +233,10 @@ export interface AsignacionContratista {
   preliquidacion?: PreliquidacionAsignacion
   liquidacion?: LiquidacionAsignacion
   compras_reembolsos: CompraReembolso[]
+  /** 21-sep (3a fuera de P2-3): evaluación ISO de reevaluación de proveedores
+   *  POR CONTRATISTA — bajó del campo singular del padre al sub-doc. Directas
+   *  no se evalúan (NEG no es proveedor que se reevalúe a sí mismo). */
+  evaluacion_contratista?: EvaluacionContratista
   alcance_desactualizado?: SenalAlcanceAsignacion
   cancelacion?: CancelacionAsignacion
   /** REGISTRO HISTÓRICO retroactivo (decisión de Giovanny, 03-sep): el pago
@@ -412,6 +417,13 @@ export function resumenAsignacionesDe(
     // estimar" — por_estado no distingue tipos)
     directas_por_estimar: asignacionesVivas(asigs)
       .filter(a => tipoDe(a) === 'administracion_directa' && a.estado === 'asignada').length,
+    // 21-sep (3a): el hito de cierre "evaluación del contratista" exige TODOS
+    // los contratistas evaluados — el modal lee estos contadores del resumen
+    // (no carga subs). Directas fuera: NEG no se reevalúa a sí misma.
+    contratistas_evaluables: asignacionesVivas(asigs)
+      .filter(a => tipoDe(a) !== 'administracion_directa').length,
+    contratistas_evaluados: asignacionesVivas(asigs)
+      .filter(a => tipoDe(a) !== 'administracion_directa' && !!a.evaluacion_contratista).length,
   }
 }
 
@@ -970,6 +982,73 @@ export function patchLiquidarAsignacion(
       (anticipada ? 'Liquidación ANTICIPADA — ' : esCancelacion ? 'Liquidación de asignación CANCELADA — ' : 'Liquidación — ') +
       `mano de obra ${manoObra} + reembolsos ${diferencia} = ${totalFinal} · anticipo ${anticipoGirado}` +
       (totalRet ? ` · retenciones ${totalRet}` : '') + ` · SALDO ${saldoFinal} · gate SST al día`),
+  }
+}
+
+/** EVALUAR CONTRATISTA (21-sep — 3a fuera de P2-3): evidencia ISO de
+ *  reevaluación de proveedores POR CONTRATISTA. Solo asignaciones no
+ *  canceladas de tipo contratista (directas = NEG, no es proveedor que se
+ *  reevalúe a sí mismo — ratificado por Giovanny); una sola vez, como el
+ *  campo singular de siempre (corrección = decisión aparte). */
+export function patchEvaluarContratista(
+  a: AsignacionContratista,
+  puntajes: Partial<Record<CriterioEvaluacion, number>>,
+  comentario: string | undefined,
+  uid: string,
+  fecha: Timestamp,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; evaluacion: EvaluacionContratista } | null {
+  if (a.estado === 'cancelada') return null
+  if (tipoDe(a) === 'administracion_directa') return null
+  if (a.evaluacion_contratista) return null
+  if (!CRITERIOS_EVALUACION.every(c => esPuntajeValido(puntajes[c.key]))) return null
+  const criterios = Object.fromEntries(
+    CRITERIOS_EVALUACION.map(c => [c.key, puntajes[c.key]!])) as Record<CriterioEvaluacion, number>
+  const evaluacion: EvaluacionContratista = {
+    criterios,
+    promedio: promedioEvaluacion(criterios),
+    ...(comentario?.trim() ? { comentario: comentario.trim() } : {}),
+    evaluado_por: uid,
+    fecha,
+  }
+  return {
+    sub: { evaluacion_contratista: evaluacion, fecha_actualizacion: fecha },
+    evaluacion,
+    entradaHistorial: entrada(a.estado, a.estado, uid, fecha,
+      `Contratista evaluado — promedio ${evaluacion.promedio}/5 (reevaluación de proveedores)`),
+  }
+}
+
+// ── RESTAURACIÓN del campo singular del padre (21-sep — 3b/3c) ──────────────
+//
+// ⚠ RESTAURACIÓN DELIBERADA, NO DISEÑO FINAL. P2-2 dejó de escribir
+// `proyecto.asignacion` y tres consumidores quedaron a ciegas (obra espejo
+// sin contratista_id → la CF no asigna técnico; proyección SST sin nombre;
+// PDFs de bandeja). Se restaura el comportamiento pre-P2-2: el singular es
+// el PRIMER contratista efectivo — con VARIOS contratistas, obra/técnico/
+// proyección siguen viendo UNO solo (limitación conocida; el modelo
+// multi-contratista lo decide P2-3 con la sesión SST).
+
+/** El singular apunta a la primera asignación NO histórica NO cancelada por
+ *  fecha de creación (las históricas son hechos pasados, no ejecutores;
+ *  una directa SÍ califica — es quien ejecuta la obra). */
+export function elegirSingular(
+  asigs: AsignacionContratista[], excluirId?: string,
+): AsignacionContratista | null {
+  const elegibles = asigs
+    .filter(a => a.id !== excluirId && !a.registro_historico && a.estado !== 'cancelada')
+    .sort((x, y) => x.fecha_creacion.toMillis() - y.fecha_creacion.toMillis())
+  return elegibles[0] ?? null
+}
+
+/** Snapshot singular del padre desde el sub-doc (mismo shape de F2.1.b). */
+export function construirSingularDesde(a: AsignacionContratista): AsignacionProyecto {
+  return {
+    contratista_id: a.contratista_id,
+    contratista_nombre: a.contratista_nombre,
+    ...(a.contratista_documento ? { contratista_documento: a.contratista_documento } : {}),
+    habilitacion_snapshot: a.habilitacion_snapshot,
+    asignado_por: a.asignado_por,
+    fecha: a.fecha,
   }
 }
 
