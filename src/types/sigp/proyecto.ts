@@ -504,7 +504,7 @@ export const puedeCerrarseEn = (estado: EstadoProyecto): boolean =>
  *  ofrece capturar — jamás bloquea el cierre. */
 export const completitudCierre = (
   p: Pick<Proyecto, 'facturacion' | 'pago_cliente' | 'liquidacion' | 'evaluacion_contratista' | 'evaluacion_cliente'>
-    & Partial<Pick<Proyecto, 'estado'>>,
+    & Partial<Pick<Proyecto, 'estado' | 'resumen_asignaciones'>>,
 ): { clave: string; etiqueta: string; ok: boolean }[] => [
   { clave: 'facturacion', etiqueta: 'Factura registrada', ok: !!p.facturacion },
   { clave: 'pago_cliente', etiqueta: 'Pago del cliente registrado', ok: !!p.pago_cliente },
@@ -516,7 +516,13 @@ export const completitudCierre = (
   // Tesoro III — otro consumidor que leía el modelo viejo como dato).
   { clave: 'liquidacion', etiqueta: 'Contratista liquidado',
     ok: !!p.liquidacion || p.estado === 'liquidado_contratista' || p.estado === 'cerrado' },
-  { clave: 'evaluacion_contratista', etiqueta: 'Evaluación del contratista', ok: !!p.evaluacion_contratista },
+  // 21-sep (3a): por asignación el hito exige TODOS los contratistas
+  // evaluados (contadores del resumen — más fuerte que el singular: la
+  // evidencia completa o pendiente, sin medias tintas; decisión Giovanny).
+  { clave: 'evaluacion_contratista', etiqueta: 'Evaluación del contratista',
+    ok: !!p.evaluacion_contratista
+      || ((p.resumen_asignaciones?.contratistas_evaluables ?? 0) > 0
+          && (p.resumen_asignaciones?.contratistas_evaluados ?? 0) >= p.resumen_asignaciones!.contratistas_evaluables!) },
   { clave: 'evaluacion_cliente', etiqueta: 'Satisfacción del cliente', ok: !!p.evaluacion_cliente },
 ]
 
@@ -994,6 +1000,12 @@ export interface ResumenAsignaciones {
    *  propio por estimar" — por_estado no distingue tipos). Opcional:
    *  resúmenes anteriores a P2-4 no lo traen. */
   directas_por_estimar?: number
+  /** 21-sep (3a): evaluación POR CONTRATISTA — evaluables = vivas de tipo
+   *  contratista (directas fuera: NEG no se reevalúa a sí misma); el hito de
+   *  cierre exige evaluados == evaluables. Opcionales: resúmenes previos no
+   *  los traen (el siguiente write económico los materializa). */
+  contratistas_evaluables?: number
+  contratistas_evaluados?: number
 }
 
 export interface Proyecto {
