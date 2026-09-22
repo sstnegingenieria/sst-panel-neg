@@ -315,42 +315,70 @@ service cloud.firestore {
     match /contratistas/{contratistaId} {
       allow read: if true;
 
-      // Gestión completa (crear/editar/eliminar). C2.1 paso 5 fase 3: el
-      // padre RECHAZA los campos de datos personales en create y update —
-      // aunque un formulario futuro se equivoque, la cédula no puede volver
-      // al doc público (la protección no depende de que ningún desarrollador
-      // se equivoque nunca).
-      allow create: if puedeGestionarProyectos()
+      // ── MODELO DEL AVAL (22-sep, decisión Giovanny) ──
+      // INSCRIBIR (crear): gestores + gestion_integral — la Caracterización
+      // asigna el aval de la inscripción al SGI e Ingrid también inscribe.
+      // C2.1 paso 5 fase 3: el padre RECHAZA los campos de datos personales
+      // en create y update — aunque un formulario futuro se equivoque, la
+      // cédula no puede volver al doc público.
+      allow create: if (puedeGestionarProyectos()
+                        || (isAuthed() && rolActual() == 'gestion_integral'))
                     && !request.resource.data.keys()
                         .hasAny(['cedula', 'telefono', 'direccion']);
+      // EDITAR (gestores): `estado` queda FUERA de esta vía — habilitar es
+      // exclusivamente el aval (titular/respaldo, abajo), patrón del BONUS
+      // del aprobador de respaldo de preliquidaciones (PR #45). Editar sin
+      // cambiar el estado pasa igual (affectedKeys = solo lo que CAMBIA).
       allow update: if puedeGestionarProyectos()
                     && !request.resource.data.diff(resource.data)
-                        .affectedKeys().hasAny(['cedula', 'telefono', 'direccion']);
+                        .affectedKeys().hasAny(['cedula', 'telefono', 'direccion', 'estado']);
       allow delete: if puedeGestionarProyectos();
 
       // C2.1 paso 5: datos personales del contratista (cédula de persona
       // natural) — patrón sub-doc privado de proveedores (C1). Leen quienes
-      // gestionan proyectos (asignación congela el documento) y gerencia
-      // administrativa (tabla de contratistas / habilitación); escriben
-      // solo los gestores (mismo camino del CRUD del padre).
+      // gestionan proyectos (asignación congela el documento), gerencia
+      // administrativa (tabla / habilitación) y gestion_integral (dueña del
+      // registro de proveedores); escriben los gestores y gestion_integral
+      // (22-sep: inscribir a un natural incluye su cédula — mismo camino
+      // del CRUD del padre).
       match /privado/{docId} {
-        allow read: if puedeGestionarProyectos() || gestionaCompras();
-        allow write: if puedeGestionarProyectos();
+        allow read: if puedeGestionarProyectos() || gestionaCompras()
+                    || (isAuthed() && rolActual() == 'gestion_integral');
+        allow write: if puedeGestionarProyectos()
+                     || (isAuthed() && rolActual() == 'gestion_integral');
       }
 
-      // Habilitar/deshabilitar contratistas (SOLO el campo `estado`; el panel
-      // inyecta `fecha_actualizacion` en cada update). No crea, no elimina,
-      // no toca ningún otro campo.
-      // 21-sep (decisión Giovanny): entra `gestion_integral` — la
-      // Caracterización asigna la habilitación de contratistas al SGI y el
-      // módulo lo contradecía desde F0.6.a-ter (solo gerencia); segunda vez
-      // que un módulo contradice el procedimiento documentado (la primera:
-      // la verificación SST). "GI habilitó" es la evidencia que el
-      // procedimiento espera.
+      // ── HABILITAR (el aval) — titular y respaldo (22-sep) ──
+      // La entrada de traza que este write agrega al historial: el rastro de
+      // autoría es parte del MISMO write (quién, cuándo, y la salvedad si es
+      // de respaldo) y las vías lo EXIGEN — append-only, sin suplantación.
+      function entradaAvalContratista() {
+        return request.resource.data.historial[request.resource.data.historial.size() - 1];
+      }
+      function escribeAvalTrazado() {
+        return request.resource.data.diff(resource.data)
+                   .affectedKeys().hasOnly(['estado', 'fecha_actualizacion', 'historial'])
+               && request.resource.data.diff(resource.data)
+                   .affectedKeys().hasAll(['estado', 'historial'])
+               && request.resource.data.historial.size()
+                   > resource.data.get('historial', []).size()
+               && entradaAvalContratista().por == request.auth.uid;
+      }
+      // TITULAR: gestion_integral — la Caracterización asigna la habilitación
+      // de contratistas al SGI (restaurada en PR #110; segunda contradicción
+      // módulo-vs-Caracterización, la primera fue la verificación SST).
       allow update: if isAuthed()
-                    && rolActual() in ['gerencia_administrativa', 'gestion_integral']
-                    && request.resource.data.diff(resource.data)
-                        .affectedKeys().hasOnly(['estado', 'fecha_actualizacion']);
+                    && rolActual() == 'gestion_integral'
+                    && escribeAvalTrazado();
+      // RESPALDO: gerencia_general, gerencia_administrativa (titular hasta
+      // este modelo — pasó a respaldo, no se quitó) y admin — SIEMPRE con
+      // salvedad escrita en la entrada de traza (por qué no avaló el
+      // titular). Patrón del aprobador de respaldo de preliquidaciones:
+      // la traza distingue el aval normal del aval por excepción.
+      allow update: if isAuthed()
+                    && rolActual() in ['gerencia_administrativa', 'gerencia_general', 'admin']
+                    && escribeAvalTrazado()
+                    && entradaAvalContratista().get('salvedad', '') != '';
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -889,11 +917,21 @@ service cloud.firestore {
     // ────────────────────────────────────────────────────────────────
     // Registro MANUAL de indicadores de proceso cruzado (hoy: ind. 5
     // ambiental/SST, doc `sst_YYYY-MM`) mientras no exista integración
-    // automática. Read: acceso SIGP. Write: gestión de proyectos.
+    // automática. Read: acceso SIGP.
+    // Write (21-sep, decisión Giovanny): helper propio — la vía heredada
+    // de gestión de proyectos MÁS gestion_integral: la Caracterización
+    // pone "indicadores" bajo el SGI y su dueña de proceso no podía
+    // registrar el ind. 5, el que más le pertenece (barrido
+    // Caracterización-vs-permisos, hallazgo 2).
+
+    function registraIndicadores() {
+      return puedeGestionarProyectos()
+          || (isAuthed() && rolActual() == 'gestion_integral');
+    }
 
     match /indicadores/{indicadorId} {
       allow read: if accesoSIGP();
-      allow create, update: if puedeGestionarProyectos();
+      allow create, update: if registraIndicadores();
     }
 
     // ── Configuración de indicadores (Opción B, 07-ago): metas editables ──
@@ -904,6 +942,23 @@ service cloud.firestore {
     match /configuracion/{docId} {
       allow read: if accesoSIGP();
       allow create, update: if isAuthed() && rolActual() in ['gerencia_general', 'admin'];
+    }
+
+    // ── Metas ISO del tablero (21-sep, decisión Giovanny) ──
+    // `configuracion/indicadores.metas_iso`: las metas de los 5 indicadores
+    // de la Caracterización las fija el SGI. gestion_integral entra con vía
+    // POR-CAMPO que EXCLUYE `meta_margen_pct` — la meta del margen operativo
+    // sigue siendo de gerencia_general (decisión deliberada del PR #69, que
+    // conserva su vía por el match genérico de arriba). Los matches se UNEN:
+    // GG+admin todo el doc (genérico) · GI solo metas_iso (este bloque).
+    match /configuracion/indicadores {
+      allow create: if isAuthed() && rolActual() == 'gestion_integral'
+                    && request.resource.data.keys()
+                        .hasOnly(['metas_iso', 'actualizado_por', 'fecha_actualizacion']);
+      allow update: if isAuthed() && rolActual() == 'gestion_integral'
+                    && request.resource.data.diff(resource.data)
+                        .affectedKeys()
+                        .hasOnly(['metas_iso', 'actualizado_por', 'fecha_actualizacion']);
     }
 
     // #3 SB3 (ratificado 07-ago): el doc `horario` lo lee CUALQUIER autenticado —

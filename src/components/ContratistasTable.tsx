@@ -1,3 +1,5 @@
+import { ultimoCambioEstado } from '../utils/contratistasTraza'
+
 export interface Contratista {
   id: string
   nombre: string
@@ -8,6 +10,9 @@ export interface Contratista {
   /** Bloque 3+5 — usuario técnico de la app que ES el contratista principal
    *  (mismo individuo). La obra-espejo se le auto-asigna. */
   usuario_tecnico_id?: string
+  /** 21-sep — rastro de autoría de la habilitación (append-only). Docs
+   *  legado no lo traen; entradas de CambioEstadoContratista. */
+  historial?: unknown[]
 }
 
 interface ContratistasTableProps {
@@ -97,6 +102,19 @@ export default function ContratistasTable({ contratistas, loading, onEdit, onTog
                   <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${estadoBadge[c.estado]}`}>
                     {c.estado}
                   </span>
+                  {(() => {
+                    const u = ultimoCambioEstado(c.historial)
+                    return u ? (
+                      <p className="text-[11px] text-gray-400 mt-0.5" title={`${u.de} → ${u.a} · ${u.por_rol}${u.salvedad ? ` · SALVEDAD: ${u.salvedad}` : ''}`}>
+                        por {u.por_nombre || u.por} · {u.fecha?.toDate?.().toLocaleDateString('es-CO') ?? ''}
+                        {u.salvedad && (
+                          <span className="ml-1 inline-flex px-1.5 py-px rounded bg-amber-50 text-amber-700 font-medium">
+                            respaldo
+                          </span>
+                        )}
+                      </p>
+                    ) : null
+                  })()}
                 </td>
                 <td className="py-3 px-4 text-right">
                   {(puedeGestionar || puedeHabilitar) ? (
