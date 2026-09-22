@@ -9,6 +9,7 @@ import Usuarios from './pages/Usuarios'
 import ObrasHub from './pages/ObrasHub'
 import ObraRegistros from './pages/ObraRegistros'
 import Reportes from './pages/Reportes'
+import Indicadores from './pages/Indicadores'
 import Layout from './components/Layout'
 import { ToastContainer } from './components/shared/Toast'
 import { ProtectedRoute } from './components/ProtectedRoute'
@@ -47,6 +48,7 @@ import {
   ROLES_VE_HORARIO,
   ROLES_VE_TAREAS,
   ROLES_VE_LICITACIONES,
+  ROLES_VE_INDICADORES_SST,
 } from './types/sigp/permisos'
 import HorarioAsistencia from './pages/administrativa/HorarioAsistencia'
 import FacturacionPagos from './pages/administrativa/FacturacionPagos'
@@ -120,6 +122,7 @@ function ProtectedRoutes() {
         <Route path="/registros" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/sigp/panel"><ObrasHub /></ProtectedRoute>} />
         <Route path="/registros/:obraId" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REGISTROS} redirectTo="/sigp/panel"><ObraRegistros /></ProtectedRoute>} />
         <Route path="/reportes" element={<ProtectedRoute rolesPermitidos={ROLES_VE_REPORTES} redirectTo="/sigp/panel"><Reportes /></ProtectedRoute>} />
+        <Route path="/indicadores" element={<ProtectedRoute rolesPermitidos={ROLES_VE_INDICADORES_SST} redirectTo="/"><Indicadores /></ProtectedRoute>} />
         {/* Bloque 3a — Gate SST previo a la liquidación (vista del área SST) */}
         <Route path="/verificacion-contratistas" element={<ProtectedRoute rolesPermitidos={ROLES_VE_VERIFICACION_SST} redirectTo="/sigp/panel"><VerificacionContratistas /></ProtectedRoute>} />
 
