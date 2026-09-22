@@ -355,3 +355,19 @@ export const ROLES_VE_ECONOMIA_LICITACION: Rol[] = [
 ]
 export const veEconomiaLicitacionUI = (rol: string | undefined) =>
   en(rol, ROLES_VE_ECONOMIA_LICITACION)
+
+// ── Módulo Indicadores SG-SST (F1, 22-sep) ──
+// Colecciones `indicadores_sst`/`indicador_mediciones` — digitaliza el Plan
+// de Evaluación por Indicadores del SG-SST (SST-PLA-EI-24), NO relacionado
+// con `indicadores` (el ind. 5 mensual del tablero SIGP, arriba). Lectura
+// para el panel + gerencia; escritura solo sst/admin/gestion_integral (el
+// rol `tecnico` de la app móvil no entra). Nombres con sufijo _SST a
+// propósito, para no confundirse con ROLES_REGISTRA_INDICADORES de arriba.
+export const ROLES_VE_INDICADORES_SST: Rol[] = [
+  'admin', 'sst', 'gerencia_general', 'residente_sst', 'gestion_integral',
+]
+export const veIndicadoresSstUI = (rol: string | undefined) => en(rol, ROLES_VE_INDICADORES_SST)
+
+export const ROLES_GESTIONA_INDICADORES_SST: Rol[] = ['sst', 'admin', 'gestion_integral']
+export const puedeGestionarIndicadoresSstUI = (rol: string | undefined) =>
+  en(rol, ROLES_GESTIONA_INDICADORES_SST)
