@@ -13,8 +13,18 @@ export interface Tecnico {
   contratista_nombre?: string
   contratista_id?: string
   obras_asignadas: string[]
-  estado: 'pendiente' | 'activo' | 'inactivo'
+  // PR C (22-sep): 'rechazado' es ESTADO con traza, no borrado — un registro
+  // rechazado es información. Reversible con Restaurar a pendiente.
+  estado: 'pendiente' | 'activo' | 'inactivo' | 'rechazado'
   rol: string
+  rechazo?: {
+    motivo: string
+    por: string
+    por_nombre: string
+    por_rol: string
+    fecha: { toDate?: () => Date }
+    restaurado?: { por: string; por_nombre: string; fecha: { toDate?: () => Date } }
+  }
   // C2.1: cliente al que pertenece un rol residente_obra. Fuente del
   // claim `cliente_id` que deriva la CF sincronizarClaims (precedente de
   // campo de alcance en users: obras_asignadas). Ausente en roles internos.
@@ -32,7 +42,9 @@ export interface Tecnico {
 }
 
 interface UsuariosPendientesProps {
-  isAdmin: boolean
+  /** PR C: aprobar/rechazar destapado a admin+sst+gestion_integral (espejo
+   *  de puedeAdministrarSST() en reglas). */
+  puedeGestionar: boolean
   tecnicos: Tecnico[]
   loading: boolean
   onAprobar: (t: Tecnico) => void
@@ -60,7 +72,7 @@ function InfoRow({ label, value }: { label: string; value?: string }) {
   )
 }
 
-export default function UsuariosPendientes({ isAdmin, tecnicos, loading, onAprobar, onRechazar, onVerPerfil }: UsuariosPendientesProps) {
+export default function UsuariosPendientes({ puedeGestionar, tecnicos, loading, onAprobar, onRechazar, onVerPerfil }: UsuariosPendientesProps) {
   return (
     <section>
       {/* Encabezado de sección */}
@@ -127,7 +139,7 @@ export default function UsuariosPendientes({ isAdmin, tecnicos, loading, onAprob
                 >
                   Ver
                 </button>
-                {isAdmin && (
+                {puedeGestionar && (
                   <>
                     <button
                       onClick={() => onAprobar(t)}
