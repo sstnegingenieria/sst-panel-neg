@@ -45,16 +45,72 @@ const sinDatos: ValorIndicador = { valor: null, semaforo: null, numerador: 0, de
 const pct = (num: number, den: number): number => (den > 0 ? (num / den) * 100 : 0)
 
 // ── Semáforos por indicador (metas de la caracterización) ──
+//
+// 21-sep-2026: las METAS dejan de ser constantes — las fija el SGI
+// (gestion_integral) en `configuracion/indicadores.metas_iso` (decisión
+// Giovanny: las metas ISO son del SGI; la meta de MARGEN operativo sigue
+// siendo de gerencia_general, decisión deliberada del PR #69). Los valores
+// de la Caracterización quedan como DEFAULT — sin doc de config, el
+// tablero se comporta byte-idéntico al histórico. El ANCHO del tramo
+// ámbar es FIJO por indicador (el de siempre: 20/15/10/10 puntos bajo la
+// meta) — el SGI fija la meta, no la geometría de la alerta; si algún día
+// también se quiere configurable, es un campo más en el mismo doc.
 
-/** Ind. 1 — cumplimiento del plan: meta 80–100 %. */
-export const semaforoPlan = (v: number): Semaforo => (v >= 80 ? 'verde' : v >= 60 ? 'ambar' : 'rojo')
-/** Ind. 2 y 4 — calidad / satisfacción (proyectos ≥4/5): meta ≥90 %. */
-export const semaforoCalidad = (v: number): Semaforo => (v >= 90 ? 'verde' : v >= 75 ? 'ambar' : 'rojo')
-/** Ind. 3 — proyección presupuestal: meta 90–110 % (desviación en ambas direcciones). */
-export const semaforoPresupuesto = (v: number): Semaforo =>
-  v >= 90 && v <= 110 ? 'verde' : (v >= 80 && v < 90) || (v > 110 && v <= 120) ? 'ambar' : 'rojo'
-/** Ind. 5 — ambiental y SST: meta ≥95 %. */
-export const semaforoSst = (v: number): Semaforo => (v >= 95 ? 'verde' : v >= 85 ? 'ambar' : 'rojo')
+export interface MetasIso {
+  plan_min: number          // ind. 1 — cumplimiento del plan (verde ≥)
+  calidad_min: number       // ind. 2 — calidad (verde ≥)
+  presupuesto_min: number   // ind. 3 — banda verde inferior
+  presupuesto_max: number   // ind. 3 — banda verde superior
+  satisfaccion_min: number  // ind. 4 — satisfacción (verde ≥)
+  sst_min: number           // ind. 5 — ambiental y SST (verde ≥)
+}
+
+/** Metas de la Caracterización Integral (documento controlado) — el default. */
+export const METAS_ISO_DEFAULT: MetasIso = {
+  plan_min: 80, calidad_min: 90,
+  presupuesto_min: 90, presupuesto_max: 110,
+  satisfaccion_min: 90, sst_min: 95,
+}
+
+const metaValida = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 200
+
+/** Metas efectivas desde el doc `configuracion/indicadores` (campo
+ *  `metas_iso`, parcial): campo a campo, un valor inválido cae al default
+ *  — jamás un tablero con meta 0 o NaN. Si la banda del presupuesto queda
+ *  invertida (min ≥ max), la banda COMPLETA vuelve al default. */
+export function metasIsoDe(cfg: { metas_iso?: Partial<MetasIso> } | null | undefined): MetasIso {
+  const m = cfg?.metas_iso
+  const r: MetasIso = {
+    plan_min: metaValida(m?.plan_min) ? m!.plan_min! : METAS_ISO_DEFAULT.plan_min,
+    calidad_min: metaValida(m?.calidad_min) ? m!.calidad_min! : METAS_ISO_DEFAULT.calidad_min,
+    presupuesto_min: metaValida(m?.presupuesto_min) ? m!.presupuesto_min! : METAS_ISO_DEFAULT.presupuesto_min,
+    presupuesto_max: metaValida(m?.presupuesto_max) ? m!.presupuesto_max! : METAS_ISO_DEFAULT.presupuesto_max,
+    satisfaccion_min: metaValida(m?.satisfaccion_min) ? m!.satisfaccion_min! : METAS_ISO_DEFAULT.satisfaccion_min,
+    sst_min: metaValida(m?.sst_min) ? m!.sst_min! : METAS_ISO_DEFAULT.sst_min,
+  }
+  if (r.presupuesto_min >= r.presupuesto_max) {
+    r.presupuesto_min = METAS_ISO_DEFAULT.presupuesto_min
+    r.presupuesto_max = METAS_ISO_DEFAULT.presupuesto_max
+  }
+  return r
+}
+
+/** Ind. 1 — cumplimiento del plan: default 80–100 %; ámbar 20 puntos bajo la meta. */
+export const semaforoPlan = (v: number, min = METAS_ISO_DEFAULT.plan_min): Semaforo =>
+  (v >= min ? 'verde' : v >= min - 20 ? 'ambar' : 'rojo')
+/** Ind. 2 y 4 — calidad / satisfacción (proyectos ≥4/5): default ≥90 %; ámbar 15 puntos bajo la meta. */
+export const semaforoCalidad = (v: number, min = METAS_ISO_DEFAULT.calidad_min): Semaforo =>
+  (v >= min ? 'verde' : v >= min - 15 ? 'ambar' : 'rojo')
+/** Ind. 3 — proyección presupuestal: default 90–110 % (desviación en ambas
+ *  direcciones); ámbar 10 puntos por fuera de la banda. */
+export const semaforoPresupuesto = (
+  v: number, min = METAS_ISO_DEFAULT.presupuesto_min, max = METAS_ISO_DEFAULT.presupuesto_max,
+): Semaforo =>
+  v >= min && v <= max ? 'verde' : (v >= min - 10 && v < min) || (v > max && v <= max + 10) ? 'ambar' : 'rojo'
+/** Ind. 5 — ambiental y SST: default ≥95 %; ámbar 10 puntos bajo la meta. */
+export const semaforoSst = (v: number, min = METAS_ISO_DEFAULT.sst_min): Semaforo =>
+  (v >= min ? 'verde' : v >= min - 10 ? 'ambar' : 'rojo')
 
 // ── Utilidades de periodo ──
 
@@ -88,24 +144,24 @@ const GESTION_ACTIVA = new Set([
 
 /** Ind. 1 — Cumplimiento del plan de trabajo (corte actual sobre proyectos en
  *  gestión con plan sembrado): actividades ejecutadas / programadas × 100. */
-export function indPlanTrabajo(proyectos: Proyecto[]): ValorIndicador {
+export function indPlanTrabajo(proyectos: Proyecto[], metas: MetasIso = METAS_ISO_DEFAULT): ValorIndicador {
   const conPlan = proyectos.filter(p => GESTION_ACTIVA.has(p.estado) && (p.actividades_plan?.length ?? 0) > 0)
   const den = conPlan.reduce((s, p) => s + (p.actividades_plan?.length ?? 0), 0)
   if (den === 0) return sinDatos
   const num = conPlan.reduce((s, p) => s + (p.actividades_plan?.filter(a => a.ejecutada).length ?? 0), 0)
   const v = pct(num, den)
-  return { valor: v, semaforo: semaforoPlan(v), numerador: num, denominador: den }
+  return { valor: v, semaforo: semaforoPlan(v, metas.plan_min), numerador: num, denominador: den }
 }
 
 /** Ind. 2 — Calidad (calificación ≥4/5 en el acta de entrega), consolidado
  *  del periodo por fecha de entrega. */
-export function indCalidad(proyectos: Proyecto[], p: Periodo): ValorIndicador {
+export function indCalidad(proyectos: Proyecto[], p: Periodo, metas: MetasIso = METAS_ISO_DEFAULT): ValorIndicador {
   const entregados = proyectos.filter(x =>
     x.entrega?.calificacion_calidad != null && enPeriodo(x.entrega.fecha, p))
   if (entregados.length === 0) return sinDatos
   const ok = entregados.filter(x => (x.entrega!.calificacion_calidad ?? 0) >= 4).length
   const v = pct(ok, entregados.length)
-  return { valor: v, semaforo: semaforoCalidad(v), numerador: ok, denominador: entregados.length }
+  return { valor: v, semaforo: semaforoCalidad(v, metas.calidad_min), numerador: ok, denominador: entregados.length }
 }
 
 /** Ind. 3 — Cumplimiento presupuestal de costos (corte actual sobre proyectos
@@ -132,6 +188,7 @@ export const excluidoPorCobertura = (p: Pick<Proyecto, 'resumen_asignaciones'>):
 
 export function indPresupuesto(
   proyectos: Proyecto[], comprasPorProyecto: Record<string, number>,
+  metas: MetasIso = METAS_ISO_DEFAULT,
 ): ValorIndicador {
   const entradas = proyectos
     .filter(p => !excluidoPorCobertura(p))
@@ -142,7 +199,10 @@ export function indPresupuesto(
   const ejecutado = entradas.reduce((s, x) => s + x.ce, 0)
   const proyectado = entradas.reduce((s, x) => s + costoPresupuestadoProyectoDe(x.p), 0)
   const v = pct(ejecutado, proyectado)
-  return { valor: v, semaforo: semaforoPresupuesto(v), numerador: ejecutado, denominador: proyectado }
+  return {
+    valor: v, semaforo: semaforoPresupuesto(v, metas.presupuesto_min, metas.presupuesto_max),
+    numerador: ejecutado, denominador: proyectado,
+  }
 }
 
 /** P2-2 — el contexto de cobertura que acompaña a los indicadores en el
@@ -167,19 +227,22 @@ export function contextoCoberturaPanel(proyectos: Proyecto[]): ContextoCobertura
 
 /** Ind. 4 — Satisfacción del cliente (encuestas ≥4/5), consolidado del
  *  periodo por fecha de la encuesta. */
-export function indSatisfaccion(proyectos: Proyecto[], p: Periodo): ValorIndicador {
+export function indSatisfaccion(proyectos: Proyecto[], p: Periodo, metas: MetasIso = METAS_ISO_DEFAULT): ValorIndicador {
   const encuestas = proyectos.filter(x => x.evaluacion_cliente && enPeriodo(x.evaluacion_cliente.fecha, p))
   if (encuestas.length === 0) return sinDatos
   const ok = encuestas.filter(x => x.evaluacion_cliente!.satisfaccion >= 4).length
   const v = pct(ok, encuestas.length)
-  return { valor: v, semaforo: semaforoCalidad(v), numerador: ok, denominador: encuestas.length }
+  return { valor: v, semaforo: semaforoCalidad(v, metas.satisfaccion_min), numerador: ok, denominador: encuestas.length }
 }
 
 /** Ind. 5 — Ambiental y SST: valor manual del periodo (proceso cruzado con el
  *  Panel SST; la integración automática es futura). */
-export function indSst(valorManual: number | null): ValorIndicador {
+export function indSst(valorManual: number | null, metas: MetasIso = METAS_ISO_DEFAULT): ValorIndicador {
   if (valorManual == null) return sinDatos
-  return { valor: valorManual, semaforo: semaforoSst(valorManual), numerador: valorManual, denominador: 100 }
+  return {
+    valor: valorManual, semaforo: semaforoSst(valorManual, metas.sst_min),
+    numerador: valorManual, denominador: 100,
+  }
 }
 
 // ── CAPA OPERATIVA ──

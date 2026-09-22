@@ -166,16 +166,27 @@ export default function ContratistasForm({
           </p>
         </div>
 
-        <SelectField
-          label="Estado"
-          value={form.estado}
-          onChange={v => set('estado', v as 'activo' | 'inactivo')}
-          options={[
-            { value: 'activo',   label: 'Activo' },
-            { value: 'inactivo', label: 'Inactivo' },
-          ]}
-          required
-        />
+        {editId ? (
+          /* Modelo del aval (22-sep): la habilitación no se cambia desde la
+             edición — va por el botón Activar/Desactivar de la tabla, que
+             deja la traza (y la salvedad si es de respaldo). La regla de
+             gestores ya no admite `estado` en el update de edición. */
+          <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+            Estado actual: <b className="capitalize">{form.estado}</b> — la habilitación se cambia con el
+            botón <b>Activar/Desactivar</b> de la tabla (aval de Gestión Integral, con traza).
+          </p>
+        ) : (
+          <SelectField
+            label="Estado"
+            value={form.estado}
+            onChange={v => set('estado', v as 'activo' | 'inactivo')}
+            options={[
+              { value: 'activo',   label: 'Activo' },
+              { value: 'inactivo', label: 'Inactivo' },
+            ]}
+            required
+          />
+        )}
 
         {/* Bloque 3+5 — vínculo con el usuario técnico de la app (mismo individuo) */}
         <div className="space-y-1">

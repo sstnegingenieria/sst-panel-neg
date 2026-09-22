@@ -24,9 +24,13 @@ import {
   SEMAFORO_COLOR, ACENTOS, etiquetaPeriodo, ultimosPeriodos,
   indPlanTrabajo, indCalidad, indPresupuesto, indSatisfaccion, indSst, indMargenReal,
   embudoDelMes, preventivosDelMes, gruposDonut,
+  METAS_ISO_DEFAULT, metasIsoDe,
 } from '../../utils/sigp/indicadores'
-import type { Periodo, ValorIndicador, Semaforo } from '../../utils/sigp/indicadores'
-import { puedeGestionarProyectosUI, veProyectosUI, veOcUI, editaMetaIndicadoresUI } from '../../types/sigp/permisos'
+import type { Periodo, ValorIndicador, Semaforo, MetasIso } from '../../utils/sigp/indicadores'
+import {
+  veProyectosUI, veOcUI, editaMetaIndicadoresUI,
+  puedeRegistrarIndicadoresUI, editaMetasIsoUI,
+} from '../../types/sigp/permisos'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import type { Solicitud } from '../../types/sigp/solicitud'
 
@@ -169,7 +173,10 @@ function TarjetaKpi({ numero, nombre, meta, frecuencia, fuente, ind, subtitulo, 
 export default function PanelSigp() {
   const { getAll } = useFirestore()
   const { user } = useAuth()
-  const puedeGestionar = puedeGestionarProyectosUI(user?.rol)
+  // 21-sep: el registro manual de indicadores suma a gestion_integral
+  // (espejo de registraIndicadores() en reglas) — reemplaza al gate viejo
+  // por puedeGestionarProyectosUI, que queda contenido en la lista nueva.
+  const puedeRegistrarIndicadores = puedeRegistrarIndicadoresUI(user?.rol)
 
   const [periodo, setPeriodo] = useState<Periodo>(periodoActual)
   const [proyectos, setProyectos] = useState<Proyecto[]>([])
@@ -184,6 +191,11 @@ export default function PanelSigp() {
   const [metaMargen, setMetaMargen] = useState<number | null>(null)
   const [editandoMeta, setEditandoMeta] = useState(false)
   const [metaPendiente, setMetaPendiente] = useState<number | undefined>(undefined)
+  // Metas ISO (21-sep): las fija el SGI en configuracion/indicadores.metas_iso;
+  // sin config → defaults de la Caracterización (metasIsoDe sanea).
+  const [metasIso, setMetasIso] = useState<MetasIso>(METAS_ISO_DEFAULT)
+  const [editandoMetasIso, setEditandoMetasIso] = useState(false)
+  const [metasIsoForm, setMetasIsoForm] = useState<MetasIso>(METAS_ISO_DEFAULT)
 
   const puedeVerCompras = veOcUI(user?.rol)
   // §16 (ii): comercial NO lee `proyectos` (regla puedeVerProyectos). El Panel
@@ -218,6 +230,9 @@ export default function PanelSigp() {
         ? Object.fromEntries(cp.docs.map(d => [d.id, (d.data().compras_ejecutadas_total as number) ?? 0]))
         : {})
       setMetaMargen(cfg?.exists() ? ((cfg.data().meta_margen_pct as number) ?? null) : null)
+      const metas = metasIsoDe(cfg?.exists() ? (cfg.data() as { metas_iso?: Partial<MetasIso> }) : null)
+      setMetasIso(metas)
+      setMetasIsoForm(metas)
     } catch {
       toast('Error al cargar los datos del panel', 'error')
     } finally {
@@ -280,20 +295,40 @@ export default function PanelSigp() {
     } catch { toast('No se pudo guardar la meta', 'error') }
   }
 
+  // 21-sep — metas ISO (SGI): merge del campo metas_iso; la regla de GI tiene
+  // hasOnly que excluye meta_margen_pct (esa sigue de GG por el match genérico).
+  const guardarMetasIso = async () => {
+    const campos = Object.values(metasIsoForm)
+    if (campos.some(v => !Number.isFinite(v) || v <= 0 || v > 200)
+        || metasIsoForm.presupuesto_min >= metasIsoForm.presupuesto_max) {
+      toast('Metas inválidas (1–200; banda del presupuesto con min < max)', 'error')
+      return
+    }
+    try {
+      await setDoc(doc(db, 'configuracion', 'indicadores'), {
+        metas_iso: { ...metasIsoForm },
+        actualizado_por: user?.uid ?? '', fecha_actualizacion: Timestamp.now(),
+      }, { merge: true })
+      setMetasIso({ ...metasIsoForm })
+      setEditandoMetasIso(false)
+      toast('Metas ISO actualizadas')
+    } catch { toast('No se pudieron guardar las metas', 'error') }
+  }
+
   // ── Cálculos ──
   // §16 (ii): los indicadores que se calculan de `proyectos` degradan a
   // IND_SIN_DATOS para comercial (nota "requiere acceso a proyectos" en la
   // tarjeta) — nunca un 0% falso calculado sobre una lista vacía.
-  const ind1 = useMemo(() => puedeVerProyectos ? indPlanTrabajo(proyectos) : IND_SIN_DATOS, [proyectos, puedeVerProyectos])
-  const ind2 = useMemo(() => puedeVerProyectos ? indCalidad(proyectos, periodo) : IND_SIN_DATOS, [proyectos, periodo, puedeVerProyectos])
+  const ind1 = useMemo(() => puedeVerProyectos ? indPlanTrabajo(proyectos, metasIso) : IND_SIN_DATOS, [proyectos, puedeVerProyectos, metasIso])
+  const ind2 = useMemo(() => puedeVerProyectos ? indCalidad(proyectos, periodo, metasIso) : IND_SIN_DATOS, [proyectos, periodo, puedeVerProyectos, metasIso])
   // Ind. 3 (C3): dato económico — sin permisos de compras, NUNCA se calcula a
   // medias (queda como "sin datos", cuenta igual en el anillo de salud).
   const ind3 = useMemo(
-    () => puedeVerCompras ? indPresupuesto(proyectos, comprasMap) : IND_SIN_DATOS,
-    [proyectos, comprasMap, puedeVerCompras],
+    () => puedeVerCompras ? indPresupuesto(proyectos, comprasMap, metasIso) : IND_SIN_DATOS,
+    [proyectos, comprasMap, puedeVerCompras, metasIso],
   )
-  const ind4 = useMemo(() => puedeVerProyectos ? indSatisfaccion(proyectos, periodo) : IND_SIN_DATOS, [proyectos, periodo, puedeVerProyectos])
-  const ind5 = useMemo(() => indSst(sstManual), [sstManual])
+  const ind4 = useMemo(() => puedeVerProyectos ? indSatisfaccion(proyectos, periodo, metasIso) : IND_SIN_DATOS, [proyectos, periodo, puedeVerProyectos, metasIso])
+  const ind5 = useMemo(() => indSst(sstManual, metasIso), [sstManual, metasIso])
   const indicadores = [ind1, ind2, ind3, ind4, ind5]
 
   const enMeta = indicadores.filter(i => i.semaforo === 'verde').length
@@ -307,11 +342,11 @@ export default function PanelSigp() {
       : `${enMeta} de los 5 indicadores del proceso están en meta este mes${conAlerta > 0 ? `; ${conAlerta} requiere${conAlerta > 1 ? 'n' : ''} atención` : ''}${sinDatos > 0 ? ` (${sinDatos} sin datos aún)` : ''}.`
 
   const tend2 = useMemo(() => puedeVerProyectos ? ultimosPeriodos(periodo, 6).map(per => ({
-    etiqueta: etiquetaPeriodo(per), valor: indCalidad(proyectos, per).valor,
-  })) : undefined, [periodo, proyectos, puedeVerProyectos])
+    etiqueta: etiquetaPeriodo(per), valor: indCalidad(proyectos, per, metasIso).valor,
+  })) : undefined, [periodo, proyectos, puedeVerProyectos, metasIso])
   const tend4 = useMemo(() => puedeVerProyectos ? ultimosPeriodos(periodo, 6).map(per => ({
-    etiqueta: etiquetaPeriodo(per), valor: indSatisfaccion(proyectos, per).valor,
-  })) : undefined, [periodo, proyectos, puedeVerProyectos])
+    etiqueta: etiquetaPeriodo(per), valor: indSatisfaccion(proyectos, per, metasIso).valor,
+  })) : undefined, [periodo, proyectos, puedeVerProyectos, metasIso])
 
   const donut = useMemo(() => gruposDonut(proyectos), [proyectos])
   const totalDonut = donut.reduce((s, g) => s + g.count, 0)
@@ -391,22 +426,66 @@ export default function PanelSigp() {
             <p className="text-xs font-extrabold text-gray-500 uppercase tracking-wide mt-1 mb-0.5 px-1">
               Indicadores oficiales del proceso <span className="normal-case font-semibold text-gray-400">· la evidencia de seguimiento y medición (ISO 9001 / 14001 / 45001)</span>
             </p>
-            <p className="text-xs text-gray-400 px-1 mb-3">
-              Cada tarjeta se calcula sola desde el sistema. Anillo = desempeño vs. meta · color del ícono = identidad del indicador.
-            </p>
+            <div className="flex items-center justify-between px-1 mb-3">
+              <p className="text-xs text-gray-400">
+                Cada tarjeta se calcula sola desde el sistema. Anillo = desempeño vs. meta · color del ícono = identidad del indicador.
+              </p>
+              {editaMetasIsoUI(user?.rol) && (
+                <button onClick={() => setEditandoMetasIso(v => !v)}
+                  className="text-[11px] px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 flex-shrink-0 ml-3">
+                  ⚙ Metas ISO
+                </button>
+              )}
+            </div>
+            {editandoMetasIso && (
+              <div className="rounded-xl border border-gray-200 bg-white p-4 mb-4">
+                <p className="text-xs font-bold text-gray-700 mb-0.5">Metas de los indicadores oficiales</p>
+                <p className="text-[11px] text-gray-400 mb-3">
+                  Las fija Gestión Integral (SGI). El tramo de alerta ámbar conserva su ancho de siempre bajo cada meta.
+                  La meta del margen operativo es aparte (Gerencia General).
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                  {([
+                    ['plan_min', '1 · Plan ≥'],
+                    ['calidad_min', '2 · Calidad ≥'],
+                    ['presupuesto_min', '3 · Presup. desde'],
+                    ['presupuesto_max', '3 · Presup. hasta'],
+                    ['satisfaccion_min', '4 · Satisfacción ≥'],
+                    ['sst_min', '5 · SST ≥'],
+                  ] as [keyof MetasIso, string][]).map(([k, label]) => (
+                    <label key={k} className="text-[11px] text-gray-500">
+                      {label}
+                      <input type="number" value={metasIsoForm[k]} min={1} max={200}
+                        onChange={e => setMetasIsoForm(f => ({ ...f, [k]: Number(e.target.value) }))}
+                        className="mt-1 w-full text-xs px-2 py-1 border border-gray-200 rounded text-right font-mono focus:outline-none focus:ring-1 focus:ring-brand-300" />
+                    </label>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2 mt-3">
+                  <button onClick={guardarMetasIso}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-brand-700 hover:bg-brand-800 text-white font-medium">
+                    Guardar metas
+                  </button>
+                  <button onClick={() => { setMetasIsoForm(metasIso); setEditandoMetasIso(false) }}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               <TarjetaKpi numero={1} nombre="Cumplimiento del plan de trabajo"
-                meta="80–100 %" frecuencia="Mensual" fuente="SIGP · plan de actividades" ind={ind1}
+                meta={`${fmtNum(metasIso.plan_min)}–100 %`} frecuencia="Mensual" fuente="SIGP · plan de actividades" ind={ind1}
                 subtitulo={!puedeVerProyectos ? 'Requiere acceso a proyectos'
                   : ind1.valor != null ? `${ind1.numerador} / ${ind1.denominador} actividades ejecutadas (corte)` : 'Se calcula del plan de actividades de los proyectos en gestión'} />
 
               <TarjetaKpi numero={2} nombre="Características técnicas y calidad"
-                meta="≥ 90 %" frecuencia="Por proyecto" fuente="acta de entrega · calidad 1–5" ind={ind2} tendencia={tend2}
+                meta={`≥ ${fmtNum(metasIso.calidad_min)} %`} frecuencia="Por proyecto" fuente="acta de entrega · calidad 1–5" ind={ind2} tendencia={tend2}
                 subtitulo={!puedeVerProyectos ? 'Requiere acceso a proyectos'
                   : ind2.valor != null ? `${ind2.numerador} / ${ind2.denominador} entregas con calif. ≥ 4` : 'Entregas del periodo con calificación de calidad'} />
 
               <TarjetaKpi numero={3} nombre="Proyección presupuestal"
-                meta="90–110 %" frecuencia="Mensual" fuente="preliquidación · costo/presupuesto (OCs + menores + reembolsos)" ind={ind3}
+                meta={`${fmtNum(metasIso.presupuesto_min)}–${fmtNum(metasIso.presupuesto_max)} %`} frecuencia="Mensual" fuente="preliquidación · costo/presupuesto (OCs + menores + reembolsos)" ind={ind3}
                 subtitulo={
                   !puedeVerCompras
                     ? 'Dato económico — requiere permisos de compras'
@@ -414,14 +493,14 @@ export default function PanelSigp() {
                 } />
 
               <TarjetaKpi numero={4} nombre="Satisfacción del cliente"
-                meta="≥ 90 %" frecuencia="Por proyecto" fuente="encuesta al cierre · 1–5" ind={ind4} tendencia={tend4}
+                meta={`≥ ${fmtNum(metasIso.satisfaccion_min)} %`} frecuencia="Por proyecto" fuente="encuesta al cierre · 1–5" ind={ind4} tendencia={tend4}
                 subtitulo={!puedeVerProyectos ? 'Requiere acceso a proyectos'
                   : ind4.valor != null ? `${ind4.numerador} / ${ind4.denominador} encuestas con puntaje ≥ 4` : 'Encuestas de satisfacción del periodo'} />
 
               <TarjetaKpi numero={5} nombre="Requisitos ambientales y SST"
-                meta="≥ 95 %" frecuencia="Mensual" fuente="Panel SST · proceso cruzado" ind={ind5}
+                meta={`≥ ${fmtNum(metasIso.sst_min)} %`} frecuencia="Mensual" fuente="Panel SST · proceso cruzado" ind={ind5}
                 subtitulo={sstManual != null ? 'Registro manual del periodo (Panel SST)' : 'Aún sin integración con el Panel SST'}>
-                {puedeGestionar && (
+                {puedeRegistrarIndicadores && (
                   <div className="flex items-center gap-1.5 mt-2">
                     <input value={sstInput} onChange={e => setSstInput(e.target.value)} placeholder="%"
                       className="w-16 text-xs px-2 py-1 border border-gray-200 rounded text-right font-mono focus:outline-none focus:ring-1 focus:ring-brand-300" />

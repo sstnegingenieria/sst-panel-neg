@@ -7,9 +7,15 @@ import StatCard from '../components/StatCard'
 import { useModal } from '../hooks/useModal'
 import { useFirestore } from '../hooks/useFirestore'
 import { toast } from '../components/shared/Toast'
+import { arrayUnion, Timestamp } from 'firebase/firestore'
 import { useAuth } from '../contexts/AuthContext'
-import { puedeGestionarContratistasUI, puedeHabilitarContratistas } from '../types/sigp/permisos'
+import {
+  puedeGestionarContratistasUI, puedeHabilitarContratistas,
+  puedeInscribirContratistas, esTitularHabilitacion,
+} from '../types/sigp/permisos'
+import Modal from '../components/shared/Modal'
 import { resolverCedula, leerPrivado, guardarCedulaPrivada } from '../utils/contratistasPrivado'
+import { entradaCambioEstado } from '../utils/contratistasTraza'
 
 export default function Contratistas() {
   const [contratistas, setContratistas] = useState<Contratista[]>([])
@@ -20,7 +26,13 @@ export default function Contratistas() {
   const { add, update, getAllOrdered } = useFirestore()
   const { user } = useAuth()
   const puedeGestionar = puedeGestionarContratistasUI(user?.rol)
+  const puedeInscribir = puedeInscribirContratistas(user?.rol)
   const puedeHabilitar = puedeHabilitarContratistas(user?.rol)
+  // Modelo del aval (22-sep): titular (GI) habilita sin salvedad; respaldo
+  // (GG/gerencia_administrativa/admin) SIEMPRE con salvedad escrita.
+  const esTitular = esTitularHabilitacion(user?.rol)
+  const [salvedadTarget, setSalvedadTarget] = useState<Contratista | null>(null)
+  const [salvedadTexto, setSalvedadTexto] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -82,17 +94,46 @@ export default function Contratistas() {
     }
   }, [contratistas])
 
-  const handleToggle = async (c: Contratista) => {
+  // 21-sep: la habilitación es el control de calificación de proveedores —
+  // cada cambio deja quién/cuándo (y la salvedad, si es de respaldo) en el
+  // historial, en el MISMO write del estado (append-only).
+  const escribirToggle = async (c: Contratista, salvedad?: string) => {
     const nuevoEstado = c.estado === 'activo' ? 'inactivo' : 'activo'
-    const accion = nuevoEstado === 'inactivo' ? 'desactivar' : 'activar'
-    if (!window.confirm(`¿Seguro que deseas ${accion} a "${c.nombre}"?`)) return
     try {
-      await update('contratistas', c.id, { estado: nuevoEstado })
-      toast(`Contratista ${nuevoEstado === 'activo' ? 'activado' : 'desactivado'}`)
+      await update('contratistas', c.id, {
+        estado: nuevoEstado,
+        historial: arrayUnion(entradaCambioEstado(
+          c.estado, nuevoEstado,
+          { uid: user?.uid ?? '', nombre: user?.nombre, rol: user?.rol },
+          Timestamp.now(),
+          salvedad,
+        )),
+      })
+      toast(`Contratista ${nuevoEstado === 'activo' ? 'activado' : 'desactivado'}${salvedad ? ' (aval de respaldo)' : ''}`)
       await load()
     } catch {
       toast('Error al actualizar el estado', 'error')
     }
+  }
+
+  const handleToggle = async (c: Contratista) => {
+    const nuevoEstado = c.estado === 'activo' ? 'inactivo' : 'activo'
+    const accion = nuevoEstado === 'inactivo' ? 'desactivar' : 'activar'
+    if (esTitular) {
+      if (!window.confirm(`¿Seguro que deseas ${accion} a "${c.nombre}"?`)) return
+      await escribirToggle(c)
+    } else {
+      // Respaldo: el aval no es suyo — salvedad obligatoria antes de escribir.
+      setSalvedadTexto('')
+      setSalvedadTarget(c)
+    }
+  }
+
+  const confirmarRespaldo = async () => {
+    if (!salvedadTarget || !salvedadTexto.trim()) return
+    const c = salvedadTarget
+    setSalvedadTarget(null)
+    await escribirToggle(c, salvedadTexto)
   }
 
   return (
@@ -102,7 +143,7 @@ export default function Contratistas() {
           <h1 className="text-2xl font-bold text-gray-800">Contratistas</h1>
           <p className="text-sm text-gray-500 mt-0.5">Personas jurídicas y naturales</p>
         </div>
-        {puedeGestionar && (
+        {puedeInscribir && (
           <button
             onClick={openCreate}
             className="flex items-center gap-2 bg-brand-700 hover:bg-brand-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
@@ -181,6 +222,39 @@ export default function Contratistas() {
           puedeHabilitar={puedeHabilitar}
         />
       </div>
+
+      {/* Aval de RESPALDO (22-sep): quien no es titular del proceso puede
+          actuar, pero deja dicho por qué — la salvedad viaja en la misma
+          entrada del historial y la regla la exige. */}
+      <Modal
+        isOpen={salvedadTarget != null}
+        title={`Aval de respaldo — ${salvedadTarget?.estado === 'activo' ? 'desactivar' : 'activar'} a ${salvedadTarget?.nombre ?? ''}`}
+        onClose={() => setSalvedadTarget(null)}
+        actions={[
+          { label: 'Cancelar', onClick: () => setSalvedadTarget(null), variant: 'secondary' },
+          {
+            label: 'Confirmar con salvedad',
+            onClick: confirmarRespaldo,
+            variant: 'primary',
+            disabled: !salvedadTexto.trim(),
+          },
+        ]}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">
+            La habilitación de contratistas es responsabilidad de <b>Gestión Integral</b> (titular del aval).
+            Como respaldo puedes actuar, pero la salvedad es obligatoria: escribe por qué no lo hace el titular.
+            Queda registrada junto a tu nombre y la fecha en el historial del contratista.
+          </p>
+          <textarea
+            value={salvedadTexto}
+            onChange={e => setSalvedadTexto(e.target.value)}
+            rows={3}
+            placeholder="Ej.: Ingrid está de vacaciones hasta el 30-sep y el contratista se necesita para la asignación de PRY-2026-050."
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+        </div>
+      </Modal>
 
       <ContratistasForm
         isOpen={modal.isOpen}

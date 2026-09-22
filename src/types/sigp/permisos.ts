@@ -78,14 +78,29 @@ export const veContratistas = (rol: string | undefined) => en(rol, ROLES_VE_CONT
 // separado de puedeAdministrarSST() para no otorgar gestión de users).
 export const ROLES_APROBAR_REGISTROS: Rol[] = ['admin', 'sst', 'gestion_integral', 'residente_sst']
 
-// Crear/editar/eliminar contratistas: solo admin (UI más estricta que las
+// Editar/eliminar contratistas: solo admin (UI más estricta que las
 // reglas a propósito — defensa en profundidad).
 export const ROLES_GESTIONA_CONTRATISTAS: Rol[] = ['admin']
 
-// Habilitar/deshabilitar contratistas: admin + gerencia_administrativa +
-// gestion_integral (21-sep, decisión Giovanny — la Caracterización asigna la
-// habilitación al SGI; espejo de la vía por-campo `estado` en reglas).
-export const ROLES_HABILITA_CONTRATISTAS: Rol[] = ['admin', 'gerencia_administrativa', 'gestion_integral']
+// Inscribir (crear) contratistas (22-sep, modelo del aval de Giovanny):
+// admin + gestion_integral — Ingrid también inscribe, no solo avala.
+// En reglas la vía de create es más amplia (gestores + GI); la UI sigue
+// más estricta a propósito.
+export const ROLES_INSCRIBE_CONTRATISTAS: Rol[] = ['admin', 'gestion_integral']
+
+// Habilitar/deshabilitar contratistas — MODELO DEL AVAL (22-sep, decisión
+// Giovanny, patrón del aprobador de respaldo de preliquidaciones):
+//   · TITULAR: gestion_integral (el aval es responsabilidad del SGI según
+//     la Caracterización) — habilita sin salvedad.
+//   · RESPALDO: gerencia_general, gerencia_administrativa y admin — pueden
+//     actuar si el titular no está, SIEMPRE con salvedad obligatoria
+//     escrita (queda en la misma entrada del historial). Quienes podían
+//     habilitar antes del modelo pasaron a respaldo, no se quitaron.
+// Espejo exacto de las dos vías por-campo de `contratistas` en reglas.
+export const ROLES_TITULAR_HABILITACION: Rol[] = ['gestion_integral']
+export const ROLES_HABILITA_CONTRATISTAS: Rol[] = [
+  'gestion_integral', 'gerencia_administrativa', 'gerencia_general', 'admin',
+]
 
 // Crear/editar/desactivar clientes (dominio comercial, F1). Alineado con
 // `puedeGestionarProyectos()` de firestore.rules — los mismos roles que
@@ -98,7 +113,10 @@ export const ROLES_GESTIONA_CLIENTES: Rol[] = [
 
 export const puedeAprobarRegistros = (rol: string | undefined) => en(rol, ROLES_APROBAR_REGISTROS)
 export const puedeGestionarContratistasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CONTRATISTAS)
+export const puedeInscribirContratistas = (rol: string | undefined) => en(rol, ROLES_INSCRIBE_CONTRATISTAS)
 export const puedeHabilitarContratistas = (rol: string | undefined) => en(rol, ROLES_HABILITA_CONTRATISTAS)
+/** Titular del aval (habilita sin salvedad); habilitador no-titular = respaldo (salvedad obligatoria). */
+export const esTitularHabilitacion = (rol: string | undefined) => en(rol, ROLES_TITULAR_HABILITACION)
 export const puedeGestionarClientesUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CLIENTES)
 // La gestión de LPU (importar, versionar) usa los mismos roles que la de
 // clientes (comercial/proyectos), alineado con puedeGestionarProyectos().
@@ -204,8 +222,33 @@ export const veOcUI = (rol: string | undefined) => en(rol, ROLES_VEN_OC)
 // ── Panel SIGP — indicador operativo "Margen real" (07-ago) ──
 // Editar la meta (`configuracion/indicadores.meta_margen_pct`): SOLO
 // gerencia_general/admin — espeja la regla Firestore del mismo doc.
+// 21-sep: la meta de MARGEN sigue siendo de GG (decisión deliberada del
+// PR #69) — las metas ISO van aparte, abajo.
 export const ROLES_EDITA_META_INDICADORES: Rol[] = ['gerencia_general', 'admin']
 export const editaMetaIndicadoresUI = (rol: string | undefined) => en(rol, ROLES_EDITA_META_INDICADORES)
+
+// ── Panel SIGP — registro manual de indicadores (21-sep) ──
+// La colección `indicadores` (hoy: ind. 5 ambiental/SST, doc sst_YYYY-MM)
+// suma a gestion_integral — la Caracterización pone "indicadores" bajo el
+// SGI y su dueña de proceso no podía registrar el que más le pertenece.
+// Espejo de registraIndicadores() en firestore.rules (la regla además
+// conserva a operacion_comercial por la vía heredada puedeGestionarProyectos;
+// la UI sigue más estricta a propósito — §16).
+export const ROLES_REGISTRA_INDICADORES: Rol[] = [
+  'admin', 'gerencia_general', 'auxiliar_proyectos', 'director_proyectos',
+  'gestion_integral',
+]
+export const puedeRegistrarIndicadoresUI = (rol: string | undefined) => en(rol, ROLES_REGISTRA_INDICADORES)
+
+// ── Panel SIGP — metas ISO del tablero (21-sep) ──
+// `configuracion/indicadores.metas_iso`: las metas de los 5 indicadores de
+// la Caracterización las fija el SGI (gestion_integral) — la regla de GI
+// tiene hasOnly que EXCLUYE meta_margen_pct (esa sigue de GG). admin por
+// infraestructura. GG podría por la regla genérica de `configuracion`
+// (write GG+admin), pero la UI no le ofrece el editor: las metas ISO son
+// del SGI (UI más estricta que las reglas a propósito).
+export const ROLES_EDITA_METAS_ISO: Rol[] = ['gestion_integral', 'admin']
+export const editaMetasIsoUI = (rol: string | undefined) => en(rol, ROLES_EDITA_METAS_ISO)
 
 // ── OC1 — datos de empresa (`configuracion/empresa`, bloque RADICACIÓN del
 // PDF de orden de compra). Espeja la regla del match genérico
