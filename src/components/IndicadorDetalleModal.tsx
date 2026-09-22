@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import Modal from './shared/Modal'
 import TextField from './shared/TextField'
-import type { Indicador, IndicadorMedicion } from '../types/indicador'
+import ChecklistCriterios from './patrones/ChecklistCriterios'
+import PlanActividades from './patrones/PlanActividades'
+import BitacoraAusentismo from './patrones/BitacoraAusentismo'
+import BitacoraRatio from './patrones/BitacoraRatio'
+import { useIndicadorRegistros } from '../hooks/useIndicadorRegistros'
+import type { Indicador, IndicadorMedicion, IndicadorRegistro } from '../types/indicador'
 import { TIPO_INDICADOR_LABELS } from '../types/indicador'
 import {
   calcularValor,
@@ -12,6 +17,7 @@ import {
   SEMAFORO_CLASSES,
   SEMAFORO_LABEL,
 } from '../utils/indicadoresCalc'
+import { derivarNumDen } from '../utils/indicadoresRegistros'
 
 interface IndicadorDetalleModalProps {
   isOpen: boolean
@@ -19,8 +25,11 @@ interface IndicadorDetalleModalProps {
   historico: IndicadorMedicion[]
   periodoActual: string
   puedeEditar: boolean
+  esAdmin: boolean
   guardando: boolean
   onGuardar: (datos: { numerador: number; denominador: number; meta: number; interpretacion: string }) => void
+  onGuardarMetaInterpretacion: (datos: { meta: number; interpretacion: string }) => void
+  onDatosCambiados: () => Promise<void>
   onClose: () => void
 }
 
@@ -30,16 +39,22 @@ export default function IndicadorDetalleModal({
   historico,
   periodoActual,
   puedeEditar,
+  esAdmin,
   guardando,
   onGuardar,
+  onGuardarMetaInterpretacion,
+  onDatosCambiados,
   onClose,
 }: IndicadorDetalleModalProps) {
+  const { cargarRegistros } = useIndicadorRegistros()
   const medicionActual = historico.find(m => m.periodo === periodoActual)
+  const esPatronado = !!indicador.patron
 
   const [numerador, setNumerador] = useState(String(medicionActual?.numerador ?? ''))
   const [denominador, setDenominador] = useState(String(medicionActual?.denominador ?? ''))
   const [metaPct, setMetaPct] = useState(medicionActual ? String(medicionActual.meta * 100) : '')
   const [interpretacion, setInterpretacion] = useState(medicionActual?.interpretacion ?? '')
+  const [registros, setRegistros] = useState<IndicadorRegistro[]>([])
 
   // Reabrir con otro indicador (o cambiar de periodo) resetea el formulario.
   useEffect(() => {
@@ -50,8 +65,26 @@ export default function IndicadorDetalleModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [indicador.id, periodoActual])
 
-  const numPreview = Number(numerador.replace(',', '.'))
-  const denPreview = Number(denominador.replace(',', '.'))
+  useEffect(() => {
+    if (esPatronado) {
+      cargarRegistros(indicador.id, periodoActual).then(setRegistros)
+    } else {
+      setRegistros([])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [indicador.id, esPatronado, periodoActual])
+
+  const recargarRegistros = async () => {
+    const [nuevos] = await Promise.all([
+      cargarRegistros(indicador.id, periodoActual),
+      onDatosCambiados(),
+    ])
+    setRegistros(nuevos)
+  }
+
+  const derivadoPatron = esPatronado ? derivarNumDen(indicador, registros) : null
+  const numPreview = esPatronado ? derivadoPatron?.numerador ?? 0 : Number(numerador.replace(',', '.'))
+  const denPreview = esPatronado ? derivadoPatron?.denominador ?? 0 : Number(denominador.replace(',', '.'))
   const metaPreview = Number(metaPct.replace(',', '.')) / 100
   const valorPreview = Number.isFinite(numPreview) && Number.isFinite(denPreview)
     ? calcularValor(numPreview, denPreview, indicador.factor)
@@ -64,13 +97,35 @@ export default function IndicadorDetalleModal({
     .map(m => ({ periodo: m.periodo, valor: calcularValor(m.numerador, m.denominador, indicador.factor) }))
     .filter((d): d is { periodo: string; valor: number } => d.valor != null)
 
-  const formValido = Number.isFinite(numPreview) && numPreview >= 0
-    && Number.isFinite(denPreview) && denPreview > 0
-    && Number.isFinite(metaPreview) && metaPreview >= 0
+  const formValido = esPatronado
+    ? Number.isFinite(metaPreview) && metaPreview >= 0
+    : Number.isFinite(numPreview) && numPreview >= 0
+      && Number.isFinite(denPreview) && denPreview > 0
+      && Number.isFinite(metaPreview) && metaPreview >= 0
 
   const handleGuardar = () => {
     if (!formValido) return
-    onGuardar({ numerador: numPreview, denominador: denPreview, meta: metaPreview, interpretacion })
+    if (esPatronado) {
+      onGuardarMetaInterpretacion({ meta: metaPreview, interpretacion })
+    } else {
+      onGuardar({ numerador: numPreview, denominador: denPreview, meta: metaPreview, interpretacion })
+    }
+  }
+
+  const renderPatron = () => {
+    const props = { indicador, periodo: periodoActual, registros, puedeEditar, onCambio: recargarRegistros }
+    switch (indicador.patron) {
+      case 'checklist':
+        return <ChecklistCriterios {...props} />
+      case 'plan':
+        return <PlanActividades {...props} esAdmin={esAdmin} />
+      case 'registro':
+        return <BitacoraAusentismo {...props} esAdmin={esAdmin} />
+      case 'ratio':
+        return <BitacoraRatio {...props} esAdmin={esAdmin} />
+      default:
+        return null
+    }
   }
 
   return (
@@ -81,7 +136,7 @@ export default function IndicadorDetalleModal({
       size="xl"
       actions={puedeEditar ? [
         { label: 'Cerrar', onClick: onClose, variant: 'secondary' },
-        { label: `Guardar medición ${periodoActual}`, onClick: handleGuardar, variant: 'primary', loading: guardando, disabled: !formValido },
+        { label: esPatronado ? 'Guardar meta e interpretación' : `Guardar medición ${periodoActual}`, onClick: handleGuardar, variant: 'primary', loading: guardando, disabled: !formValido },
       ] : [
         { label: 'Cerrar', onClick: onClose, variant: 'secondary' },
       ]}
@@ -119,6 +174,28 @@ export default function IndicadorDetalleModal({
           </dl>
         </section>
 
+        {/* III. Gráfico — siempre visible (Ingrid, F2 punto 3) */}
+        <section>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Gráfico</h4>
+          {chartData.length > 1 ? (
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="periodo" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip formatter={(v) => formatoValor(typeof v === 'number' ? v : Number(v), indicador.factor)} />
+                  <Line type="monotone" dataKey="valor" stroke="#628e3a" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-24 flex items-center justify-center rounded-lg border border-dashed border-gray-200 text-sm text-gray-400">
+              Aún no hay suficientes periodos con datos para graficar.
+            </div>
+          )}
+        </section>
+
         {/* Valor y semáforo en vivo del periodo actual / formulario */}
         <section className="bg-gray-50 rounded-lg p-4">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">
@@ -126,10 +203,14 @@ export default function IndicadorDetalleModal({
           </h4>
           {puedeEditar ? (
             <div className="flex flex-col gap-3">
-              <div className="grid grid-cols-2 gap-3">
-                <TextField label="Numerador" value={numerador} onChange={setNumerador} hint={indicador.label_numerador} />
-                <TextField label="Denominador" value={denominador} onChange={setDenominador} hint={indicador.label_denominador} />
-              </div>
+              {esPatronado ? (
+                renderPatron()
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <TextField label="Numerador" value={numerador} onChange={setNumerador} hint={indicador.label_numerador} />
+                  <TextField label="Denominador" value={denominador} onChange={setDenominador} hint={indicador.label_denominador} />
+                </div>
+              )}
               <TextField label="Meta (%)" value={metaPct} onChange={setMetaPct} hint="Ej. 90 para 90%" />
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium text-gray-700">Interpretación</label>
@@ -143,6 +224,11 @@ export default function IndicadorDetalleModal({
               </div>
               <div className="flex items-center gap-3 pt-1">
                 <span className="text-2xl font-bold text-gray-900">{formatoValor(valorPreview, indicador.factor)}</span>
+                {esPatronado && (
+                  <span className="text-xs text-gray-400">
+                    ({numPreview} / {denPreview} — derivado de la bitácora)
+                  </span>
+                )}
                 {indicador.pendiente_validacion ? (
                   <span className="text-xs font-medium px-2 py-1 rounded-full bg-gray-100 text-gray-500">Pendiente de validación</span>
                 ) : semaforoPreview ? (
@@ -178,18 +264,21 @@ export default function IndicadorDetalleModal({
                 <tbody>
                   {historico.map(m => {
                     const valor = calcularValor(m.numerador, m.denominador, indicador.factor)
-                    const semaforo = valor != null && !indicador.pendiente_validacion
+                    const semaforo = valor != null && !indicador.pendiente_validacion && !m.es_referencia
                       ? colorSemaforo(valor, m.meta, indicador.factor)
                       : null
                     return (
                       <tr key={m.id} className="border-t border-gray-100">
-                        <td className="py-1.5 pr-3 font-medium text-gray-700">{m.periodo}</td>
+                        <td className="py-1.5 pr-3 font-medium text-gray-700">
+                          {m.periodo}
+                          {m.es_referencia && <span className="ml-1.5 text-[10px] text-gray-400 font-normal">(referencia)</span>}
+                        </td>
                         <td className="py-1.5 pr-3 text-gray-600">{m.numerador}</td>
                         <td className="py-1.5 pr-3 text-gray-600">{m.denominador}</td>
                         <td className="py-1.5 pr-3 text-gray-800 font-medium">{formatoValor(valor, indicador.factor)}</td>
-                        <td className="py-1.5 pr-3 text-gray-500">{(m.meta * 100).toLocaleString('es-CO')}%</td>
+                        <td className="py-1.5 pr-3 text-gray-500">{m.es_referencia ? '—' : `${(m.meta * 100).toLocaleString('es-CO')}%`}</td>
                         <td className="py-1.5 pr-3">
-                          {indicador.pendiente_validacion ? (
+                          {m.es_referencia || indicador.pendiente_validacion ? (
                             <span className="text-xs text-gray-400">—</span>
                           ) : semaforo ? (
                             <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${SEMAFORO_CLASSES[semaforo]}`}>
@@ -205,24 +294,6 @@ export default function IndicadorDetalleModal({
             </div>
           )}
         </section>
-
-        {/* III. Gráfico */}
-        {chartData.length > 1 && (
-          <section>
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Gráfico</h4>
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="periodo" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v) => formatoValor(typeof v === 'number' ? v : Number(v), indicador.factor)} />
-                  <Line type="monotone" dataKey="valor" stroke="#628e3a" strokeWidth={2} dot={{ r: 3 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </section>
-        )}
 
         {/* IV. Interpretación histórica */}
         {historico.some(m => m.interpretacion) && (

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../contexts/AuthContext'
 import { useIndicadores } from '../hooks/useIndicadores'
+import { useIndicadorRegistros } from '../hooks/useIndicadorRegistros'
 import { puedeGestionarIndicadoresSstUI } from '../types/sigp/permisos'
 import type { Indicador, IndicadorMedicion, TipoIndicador } from '../types/indicador'
 import { TIPO_INDICADOR_LABELS } from '../types/indicador'
@@ -15,12 +16,15 @@ const PERIODO_ACTUAL = '2026'
 export default function Indicadores() {
   const { user } = useAuth()
   const { cargarCatalogo, cargarTodasMediciones, guardarMedicion, sembrarCatalogoSiFalta } = useIndicadores()
+  const { sembrarReferencia2025SiFalta, sembrarPatronesSiFalta, guardarMetaInterpretacion } = useIndicadorRegistros()
   const puedeGestionar = puedeGestionarIndicadoresSstUI(user?.rol)
+  const esAdmin = user?.rol === 'admin'
 
   const [catalogo, setCatalogo] = useState<Indicador[]>([])
   const [mediciones, setMediciones] = useState<IndicadorMedicion[]>([])
   const [cargando, setCargando] = useState(true)
   const [sembrando, setSembrando] = useState(false)
+  const [sembrandoF2, setSembrandoF2] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [indicadorAbierto, setIndicadorAbierto] = useState<Indicador | null>(null)
   const [filtroTipo, setFiltroTipo] = useState<TipoIndicador | ''>('')
@@ -32,6 +36,7 @@ export default function Indicadores() {
     setCatalogo(cat)
     setMediciones(med)
     setCargando(false)
+    return cat
   }
 
   useEffect(() => {
@@ -70,6 +75,29 @@ export default function Indicadores() {
     }
   }
 
+  const handleSembrarF2 = async () => {
+    if (!user) return
+    setSembrandoF2(true)
+    try {
+      const catActual = catalogo.length > 0 ? catalogo : await cargarTodo()
+      const nRef = await sembrarReferencia2025SiFalta(catActual, user.uid)
+      const nPatrones = await sembrarPatronesSiFalta(catActual)
+      toast(nRef === 0 && nPatrones === 0
+        ? 'La referencia 2025 y los patrones ya estaban sembrados'
+        : `Sembrado: ${nRef} referencias 2025, ${nPatrones} patrones`)
+      await cargarTodo()
+    } catch {
+      toast('No se pudo sembrar la referencia 2025 / los patrones', 'error')
+    } finally {
+      setSembrandoF2(false)
+    }
+  }
+
+  const handleDatosCambiados = async () => {
+    const cat = await cargarTodo()
+    setIndicadorAbierto(prev => (prev ? cat.find(i => i.id === prev.id) ?? prev : prev))
+  }
+
   const handleGuardarMedicion = async (datos: { numerador: number; denominador: number; meta: number; interpretacion: string }) => {
     if (!indicadorAbierto || !user) return
     setGuardando(true)
@@ -81,6 +109,21 @@ export default function Indicadores() {
       await cargarTodo()
     } catch {
       toast('No se pudo guardar la medición', 'error')
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  const handleGuardarMetaInterpretacion = async (datos: { meta: number; interpretacion: string }) => {
+    if (!indicadorAbierto || !user) return
+    setGuardando(true)
+    try {
+      await guardarMetaInterpretacion(indicadorAbierto, PERIODO_ACTUAL, datos, user.uid)
+      toast('Meta e interpretación guardadas')
+      setIndicadorAbierto(null)
+      await cargarTodo()
+    } catch {
+      toast('No se pudo guardar', 'error')
     } finally {
       setGuardando(false)
     }
@@ -120,13 +163,25 @@ export default function Indicadores() {
           <h1 className="text-xl font-display font-bold text-gray-900">Indicadores SG-SST</h1>
           <p className="text-sm text-gray-500">Plan de evaluación por indicadores (SST-PLA-EI-24) — periodo {PERIODO_ACTUAL}</p>
         </div>
-        <button
-          onClick={exportarExcel}
-          disabled={catalogo.length === 0}
-          className="px-4 py-2 rounded-lg text-sm font-medium bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition disabled:opacity-50"
-        >
-          Exportar informe
-        </button>
+        <div className="flex items-center gap-2">
+          {puedeGestionar && (
+            <button
+              onClick={handleSembrarF2}
+              disabled={sembrandoF2}
+              title="Siembra la referencia 2025 (solo lectura) y los patrones de captura de los 4 indicadores piloto — no duplica si ya está sembrado"
+              className="px-3 py-2 rounded-lg text-xs font-medium bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 transition disabled:opacity-50"
+            >
+              {sembrandoF2 ? 'Sembrando…' : 'Sembrar 2025 y patrones'}
+            </button>
+          )}
+          <button
+            onClick={exportarExcel}
+            disabled={catalogo.length === 0}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition disabled:opacity-50"
+          >
+            Exportar informe
+          </button>
+        </div>
       </div>
 
       {!cargando && catalogo.length === 0 && (
@@ -188,8 +243,11 @@ export default function Indicadores() {
           historico={indicadorAbiertoHistorico}
           periodoActual={PERIODO_ACTUAL}
           puedeEditar={puedeGestionar}
+          esAdmin={esAdmin}
           guardando={guardando}
           onGuardar={handleGuardarMedicion}
+          onGuardarMetaInterpretacion={handleGuardarMetaInterpretacion}
+          onDatosCambiados={handleDatosCambiados}
           onClose={() => setIndicadorAbierto(null)}
         />
       )}
