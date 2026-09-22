@@ -318,11 +318,22 @@ service cloud.firestore {
       // ── MODELO DEL AVAL (22-sep, decisión Giovanny) ──
       // INSCRIBIR (crear): gestores + gestion_integral — la Caracterización
       // asigna el aval de la inscripción al SGI e Ingrid también inscribe.
+      // EL CONTRATISTA NACE INACTIVO (22-sep, cierre del hueco de la puerta
+      // de entrada): si el estado inicial fuera libre, todo el control del
+      // aval sería evitable — bastaría nacer habilitado sin pasar por GI.
+      // Con este guard, "¿quién avaló a este contratista y cuándo?" SIEMPRE
+      // tiene respuesta: nadie puede nacer avalado; el aval es un acto
+      // separado y deliberado (el toggle trazado), jamás un default.
+      // 📓 BITÁCORA: la traza rige desde el 22-sep-2026 — los 11
+      // contratistas existentes conservan su estado SIN registro de quién
+      // los avaló porque son anteriores al control; historia aceptada, no
+      // se inventa retroactivamente.
       // C2.1 paso 5 fase 3: el padre RECHAZA los campos de datos personales
       // en create y update — aunque un formulario futuro se equivoque, la
       // cédula no puede volver al doc público.
       allow create: if (puedeGestionarProyectos()
                         || (isAuthed() && rolActual() == 'gestion_integral'))
+                    && request.resource.data.get('estado', '') == 'inactivo'
                     && !request.resource.data.keys()
                         .hasAny(['cedula', 'telefono', 'direccion']);
       // EDITAR (gestores): `estado` queda FUERA de esta vía — habilitar es

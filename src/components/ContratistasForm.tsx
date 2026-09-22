@@ -38,7 +38,10 @@ interface FormState {
 const NIT_RE = /^\d{3}\.\d{3}\.\d{3}-\d$/
 
 function toFormState(data: ContratistaFormData | null | undefined): FormState {
-  if (!data) return { nombre: '', tipoDoc: 'nit', numero: '', estado: 'activo', usuarioTecnicoId: '' }
+  // 22-sep: el contratista NACE INACTIVO — el aval (habilitar) es un acto
+  // separado de Gestión Integral por el toggle trazado, nunca un default
+  // del formulario. La regla de create lo exige.
+  if (!data) return { nombre: '', tipoDoc: 'nit', numero: '', estado: 'inactivo', usuarioTecnicoId: '' }
   return {
     nombre:  data.nombre,
     tipoDoc: data.tipo === 'natural' ? 'cedula' : 'nit',
@@ -176,16 +179,11 @@ export default function ContratistasForm({
             botón <b>Activar/Desactivar</b> de la tabla (aval de Gestión Integral, con traza).
           </p>
         ) : (
-          <SelectField
-            label="Estado"
-            value={form.estado}
-            onChange={v => set('estado', v as 'activo' | 'inactivo')}
-            options={[
-              { value: 'activo',   label: 'Activo' },
-              { value: 'inactivo', label: 'Inactivo' },
-            ]}
-            required
-          />
+          /* 22-sep: nace inactivo — nadie puede nacer avalado. */
+          <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+            El contratista se inscribe <b>inactivo</b>. La habilitación es el <b>aval de
+            Gestión Integral</b> — se otorga después con el botón <b>Activar</b> de la tabla y queda trazada.
+          </p>
         )}
 
         {/* Bloque 3+5 — vínculo con el usuario técnico de la app (mismo individuo) */}
