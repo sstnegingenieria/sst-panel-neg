@@ -254,11 +254,20 @@ service cloud.firestore {
 
       // Update self: puede editar su propio documento, pero NO cambiar
       // campos sensibles.
+      // 22-sep (PR B nómina): `empleador_verificacion` la escribe SOLO la
+      // CF emparejarNomina (Admin SDK) y `contratista_id/nombre` dejan de
+      // ser editables por el propio usuario — un dato "verificado contra
+      // la nómina" que el usuario pudiera reescribir sería evidencia
+      // falsificable. La app solo los escribe en el CREATE del registro
+      // (verificado contra el código Dart: el único self-update de la app
+      // es `documentos`); escribirlos con el MISMO valor sigue pasando
+      // (affectedKeys = solo lo que cambia).
       allow update: if isAuthed()
                     && request.auth.uid == userId
                     && !request.resource.data.diff(resource.data)
                         .affectedKeys()
-                        .hasAny(['rol', 'role', 'estado', 'aprobado', 'obras_asignadas']);
+                        .hasAny(['rol', 'role', 'estado', 'aprobado', 'obras_asignadas',
+                                 'contratista_id', 'contratista_nombre', 'empleador_verificacion']);
 
       // Create/update/delete administrativo: solo puedeAdministrarSST
       allow create, update, delete: if puedeAdministrarSST();

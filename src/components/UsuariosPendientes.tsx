@@ -25,6 +25,15 @@ export interface Tecnico {
     fecha: { toDate?: () => Date }
     restaurado?: { por: string; por_nombre: string; fecha: { toDate?: () => Date } }
   }
+  // PR B nómina (22-sep): la escribe SOLO la CF emparejarNomina. Con
+  // `contratista_declarado` presente, la CF CORRIGIÓ el empleador (la
+  // nómina gana sobre la declaración) — el chip lo hace visible.
+  empleador_verificacion?: {
+    estado: 'verificado_nomina' | 'declarado_sin_verificar' | 'conflicto_nomina'
+    fecha: { toDate?: () => Date }
+    fuente: string
+    contratista_declarado?: { id: string; nombre: string }
+  }
   // C2.1: cliente al que pertenece un rol residente_obra. Fuente del
   // claim `cliente_id` que deriva la CF sincronizarClaims (precedente de
   // campo de alcance en users: obras_asignadas). Ausente en roles internos.
@@ -50,6 +59,45 @@ interface UsuariosPendientesProps {
   onAprobar: (t: Tecnico) => void
   onRechazar: (t: Tecnico) => void
   onVerPerfil: (t: Tecnico) => void
+}
+
+/** Chip del emparejamiento por nómina (PR B). CUATRO estados visibles —
+ *  decisión 2 de Giovanny: la corrección de empleador se VE en la lista
+ *  ("declaró X → nómina: Y"), distinta del verde normal, para que un error
+ *  de carga de nómina se note mirando, no auditando el historial. */
+export function ChipVerificacionNomina({ t }: { t: Tecnico }) {
+  const v = t.empleador_verificacion
+  if (!v) return null
+  if (v.estado === 'verificado_nomina' && v.contratista_declarado) {
+    return (
+      <span
+        className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-800 border border-emerald-300"
+        title={`La nómina ganó sobre la declaración: declaró "${v.contratista_declarado.nombre}", la nómina dice "${t.contratista_nombre ?? ''}"`}
+      >
+        ✓ empleador corregido: declaró {v.contratista_declarado.nombre || '—'} → nómina: {t.contratista_nombre}
+      </span>
+    )
+  }
+  if (v.estado === 'verificado_nomina') {
+    return (
+      <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700">
+        ✓ verificado contra la nómina
+      </span>
+    )
+  }
+  if (v.estado === 'conflicto_nomina') {
+    return (
+      <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700"
+        title="La cédula está en la nómina de varios contratistas y ninguno es el declarado — revisar">
+        ⚠ conflicto de nómina — revisar
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-gray-500">
+      declarado por el usuario, sin verificar
+    </span>
+  )
 }
 
 function initials(name: string): string {
@@ -129,6 +177,13 @@ export default function UsuariosPendientes({ puedeGestionar, tecnicos, loading, 
                 <InfoRow label="ARL" value={t.arl} />
                 <InfoRow label="Contrat." value={t.contratista_nombre} />
               </div>
+
+              {/* PR B: el chip de la nómina al lado de la decisión */}
+              {t.empleador_verificacion && (
+                <div className="mt-2">
+                  <ChipVerificacionNomina t={t} />
+                </div>
+              )}
 
               {/* Acciones */}
               <div className="mt-4 flex items-center gap-2">

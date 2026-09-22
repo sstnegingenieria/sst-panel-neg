@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Tecnico } from './UsuariosPendientes'
+import { Tecnico, ChipVerificacionNomina } from './UsuariosPendientes'
 import { Obra } from './ObrasTable'
 import { getSaludDocumental, estadoClasses, estadoLabel } from '../utils/vencimiento'
 
@@ -183,7 +183,12 @@ export default function UsuariosActivos({
                       )
                     })()}
                   </td>
-                  <td className="py-3 px-4 text-gray-600">{t.contratista_nombre ?? '—'}</td>
+                  <td className="py-3 px-4 text-gray-600">
+                    {t.contratista_nombre ?? '—'}
+                    {t.empleador_verificacion && (
+                      <div className="mt-1"><ChipVerificacionNomina t={t} /></div>
+                    )}
+                  </td>
                   <td className="py-3 px-4">
                     <div className="flex flex-wrap gap-1">
                       {(t.obras_asignadas ?? []).length === 0 && (
