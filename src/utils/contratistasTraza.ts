@@ -8,10 +8,16 @@
 // arrayUnion — cero borrado físico, restricción 5.1).
 //
 // La entrada se construye AQUÍ (builder puro, testeable) — la UI no
-// improvisa writes. La regla de la vía por-campo admite `historial`
-// junto a `estado`/`fecha_actualizacion` (hasOnly extendido); el rastro
-// lo exige la UI, no la regla, para no romper pestañas con bundle viejo
-// (cambio aditivo — ver PR).
+// improvisa writes. Las vías del aval en reglas EXIGEN la traza
+// (hasAll estado+historial, historial que crece, por == uid; salvedad
+// para el respaldo).
+//
+// 📓 BITÁCORA (22-sep-2026): el contratista NACE INACTIVO (regla de
+// create) — nadie nace avalado, así "¿quién avaló y cuándo?" siempre
+// tiene respuesta. La traza rige desde esta fecha: los 11 contratistas
+// existentes conservan su estado SIN registro de quién los avaló porque
+// son anteriores al control — HISTORIA ACEPTADA, no se inventa
+// retroactivamente (su primera entrada será el próximo toggle real).
 
 import { Timestamp } from 'firebase/firestore'
 
