@@ -11,9 +11,12 @@ import { arrayUnion, Timestamp } from 'firebase/firestore'
 import { useAuth } from '../contexts/AuthContext'
 import {
   puedeGestionarContratistasUI, puedeHabilitarContratistas,
-  puedeInscribirContratistas, esTitularHabilitacion,
+  puedeInscribirContratistas, esTitularHabilitacion, puedeGestionarNominaUI,
 } from '../types/sigp/permisos'
 import Modal from '../components/shared/Modal'
+import NominaModal from '../components/NominaModal'
+import { getDoc, doc as docRef } from 'firebase/firestore'
+import type { NominaContratista } from '../utils/contratistasNomina'
 import { resolverCedula, leerPrivado, guardarCedulaPrivada } from '../utils/contratistasPrivado'
 import { entradaCambioEstado } from '../utils/contratistasTraza'
 
@@ -33,6 +36,30 @@ export default function Contratistas() {
   const esTitular = esTitularHabilitacion(user?.rol)
   const [salvedadTarget, setSalvedadTarget] = useState<Contratista | null>(null)
   const [salvedadTexto, setSalvedadTexto] = useState('')
+  // PR A nómina: contratista cuyo modal está abierto + cédulas VIVAS de los
+  // DEMÁS (guard "ya en otra nómina" de la vista previa).
+  const puedeNomina = puedeGestionarNominaUI(user?.rol)
+  const [nominaTarget, setNominaTarget] = useState<Contratista | null>(null)
+  const [nominasOtros, setNominasOtros] = useState<Record<string, Set<string>>>({})
+
+  const abrirNomina = async (c: Contratista) => {
+    try {
+      const otros = contratistas.filter(x => x.id !== c.id)
+      const lecturas = await Promise.all(otros.map(x =>
+        getDoc(docRef(db, 'contratistas', x.id, 'privado', 'nomina')).catch(() => null)))
+      const mapa: Record<string, Set<string>> = {}
+      otros.forEach((x, i) => {
+        const data = lecturas[i]?.exists() ? (lecturas[i]!.data() as NominaContratista) : null
+        const vivas = Object.entries(data?.trabajadores ?? {})
+          .filter(([, t]) => !t.retirado).map(([ced]) => ced)
+        if (vivas.length) mapa[x.id] = new Set(vivas)
+      })
+      setNominasOtros(mapa)
+    } catch {
+      setNominasOtros({})
+    }
+    setNominaTarget(c)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -218,8 +245,10 @@ export default function Contratistas() {
           loading={loading}
           onEdit={openEdit}
           onToggleEstado={handleToggle}
+          onNomina={abrirNomina}
           puedeGestionar={puedeGestionar}
           puedeHabilitar={puedeHabilitar}
+          puedeNomina={puedeNomina}
         />
       </div>
 
@@ -255,6 +284,13 @@ export default function Contratistas() {
           />
         </div>
       </Modal>
+
+      <NominaModal
+        isOpen={nominaTarget != null}
+        onClose={() => setNominaTarget(null)}
+        contratista={nominaTarget}
+        nominasOtros={nominasOtros}
+      />
 
       <ContratistasForm
         isOpen={modal.isOpen}

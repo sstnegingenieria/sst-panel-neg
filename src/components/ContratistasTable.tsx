@@ -20,8 +20,10 @@ interface ContratistasTableProps {
   loading: boolean
   onEdit: (c: Contratista) => void
   onToggleEstado: (c: Contratista) => void
+  onNomina?: (c: Contratista) => void
   puedeGestionar: boolean
   puedeHabilitar: boolean
+  puedeNomina?: boolean
 }
 
 const tipoBadge = {
@@ -45,7 +47,9 @@ function initials(name: string): string {
   )
 }
 
-export default function ContratistasTable({ contratistas, loading, onEdit, onToggleEstado, puedeGestionar, puedeHabilitar }: ContratistasTableProps) {
+export default function ContratistasTable({
+  contratistas, loading, onEdit, onToggleEstado, onNomina, puedeGestionar, puedeHabilitar, puedeNomina,
+}: ContratistasTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full text-sm">
@@ -117,8 +121,17 @@ export default function ContratistasTable({ contratistas, loading, onEdit, onTog
                   })()}
                 </td>
                 <td className="py-3 px-4 text-right">
-                  {(puedeGestionar || puedeHabilitar) ? (
+                  {(puedeGestionar || puedeHabilitar || puedeNomina) ? (
                     <div className="flex items-center justify-end gap-2">
+                      {puedeNomina && onNomina && (
+                        <button
+                          onClick={() => onNomina(c)}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition font-medium"
+                          title="Nómina autorizada del contratista (precarga por pegado)"
+                        >
+                          👥 Nómina
+                        </button>
+                      )}
                       {puedeGestionar && (
                         <button
                           onClick={() => onEdit(c)}
