@@ -88,6 +88,12 @@ export const ROLES_GESTIONA_CONTRATISTAS: Rol[] = ['admin']
 // más estricta a propósito.
 export const ROLES_INSCRIBE_CONTRATISTAS: Rol[] = ['admin', 'gestion_integral']
 
+// Nómina precargada del contratista (PR A, diseño 22-sep): la carga y el
+// retiro los hace quien inscribe — el sub-doc privado/nomina lo permite
+// también a gestores en reglas (mismo camino del CRUD), pero la UI de
+// nómina es del SGI (más estricta a propósito).
+export const ROLES_GESTIONA_NOMINA: Rol[] = ['admin', 'gestion_integral']
+
 // Habilitar/deshabilitar contratistas — MODELO DEL AVAL (22-sep, decisión
 // Giovanny, patrón del aprobador de respaldo de preliquidaciones):
 //   · TITULAR: gestion_integral (el aval es responsabilidad del SGI según
@@ -114,6 +120,7 @@ export const ROLES_GESTIONA_CLIENTES: Rol[] = [
 export const puedeAprobarRegistros = (rol: string | undefined) => en(rol, ROLES_APROBAR_REGISTROS)
 export const puedeGestionarContratistasUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_CONTRATISTAS)
 export const puedeInscribirContratistas = (rol: string | undefined) => en(rol, ROLES_INSCRIBE_CONTRATISTAS)
+export const puedeGestionarNominaUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_NOMINA)
 export const puedeHabilitarContratistas = (rol: string | undefined) => en(rol, ROLES_HABILITA_CONTRATISTAS)
 /** Titular del aval (habilita sin salvedad); habilitador no-titular = respaldo (salvedad obligatoria). */
 export const esTitularHabilitacion = (rol: string | undefined) => en(rol, ROLES_TITULAR_HABILITACION)
