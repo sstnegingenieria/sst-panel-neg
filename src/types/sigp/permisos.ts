@@ -94,6 +94,16 @@ export const ROLES_INSCRIBE_CONTRATISTAS: Rol[] = ['admin', 'gestion_integral']
 // nómina es del SGI (más estricta a propósito).
 export const ROLES_GESTIONA_NOMINA: Rol[] = ['admin', 'gestion_integral']
 
+// ── Gestión de TÉCNICOS en la página Usuarios (PR C del diseño 22-sep) ──
+// Destape: aprobar/rechazar pendientes, asignar obras + fijar empleador,
+// activar/desactivar. ESPEJO EXACTO de puedeAdministrarSST() en reglas
+// (decisión 1 de Giovanny: sst ya aprueba técnicos desde la app — excluirlo
+// del panel sería hacer el mismo trabajo por un camino y no por el otro;
+// una sola fuente de verdad). La INFRAESTRUCTURA sigue admin-only: invitar
+// usuarios del panel, ⇄ Rol (rompería claims) y ✎ Firma.
+export const ROLES_GESTIONA_TECNICOS: Rol[] = ['admin', 'sst', 'gestion_integral']
+export const puedeGestionarTecnicosUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_TECNICOS)
+
 // Habilitar/deshabilitar contratistas — MODELO DEL AVAL (22-sep, decisión
 // Giovanny, patrón del aprobador de respaldo de preliquidaciones):
 //   · TITULAR: gestion_integral (el aval es responsabilidad del SGI según

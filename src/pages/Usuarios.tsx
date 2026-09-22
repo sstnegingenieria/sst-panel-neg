@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
-import { collection, getDocs, deleteDoc, doc, updateDoc, deleteField, Timestamp } from 'firebase/firestore'
+import { collection, getDocs, doc, updateDoc, deleteField, Timestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useAuth } from '../contexts/AuthContext'
+import { puedeGestionarTecnicosUI } from '../types/sigp/permisos'
+import Modal from '../components/shared/Modal'
 import { Tecnico } from '../components/UsuariosPendientes'
 import UsuariosPendientes from '../components/UsuariosPendientes'
 import UsuariosActivos from '../components/UsuariosActivos'
@@ -18,8 +20,17 @@ import { toast } from '../components/shared/Toast'
 
 export default function Usuarios() {
   const { user: currentUser } = useAuth()
+  // PR C (22-sep): la gestión de TÉCNICOS (aprobar/rechazar, obras+empleador,
+  // activar/desactivar) se destapa a sst y gestion_integral — espejo exacto
+  // de puedeAdministrarSST() en reglas, que ya se los permitía. isAdmin queda
+  // SOLO para infraestructura (Invitar, ⇄ Rol, ✎ Firma, personal de panel).
   const isAdmin = currentUser?.rol === 'admin'
+  const puedeGestionarTecnicos = puedeGestionarTecnicosUI(currentUser?.rol)
   const [pendientes, setPendientes] = useState<Tecnico[]>([])
+  const [rechazados, setRechazados] = useState<Tecnico[]>([])
+  const [verRechazados, setVerRechazados] = useState(false)
+  const [rechazoTarget, setRechazoTarget] = useState<Tecnico | null>(null)
+  const [rechazoMotivo, setRechazoMotivo] = useState('')
   const [activos, setActivos] = useState<Tecnico[]>([])
   const [panelUsers, setPanelUsers] = useState<Tecnico[]>([])
   const [obras, setObras] = useState<Obra[]>([])
@@ -52,11 +63,14 @@ export default function Usuarios() {
       const todos = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Tecnico[]
 
       setPendientes(todos.filter(t => t.estado === 'pendiente'))
-      setActivos(todos.filter(t => t.rol === 'tecnico' && t.estado !== 'pendiente'))
+      // PR C: 'rechazado' es ESTADO, no borrado — un registro rechazado es
+      // información (alguien dijo trabajar para un contratista y no pasó).
+      setRechazados(todos.filter(t => t.estado === 'rechazado'))
+      setActivos(todos.filter(t => t.rol === 'tecnico' && t.estado !== 'pendiente' && t.estado !== 'rechazado'))
       // OC1: la sección de panel lista TODO el personal con acceso al panel
       // (antes solo sst/admin — los roles SIGP eran invisibles acá y el
       // admin no tenía dónde capturar cargo/celular del firmante de OCs).
-      setPanelUsers(todos.filter(t => t.rol !== 'tecnico' && t.estado !== 'pendiente'))
+      setPanelUsers(todos.filter(t => t.rol !== 'tecnico' && t.estado !== 'pendiente' && t.estado !== 'rechazado'))
     } catch (err) {
       console.error(err)
       toast('Error al cargar usuarios', 'error')
@@ -88,15 +102,52 @@ export default function Usuarios() {
     }
   }
 
-  // ── Rechazar / eliminar técnico pendiente ──────────────────────────────────
-  const handleRechazar = async (t: Tecnico) => {
-    if (!window.confirm(`¿Rechazar y eliminar a ${t.nombre}? Esta acción no se puede deshacer.`)) return
+  // ── Rechazar técnico pendiente — ESTADO, no borrado (PR C, 22-sep) ────────
+  // Antes hacía deleteDoc: borraba la evidencia de que alguien intentó
+  // registrarse (tensión con la restricción 5.1 destapada al ampliar el
+  // acceso). Ahora estado 'rechazado' + motivo obligatorio + traza, y es
+  // reversible (Restaurar a pendiente). La app bloquea al rechazado por la
+  // vía "sin obras asignadas" (mensaje genérico — la app no se toca).
+  const handleRechazar = (t: Tecnico) => {
+    setRechazoMotivo('')
+    setRechazoTarget(t)
+  }
+
+  const confirmarRechazo = async () => {
+    if (!rechazoTarget || !rechazoMotivo.trim()) return
+    const t = rechazoTarget
+    setRechazoTarget(null)
     try {
-      await deleteDoc(doc(db, 'users', t.id))
-      toast(`${t.nombre} rechazado y eliminado`, 'info')
+      await updateDoc(doc(db, 'users', t.id), {
+        estado: 'rechazado',
+        rechazo: {
+          motivo: rechazoMotivo.trim(),
+          por: currentUser?.uid ?? '',
+          por_nombre: currentUser?.nombre ?? '',
+          por_rol: currentUser?.rol ?? '',
+          fecha: Timestamp.now(),
+        },
+      })
+      toast(`${t.nombre} rechazado (queda en el registro)`, 'info')
       await load()
     } catch {
       toast('Error al rechazar el técnico', 'error')
+    }
+  }
+
+  const handleRestaurar = async (t: Tecnico) => {
+    if (!window.confirm(`¿Restaurar a ${t.nombre} a la cola de pendientes?`)) return
+    try {
+      await updateDoc(doc(db, 'users', t.id), {
+        estado: 'pendiente',
+        'rechazo.restaurado': {
+          por: currentUser?.uid ?? '', por_nombre: currentUser?.nombre ?? '', fecha: Timestamp.now(),
+        },
+      })
+      toast(`${t.nombre} restaurado a pendientes`)
+      await load()
+    } catch {
+      toast('Error al restaurar', 'error')
     }
   }
 
@@ -179,7 +230,7 @@ export default function Usuarios() {
 
       {/* Sección pendientes */}
       <UsuariosPendientes
-        isAdmin={isAdmin}
+        puedeGestionar={puedeGestionarTecnicos}
         tecnicos={pendientes}
         loading={loading}
         onAprobar={handleAprobar}
@@ -187,9 +238,50 @@ export default function Usuarios() {
         onVerPerfil={openPerfil}
       />
 
+      {/* Rechazados — registro visible, no borrado (PR C) */}
+      {rechazados.length > 0 && (
+        <section className="bg-white rounded-lg border border-gray-200 shadow-sm px-6 py-4">
+          <button
+            onClick={() => setVerRechazados(v => !v)}
+            className="text-sm font-bold text-gray-700 flex items-center gap-2"
+          >
+            <span>{verRechazados ? '▾' : '▸'}</span>
+            Registros rechazados
+            <span className="text-xs font-normal text-gray-400">({rechazados.length})</span>
+          </button>
+          {verRechazados && (
+            <table className="min-w-full text-xs mt-3">
+              <tbody>
+                {rechazados.map(t => (
+                  <tr key={t.id} className="border-b border-gray-100">
+                    <td className="py-2 pr-3 text-gray-800 font-medium">{t.nombre}</td>
+                    <td className="py-2 pr-3 text-gray-400">{t.email}</td>
+                    <td className="py-2 pr-3 text-gray-500">{t.contratista_nombre || '—'}</td>
+                    <td className="py-2 pr-3 text-gray-500" title={t.rechazo?.motivo}>
+                      {t.rechazo ? `por ${t.rechazo.por_nombre} · ${t.rechazo.fecha?.toDate?.().toLocaleDateString('es-CO') ?? ''} · ${t.rechazo.motivo}` : '—'}
+                    </td>
+                    <td className="py-2 text-right">
+                      {puedeGestionarTecnicos && (
+                        <button
+                          onClick={() => handleRestaurar(t)}
+                          className="text-[11px] px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                        >
+                          Restaurar a pendiente
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
+
       {/* Sección activos/inactivos */}
       <UsuariosActivos
         isAdmin={isAdmin}
+        puedeGestionar={puedeGestionarTecnicos}
         tecnicos={activos}
         obras={obras}
         loading={loading}
@@ -200,6 +292,36 @@ export default function Usuarios() {
         onCambiarRol={handleCambiarRol}
         onEditarDocs={openDocs}
       />
+
+      {/* Motivo del rechazo — obligatorio (el registro es evidencia) */}
+      <Modal
+        isOpen={rechazoTarget != null}
+        title={`Rechazar registro — ${rechazoTarget?.nombre ?? ''}`}
+        onClose={() => setRechazoTarget(null)}
+        actions={[
+          { label: 'Cancelar', onClick: () => setRechazoTarget(null), variant: 'secondary' },
+          {
+            label: 'Rechazar con motivo',
+            onClick: confirmarRechazo,
+            variant: 'danger',
+            disabled: !rechazoMotivo.trim(),
+          },
+        ]}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">
+            El registro NO se elimina: queda como <b>rechazado</b> con tu nombre, la fecha y el motivo
+            — y puede restaurarse a pendientes si fue un error. La persona no podrá usar la app.
+          </p>
+          <textarea
+            value={rechazoMotivo}
+            onChange={e => setRechazoMotivo(e.target.value)}
+            rows={3}
+            placeholder="Ej.: No aparece en la nómina del contratista que declaró y el contratista no lo reconoce."
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+        </div>
+      </Modal>
 
       {/* Sección personal de panel (SST / Admin) */}
       <UsuariosPanel

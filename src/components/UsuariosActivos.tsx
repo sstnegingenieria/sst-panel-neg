@@ -4,7 +4,11 @@ import { Obra } from './ObrasTable'
 import { getSaludDocumental, estadoClasses, estadoLabel } from '../utils/vencimiento'
 
 interface UsuariosActivosProps {
+  /** Infraestructura (⇄ Rol) — sigue admin-only. */
   isAdmin: boolean
+  /** PR C: obras+empleador y activar/desactivar destapados a
+   *  admin+sst+gestion_integral (espejo de puedeAdministrarSST()). */
+  puedeGestionar: boolean
   tecnicos: Tecnico[]
   obras: Obra[]
   loading: boolean
@@ -52,6 +56,9 @@ const estadoBadge = {
   activo: 'bg-emerald-50 text-emerald-700',
   inactivo: 'bg-gray-100 text-gray-500',
   pendiente: 'bg-amber-50 text-amber-700',
+  // PR C: los rechazados no se listan aquí (sección propia), pero el badge
+  // existe por completitud del tipo.
+  rechazado: 'bg-red-50 text-red-600',
 }
 
 function initials(name: string): string {
@@ -66,7 +73,7 @@ function initials(name: string): string {
 }
 
 export default function UsuariosActivos({
-  isAdmin, tecnicos, obras, loading, onAsignarObras, onDesactivar, onActivar, onVerPerfil, onCambiarRol, onEditarDocs,
+  isAdmin, puedeGestionar, tecnicos, obras, loading, onAsignarObras, onDesactivar, onActivar, onVerPerfil, onCambiarRol, onEditarDocs,
 }: UsuariosActivosProps) {
   const obraMap = Object.fromEntries(obras.map(o => [o.id, o.nombre_sitio]))
 
@@ -213,7 +220,7 @@ export default function UsuariosActivos({
                       >
                         📋 Docs
                       </button>
-                      {isAdmin && (
+                      {puedeGestionar && (
                         <>
                           <button
                             onClick={() => onAsignarObras(t)}
@@ -222,7 +229,7 @@ export default function UsuariosActivos({
                           >
                             🔗 Obras
                           </button>
-                          <RolSelector tecnico={t} onCambiarRol={onCambiarRol} />
+                          {isAdmin && <RolSelector tecnico={t} onCambiarRol={onCambiarRol} />}
                           {t.estado === 'activo' ? (
                             <button
                               onClick={() => onDesactivar(t)}
