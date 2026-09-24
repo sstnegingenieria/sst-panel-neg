@@ -509,7 +509,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
   }
 
   // ═══════════════ PDF de LIQUIDACIÓN por asignación (17-sep — arreglo #4:
-  // el entregable SGI-FT-LIQ-26 se perdió en el camino por-asignación; mismo
+  // el entregable CM-FT-LQ-26 se perdió en el camino por-asignación; mismo
   // generador del 3b, DTO plano — cero cambios de layout). Directas no
   // generan documento: no hay pago a tercero que entregar. ═══════════════════
   const docLiquidacion = async (a: AsignacionContratista) => {
@@ -873,7 +873,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                   </p>
                 )}
                 {/* 17-sep (arreglo #4): el entregable de la liquidación
-                    (SGI-FT-LIQ-26) por asignación — directas no lo generan */}
+                    (CM-FT-LQ-26) por asignación — directas no lo generan */}
                 {a.liquidacion && !dir && (puedeGestionar || puedeAprobar || puedeLiquidar) && (
                   <div className="pt-0.5">
                     <button onClick={() => docLiquidacion(a)} disabled={aplicando}

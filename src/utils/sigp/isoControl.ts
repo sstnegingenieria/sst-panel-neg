@@ -12,8 +12,21 @@
 // defendible (la propuesta es una cotización en sustancia) y evita crear un
 // formato nuevo, pero un documento con ese código y otra serie de numeración
 // lo tiene que RATIFICAR la dueña de proceso (Ingrid, GI). No decidirlo acá.
-// PENDIENTE FUERA DEL REPO: ratificación de SGI-FT-PRL-26 por Ingrid (GI)
-// y registro en el Listado Maestro (frente Trinorma).
+//
+// ═══ ESQUEMA DE CODIFICACIÓN DEL LISTADO MAESTRO (Ingrid Laverde, GI —
+// ratificación del 18-ago-2026, incorporada 24-sep-2026) ═══
+// El PREFIJO del código es el ÁREA DUEÑA del formato: CM comercial,
+// DO proyectos, DC el de órdenes de compra. "SGI-" NO es un prefijo de
+// área — los códigos SGI-FT-* que este archivo llevó entre ago y sep-2026
+// eran inventados y no existen en el Listado Maestro. Cualquier código
+// futuro LO ASIGNA Gestión Integral; no se inventa desde el panel.
+// HECHO REGISTRADO (no corregible retroactivamente): los PDFs de
+// preliquidación y liquidación emitidos entre ago-2026 y el 24-sep-2026
+// llevan los códigos inexistentes — se generan y descargan, no se
+// almacenan, así que no hay corrección posible sobre los ya emitidos.
+// FUTURO — informe de visita técnica: NO crear código nuevo; ya existe
+// como DO-FT-RV-23 versión 3 del 16/10/2024 (cuando se construya ese
+// módulo, usa el formato existente).
 export interface ControlDocumentalIso {
   area: string
   codigo: string
@@ -22,34 +35,40 @@ export interface ControlDocumentalIso {
   nombre: string
 }
 
+// Código RATIFICADO por Ingrid (GI) el 18-ago-2026: CM-FT-PL-26 · Versión 1
+// · 18/08/2026 (reemplaza al inventado SGI-FT-PRL-26 — ver hecho registrado
+// arriba). El `area` mostrada en el cuadro sigue siendo la validada
+// visualmente en el PR #62; si el Listado Maestro registra otra, el ajuste
+// es esta línea.
 export const PRELIQUIDACION: ControlDocumentalIso = {
   area: 'GESTIÓN DE PROYECTOS',
-  codigo: 'SGI-FT-PRL-26',
+  codigo: 'CM-FT-PL-26',
   version: '01',
-  modificado: 'AGO-2026',
+  modificado: '18/08/2026',
   nombre: 'PRELIQUIDACIÓN DEL CONTRATISTA',
 }
 
-// PENDIENTE FUERA DEL REPO: ratificación de SGI-FT-LIQ-26 por Ingrid (GI)
-// y registro en el Listado Maestro (frente Trinorma) — igual que el PRL.
+// Código RATIFICADO por Ingrid (GI) el 18-ago-2026: CM-FT-LQ-26 · Versión 1
+// · 18/08/2026 (reemplaza al inventado SGI-FT-LIQ-26).
 export const LIQUIDACION: ControlDocumentalIso = {
   area: 'GESTIÓN ADMINISTRATIVA',
-  codigo: 'SGI-FT-LIQ-26',
+  codigo: 'CM-FT-LQ-26',
   version: '01',
-  modificado: 'AGO-2026',
+  modificado: '18/08/2026',
   nombre: 'LIQUIDACIÓN DEL CONTRATISTA',
 }
 
-// OC1 — orden de compra. El código DC-FT-OC-00-19 es el del formato REAL
-// vigente del SGI (versión anterior: 04 de ene-2025, diligenciada a mano).
-// Versión y fecha van como PROPUESTA 05/AGO-2026 porque el documento cambia
-// al generarse desde el panel — Ingrid (GI) debe RATIFICAR número de
-// versión, fecha Y área antes de darlo por oficial en el Listado Maestro
-// (frente Trinorma; la 04-2025 NO se reutiliza). Parametrizado aquí para
-// que el ajuste post-ratificación sea una línea.
+// OC1 — orden de compra. Código CORREGIDO a DC-FT-OC-19 por ratificación
+// VERBAL de Ingrid (GI, 24-sep-2026): el formato FÍSICO del SGI trae
+// impreso "DC-FT-OC-00-19" y de ahí lo leímos — la discrepancia venía del
+// papel, no del panel (si un PDF nuevo difiere de uno viejo en el código,
+// esta es la razón). Versión y fecha siguen como PROPUESTA 05/AGO-2026,
+// pendientes de que Ingrid las registre en el Listado Maestro (frente
+// Trinorma; la 04-2025 NO se reutiliza). Parametrizado aquí para que el
+// ajuste post-registro sea una línea.
 export const ORDEN_COMPRA: ControlDocumentalIso = {
   area: 'GESTIÓN DE PROYECTOS',
-  codigo: 'DC-FT-OC-00-19',
+  codigo: 'DC-FT-OC-19',
   version: '05',
   modificado: 'AGO-2026',
   nombre: 'ORDEN DE COMPRA Y/O SERVICIO',

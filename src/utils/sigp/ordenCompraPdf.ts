@@ -1,4 +1,4 @@
-// PDF de ORDEN DE COMPRA Y/O SERVICIO (OC1) — formato ISO DC-FT-OC-00-19
+// PDF de ORDEN DE COMPRA Y/O SERVICIO (OC1) — formato ISO DC-FT-OC-19
 // generado desde el panel (antes se diligenciaba a mano en Excel).
 //
 // CARA AL PROVEEDOR. Reglas duras del bloque:

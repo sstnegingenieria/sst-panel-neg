@@ -336,7 +336,7 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // Descargar PDF (DC-FT-OC-00-19) — on-demand, solo desde aprobada/comprada
+  // Descargar PDF (DC-FT-OC-19) — on-demand, solo desde aprobada/comprada
   // ═══════════════════════════════════════════════════════════════════════
   const [descargandoId, setDescargandoId] = useState<string | null>(null)
 
