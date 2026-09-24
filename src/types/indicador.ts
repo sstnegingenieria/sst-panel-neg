@@ -24,6 +24,36 @@ export const TIPO_INDICADOR_COLOR: Record<TipoIndicador, string> = {
   estandar_minimo: 'bg-amber-100 text-amber-800',
 }
 
+/**
+ * Módulo Indicadores SG-SST (F2 — datos alimentadores).
+ * Ingrid (Gestión Integral) revisó F1 y pidió: nada de numerador/denominador
+ * crudo — cada indicador se alimenta con DATOS FUENTE y el panel calcula el
+ * % solo. Para no construir 26 formularios distintos, se agrupan en 4
+ * patrones de captura reutilizables. Solo 4 indicadores piloto (F2.1) los
+ * usan; los otros 22 quedan con la entrada simple de F1 hasta F2.2.
+ */
+export type PatronIndicador = 'checklist' | 'plan' | 'registro' | 'ratio'
+
+/** Patrón A — checklist de criterios (SST-IND-01: los 11 del Decreto 1072). */
+export interface ConfigChecklist {
+  criterios: { id: string; texto: string }[]
+}
+
+/** Patrón B — programado vs. ejecutado. Sin config propia (las actividades viven en indicador_registros). */
+export type ConfigPlan = Record<string, never>
+
+/** Patrón C — bitácora acumulable con una base anual editable (ej. días programados de Ausentismo). */
+export interface ConfigRegistroAnual {
+  dias_programados: number
+}
+
+/** Patrón D — ratio con base externa editable (ej. total de trabajadores). */
+export interface ConfigRatioAnual {
+  total_trabajadores: number
+}
+
+export type ConfigIndicador = ConfigChecklist | ConfigPlan | ConfigRegistroAnual | ConfigRatioAnual
+
 export interface Indicador {
   id: string
   codigo: string
@@ -49,6 +79,16 @@ export interface Indicador {
   pendiente_validacion: boolean
   activo: boolean
   orden: number
+  /**
+   * F2 piloto (22-sep): si está presente, la ficha reemplaza los campos
+   * numerador/denominador por la captura del patrón — esos dos valores se
+   * DERIVAN de `indicador_registros` y se re-escriben solos en
+   * `indicador_mediciones` cada vez que la bitácora cambia (ver
+   * utils/indicadoresRegistros.ts). Ausente en los 22 indicadores no
+   * pilotados — siguen con la entrada simple de F1.
+   */
+  patron?: PatronIndicador
+  config?: ConfigIndicador
 }
 
 export interface IndicadorMedicion {
@@ -63,6 +103,30 @@ export interface IndicadorMedicion {
   interpretacion: string
   registrado_por: string
   fecha: Timestamp
+  /**
+   * F2 (22-sep): true SOLO en la fila sembrada de referencia 2025 (cifras
+   * oficiales del Excel, no capturadas por un usuario). El tablero la usa
+   * para no editarla y para no pintarle semáforo (no hay meta real de 2025
+   * — mostrar un "cumple" inventado sería engañoso).
+   */
+  es_referencia?: boolean
+}
+
+/**
+ * Los datos fuente de un indicador con `patron` — una bitácora o checklist
+ * por indicador×periodo. numerador/denominador de `indicador_mediciones` se
+ * derivan SIEMPRE de estos registros (ver utils/indicadoresRegistros.ts);
+ * nunca se teclean directamente para un indicador pilotado.
+ */
+export interface IndicadorRegistro {
+  id: string
+  indicador_id: string
+  periodo: string
+  patron: PatronIndicador
+  /** Forma según el patrón — ver utils/indicadoresRegistros.ts para el contrato exacto de cada uno. */
+  data: Record<string, unknown>
+  registrado_por: string
+  fecha_registro: Timestamp
 }
 
 /**
@@ -437,5 +501,85 @@ export const SEED_INDICADORES: Omit<Indicador, 'id'>[] = [
     pendiente_validacion: true,
     activo: true,
     orden: 26,
+  },
+]
+
+/**
+ * Referencia 2025 — cifras oficiales del Excel SST-PLA-EI-24, una por
+ * indicador (por `codigo`), sembradas como solo-lectura (`es_referencia:
+ * true`). Fuente: ref_2025.json del diseño F2, verificado 1:1 contra el
+ * catálogo (mismo orden/nombres que SEED_INDICADORES). `meta:0` a propósito
+ * — es referencia comparativa, no se le juzga contra una meta.
+ */
+export const SEED_MEDICIONES_2025: { codigo: string; numerador: number; denominador: number }[] = [
+  { codigo: 'SST-IND-01', numerador: 11, denominador: 11 },
+  { codigo: 'SST-IND-02', numerador: 58, denominador: 60 },
+  { codigo: 'SST-IND-03', numerador: 60, denominador: 95 },
+  { codigo: 'SST-IND-04', numerador: 40, denominador: 46 },
+  { codigo: 'SST-IND-05', numerador: 22, denominador: 22 },
+  { codigo: 'SST-IND-06', numerador: 9, denominador: 9 },
+  { codigo: 'SST-IND-07', numerador: 9, denominador: 9 },
+  { codigo: 'SST-IND-08', numerador: 4, denominador: 4 },
+  { codigo: 'SST-IND-09', numerador: 1, denominador: 1 },
+  { codigo: 'SST-IND-10', numerador: 3, denominador: 3 },
+  { codigo: 'SST-IND-11', numerador: 165, denominador: 165 },
+  { codigo: 'SST-IND-12', numerador: 575, denominador: 574 },
+  { codigo: 'SST-IND-13', numerador: 12, denominador: 8 },
+  { codigo: 'SST-IND-14', numerador: 95, denominador: 120 },
+  { codigo: 'SST-IND-15', numerador: 15, denominador: 9 },
+  { codigo: 'SST-IND-16', numerador: 14, denominador: 14 },
+  { codigo: 'SST-IND-17', numerador: 9, denominador: 8 },
+  { codigo: 'SST-IND-18', numerador: 1, denominador: 1 },
+  { codigo: 'SST-IND-19', numerador: 4, denominador: 4 },
+  { codigo: 'SST-IND-20', numerador: 0, denominador: 0 },
+  { codigo: 'SST-IND-21', numerador: 2, denominador: 2342 },
+  { codigo: 'SST-IND-22', numerador: 0, denominador: 9 },
+  { codigo: 'SST-IND-23', numerador: 0, denominador: 1 },
+  { codigo: 'SST-IND-24', numerador: 0, denominador: 9 },
+  { codigo: 'SST-IND-25', numerador: 0, denominador: 9 },
+  { codigo: 'SST-IND-26', numerador: 0, denominador: 26 },
+]
+
+/**
+ * Patrones piloto (F2.1) — 4 de 26, uno por cada patrón de captura. Los 11
+ * criterios del checklist son los textos literales del Decreto 1072 (mismo
+ * orden del diseño). Los valores anuales de config (`dias_programados`,
+ * `total_trabajadores`) nacen con un default editable — SST/GI los ajustan
+ * al valor real desde la ficha.
+ */
+export const SEED_PATRONES: { codigo: string; patron: PatronIndicador; config: ConfigIndicador }[] = [
+  {
+    codigo: 'SST-IND-01',
+    patron: 'checklist',
+    config: {
+      criterios: [
+        { id: '1', texto: 'Política de SST comunicada' },
+        { id: '2', texto: 'Objetivos y metas de SST' },
+        { id: '3', texto: 'Plan de trabajo anual y cronograma' },
+        { id: '4', texto: 'Asignación de responsabilidades de SST' },
+        { id: '5', texto: 'Asignación de recursos (humanos, físicos, financieros)' },
+        { id: '6', texto: 'Definición de metodología en la identificación de peligros' },
+        { id: '7', texto: 'Conformación y funcionamiento del COPASST' },
+        { id: '8', texto: 'Documentos que soportan el SG-SST' },
+        { id: '9', texto: 'Procedimiento para efectuar el diagnóstico de condiciones de salud' },
+        { id: '10', texto: 'Existencia de un plan para prevención y atención de emergencias' },
+        { id: '11', texto: 'Plan de capacitación en SST' },
+      ],
+    } satisfies ConfigChecklist,
+  },
+  {
+    codigo: 'SST-IND-04',
+    patron: 'plan',
+    config: {} satisfies ConfigPlan,
+  },
+  {
+    codigo: 'SST-IND-06',
+    patron: 'ratio',
+    config: { total_trabajadores: 10 } satisfies ConfigRatioAnual,
+  },
+  {
+    codigo: 'SST-IND-26',
+    patron: 'registro',
+    config: { dias_programados: 261 } satisfies ConfigRegistroAnual,
   },
 ]
