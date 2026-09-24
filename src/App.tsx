@@ -49,10 +49,12 @@ import {
   ROLES_VE_TAREAS,
   ROLES_VE_LICITACIONES,
   ROLES_VE_INDICADORES_SST,
+  ROLES_GESTIONA_EMPLEADOS,
 } from './types/sigp/permisos'
 import HorarioAsistencia from './pages/administrativa/HorarioAsistencia'
 import FacturacionPagos from './pages/administrativa/FacturacionPagos'
 import Proveedores from './pages/administrativa/Proveedores'
+import EmpleadosDirectos from './pages/administrativa/EmpleadosDirectos'
 import VerificacionContratistas from './pages/VerificacionContratistas'
 import Tareas from './pages/tareas/Tareas'
 
@@ -186,6 +188,8 @@ function ProtectedRoutes() {
         <Route path="/administrativa/facturacion" element={<ProtectedRoute rolesPermitidos={ROLES_VE_FACTURACION}><FacturacionPagos /></ProtectedRoute>} />
         {/* Módulo Compras (C1) — proveedores; solo gerencia_administrativa/admin */}
         <Route path="/administrativa/proveedores" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_COMPRAS}><Proveedores /></ProtectedRoute>} />
+        {/* Maestro de empleados directos (RRHH) — dato sensible, 3 roles */}
+        <Route path="/administrativa/empleados" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_EMPLEADOS} redirectTo="/sigp/panel"><EmpleadosDirectos /></ProtectedRoute>} />
         {/* #3 Horario y asistencia (07-ago) — reportes de reloj + ausentismos;
             todas las gerencias + admin (gerencia_administrativa opera). */}
         <Route path="/administrativa/horario" element={<ProtectedRoute rolesPermitidos={ROLES_VE_HORARIO} redirectTo="/sigp/panel"><HorarioAsistencia /></ProtectedRoute>} />
