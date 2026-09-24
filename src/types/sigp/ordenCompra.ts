@@ -33,7 +33,8 @@ export interface LineaOrdenCompra {
 }
 
 /** OC1 — bloque "ENTREGAR EN": dato de la ORDEN, no del proveedor (el
- *  formato real DC-FT-OC-00-19 pide dónde despachar ESTA compra). */
+ *  formato real DC-FT-OC-19 pide dónde despachar ESTA compra; el papel
+ *  trae impreso "00-19" — código corregido por GI, ver isoControl.ts). */
 export interface DespachoOC {
   direccion: string
   contacto: string
