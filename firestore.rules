@@ -1075,6 +1075,36 @@ service cloud.firestore {
       }
     }
 
+    // ── Maestro de empleados directos (RRHH) — dato sensible (nombre + cédula,
+    // Ley 1581). NO es la nómina de contratistas (contratistas/{id}/privado/nomina,
+    // otro frente). Lectura Y escritura solo para admin + gestion_integral +
+    // gerencia_administrativa (espejo de ROLES_GESTIONA_EMPLEADOS en permisos.ts);
+    // sst/tecnico/gerencia_general/roles SIGP quedan fuera hasta que el SIGP los
+    // pida. La baja es SOFT (update: fecha_retiro + activo=false). El delete
+    // físico queda solo para admin — decisión del dueño del módulo (p. ej. el
+    // derecho de supresión de la Ley 1581); la UI nunca lo invoca.
+    function gestionaEmpleados() {
+      return isAuthed() && rolActual() in ['admin', 'gestion_integral', 'gerencia_administrativa'];
+    }
+
+    match /empleados_directos/{empleadoId} {
+      allow read: if gestionaEmpleados();
+      // El alta nace vigente y con su auditoría completa (sin fecha_carga un
+      // update posterior fallaría al leer resource.data.fecha_carga).
+      allow create: if gestionaEmpleados()
+                    && request.resource.data.cargado_por == request.auth.uid
+                    && request.resource.data.actualizado_por == request.auth.uid
+                    && request.resource.data.fecha_carga is timestamp
+                    && request.resource.data.activo == true
+                    && request.resource.data.fecha_retiro == null;
+      // cargado_por y fecha_carga inmutables; el último editor queda firmado.
+      allow update: if gestionaEmpleados()
+                    && request.resource.data.cargado_por == resource.data.cargado_por
+                    && request.resource.data.fecha_carga == resource.data.fecha_carga
+                    && request.resource.data.actualizado_por == request.auth.uid;
+      allow delete: if isAuthed() && rolActual() == 'admin';
+    }
+
     // Módulo Tareas (14-ago): tareas con asignación y "balón en cancha".
     // Calco de ordenes_compra con TRES vías de update por `||`:
     //   asignador (editar/reasignar/anular — jamás cierra la tarea de otro)
