@@ -23,7 +23,6 @@ import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
 import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO, costoEjecutadoDe } from '../../types/sigp/proyecto'
-import { TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR } from '../../types/sigp/cotizacion'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import { esCoordenadaValida, urlVerificarEnMaps } from '../../utils/geo'
 
@@ -108,11 +107,6 @@ export default function ProyectoDetalleSigp() {
         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${ESTADO_PRY_COLOR[proyecto.estado]}`}>
           {ESTADO_PRY_LABEL[proyecto.estado]}
         </span>
-        {s.tipo_inversion && (
-          <span className={`inline-flex px-1.5 py-0.5 rounded text-[11px] font-semibold ${TIPO_INVERSION_COLOR[s.tipo_inversion]}`}>
-            {TIPO_INVERSION_LABEL[s.tipo_inversion]}
-          </span>
-        )}
         {/* Bloque D — reintento del espejo SST (upsert idempotente: no duplica) */}
         {puedeGestionar && idxEstado >= ESTADOS_PROYECTO.indexOf('en_ejecucion') && (
           <button

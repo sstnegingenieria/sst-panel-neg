@@ -10,7 +10,7 @@
 
 import type { Timestamp } from 'firebase/firestore'
 import { subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, GRUPO_OTROS_ID } from './cotizacion'
-import type { Cotizacion, VersionCotizacion, EsquemaTributario, TipoInversion } from './cotizacion'
+import type { Cotizacion, VersionCotizacion, EsquemaTributario } from './cotizacion'
 import { esCoordenadaValida } from '../../utils/geo'
 import type { CoordenadasSitio } from '../../utils/geo'
 
@@ -907,7 +907,6 @@ export interface SnapshotProyecto {
   coordenadas_sitio?: CoordenadasSitio
   valor_venta: number          // total de la versión aprobada (con impuestos)
   esquema_tributario: EsquemaTributario
-  tipo_inversion?: TipoInversion
   alcance: AlcanceGrupo[]
   total_items: number
 }
@@ -1079,7 +1078,7 @@ export const ventaInicialDe = (
  * caen en 'Otros' igual que allá.
  */
 export function construirSnapshotProyecto(
-  cotizacion: Pick<Cotizacion, 'asunto' | 'contacto' | 'tipo_inversion' | 'prospecto_nombre' | 'nombre_sitio' | 'codigo_sitio_cliente' | 'coordenadas_sitio'>,
+  cotizacion: Pick<Cotizacion, 'asunto' | 'contacto' | 'prospecto_nombre' | 'nombre_sitio' | 'codigo_sitio_cliente' | 'coordenadas_sitio'>,
   version: Pick<VersionCotizacion, 'items' | 'totales' | 'esquema' | 'modo_agrupacion' | 'actividades' | 'agrupador'>,
   clienteNombre?: string,
   clienteNit?: string,
@@ -1107,7 +1106,6 @@ export function construirSnapshotProyecto(
     ...(esCoordenadaValida(cotizacion.coordenadas_sitio) ? { coordenadas_sitio: cotizacion.coordenadas_sitio } : {}),
     valor_venta: version.totales.total,
     esquema_tributario: version.esquema,
-    ...(cotizacion.tipo_inversion ? { tipo_inversion: cotizacion.tipo_inversion } : {}),
     alcance: grupos
       .filter(g => (porGrupo.get(g.grupo_id) ?? 0) > 0)
       .map(g => ({ grupo: g.grupo_nombre, items: porGrupo.get(g.grupo_id) ?? 0, subtotal: g.subtotal })),

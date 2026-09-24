@@ -18,7 +18,6 @@ import {
   calcularTotales, valorTotalItem, estadoEfectivo, valorNegDe,
   ESTADO_COT_LABEL, ESTADO_COT_COLOR, ESQUEMA_LABEL, ESQUEMAS,
   asignarCodigosINP, esItemBloqueado, patchInstancia,
-  TIPOS_INVERSION, TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR,
   subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, GRUPO_OTROS_ID,
   conInstanciaIds, nuevaInstanciaId, sembrarActividadesDesdeCapitulos,
   PRESETS_FORMA_PAGO, PRESETS_TIEMPO_EJECUCION, PRESETS_GARANTIA, OBSERVACIONES_BASE,
@@ -26,7 +25,7 @@ import {
   totalDescuentosDe, observacionesConNotaDescuento, esVersionDeCambio,
   lineasIncompletas,
 } from '../../types/sigp/cotizacion'
-import type { ModoAgrupacion, Actividad, TipoInversion, TipoDescuento, ModoDescuento, DescuentoCotizacion } from '../../types/sigp/cotizacion'
+import type { ModoAgrupacion, Actividad, TipoDescuento, ModoDescuento, DescuentoCotizacion } from '../../types/sigp/cotizacion'
 import type { CatalogoItem } from '../../types/sigp/catalogo'
 import type { ItemCotizacion, EsquemaTributario, ConfigAIU, CondicionesCotizacion, APU } from '../../types/sigp/cotizacion'
 import ApuModal from '../../components/sigp/cotizaciones/ApuModal'
@@ -85,7 +84,6 @@ export default function CotizacionDetalleSigp() {
   const [modoAgr, setModoAgr] = useState<ModoAgrupacion>('capitulo')
   const [actividades, setActividades] = useState<Actividad[]>([])
   // 1.4B.d — tipo de inversión del padre
-  const [tipoInversion, setTipoInversion] = useState<TipoInversion | ''>('')
   // #2a — descuento global de la versión (dos modos combinables; texto crudo
   // en el estado, se parsea al calcular/persistir)
   const [descCdTipo, setDescCdTipo] = useState<TipoDescuento>('porcentaje')
@@ -114,11 +112,10 @@ export default function CotizacionDetalleSigp() {
   useEffect(() => {
     setAsunto(cotizacion?.asunto ?? '')
     setContactoNombre(cotizacion?.contacto ?? '')
-    setTipoInversion(cotizacion?.tipo_inversion ?? '')
     setNombreSitio(cotizacion?.nombre_sitio ?? '')
     setCodigoSitio(cotizacion?.codigo_sitio_cliente ?? '')
     setCoordenadasSitio(esCoordenadaValida(cotizacion?.coordenadas_sitio) ? cotizacion!.coordenadas_sitio! : null)
-  }, [cotizacion?.id, cotizacion?.asunto, cotizacion?.contacto, cotizacion?.tipo_inversion, cotizacion?.nombre_sitio, cotizacion?.codigo_sitio_cliente, cotizacion?.coordenadas_sitio]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cotizacion?.id, cotizacion?.asunto, cotizacion?.contacto, cotizacion?.nombre_sitio, cotizacion?.codigo_sitio_cliente, cotizacion?.coordenadas_sitio]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!version) return
@@ -496,7 +493,6 @@ export default function CotizacionDetalleSigp() {
         ...(esCoordenadaValida(coordenadasSitio)
           ? { coordenadas_sitio: coordenadasSitio }
           : esCoordenadaValida(cotizacion.coordenadas_sitio) ? { coordenadas_sitio: deleteField() } : {}),
-        tipo_inversion: tipoInversion || deleteField(),
         fecha_actualizacion: Timestamp.now(),
         ...(materializa ? {
           consecutivo: materializa.consecutivo,
@@ -701,11 +697,6 @@ export default function CotizacionDetalleSigp() {
         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${ESTADO_COT_COLOR[est]}`}>{ESTADO_COT_LABEL[est]}</span>
         {etiquetaVersion(cotizacion.version_activa) && <span className="text-sm text-gray-400">{etiquetaVersion(cotizacion.version_activa)}</span>}
         <span className="text-sm text-gray-600">· {origen}{cotizacion.es_licitacion && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 font-semibold">LICITACIÓN</span>}</span>
-        {cotizacion.tipo_inversion && !editable && (
-          <span className={`inline-flex px-1.5 py-0.5 rounded text-[11px] font-semibold ${TIPO_INVERSION_COLOR[cotizacion.tipo_inversion]}`}>
-            {TIPO_INVERSION_LABEL[cotizacion.tipo_inversion]}
-          </span>
-        )}
         {version?.pdf_url && (
           <span className="inline-flex items-center gap-1.5">
             <button onClick={descargarPdf} title={version.pdf_hash ? `SHA-256: ${version.pdf_hash.slice(0, 16)}…` : undefined}
@@ -947,16 +938,6 @@ export default function CotizacionDetalleSigp() {
                     <option value="capitulo">Capítulos</option>
                     <option value="actividad">Actividades</option>
                   </select>
-                  {/* Bloque 2 — solo clientes con el flag (o cotizaciones que ya
-                      traen el dato, para poder verlo/limpiarlo) */}
-                  {(cliente?.usa_tipo_inversion || cotizacion.tipo_inversion) && <>
-                    <label className="text-xs text-gray-500 ml-2">Inversión</label>
-                    <select value={tipoInversion} onChange={e => setTipoInversion(e.target.value as TipoInversion | '')}
-                      className="text-xs px-2 py-1.5 border border-gray-300 rounded-lg bg-white">
-                      <option value="">— Sin clasificar —</option>
-                      {TIPOS_INVERSION.map(t => <option key={t} value={t}>{TIPO_INVERSION_LABEL[t]}</option>)}
-                    </select>
-                  </>}
                 </>}
               </div>
               {puedeGestionar && <button onClick={() => setAnalisis(a => !a)}

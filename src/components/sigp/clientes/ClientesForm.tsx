@@ -9,7 +9,6 @@ export interface ClienteFormData {
   nombre: string
   nit: string
   estado: 'activo' | 'inactivo'
-  usa_tipo_inversion: boolean
   usa_preventivos: boolean
   /** C1.1: vocabulario controlado de contratos (alcance de LPUs). */
   contratos: string[]
@@ -39,7 +38,6 @@ interface FormState {
   nombre: string
   nit: string
   estado: 'activo' | 'inactivo'
-  usaTipoInversion: boolean
   usaPreventivos: boolean
   contratos: string[]
   contratoNuevo: string
@@ -53,7 +51,7 @@ const EMPTY_CONTACTO: ContactoRow = { nombre: '', cargo: '', email: '', telefono
 function toFormState(c: Cliente | null | undefined): FormState {
   if (!c) {
     return {
-      nombre: '', nit: '', estado: 'activo', usaTipoInversion: false, usaPreventivos: false,
+      nombre: '', nit: '', estado: 'activo', usaPreventivos: false,
       contratos: [], contratoNuevo: '',
       contactos: [{ ...EMPTY_CONTACTO }],
       esquema: 'iva_pleno',
@@ -65,7 +63,6 @@ function toFormState(c: Cliente | null | undefined): FormState {
     nombre: c.nombre,
     nit: c.nit,
     estado: c.estado,
-    usaTipoInversion: c.usa_tipo_inversion ?? false,
     usaPreventivos: c.usa_preventivos ?? false,
     contratos: c.contratos ?? [],
     contratoNuevo: '',
@@ -112,7 +109,6 @@ function toFormData(s: FormState): ClienteFormData {
     nombre: s.nombre.trim(),
     nit: s.nit.trim(),
     estado: s.estado,
-    usa_tipo_inversion: s.usaTipoInversion,
     usa_preventivos: s.usaPreventivos,
     contratos: s.contratos,
     contactos,
@@ -389,13 +385,6 @@ export default function ClientesForm({ isOpen, onClose, onSave, initial }: Clien
               </div>
             </div>
           )}
-          {/* Bloque 2 — solo con este flag el cotizador muestra el selector OPEX/CAPEX */}
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" checked={form.usaTipoInversion}
-              onChange={e => set('usaTipoInversion', e.target.checked)}
-              className="w-4 h-4 accent-brand-700" />
-            Clasifica contratos por tipo de inversión (OPEX/CAPEX — contratos tipo Claro)
-          </label>
           {/* Ruta B — el cliente de PREVENTIVOS (precio de matriz). Semántica
               singular: un solo cliente flaggeado activo a la vez. */}
           <label className="flex items-center gap-2 text-sm text-gray-700">

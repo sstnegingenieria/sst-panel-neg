@@ -35,7 +35,7 @@ const actividades: Actividad[] = [
 describe('construirSnapshotProyecto', () => {
   it('copia los datos de presentación y el valor de venta del total aprobado', () => {
     const s = construirSnapshotProyecto(
-      { asunto: 'Adecuaciones Ráquira', contacto: 'Ana Pérez', tipo_inversion: 'capex' },
+      { asunto: 'Adecuaciones Ráquira', contacto: 'Ana Pérez' },
       version({ esquema: 'aiu', totales: { costos_directos: 100, admin: 12, imprevistos: 3, utilidad: 8, iva: 2, total: 125 } as never }),
       'INGEMEC S.A.S.', '901.234.567-8',
     )
@@ -45,7 +45,6 @@ describe('construirSnapshotProyecto', () => {
     expect(s.contacto).toBe('Ana Pérez')
     expect(s.valor_venta).toBe(125)
     expect(s.esquema_tributario).toBe('aiu')
-    expect(s.tipo_inversion).toBe('capex')
   })
 
   it('cae al prospecto cuando no hay cliente y omite opcionales vacíos', () => {
@@ -56,7 +55,6 @@ describe('construirSnapshotProyecto', () => {
     expect(s.cliente).toBe('Prospecto SAS')
     expect(s.cliente_nit).toBeUndefined()
     expect(s.contacto).toBeUndefined()
-    expect(s.tipo_inversion).toBeUndefined()
   })
 
   it('coordenadas del sitio: válidas se congelan, inválidas/ausentes se omiten', () => {

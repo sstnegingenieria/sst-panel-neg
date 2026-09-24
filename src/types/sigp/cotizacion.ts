@@ -53,9 +53,6 @@ export interface SubtotalGrupo {
   subtotal: number             // Σ valor_total de sus ítems (redondeado a peso)
 }
 
-/** Clasificación de inversión para contratos tipo Claro (badge + filtro). */
-export type TipoInversion = 'opex' | 'capex'
-
 // ── Sub-tipos ─────────────────────────────────────────────────────────────────
 
 export interface Adjunto {
@@ -372,7 +369,10 @@ export interface Cotizacion {
   coordenadas_sitio?: CoordenadasSitio
 
   es_licitacion: boolean
-  tipo_inversion?: TipoInversion   // OPEX/CAPEX (contratos tipo Claro) — opcional
+  // `tipo_inversion` (OPEX/CAPEX, PR #34) se RETIRÓ en la tanda 5 · #3:
+  // censo de prod 24-sep — bandera apagada en los 16 clientes, 0/60
+  // cotizaciones y 0/59 proyectos con el campo. La clasificación opex/capex
+  // que SÍ vive es la `naturaleza` del alcance de LPU (C1.1) — otro dominio.
   estado: EstadoCotizacion     // borrador|enviada|aprobada|rechazada (vencida = derivada)
   version_activa: number       // nº de la versión activa (la última)
 
@@ -464,19 +464,6 @@ export const AGRUPADOR_LABEL: Record<AgrupadorItems, string> = {
 export const AGRUPADOR_SINGULAR: Record<AgrupadorItems, string> = {
   capitulos: 'Capítulo',
   actividades: 'Actividad',
-}
-
-export const TIPOS_INVERSION = ['opex', 'capex'] as const
-
-export const TIPO_INVERSION_LABEL: Record<TipoInversion, string> = {
-  opex: 'OPEX',
-  capex: 'CAPEX',
-}
-
-/** Badge en neutros de marca (clasificación, no estado). */
-export const TIPO_INVERSION_COLOR: Record<TipoInversion, string> = {
-  opex: 'bg-gray-100 text-gray-700',
-  capex: 'bg-brand-50 text-brand-700',
 }
 
 /**
