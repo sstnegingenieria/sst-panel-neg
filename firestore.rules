@@ -981,6 +981,20 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Indicadores SG-SST F2: datos fuente (bitácoras/checklist) de los indicadores
+    // con patron. registrado_por e indicador_id inmutables en update; delete solo
+    // admin (traza de auditoría). Los toggles de checklist envían registrado_por
+    // SOLO al crear (ver useIndicadorRegistros.marcarCriterioChecklist).
+    match /indicador_registros/{registroId} {
+      allow read: if veIndicadoresSst();
+      allow create: if gestionaIndicadoresSst()
+        && request.resource.data.registrado_por == request.auth.uid;
+      allow update: if gestionaIndicadoresSst()
+        && request.resource.data.registrado_por == resource.data.registrado_por
+        && request.resource.data.indicador_id == resource.data.indicador_id;
+      allow delete: if isAuthed() && rolActual() == 'admin';
+    }
+
     // ── Configuración de indicadores (Opción B, 07-ago): metas editables ──
     // Lectura: quien ve el tablero. Escritura: SOLO gerencia_general/admin.
     // Sin delete. Docs: configuracion/indicadores { meta_margen_pct } y
