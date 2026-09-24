@@ -122,31 +122,37 @@ async function emparejarTecnico(db, uid, userData, nominas) {
 }
 
 /** Trigger 1 — registro nuevo de la app. */
-const emparejarAlRegistrarse = onDocumentCreated('users/{uid}', async (event) => {
-  const data = event.data?.data();
-  if (!data || (data.rol ?? data.role ?? '') !== 'tecnico') return;
-  const db = admin.firestore();
-  const nominas = await leerNominas(db);
-  await emparejarTecnico(db, event.params.uid, data, nominas);
-});
+const emparejarAlRegistrarse = onDocumentCreated(
+  { document: 'users/{uid}', region: 'us-central1' },
+  async (event) => {
+    const data = event.data?.data();
+    if (!data || (data.rol ?? data.role ?? '') !== 'tecnico') return;
+    const db = admin.firestore();
+    const nominas = await leerNominas(db);
+    await emparejarTecnico(db, event.params.uid, data, nominas);
+  },
+);
 
 /** Trigger 2 — la nómina cambió: re-evaluar los técnicos NO verificados
  *  (y los verificados cuya nómina pudo retirarlos NO se degradan solos —
  *  la verificación otorgada es un hecho histórico; retirar de la nómina
  *  solo afecta emparejamientos futuros, como pactó el diseño). */
-const emparejarAlCargarNomina = onDocumentWritten('contratistas/{cid}/privado/{docId}', async (event) => {
-  if (event.params.docId !== 'nomina') return;
-  const db = admin.firestore();
-  const nominas = await leerNominas(db);
-  const tecnicos = await db.collection('users').where('rol', '==', 'tecnico').get();
-  let n = 0;
-  for (const t of tecnicos.docs) {
-    const data = t.data();
-    if (data.empleador_verificacion?.estado === 'verificado_nomina') continue;
-    if (await emparejarTecnico(db, t.id, data, nominas)) n++;
-  }
-  if (n > 0) logger.info(`nomina: re-emparejados ${n} técnicos tras carga de nómina`);
-});
+const emparejarAlCargarNomina = onDocumentWritten(
+  { document: 'contratistas/{cid}/privado/{docId}', region: 'us-central1' },
+  async (event) => {
+    if (event.params.docId !== 'nomina') return;
+    const db = admin.firestore();
+    const nominas = await leerNominas(db);
+    const tecnicos = await db.collection('users').where('rol', '==', 'tecnico').get();
+    let n = 0;
+    for (const t of tecnicos.docs) {
+      const data = t.data();
+      if (data.empleador_verificacion?.estado === 'verificado_nomina') continue;
+      if (await emparejarTecnico(db, t.id, data, nominas)) n++;
+    }
+    if (n > 0) logger.info(`nomina: re-emparejados ${n} técnicos tras carga de nómina`);
+  },
+);
 
 module.exports = {
   emparejarAlRegistrarse,
