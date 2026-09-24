@@ -28,9 +28,14 @@ const { FieldValue } = require('firebase-admin/firestore');
 const { logger } = require('firebase-functions/v2');
 
 // ── Normalización de cédula — PARIDAD con utils/contratistasNomina.ts ──────
-// Umbral 6–12 nombrado. ⚠ SALVEDAD EXTRANJEROS (pregunta abierta): un
-// documento con letras (pasaporte "AB123456", PPT) devuelve null — JAMÁS se
-// empareja por los dígitos sueltos. Paridad fijada por test cruzado.
+// Umbral 6–12 dígitos: SUPUESTO VIGENTE, no verdad permanente (confirmado
+// por Giovanny 24-sep-2026: hoy no hay trabajadores extranjeros entre el
+// personal de los contratistas). ⚠ Si algún día entra personal extranjero,
+// el emparejamiento por cédula numérica FALLARÍA EN SILENCIO — un pasaporte
+// normalizado podría coincidir con la cédula de otra persona — y este
+// normalizador necesita revisión. Mientras tanto, un documento con letras
+// (pasaporte "AB123456", PPT) devuelve null: JAMÁS se empareja por los
+// dígitos sueltos. Paridad fijada por test cruzado.
 const CEDULA_MIN_DIGITOS = 6;
 const CEDULA_MAX_DIGITOS = 12;
 
