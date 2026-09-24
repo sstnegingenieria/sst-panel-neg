@@ -8,7 +8,7 @@
 // puedeGestionarComprasUI.
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { ChangeEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { collection, getDocs, doc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../firebase/config'
@@ -17,9 +17,11 @@ import { toast } from '../../components/shared/Toast'
 import Modal from '../../components/shared/Modal'
 import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
 import { fmtMoney } from '../../utils/sigp/formato'
-import { puedeGestionarComprasUI } from '../../types/sigp/permisos'
+import { puedeGestionarComprasUI, puedeCrearOcUI } from '../../types/sigp/permisos'
 import { ESTADO_OC_LABEL, ESTADO_OC_COLOR, validarOcParaComprar } from '../../types/sigp/ordenCompra'
 import type { OrdenCompra, EstadoOrdenCompra } from '../../types/sigp/ordenCompra'
+import { ESTADO_PRY_LABEL } from '../../types/sigp/proyecto'
+import type { Proyecto } from '../../types/sigp/proyecto'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
@@ -52,7 +54,9 @@ const PILLS: { clave: Seccion; etiqueta: string }[] = [
 
 export default function OrdenesCompraSigp() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const puedeComprar = puedeGestionarComprasUI(user?.rol)
+  const puedeCrear = puedeCrearOcUI(user?.rol)
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([])
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState('')
@@ -183,6 +187,45 @@ export default function OrdenesCompraSigp() {
     } finally { setAplicandoId(null) }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // Tanda 5 · #4 — salida del callejón: "＋ Crear orden de compra" pregunta
+  // a qué proyecto y lleva DIRECTO a la sección de OCs de su ficha (con el
+  // formulario abierto vía ?oc=crear). El diseño no cambia — la OC se sigue
+  // creando en la ficha; esto solo le da camino a quien llega por el sidebar.
+  // Solo se ofrecen proyectos donde crear ES posible (cerrados fuera, con la
+  // razón dicha) — matiz de Giovanny: no cambiar un callejón por otro.
+  // ═══════════════════════════════════════════════════════════════════════
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerLoading, setPickerLoading] = useState(false)
+  const [pickerBusqueda, setPickerBusqueda] = useState('')
+  const [proyectosPicker, setProyectosPicker] = useState<Proyecto[]>([])
+
+  const abrirPicker = async () => {
+    setPickerOpen(true)
+    setPickerBusqueda('')
+    setPickerLoading(true)
+    try {
+      const snap = await getDocs(collection(db, 'proyectos'))
+      const datos = snap.docs.map(d => ({ id: d.id, ...d.data() }) as Proyecto)
+        .filter(p => p.estado !== 'cerrado')
+      datos.sort((a, b) => (b.fecha_creacion?.toMillis?.() ?? 0) - (a.fecha_creacion?.toMillis?.() ?? 0))
+      setProyectosPicker(datos)
+    } catch {
+      toast('Error al cargar los proyectos', 'error')
+      setPickerOpen(false)
+    } finally { setPickerLoading(false) }
+  }
+
+  const proyectosPickerFiltrados = useMemo(() => {
+    const q = pickerBusqueda.trim().toLowerCase()
+    if (!q) return proyectosPicker
+    return proyectosPicker.filter(p =>
+      p.consecutivo.toLowerCase().includes(q) ||
+      (p.snapshot?.cliente ?? '').toLowerCase().includes(q) ||
+      (p.snapshot?.nombre_sitio ?? '').toLowerCase().includes(q) ||
+      (p.snapshot?.asunto ?? '').toLowerCase().includes(q))
+  }, [proyectosPicker, pickerBusqueda])
+
   const conteo = useMemo(() => Object.fromEntries(
     PILLS.map(p => [p.clave, p.clave === 'todas' ? ordenes.length : ordenes.filter(o => o.estado === p.clave).length]),
   ) as Record<Seccion, number>, [ordenes])
@@ -199,14 +242,21 @@ export default function OrdenesCompraSigp() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div>
-        <p className="text-xs font-semibold tracking-wide text-brand-700 uppercase">SIGP · Compras · C2/C3</p>
-        <h1 className="text-2xl font-bold text-gray-800">Órdenes de compra</h1>
-        <p className="text-sm text-gray-500">
-          Crear, editar, emitir, aprobar y anular se hacen desde la ficha del proyecto. La
-          <b> compra</b> (valor real pagado + soporte) se registra aquí — es la cola de trabajo de
-          quien gestiona compras.
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-xs font-semibold tracking-wide text-brand-700 uppercase">SIGP · Compras · C2/C3</p>
+          <h1 className="text-2xl font-bold text-gray-800">Órdenes de compra</h1>
+          <p className="text-sm text-gray-500">
+            Cada OC vive en la ficha de su proyecto; la <b>compra</b> (valor real + soporte) se
+            registra aquí.
+          </p>
+        </div>
+        {puedeCrear && (
+          <button onClick={abrirPicker}
+            className="text-sm px-3 py-2 rounded-lg font-medium bg-brand-600 hover:bg-brand-700 text-white flex-shrink-0">
+            ＋ Crear orden de compra
+          </button>
+        )}
       </div>
 
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -302,6 +352,49 @@ export default function OrdenesCompraSigp() {
           </tbody>
         </table>
       </div>
+
+      {/* ── Modal: elegir proyecto para la nueva OC (tanda 5 · #4) ────── */}
+      <Modal
+        isOpen={pickerOpen}
+        title="Nueva orden de compra — ¿para qué proyecto?"
+        onClose={() => setPickerOpen(false)}
+        actions={[{ label: 'Cancelar', onClick: () => setPickerOpen(false), variant: 'secondary' }]}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">
+            La orden se crea en la ficha del proyecto — elige uno y te llevamos directo con el
+            formulario abierto.
+          </p>
+          <input value={pickerBusqueda} onChange={e => setPickerBusqueda(e.target.value)} autoFocus
+            placeholder="Buscar por PRY, cliente, sitio o asunto…"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+          {pickerLoading ? (
+            <p className="py-6 text-center text-sm text-gray-400">Cargando proyectos…</p>
+          ) : proyectosPickerFiltrados.length === 0 ? (
+            <p className="py-6 text-center text-sm text-gray-400">
+              {proyectosPicker.length === 0
+                ? 'No hay proyectos abiertos donde crear una orden.'
+                : 'Ningún proyecto coincide con la búsqueda.'}
+            </p>
+          ) : (
+            <div className="max-h-72 overflow-y-auto divide-y divide-gray-100 border border-gray-200 rounded-lg">
+              {proyectosPickerFiltrados.map(p => (
+                <button key={p.id} onClick={() => { setPickerOpen(false); navigate(`/sigp/proyectos/${p.id}?oc=crear`) }}
+                  className="w-full text-left px-3 py-2 hover:bg-brand-50 transition-colors">
+                  <span className="font-mono text-sm text-brand-700 font-semibold">{p.consecutivo}</span>
+                  <span className="ml-2 text-sm text-gray-700">{p.snapshot?.nombre_sitio || p.snapshot?.asunto || '—'}</span>
+                  <span className="block text-xs text-gray-400">
+                    {p.snapshot?.cliente} · {ESTADO_PRY_LABEL[p.estado] ?? p.estado}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] text-gray-400">
+            Los proyectos cerrados no admiten órdenes nuevas y no aparecen en esta lista.
+          </p>
+        </div>
+      </Modal>
 
       {/* ── Modal: Comprar (C3) — aprobada → comprada ─────────────────── */}
       <Modal

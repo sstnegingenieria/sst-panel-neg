@@ -10,10 +10,10 @@ import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
 import { useFirestore } from '../../../hooks/useFirestore'
 import { esCoordenadaValida } from '../../../utils/geo'
 import {
-  ESQUEMAS, ESQUEMA_LABEL, calcularTotales, TIPOS_INVERSION, TIPO_INVERSION_LABEL,
+  ESQUEMAS, ESQUEMA_LABEL, calcularTotales,
   PRESETS_FORMA_PAGO, PRESETS_TIEMPO_EJECUCION, PRESETS_GARANTIA, OBSERVACIONES_BASE,
 } from '../../../types/sigp/cotizacion'
-import type { EsquemaTributario, ConfigAIU, CondicionesCotizacion, TipoInversion } from '../../../types/sigp/cotizacion'
+import type { EsquemaTributario, ConfigAIU, CondicionesCotizacion } from '../../../types/sigp/cotizacion'
 import type { Cliente } from '../../../types/sigp/cliente'
 import type { Cotizacion } from '../../../types/sigp/cotizacion'
 import type { Solicitud } from '../../../types/sigp/solicitud'
@@ -36,7 +36,6 @@ interface FormState {
   clienteId: string
   prospectoNombre: string
   esLicitacion: boolean
-  tipoInversion: TipoInversion | ''
   esquema: EsquemaTributario
   aiuAdmin: string
   aiuImprev: string
@@ -50,7 +49,7 @@ interface FormState {
 }
 
 const inicial = (): FormState => ({
-  asunto: '', solicitudId: '', clienteId: '', prospectoNombre: '', esLicitacion: false, tipoInversion: '',
+  asunto: '', solicitudId: '', clienteId: '', prospectoNombre: '', esLicitacion: false,
   esquema: 'iva_pleno', aiuAdmin: '9', aiuImprev: '5', aiuUtil: '4', ivaPct: '19',
   formaPago: '', validezDias: '30', tiempoEjecucion: '', garantia: '', observaciones: OBSERVACIONES_BASE,
 })
@@ -189,9 +188,6 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes, 
       if (solVinculada?.nombre_sitio?.trim()) parentData.nombre_sitio = solVinculada.nombre_sitio.trim()
       if (solVinculada?.codigo_sitio_cliente?.trim()) parentData.codigo_sitio_cliente = solVinculada.codigo_sitio_cliente.trim()
       if (esCoordenadaValida(solVinculada?.coordenadas_sitio)) parentData.coordenadas_sitio = solVinculada!.coordenadas_sitio
-      // Bloque 2: el tipo de inversión solo aplica a clientes con el flag
-      if (form.tipoInversion && clientes.find(c => c.id === form.clienteId)?.usa_tipo_inversion)
-        parentData.tipo_inversion = form.tipoInversion
 
       const batch = writeBatch(db)
       batch.set(doc(db, 'cotizaciones', cotizacionId), parentData)
@@ -288,19 +284,6 @@ export default function CotizacionForm({ isOpen, onClose, onGuardado, clientes, 
             <input type="checkbox" checked={form.esLicitacion} onChange={e => set('esLicitacion', e.target.checked)} className="w-4 h-4 accent-brand-700" />
             Es licitación (el documento final es externo, se adjunta)
           </label>
-          {/* Bloque 2 — solo para clientes que clasifican por tipo de inversión
-              (flag usa_tipo_inversion en el cliente, ej. Claro) */}
-          {clientes.find(c => c.id === form.clienteId)?.usa_tipo_inversion && (
-            <SelectField
-              label="Tipo de inversión (OPEX/CAPEX — opcional)"
-              value={form.tipoInversion}
-              onChange={v => set('tipoInversion', v as TipoInversion | '')}
-              options={[
-                { value: '', label: '— Sin clasificar —' },
-                ...TIPOS_INVERSION.map(t => ({ value: t, label: TIPO_INVERSION_LABEL[t] })),
-              ]}
-            />
-          )}
         </div>
 
         {/* Esquema tributario */}

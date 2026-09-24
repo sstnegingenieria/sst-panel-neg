@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import type { Cotizacion } from '../../../types/sigp/cotizacion'
 import {
   ESTADO_COT_LABEL, ESTADO_COT_COLOR, estadoEfectivo,
-  TIPO_INVERSION_LABEL, TIPO_INVERSION_COLOR, diasDesdeEnvio, colorSeguimiento,
+  diasDesdeEnvio, colorSeguimiento,
 } from '../../../types/sigp/cotizacion'
 import { etiquetaVersion, fmtMoney } from '../../../utils/sigp/formato'
 
@@ -66,7 +66,6 @@ export default function CotizacionesTable({ cotizaciones, loading, clienteNombre
                   <td className="py-3 px-4 font-mono text-xs text-gray-700">
                     {c.consecutivo || <span className="text-gray-400 italic font-sans" title="El COT se asigna al diligenciar (no se queman consecutivos en pendientes)">sin código · pendiente</span>}
                     {c.es_licitacion && <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-50 text-violet-700">LIC</span>}
-                    {c.tipo_inversion && <span className={`ml-1 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold ${TIPO_INVERSION_COLOR[c.tipo_inversion]}`}>{TIPO_INVERSION_LABEL[c.tipo_inversion]}</span>}
                   </td>
                   <td className="py-3 px-4 font-medium text-gray-800">{origen(c, clienteNombres)}</td>
                   <td className="py-3 px-4 text-gray-600 max-w-[16rem] truncate" title={c.asunto}>{c.asunto || '—'}</td>

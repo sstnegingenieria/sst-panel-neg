@@ -37,10 +37,10 @@ export interface Cliente {
   nit: string
   contactos: Contacto[]
   estado: 'activo' | 'inactivo'   // soft-delete, coherente con contratistas SST
-  /** Bloque 2 (22-jul-2026): el cliente clasifica sus contratos por tipo de
-   *  inversión (OPEX/CAPEX — contratos tipo Claro). Solo con este flag el
-   *  cotizador muestra el selector. Ausente = false. */
-  usa_tipo_inversion?: boolean
+  // `usa_tipo_inversion` (Bloque 2, PR #34) se RETIRÓ en la tanda 5 · #3:
+  // nunca se activó en ningún cliente (censo de prod 24-sep) y Actividades
+  // cubrió el caso Claro. La clasificación opex/capex vigente es la
+  // `naturaleza` del alcance de LPU (C1.1).
   /** Ruta B (11-ago-2026, IHS→Vertis): el cliente opera PREVENTIVOS con
    *  precio de matriz (types/sigp/preventivos.ts). Reemplaza el viejo
    *  hardcode por nombre "ihs" del form de solicitudes. Ausente = false;

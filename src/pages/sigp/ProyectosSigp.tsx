@@ -21,6 +21,11 @@ export default function ProyectosSigp() {
   // P2-2: chips de sub-etapa FILTRABLES, no decorativos — "¿por qué este
   // proyecto no arranca?" se responde filtrando (condición de Giovanny).
   const [filtroSubEtapa, setFiltroSubEtapa] = useState<SubEtapaPreparacion | ''>('')
+  // Tanda 5 · #1: chips por CLIENTE con conteo (misma mecánica de los de
+  // sub-etapa). La lista sale de los proyectos que el usuario PUEDE VER (lo
+  // que las reglas dejaron leer), jamás de la colección `clientes` — solo
+  // aparecen clientes con proyectos. Compone en AND con los demás filtros.
+  const [filtroCliente, setFiltroCliente] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -46,11 +51,21 @@ export default function ProyectosSigp() {
     return c
   }, [proyectos])
 
+  const conteoClientes = useMemo(() => {
+    const c = new Map<string, number>()
+    for (const p of proyectos) {
+      const nombre = p.snapshot.cliente?.trim()
+      if (nombre) c.set(nombre, (c.get(nombre) ?? 0) + 1)
+    }
+    return [...c.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es', { sensitivity: 'base' }))
+  }, [proyectos])
+
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
     return proyectos.filter(p =>
       (!filtroEstado || p.estado === filtroEstado) &&
       (!filtroSubEtapa || subEtapaProyectoDe(p) === filtroSubEtapa) &&
+      (!filtroCliente || p.snapshot.cliente?.trim() === filtroCliente) &&
       (!q ||
         p.consecutivo.toLowerCase().includes(q) ||
         p.snapshot.cliente.toLowerCase().includes(q) ||
@@ -60,7 +75,7 @@ export default function ProyectosSigp() {
         (p.cotizacion_consecutivo ?? '').toLowerCase().includes(q) ||
         (p.solicitud_consecutivo ?? '').toLowerCase().includes(q)),
     )
-  }, [proyectos, filtroEstado, filtroSubEtapa, busqueda])
+  }, [proyectos, filtroEstado, filtroSubEtapa, filtroCliente, busqueda])
 
   if (!f2Enabled) {
     return (
@@ -96,6 +111,31 @@ export default function ProyectosSigp() {
             </select>
           </div>
         </div>
+
+        {/* Tanda 5 · #1 — chips por cliente (clic = filtrar, re-clic = quitar);
+            solo clientes con proyectos visibles, con conteo */}
+        {!loading && conteoClientes.length > 1 && (
+          <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-gray-100">
+            <span className="text-[11px] text-gray-400 uppercase tracking-wide mr-1">Cliente:</span>
+            {conteoClientes.map(([nombre, n]) => (
+              <button key={nombre}
+                onClick={() => setFiltroCliente(f => f === nombre ? '' : nombre)}
+                className={`text-[11px] px-2 py-0.5 rounded-full border font-medium transition-colors ${
+                  filtroCliente === nombre
+                    ? 'bg-brand-600 border-brand-600 text-white'
+                    : 'bg-white border-gray-300 text-gray-600 hover:border-brand-400 hover:text-brand-700'
+                }`}>
+                {nombre} · {n}
+              </button>
+            ))}
+            {filtroCliente && (
+              <button onClick={() => setFiltroCliente('')}
+                className="text-[11px] text-gray-400 hover:text-gray-600 underline underline-offset-2 ml-1">
+                quitar filtro
+              </button>
+            )}
+          </div>
+        )}
 
         {/* P2-2 · sub-etapas de preparación — chips FILTRABLES (clic = filtrar,
             re-clic = quitar): "¿por qué no arranca?" se responde aquí */}

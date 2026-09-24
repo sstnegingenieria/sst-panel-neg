@@ -35,7 +35,7 @@ const actividades: Actividad[] = [
 describe('construirSnapshotProyecto', () => {
   it('copia los datos de presentación y el valor de venta del total aprobado', () => {
     const s = construirSnapshotProyecto(
-      { asunto: 'Adecuaciones Ráquira', contacto: 'Ana Pérez', tipo_inversion: 'capex' },
+      { asunto: 'Adecuaciones Ráquira', contacto: 'Ana Pérez' },
       version({ esquema: 'aiu', totales: { costos_directos: 100, admin: 12, imprevistos: 3, utilidad: 8, iva: 2, total: 125 } as never }),
       'INGEMEC S.A.S.', '901.234.567-8',
     )
@@ -45,7 +45,6 @@ describe('construirSnapshotProyecto', () => {
     expect(s.contacto).toBe('Ana Pérez')
     expect(s.valor_venta).toBe(125)
     expect(s.esquema_tributario).toBe('aiu')
-    expect(s.tipo_inversion).toBe('capex')
   })
 
   it('cae al prospecto cuando no hay cliente y omite opcionales vacíos', () => {
@@ -56,7 +55,6 @@ describe('construirSnapshotProyecto', () => {
     expect(s.cliente).toBe('Prospecto SAS')
     expect(s.cliente_nit).toBeUndefined()
     expect(s.contacto).toBeUndefined()
-    expect(s.tipo_inversion).toBeUndefined()
   })
 
   it('coordenadas del sitio: válidas se congelan, inválidas/ausentes se omiten', () => {
@@ -268,5 +266,19 @@ describe('permisos de ingreso (F2.1.b)', () => {
       expect(PERMISOS_LABEL[e]).toBeTruthy()
       expect(PERMISOS_COLOR[e]).toMatch(/bg-/)
     }
+  })
+})
+
+// ── Tanda 5 · #5 — constancia de cargue de entregables ──────────────────────
+import { puedeDiligenciarEntregable } from '../proyecto'
+
+describe('puedeDiligenciarEntregable (constancia + fecha + periodo obligatorios)', () => {
+  it('los tres presentes → true', () => {
+    expect(puedeDiligenciarEntregable({ tieneArchivo: true, fecha: '2026-09-24', periodo: '2026-09' })).toBe(true)
+  })
+  it('sin constancia, sin fecha o sin periodo → false', () => {
+    expect(puedeDiligenciarEntregable({ tieneArchivo: false, fecha: '2026-09-24', periodo: '2026-09' })).toBe(false)
+    expect(puedeDiligenciarEntregable({ tieneArchivo: true, fecha: '  ', periodo: '2026-09' })).toBe(false)
+    expect(puedeDiligenciarEntregable({ tieneArchivo: true, fecha: '2026-09-24', periodo: '' })).toBe(false)
   })
 })

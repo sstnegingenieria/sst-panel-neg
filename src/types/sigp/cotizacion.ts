@@ -53,9 +53,6 @@ export interface SubtotalGrupo {
   subtotal: number             // Σ valor_total de sus ítems (redondeado a peso)
 }
 
-/** Clasificación de inversión para contratos tipo Claro (badge + filtro). */
-export type TipoInversion = 'opex' | 'capex'
-
 // ── Sub-tipos ─────────────────────────────────────────────────────────────────
 
 export interface Adjunto {
@@ -162,6 +159,42 @@ export interface ItemCotizacion {
 /** Valor NEG derivado: Matriz × factor, redondeado a peso. */
 export const valorNegDe = (valorMatriz: number, factor: number): number =>
   Math.round(valorMatriz * factor)
+
+// ── Guard de emisión (tanda 5 · #2) ─────────────────────────────────────────
+// Una cotización NO se envía con líneas incompletas: el envío es el ÚNICO
+// punto que genera el PDF (CotizacionAcciones.enviar), así que este guard
+// cubre PDF y estado a la vez. BLOQUEA, no advierte — misma familia del
+// guard de importación de LPU (C1.1): una validación que se puede saltar
+// deja de ser validación. No existe en el modelo el "ítem informativo": toda
+// línea es cobrable (el importador de LPU descarta los sin precio y el
+// esquema Matriz deriva siempre >0). El aviso histórico de F1.4-A ("se puede
+// guardar, pero completa los precios antes de enviar") queda EJECUTADO acá.
+
+export interface LineaIncompleta {
+  /** Cómo se le nombra la línea al usuario: código, o descripción corta, o nº. */
+  etiqueta: string
+  /** Qué le falta: 'descripción' | 'unidad' | 'cantidad' | 'precio'. */
+  faltas: string[]
+}
+
+/** Líneas que impiden EMITIR (enviar + PDF). [] = todo completo. */
+export function lineasIncompletas(items: ItemCotizacion[]): LineaIncompleta[] {
+  const out: LineaIncompleta[] = []
+  items.forEach((it, i) => {
+    const faltas: string[] = []
+    if (!it.descripcion?.trim()) faltas.push('descripción')
+    if (!it.unidad?.trim()) faltas.push('unidad')
+    if (!(it.cantidad > 0)) faltas.push('cantidad')
+    if (!(it.valor_unitario > 0)) faltas.push('precio')
+    if (faltas.length > 0) {
+      const desc = it.descripcion?.trim() ?? ''
+      const etiqueta = it.codigo?.trim()
+        || (desc ? (desc.length > 40 ? desc.slice(0, 40) + '…' : desc) : `línea ${i + 1}`)
+      out.push({ etiqueta, faltas })
+    }
+  })
+  return out
+}
 
 /** Porcentajes AIU (enteros). */
 export interface ConfigAIU {
@@ -336,7 +369,10 @@ export interface Cotizacion {
   coordenadas_sitio?: CoordenadasSitio
 
   es_licitacion: boolean
-  tipo_inversion?: TipoInversion   // OPEX/CAPEX (contratos tipo Claro) — opcional
+  // `tipo_inversion` (OPEX/CAPEX, PR #34) se RETIRÓ en la tanda 5 · #3:
+  // censo de prod 24-sep — bandera apagada en los 16 clientes, 0/60
+  // cotizaciones y 0/59 proyectos con el campo. La clasificación opex/capex
+  // que SÍ vive es la `naturaleza` del alcance de LPU (C1.1) — otro dominio.
   estado: EstadoCotizacion     // borrador|enviada|aprobada|rechazada (vencida = derivada)
   version_activa: number       // nº de la versión activa (la última)
 
@@ -428,19 +464,6 @@ export const AGRUPADOR_LABEL: Record<AgrupadorItems, string> = {
 export const AGRUPADOR_SINGULAR: Record<AgrupadorItems, string> = {
   capitulos: 'Capítulo',
   actividades: 'Actividad',
-}
-
-export const TIPOS_INVERSION = ['opex', 'capex'] as const
-
-export const TIPO_INVERSION_LABEL: Record<TipoInversion, string> = {
-  opex: 'OPEX',
-  capex: 'CAPEX',
-}
-
-/** Badge en neutros de marca (clasificación, no estado). */
-export const TIPO_INVERSION_COLOR: Record<TipoInversion, string> = {
-  opex: 'bg-gray-100 text-gray-700',
-  capex: 'bg-brand-50 text-brand-700',
 }
 
 /**

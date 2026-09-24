@@ -19,7 +19,7 @@ import {
 } from '../../../types/sigp/cotizacion'
 import { puedeGestionarProyectosUI } from '../../../types/sigp/permisos'
 import { etiquetaVersion, fmtMoney } from '../../../utils/sigp/formato'
-import type { Cotizacion, EstadoCotizacion, VersionCotizacion, SubtotalGrupo } from '../../../types/sigp/cotizacion'
+import type { Cotizacion, EstadoCotizacion, VersionCotizacion, SubtotalGrupo, LineaIncompleta } from '../../../types/sigp/cotizacion'
 import type { SnapshotProyecto } from '../../../types/sigp/proyecto'
 
 interface CotizacionAccionesProps {
@@ -30,6 +30,10 @@ interface CotizacionAccionesProps {
   guardarBorrador: () => Promise<boolean>
   /** Genera y sube el PDF de la versión congelada (1.4B.e). null = falló → el envío se aborta. */
   generarPdf: (fechaEmision: Date) => Promise<{ url: string; hash: string } | null>
+  /** Tanda 5 · #2 — líneas que impiden EMITIR (precio/unidad/cantidad/descripción
+   *  faltantes). Con elementos, el botón Enviar se bloquea Y enviar() rehúsa
+   *  (doble capa: una validación que se puede saltar no es validación). */
+  lineasIncompletas?: LineaIncompleta[]
   reload: () => Promise<void>
 }
 
@@ -39,7 +43,7 @@ interface CotizacionAccionesProps {
  *  - enviada   → Aprobar (evidencia OBLIGATORIA) | Rechazar (motivo obligatorio)
  *  - enviada/rechazada/vencida → Nueva versión (copia completa como borrador v+1)
  */
-export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestionar, guardarBorrador, generarPdf, reload }: CotizacionAccionesProps) {
+export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestionar, guardarBorrador, generarPdf, lineasIncompletas, reload }: CotizacionAccionesProps) {
   const { user } = useAuth()
   const [aplicando, setAplicando] = useState(false)
   const [modalRechazo, setModalRechazo] = useState(false)
@@ -133,7 +137,15 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
     ...(extra?.motivo ? { motivo: extra.motivo } : {}),
   })
 
+  const emisionBloqueada = (lineasIncompletas?.length ?? 0) > 0
+
   const enviar = async () => {
+    // Guard duro (tanda 5 · #2): además del botón deshabilitado — ningún
+    // camino emite con líneas incompletas.
+    if (emisionBloqueada) {
+      toast('No se puede enviar: hay líneas sin precio, unidad, cantidad o descripción', 'error')
+      return
+    }
     const etiq = etiquetaVersion(cotizacion.version_activa)
     if (!window.confirm(`¿Enviar ${etiq ? `la versión ${etiq} de ` : ''}${cotizacion.consecutivo}? El snapshot se congela, se genera el PDF y la cotización deja de ser editable.`)) return
     setAplicando(true)
@@ -321,11 +333,26 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {/* Tanda 5 · #2 — bloqueo de emisión: panel rojo con las líneas
+          ofensoras (familia del guard de importación de LPU) */}
+      {efectivo === 'borrador' && (puedeGestionar || (enCambio && puedeIniciarCambio)) && emisionBloqueada && (
+        <div className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+          <p className="font-semibold">⛔ No se puede enviar — {lineasIncompletas!.length} línea(s) incompleta(s):</p>
+          <ul className="mt-1 space-y-0.5">
+            {lineasIncompletas!.slice(0, 6).map((l, i) => (
+              <li key={i}><span className="font-mono">{l.etiqueta}</span> — falta {l.faltas.join(', ')}</li>
+            ))}
+            {lineasIncompletas!.length > 6 && <li>… y {lineasIncompletas!.length - 6} más</li>}
+          </ul>
+          <p className="mt-1 text-red-700">Completa las líneas (o retíralas) para emitir la cotización.</p>
+        </div>
+      )}
       {/* Enviar: comercial siempre; en versión de CAMBIO también proyectos
           (quien la inició debe poder completarla — la aprobación sigue
           siendo el control). */}
       {efectivo === 'borrador' && (puedeGestionar || (enCambio && puedeIniciarCambio)) && (
-        <button onClick={enviar} disabled={aplicando}
+        <button onClick={enviar} disabled={aplicando || emisionBloqueada}
+          title={emisionBloqueada ? 'Hay líneas incompletas — ver el detalle arriba' : undefined}
           className="text-sm px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 disabled:opacity-50">
           Enviar →
         </button>
