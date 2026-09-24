@@ -388,3 +388,12 @@ export const veIndicadoresSstUI = (rol: string | undefined) => en(rol, ROLES_VE_
 export const ROLES_GESTIONA_INDICADORES_SST: Rol[] = ['sst', 'admin', 'gestion_integral']
 export const puedeGestionarIndicadoresSstUI = (rol: string | undefined) =>
   en(rol, ROLES_GESTIONA_INDICADORES_SST)
+
+// ── Maestro de empleados directos (RRHH) ──
+// Colección `empleados_directos` — personal DIRECTO de NEG (NO la nómina de
+// contratistas). Datos personales (nombre + cédula, Ley 1581): la lectura se
+// limita a los MISMOS 3 roles que gestionan (espejo de gestionaEmpleados() en
+// firestore.rules). Los roles del SIGP que consuman el maestro (p. ej. Horario)
+// se agregan cuando el SIGP lo pida — no antes.
+export const ROLES_GESTIONA_EMPLEADOS: Rol[] = ['admin', 'gestion_integral', 'gerencia_administrativa']
+export const puedeGestionarEmpleadosUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_EMPLEADOS)
