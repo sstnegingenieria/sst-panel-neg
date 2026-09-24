@@ -1,15 +1,18 @@
-// Entregables IHS (SIGP F2.3 ligero) — solo proyectos PREVENTIVOS.
+// Entregables del cliente (SIGP F2.3 ligero) — solo proyectos PREVENTIVOS.
 //
-// Traza los 3 formatos que el equipo diligencia en los archivos de IHS y
-// sube a la app del cliente: aquí solo estado + copia adjunta + fecha + nota.
-// Los 3 son requisito para registrar la ENTREGA (gate en EjecucionProyecto).
+// Traza los 3 formatos que el equipo diligencia en los archivos del cliente
+// y sube a SU plataforma. Tanda 5 · #5: el adjunto es la CONSTANCIA del
+// cargue (un pantallazo alcanza) — no la copia del archivo, que ya custodia
+// el cliente (principio §5.10 del CLAUDE.md: no duplicar su sistema de
+// registro). Auditable: fecha + quién + periodo. Los 3 son requisito para
+// registrar la ENTREGA (gate en EjecucionProyecto).
 import { useState } from 'react'
 import { doc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
-import { ENTREGABLES_IHS, entregablesIhsFaltantes } from '../../../types/sigp/proyecto'
+import { ENTREGABLES_IHS, entregablesIhsFaltantes, puedeDiligenciarEntregable } from '../../../types/sigp/proyecto'
 import type { Proyecto, EntregableIhsKey } from '../../../types/sigp/proyecto'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
@@ -26,6 +29,7 @@ export default function EntregablesIhs({ proyecto, puedeGestionar, reload }: Pro
   const [abierto, setAbierto] = useState<EntregableIhsKey | null>(null)
   const [archivo, setArchivo] = useState<File | null>(null)
   const [fecha, setFecha] = useState('')
+  const [periodo, setPeriodo] = useState('')
   const [nota, setNota] = useState('')
   const [aplicando, setAplicando] = useState(false)
 
@@ -38,11 +42,13 @@ export default function EntregablesIhs({ proyecto, puedeGestionar, reload }: Pro
     setAbierto(key)
     setArchivo(null)
     setFecha(new Date().toISOString().slice(0, 10))
+    setPeriodo(proyecto.entregables_ihs?.[key]?.periodo ?? new Date().toISOString().slice(0, 7))
     setNota(proyecto.entregables_ihs?.[key]?.nota ?? '')
   }
 
   const guardar = async () => {
-    if (!abierto || !archivo) return   // el adjunto ES la evidencia — obligatorio
+    // La constancia + fecha + periodo son obligatorios (mismo predicado del botón).
+    if (!abierto || !archivo || !puedeDiligenciarEntregable({ tieneArchivo: !!archivo, fecha, periodo })) return
     setAplicando(true)
     try {
       const etiqueta = ENTREGABLES_IHS.find(e => e.key === abierto)!.label
@@ -55,16 +61,17 @@ export default function EntregablesIhs({ proyecto, puedeGestionar, reload }: Pro
           estado: 'diligenciado',
           adjunto_url: url, adjunto_nombre: archivo.name,
           fecha: Timestamp.fromDate(new Date(fecha + 'T12:00:00')),
+          periodo,
           ...(nota.trim() ? { nota: nota.trim() } : {}),
           por: user?.uid ?? '',
         },
         fecha_actualizacion: ahora,
         historial: arrayUnion({
           de: proyecto.estado, a: proyecto.estado, por: user?.uid ?? '', fecha: ahora,
-          motivo: `Entregable IHS diligenciado: ${etiqueta} (${archivo.name})`,
+          motivo: `Entregable cargado al cliente: ${etiqueta} — periodo ${periodo} (constancia: ${archivo.name})`,
         }),
       })
-      toast(`${etiqueta} adjuntado`)
+      toast(`${etiqueta} — cargue registrado`)
       setAbierto(null)
       await reload()
     } catch { toast('Error al adjuntar el entregable', 'error') } finally { setAplicando(false) }
@@ -81,8 +88,9 @@ export default function EntregablesIhs({ proyecto, puedeGestionar, reload }: Pro
         </span>
       </div>
       <p className="text-[11px] text-gray-400">
-        Los formatos se diligencian en los archivos del cliente y se suben a su plataforma; aquí queda la trazabilidad y la copia.
-        Los 3 son requisito para registrar la entrega.
+        Los formatos se diligencian en los archivos del cliente y se suben a su plataforma — el
+        cliente custodia el documento; aquí queda la <b>constancia del cargue</b> (un pantallazo
+        alcanza), con fecha, quién y periodo. Los 3 son requisito para registrar la entrega.
       </p>
 
       <ul className="space-y-2">
@@ -97,6 +105,7 @@ export default function EntregablesIhs({ proyecto, puedeGestionar, reload }: Pro
                 {hecho ? (
                   <>
                     <span className="text-xs text-gray-400">· {fFecha(item?.fecha)}</span>
+                    {item?.periodo && <span className="text-xs text-gray-400">· periodo {item.periodo}</span>}
                     {item?.adjunto_url && (
                       <a href={item.adjunto_url} target="_blank" rel="noreferrer"
                         className="text-xs text-brand-700 underline underline-offset-2">
@@ -110,7 +119,7 @@ export default function EntregablesIhs({ proyecto, puedeGestionar, reload }: Pro
                 {puedeGestionar && (
                   <button onClick={() => abrir(e.key)}
                     className="ml-auto text-xs px-2 py-0.5 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 font-medium">
-                    {hecho ? 'Reemplazar' : 'Adjuntar'}
+                    {hecho ? 'Reemplazar constancia' : 'Registrar cargue'}
                   </button>
                 )}
               </div>
@@ -119,14 +128,19 @@ export default function EntregablesIhs({ proyecto, puedeGestionar, reload }: Pro
               {abierto === e.key && (
                 <div className="mt-2 pl-6 space-y-2 bg-gray-50 rounded-lg p-3">
                   <label className="block text-xs text-gray-500">
-                    Archivo diligenciado (Excel del cliente)
-                    <input type="file" onChange={ev => setArchivo(ev.target.files?.[0] ?? null)}
+                    Constancia del cargue en la plataforma del cliente (pantallazo o PDF)
+                    <input type="file" accept="image/*,.pdf" onChange={ev => setArchivo(ev.target.files?.[0] ?? null)}
                       className="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
                   </label>
                   <div className="flex flex-wrap gap-2.5">
                     <label className="text-xs text-gray-500">
                       Fecha
                       <input type="date" value={fecha} onChange={ev => setFecha(ev.target.value)}
+                        className="mt-1 block text-sm px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                    </label>
+                    <label className="text-xs text-gray-500">
+                      Periodo
+                      <input type="month" value={periodo} onChange={ev => setPeriodo(ev.target.value)}
                         className="mt-1 block text-sm px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300" />
                     </label>
                     <label className="flex-1 min-w-[200px] text-xs text-gray-500">
@@ -136,7 +150,8 @@ export default function EntregablesIhs({ proyecto, puedeGestionar, reload }: Pro
                     </label>
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={guardar} disabled={!archivo || !fecha || aplicando}
+                    <button onClick={guardar}
+                      disabled={aplicando || !puedeDiligenciarEntregable({ tieneArchivo: !!archivo, fecha, periodo })}
                       className="text-sm px-3 py-1.5 rounded-lg font-medium bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50">
                       {aplicando ? 'Adjuntando…' : 'Guardar'}
                     </button>

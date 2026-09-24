@@ -268,3 +268,17 @@ describe('permisos de ingreso (F2.1.b)', () => {
     }
   })
 })
+
+// ── Tanda 5 · #5 — constancia de cargue de entregables ──────────────────────
+import { puedeDiligenciarEntregable } from '../proyecto'
+
+describe('puedeDiligenciarEntregable (constancia + fecha + periodo obligatorios)', () => {
+  it('los tres presentes → true', () => {
+    expect(puedeDiligenciarEntregable({ tieneArchivo: true, fecha: '2026-09-24', periodo: '2026-09' })).toBe(true)
+  })
+  it('sin constancia, sin fecha o sin periodo → false', () => {
+    expect(puedeDiligenciarEntregable({ tieneArchivo: false, fecha: '2026-09-24', periodo: '2026-09' })).toBe(false)
+    expect(puedeDiligenciarEntregable({ tieneArchivo: true, fecha: '  ', periodo: '2026-09' })).toBe(false)
+    expect(puedeDiligenciarEntregable({ tieneArchivo: true, fecha: '2026-09-24', periodo: '' })).toBe(false)
+  })
+})

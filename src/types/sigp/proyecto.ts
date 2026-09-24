@@ -813,11 +813,12 @@ export interface SoporteCliente {
 
 // ── Entregables IHS (F2.3 ligero) — solo proyectos preventivos ──
 //
-// Los 3 formatos IHS los diligencia el equipo en los ARCHIVOS DEL CLIENTE y
-// se suben a la app de IHS. El panel solo TRAZA que se hicieron y guarda
-// copia (adjunto a Storage) — sin capturar datos ni generar los Excel
-// (evita saturar el panel y la doble digitación). Los 3 son requisito para
-// registrar la ENTREGA del proyecto preventivo.
+// Los 3 formatos los diligencia el equipo en los ARCHIVOS DEL CLIENTE y se
+// suben a la plataforma del cliente. El panel solo TRAZA que se cargaron —
+// sin capturar datos ni generar los Excel (evita saturar el panel y la
+// doble digitación). Los 3 son requisito para registrar la ENTREGA del
+// proyecto preventivo. Desde la tanda 5 · #5 el adjunto es la CONSTANCIA
+// del cargue, no la copia del archivo (ver principio abajo).
 
 export const ENTREGABLES_IHS = [
   { key: 'inventario_antenas', label: 'Inventario de antenas' },
@@ -827,14 +828,31 @@ export const ENTREGABLES_IHS = [
 
 export type EntregableIhsKey = (typeof ENTREGABLES_IHS)[number]['key']
 
+// PRINCIPIO (tanda 5 · #5, CLAUDE.md §5.10 — cuarta aparición del patrón:
+// FAD de Claro, actas ANS, documentación de trabajadores, y estos
+// entregables): NO duplicar el sistema de registro del cliente. El cliente
+// es el custodio del documento (se sube a SU plataforma); aquí se guarda la
+// CONSTANCIA de haberlo cargado (un pantallazo alcanza) — no una segunda
+// copia que envejece y se desincroniza. Auditable: fecha + quién + periodo.
+// Entregables históricos con el Excel adjunto siguen válidos tal cual.
 export interface EntregableIhs {
   estado: 'pendiente' | 'diligenciado'
+  /** Constancia del cargue en la plataforma del cliente (pantallazo/PDF).
+   *  En registros pre-tanda-5 era la copia del Excel — sigue válida. */
   adjunto_url?: string
   adjunto_nombre?: string
   fecha?: Timestamp            // cuándo se diligenció
+  /** Periodo al que corresponde el cargue (YYYY-MM). Obligatorio al
+   *  diligenciar desde la tanda 5; ausente en históricos. */
+  periodo?: string
   nota?: string
   por?: string                 // uid
 }
+
+/** Guard del diligenciamiento (tanda 5 · #5): constancia + fecha + periodo,
+ *  los tres obligatorios. Mismo predicado en el botón y en guardar(). */
+export const puedeDiligenciarEntregable = (d: { tieneArchivo: boolean; fecha: string; periodo: string }): boolean =>
+  d.tieneArchivo && d.fecha.trim() !== '' && d.periodo.trim() !== ''
 
 /** Entregables IHS que faltan (labels) — [] cuando está 3/3. */
 export const entregablesIhsFaltantes = (

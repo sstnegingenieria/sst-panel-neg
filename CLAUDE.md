@@ -100,6 +100,7 @@ En PDFs generados (cotizaciones, actas, informes) usar `Plantilla_de_documento.d
 7. **Autenticación obligatoria**. Ninguna colección tiene reglas `allow read/write: if true`. Todo pasa por `request.auth.uid` y rol.
 8. **PDFs con hash**. Cada PDF generado guarda su hash SHA-256 en el documento correspondiente — evidencia de integridad.
 9. **Consulta, no gestión — patrón para módulos externos**. El módulo de proyectos **consume estados** de otros módulos (SGI, administrativa) pero **no los escribe**. Los dominios externos hoy incluyen: habilitación SST del contratista (escrita por SGI) y ciclo financiero de anticipos, pagos y facturación (escrita por gerencia administrativa). Ver reglas 7.2 y 7.6.
+10. **No duplicar el sistema de registro del cliente** (principio ganado a la cuarta aparición — FAD de Claro, actas ANS, documentación de los trabajadores, entregables de preventivos; escrito 24-sep-2026). Cuando el cliente ya es el custodio del documento, nosotros guardamos la **constancia de haberlo entregado** — no una segunda copia que envejece y se desincroniza. La constancia debe seguir sirviendo como registro auditable: **fecha, quién cargó y a qué periodo corresponde**. Un pantallazo alcanza.
 
 ---
 
