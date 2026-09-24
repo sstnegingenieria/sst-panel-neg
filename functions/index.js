@@ -37,6 +37,7 @@ const { sincronizarComprasProyectoDesdeOC, sincronizarComprasProyectoDesdeMenore
 const { crearProyectoAlAprobarCotizacion, crearProyectoAlAceptarPreventivo } = require('./crearProyecto');
 const { registrarEventoHorario } = require('./horario');
 const { sincronizarClaims, resincronizarClaims } = require('./claims');
+const { emparejarAlRegistrarse, emparejarAlCargarNomina } = require('./nomina');
 
 exports.generarConsecutivo = generarConsecutivo;
 exports.asignarObraAlPrincipal = asignarObraAlPrincipal;
@@ -48,3 +49,5 @@ exports.crearProyectoAlAceptarPreventivo = crearProyectoAlAceptarPreventivo;
 exports.registrarEventoHorario = registrarEventoHorario;
 exports.sincronizarClaims = sincronizarClaims;
 exports.resincronizarClaims = resincronizarClaims;
+exports.emparejarAlRegistrarse = emparejarAlRegistrarse;
+exports.emparejarAlCargarNomina = emparejarAlCargarNomina;
