@@ -11,6 +11,7 @@
 // - apruebaOcUI: aprueba emitidas; anula aprobadas.
 // - veOcUI: lectura (además gerencia_administrativa + gestion_integral).
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { ChangeEvent } from 'react'
 import {
   collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, arrayUnion, Timestamp,
@@ -94,7 +95,12 @@ interface Props {
 
 export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
   const { user } = useAuth()
-  const puedeCrear = puedeCrearOcUI(user?.rol)
+  // Tanda 5 · #4: un proyecto CERRADO no admite órdenes nuevas (cierra el
+  // hueco de que C2 no recibía el solo-lectura del bloque de cierre) — y el
+  // buscador de la bandeja solo ofrece proyectos donde crear ES posible,
+  // para que el atajo no lleve a otro callejón.
+  const proyectoCerrado = proyecto.estado === 'cerrado'
+  const puedeCrear = puedeCrearOcUI(user?.rol) && !proyectoCerrado
   const puedeAprobar = apruebaOcUI(user?.rol)
   const { obtener } = useConsecutivo()
   // Patrón SOL/VIS/COT/PRY: el consecutivo, si ya se consumió al emitir y el
@@ -135,6 +141,22 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
   const subtotalForm = subtotalDe(lineasFormDerivadas)
   const ivaForm = ivaTotalDe(lineasFormDerivadas)
   const totalForm = subtotalForm + ivaForm
+
+  // Tanda 5 · #4 — aterrizaje desde la bandeja: `?oc=crear` hace scroll a
+  // esta sección y abre el formulario de crear (el param se consume para que
+  // un F5 no lo re-dispare). Patrón `?pendientes=1` del pipeline (§48).
+  const seccionRef = useRef<HTMLDivElement>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const ocParamRef = useRef(false)
+  useEffect(() => {
+    if (ocParamRef.current || searchParams.get('oc') !== 'crear') return
+    ocParamRef.current = true
+    seccionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (puedeCrear) void abrirCrear()
+    const next = new URLSearchParams(searchParams)
+    next.delete('oc')
+    setSearchParams(next, { replace: true })
+  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const abrirCrear = async () => {
     setFormTarget(null)
@@ -474,7 +496,7 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
     [...oc.historial].reverse().find(h => h.a === 'anulada')?.motivo
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+    <div ref={seccionRef} className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 scroll-mt-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="font-semibold text-gray-800">Órdenes de compra</h2>
@@ -483,6 +505,9 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
             asigna al emitir, con la cotización del proveedor ya adjunta.
           </p>
         </div>
+        {proyectoCerrado && puedeCrearOcUI(user?.rol) && (
+          <p className="text-xs text-gray-400 flex-shrink-0">Proyecto cerrado — no admite órdenes nuevas.</p>
+        )}
         {puedeCrear && (
           <button onClick={abrirCrear}
             className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 flex-shrink-0">
