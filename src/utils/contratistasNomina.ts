@@ -36,13 +36,15 @@ export interface NominaContratista {
 }
 
 // ── Normalización de cédula ──────────────────────────────────────────────────
-// Umbral 6–12 dígitos: supuesto NOMBRADO del diseño (cédulas colombianas).
-// ⚠ SALVEDAD PLANTEADA (pregunta abierta para Giovanny, decisión 3 del
-// diseño): un documento EXTRANJERO (pasaporte "AB123456", PPT) contiene
-// letras — NO se normaliza a los dígitos sueltos (emparejaría por
-// casualidad): devuelve null y la fila/registro queda "sin cédula legible" /
-// "sin verificar". Cuando el negocio defina cómo tratar extranjeros, este
-// helper es el único punto que cambia. Fijado por test.
+// Umbral 6–12 dígitos: SUPUESTO VIGENTE, no verdad permanente (confirmado
+// por Giovanny 24-sep-2026: hoy no hay trabajadores extranjeros entre el
+// personal de los contratistas). ⚠ Si algún día entra personal extranjero,
+// el emparejamiento por cédula numérica FALLARÍA EN SILENCIO — un pasaporte
+// normalizado podría coincidir con la cédula de otra persona — y este
+// parser necesita revisión. Mientras tanto, un documento con letras
+// (pasaporte "AB123456", PPT) NO se normaliza a los dígitos sueltos:
+// devuelve null y la fila/registro queda "sin cédula legible" /
+// "sin verificar". Este helper es el único punto que cambia. Fijado por test.
 export const CEDULA_MIN_DIGITOS = 6
 export const CEDULA_MAX_DIGITOS = 12
 
