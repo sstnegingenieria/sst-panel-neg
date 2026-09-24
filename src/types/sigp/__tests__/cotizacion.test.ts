@@ -494,3 +494,46 @@ describe('reglas de estado', () => {
     expect(puedeNuevaVersion('aprobada')).toBe(false)
   })
 })
+
+// ── Tanda 5 · #2 — guard de emisión: lineasIncompletas ──────────────────────
+import { lineasIncompletas } from '../cotizacion'
+
+const itemCompleto = (extra: Partial<ItemCotizacion> = {}): ItemCotizacion => ({
+  origen: 'manual', codigo: 'X-1', descripcion: 'Canalización', unidad: 'm',
+  valor_unitario: 1000, cantidad: 2, valor_total: 2000, ...extra,
+})
+
+describe('lineasIncompletas (guard de emisión)', () => {
+  it('todo completo → []', () => {
+    expect(lineasIncompletas([itemCompleto(), itemCompleto({ codigo: 'X-2' })])).toEqual([])
+  })
+  it('precio en $0 bloquea — el caso histórico de F1.4-A que solo advertía', () => {
+    const r = lineasIncompletas([itemCompleto({ valor_unitario: 0 })])
+    expect(r).toHaveLength(1)
+    expect(r[0].faltas).toEqual(['precio'])
+    expect(r[0].etiqueta).toBe('X-1')
+  })
+  it('detecta cada falta por separado y las acumula en una misma línea', () => {
+    const r = lineasIncompletas([itemCompleto({ descripcion: ' ', unidad: '', cantidad: 0, valor_unitario: 0 })])
+    expect(r[0].faltas).toEqual(['descripción', 'unidad', 'cantidad', 'precio'])
+  })
+  it('cantidad negativa o NaN cuenta como falta de cantidad', () => {
+    expect(lineasIncompletas([itemCompleto({ cantidad: -1 })])[0].faltas).toEqual(['cantidad'])
+    expect(lineasIncompletas([itemCompleto({ cantidad: NaN })])[0].faltas).toEqual(['cantidad'])
+  })
+  it('sin código usa la descripción corta como etiqueta; sin nada, el número de línea', () => {
+    const r = lineasIncompletas([
+      itemCompleto(),
+      itemCompleto({ codigo: '', valor_unitario: 0 }),
+      itemCompleto({ codigo: '', descripcion: '', valor_unitario: 0 }),
+    ])
+    expect(r).toHaveLength(2)
+    expect(r[0].etiqueta).toBe('Canalización')
+    expect(r[1].etiqueta).toBe('línea 3')
+    expect(r[1].faltas).toContain('descripción')
+  })
+  it('la línea de transporte por zona NO se exceptúa: cantidad 0 (sin otras líneas) bloquea', () => {
+    const r = lineasIncompletas([itemCompleto({ es_transporte: true, cantidad: 0 })])
+    expect(r).toHaveLength(1)
+  })
+})

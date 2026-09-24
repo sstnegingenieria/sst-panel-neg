@@ -24,6 +24,7 @@ import {
   PRESETS_FORMA_PAGO, PRESETS_TIEMPO_EJECUCION, PRESETS_GARANTIA, OBSERVACIONES_BASE,
   esTransporteZona, esItemTransporte, aplicarTransporte, sugerirTransporteZona,
   totalDescuentosDe, observacionesConNotaDescuento, esVersionDeCambio,
+  lineasIncompletas,
 } from '../../types/sigp/cotizacion'
 import type { ModoAgrupacion, Actividad, TipoInversion, TipoDescuento, ModoDescuento, DescuentoCotizacion } from '../../types/sigp/cotizacion'
 import type { CatalogoItem } from '../../types/sigp/catalogo'
@@ -243,6 +244,9 @@ export default function CotizacionDetalleSigp() {
     && (puedeGestionar || (enCambio && puedeGestionarProyectosUI(user?.rol)))
   const capitulos = useMemo(() => [...new Set(items.map(i => i.capitulo?.trim()).filter(Boolean))] as string[], [items])
   const itemsCero = items.filter(i => (i.valor_unitario || 0) <= 0).length
+  // Tanda 5 · #2 — guard de emisión: se calcula sobre los ítems EN PANTALLA
+  // (lo que el envío va a congelar) y bloquea Enviar en CotizacionAcciones.
+  const incompletas = useMemo(() => lineasIncompletas(items), [items])
   const actividadesOrdenadas = useMemo(() => [...actividades].sort((a, b) => a.orden - b.orden), [actividades])
 
   // Grupos para render: misma fuente que los subtotales (subtotalesPorGrupo) —
@@ -792,6 +796,7 @@ export default function CotizacionDetalleSigp() {
         puedeGestionar={puedeGestionar}
         guardarBorrador={prepararEnvio}
         generarPdf={generarPdfEnvio}
+        lineasIncompletas={incompletas}
         reload={reload}
       />
 
@@ -1160,7 +1165,7 @@ export default function CotizacionDetalleSigp() {
                 })}
             </table>
           </div>
-          {editable && itemsCero > 0 && <p className="text-xs text-amber-700">⚠ {itemsCero} ítem(s) en $0 (resaltados). Se puede guardar, pero completa los precios antes de enviar.</p>}
+          {editable && itemsCero > 0 && <p className="text-xs text-amber-700">⚠ {itemsCero} ítem(s) en $0 (resaltados). Se puede guardar el borrador, pero el envío queda bloqueado hasta completar los precios.</p>}
         </div>
 
         {/* Totales: columna lateral fija; con análisis ON bajan a ancho completo (2 tarjetas) */}

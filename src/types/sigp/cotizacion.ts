@@ -163,6 +163,42 @@ export interface ItemCotizacion {
 export const valorNegDe = (valorMatriz: number, factor: number): number =>
   Math.round(valorMatriz * factor)
 
+// ── Guard de emisión (tanda 5 · #2) ─────────────────────────────────────────
+// Una cotización NO se envía con líneas incompletas: el envío es el ÚNICO
+// punto que genera el PDF (CotizacionAcciones.enviar), así que este guard
+// cubre PDF y estado a la vez. BLOQUEA, no advierte — misma familia del
+// guard de importación de LPU (C1.1): una validación que se puede saltar
+// deja de ser validación. No existe en el modelo el "ítem informativo": toda
+// línea es cobrable (el importador de LPU descarta los sin precio y el
+// esquema Matriz deriva siempre >0). El aviso histórico de F1.4-A ("se puede
+// guardar, pero completa los precios antes de enviar") queda EJECUTADO acá.
+
+export interface LineaIncompleta {
+  /** Cómo se le nombra la línea al usuario: código, o descripción corta, o nº. */
+  etiqueta: string
+  /** Qué le falta: 'descripción' | 'unidad' | 'cantidad' | 'precio'. */
+  faltas: string[]
+}
+
+/** Líneas que impiden EMITIR (enviar + PDF). [] = todo completo. */
+export function lineasIncompletas(items: ItemCotizacion[]): LineaIncompleta[] {
+  const out: LineaIncompleta[] = []
+  items.forEach((it, i) => {
+    const faltas: string[] = []
+    if (!it.descripcion?.trim()) faltas.push('descripción')
+    if (!it.unidad?.trim()) faltas.push('unidad')
+    if (!(it.cantidad > 0)) faltas.push('cantidad')
+    if (!(it.valor_unitario > 0)) faltas.push('precio')
+    if (faltas.length > 0) {
+      const desc = it.descripcion?.trim() ?? ''
+      const etiqueta = it.codigo?.trim()
+        || (desc ? (desc.length > 40 ? desc.slice(0, 40) + '…' : desc) : `línea ${i + 1}`)
+      out.push({ etiqueta, faltas })
+    }
+  })
+  return out
+}
+
 /** Porcentajes AIU (enteros). */
 export interface ConfigAIU {
   admin: number
