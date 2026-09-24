@@ -21,10 +21,11 @@ export default function ProyectosSigp() {
   // P2-2: chips de sub-etapa FILTRABLES, no decorativos — "¿por qué este
   // proyecto no arranca?" se responde filtrando (condición de Giovanny).
   const [filtroSubEtapa, setFiltroSubEtapa] = useState<SubEtapaPreparacion | ''>('')
-  // Tanda 5 · #1: chips por CLIENTE con conteo (misma mecánica de los de
-  // sub-etapa). La lista sale de los proyectos que el usuario PUEDE VER (lo
-  // que las reglas dejaron leer), jamás de la colección `clientes` — solo
-  // aparecen clientes con proyectos. Compone en AND con los demás filtros.
+  // Tanda 5 · #1 (rev. 24-sep: desplegable, no chips — misma forma que el
+  // filtro de estados). La lista sale de los proyectos que el usuario PUEDE
+  // VER (lo que las reglas dejaron leer), jamás de la colección `clientes` —
+  // solo clientes con proyectos, con conteo dentro de la opción. Compone en
+  // AND con estado + sub-etapa + búsqueda.
   const [filtroCliente, setFiltroCliente] = useState('')
 
   const load = useCallback(async () => {
@@ -104,6 +105,11 @@ export default function ProyectosSigp() {
             <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
               placeholder="Buscar por PRY, cliente, asunto o COT…"
               className="text-sm px-3 py-1.5 border border-gray-300 rounded-lg w-64 focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            <select value={filtroCliente} onChange={e => setFiltroCliente(e.target.value)}
+              className="text-sm px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300">
+              <option value="">Todos los clientes</option>
+              {conteoClientes.map(([nombre, n]) => <option key={nombre} value={nombre}>{nombre} ({n})</option>)}
+            </select>
             <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}
               className="text-sm px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300">
               <option value="">Todos los estados</option>
@@ -111,31 +117,6 @@ export default function ProyectosSigp() {
             </select>
           </div>
         </div>
-
-        {/* Tanda 5 · #1 — chips por cliente (clic = filtrar, re-clic = quitar);
-            solo clientes con proyectos visibles, con conteo */}
-        {!loading && conteoClientes.length > 1 && (
-          <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-gray-100">
-            <span className="text-[11px] text-gray-400 uppercase tracking-wide mr-1">Cliente:</span>
-            {conteoClientes.map(([nombre, n]) => (
-              <button key={nombre}
-                onClick={() => setFiltroCliente(f => f === nombre ? '' : nombre)}
-                className={`text-[11px] px-2 py-0.5 rounded-full border font-medium transition-colors ${
-                  filtroCliente === nombre
-                    ? 'bg-brand-600 border-brand-600 text-white'
-                    : 'bg-white border-gray-300 text-gray-600 hover:border-brand-400 hover:text-brand-700'
-                }`}>
-                {nombre} · {n}
-              </button>
-            ))}
-            {filtroCliente && (
-              <button onClick={() => setFiltroCliente('')}
-                className="text-[11px] text-gray-400 hover:text-gray-600 underline underline-offset-2 ml-1">
-                quitar filtro
-              </button>
-            )}
-          </div>
-        )}
 
         {/* P2-2 · sub-etapas de preparación — chips FILTRABLES (clic = filtrar,
             re-clic = quitar): "¿por qué no arranca?" se responde aquí */}

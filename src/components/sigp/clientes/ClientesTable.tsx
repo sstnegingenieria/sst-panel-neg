@@ -90,8 +90,10 @@ export default function ClientesTable({
                     <span className="text-gray-600 font-mono text-xs">{c.nit || '—'}</span>
                   </td>
                   <td className="py-3 px-4">
-                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${esquemaBadge[c.condiciones_comerciales.esquema_impuestos]}`}>
-                      {esquemaLabel[c.condiciones_comerciales.esquema_impuestos]}
+                    {/* Guard: un doc sin condiciones_comerciales no debe dejar la
+                        página en blanco (default iva_pleno, como pipeline.ts). */}
+                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${esquemaBadge[c.condiciones_comerciales?.esquema_impuestos ?? 'iva_pleno']}`}>
+                      {esquemaLabel[c.condiciones_comerciales?.esquema_impuestos ?? 'iva_pleno']}
                     </span>
                   </td>
                   <td className="py-3 px-4">
