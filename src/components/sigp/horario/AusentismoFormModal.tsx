@@ -2,7 +2,14 @@
 // soporte (patrón proveedores/liquidación) porque la ruta de Storage lo
 // necesita; el detalle médico (sub-doc privado/detalle) se escribe DESPUÉS
 // del doc principal y solo si hay texto y el rol gestiona horario.
-import { useEffect, useState } from 'react'
+//
+// El empleado se elige del maestro `empleados_directos` (24-sep, integración
+// Ausentismo) — ya no es texto libre. "Un hecho, un lugar": el indicador
+// SG-SST de Ausentismo (SST-IND-26) se auto-alimenta desde esta colección vía
+// CF, y necesita una identidad estable, no un nombre tecleado. `gestionaHorario()`
+// (gerencia_administrativa+admin) ya es subconjunto de los roles que leen
+// `empleados_directos` — sin cambio de reglas.
+import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { Timestamp, collection, doc, setDoc } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
@@ -10,9 +17,10 @@ import { db, storage } from '../../../firebase/config'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import SelectField from '../../shared/SelectField'
-import TextField from '../../shared/TextField'
 import { TIPOS_AUSENTISMO, TIPO_AUSENTISMO_LABEL } from '../../../types/sigp/horario'
 import type { TipoAusentismo } from '../../../types/sigp/horario'
+import { useEmpleadosDirectos } from '../../../hooks/useEmpleadosDirectos'
+import type { EmpleadoDirecto } from '../../../types/empleadoDirecto'
 
 interface Props {
   isOpen: boolean
@@ -28,7 +36,10 @@ function extensionDe(file: File): string {
 }
 
 export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGestionar, userUid }: Props) {
-  const [empleadoNombre, setEmpleadoNombre] = useState('')
+  const { cargar: cargarEmpleados } = useEmpleadosDirectos()
+  const [empleados, setEmpleados] = useState<EmpleadoDirecto[]>([])
+  const [cargandoEmpleados, setCargandoEmpleados] = useState(false)
+  const [empleadoId, setEmpleadoId] = useState('')
   const [tipo, setTipo] = useState<TipoAusentismo>('permiso')
   const [fechaInicio, setFechaInicio] = useState('')
   const [fechaFin, setFechaFin] = useState('')
@@ -41,18 +52,28 @@ export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGes
 
   useEffect(() => {
     if (!isOpen) return
-    setEmpleadoNombre(''); setTipo('permiso'); setFechaInicio(''); setFechaFin('')
+    setEmpleadoId(''); setTipo('permiso'); setFechaInicio(''); setFechaFin('')
     setDescripcion(''); setArchivo(null); setDetalleAbierto(false)
     setDiagnostico(''); setObservaciones('')
-  }, [isOpen])
+    setCargandoEmpleados(true)
+    cargarEmpleados()
+      .then(lista => setEmpleados(lista.filter(e => e.activo)))
+      .catch(() => toast('No se pudo cargar el listado de empleados', 'error'))
+      .finally(() => setCargandoEmpleados(false))
+  }, [isOpen, cargarEmpleados])
+
+  const empleadoSeleccionado = useMemo(
+    () => empleados.find(e => e.id === empleadoId) ?? null,
+    [empleados, empleadoId],
+  )
 
   const onArchivo = (e: ChangeEvent<HTMLInputElement>) => setArchivo(e.target.files?.[0] ?? null)
 
   const fechasValidas = fechaInicio !== '' && fechaFin !== '' && fechaFin >= fechaInicio
-  const valido = empleadoNombre.trim() !== '' && fechasValidas && archivo !== null
+  const valido = empleadoSeleccionado !== null && fechasValidas && archivo !== null
 
   const guardar = async () => {
-    if (!valido || !archivo) return
+    if (!valido || !archivo || !empleadoSeleccionado) return
     setGuardando(true)
     try {
       const id = doc(collection(db, 'ausentismos')).id
@@ -61,7 +82,8 @@ export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGes
       const soporte_url = await getDownloadURL(archivoRef)
       const ahora = Timestamp.now()
       await setDoc(doc(db, 'ausentismos', id), {
-        empleado_nombre: empleadoNombre.trim(),
+        empleado_id: empleadoSeleccionado.id,
+        empleado_nombre: empleadoSeleccionado.nombre,
         tipo,
         fecha_inicio: Timestamp.fromDate(new Date(fechaInicio + 'T12:00:00')),
         fecha_fin: Timestamp.fromDate(new Date(fechaFin + 'T12:00:00')),
@@ -97,8 +119,15 @@ export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGes
       ]}
     >
       <div className="space-y-4">
-        <TextField label="Nombre del empleado" value={empleadoNombre} onChange={setEmpleadoNombre}
-          required placeholder="Nombre completo" />
+        <SelectField label="Empleado" value={empleadoId} onChange={setEmpleadoId} required
+          disabled={cargandoEmpleados}
+          placeholder={cargandoEmpleados ? 'Cargando…' : 'Selecciona un empleado'}
+          options={empleados.map(e => ({ value: e.id, label: e.nombre }))} />
+        {!cargandoEmpleados && empleados.length === 0 && (
+          <p className="text-xs text-amber-600">
+            No hay empleados activos en el maestro. Pide a RRHH que lo cargue en Empleados directos antes de registrar el ausentismo.
+          </p>
+        )}
         <SelectField label="Tipo" value={tipo} onChange={v => setTipo(v as TipoAusentismo)} required
           options={TIPOS_AUSENTISMO.map(t => ({ value: t, label: TIPO_AUSENTISMO_LABEL[t] }))} />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -577,9 +577,10 @@ export const SEED_PATRONES: { codigo: string; patron: PatronIndicador; config: C
     patron: 'ratio',
     config: { total_trabajadores: 10 } satisfies ConfigRatioAnual,
   },
-  {
-    codigo: 'SST-IND-26',
-    patron: 'registro',
-    config: { dias_programados: 261 } satisfies ConfigRegistroAnual,
-  },
+  // SST-IND-26 (Ausentismo) SALIÓ de aquí (24-sep, integración Horario): ya
+  // no tiene bitácora manual — se auto-alimenta desde `ausentismos` +
+  // `empleados_directos` vía la CF `indicadorAusentismo.js` (functions/),
+  // que escribe directo en `indicador_mediciones`. Un doc ya sembrado con
+  // `patron:'registro'` no se limpia solo por retirarlo de este array
+  // (`sembrarPatronesSiFalta` es aditiva) — usa `retirarPatronSiExiste`.
 ]
