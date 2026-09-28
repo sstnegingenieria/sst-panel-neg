@@ -898,8 +898,14 @@ service cloud.firestore {
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['cierre_directa'])
                 || resource.data.get('tipo', '') == 'administracion_directa')
             && !fijaAprobacionPreliq()
+            // 28-sep (lo atrapó la batería del cierre anticipado): el guard
+            // viejo impedía CREAR un anticipo pero no RETIRARLO — un gestor
+            // podía borrar el giro registrado sin traza (y vaciar el
+            // incurrido del cierre por la puerta de atrás). Ahora la
+            // PRESENCIA del anticipo se conserva en ambas direcciones:
+            // crear y anular son de gerencia (patchCorregirAnticipo).
             && (('anticipo' in resource.data.get('preliquidacion', {}).keys())
-                || !('anticipo' in request.resource.data.get('preliquidacion', {}).keys()))
+                == ('anticipo' in request.resource.data.get('preliquidacion', {}).keys()))
             && (request.resource.data.get('estado', '') != 'liquidada'
                 || resource.data.get('tipo', '') == 'administracion_directa'))
           ||

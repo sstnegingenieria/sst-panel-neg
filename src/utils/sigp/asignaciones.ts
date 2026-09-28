@@ -6,7 +6,7 @@
 // atómico). La UI no improvisa writes: todo pasa por los builders puros de
 // types/sigp/asignacion.ts.
 import {
-  collection, doc, getDocs, writeBatch, deleteField, arrayUnion, Timestamp,
+  collection, doc, getDoc, getDocs, writeBatch, deleteField, arrayUnion, Timestamp,
 } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import {
@@ -104,6 +104,16 @@ export async function ejecutarCierreAnticipado(
 ): Promise<CierreAnticipado['incurrido'] | null> {
   const r = patchCancelarProyecto(p, asigs, comprasCf, datos, uid, Timestamp.now())
   if (!r) return null
+  // La anotación en la cotización es COSMÉTICA y el cierre es lo importante:
+  // un enlace roto (cotización inexistente) no puede tumbar el batch entero
+  // (update sobre doc inexistente = NOT_FOUND de TODO el batch — lo atrapó
+  // el E2E). Se verifica existencia antes; si falta, se omite con warn.
+  let anotarCotizacion = false
+  if (p.origen !== 'preventivo' && p.cotizacion_id) {
+    try { anotarCotizacion = (await getDoc(doc(db, 'cotizaciones', p.cotizacion_id))).exists() }
+    catch { anotarCotizacion = false }
+    if (!anotarCotizacion) console.warn(`cierre anticipado: cotización ${p.cotizacion_id} no legible — se omite la anotación`)
+  }
   const batch = writeBatch(db)
   for (const c of r.cancelaciones) {
     batch.update(doc(db, 'proyectos', p.id, 'asignaciones', c.id), {
@@ -115,7 +125,7 @@ export async function ejecutarCierreAnticipado(
     resumen_asignaciones: r.resumen,
     historial: arrayUnion(r.entradaHistorial),
   })
-  if (p.origen !== 'preventivo' && p.cotizacion_id) {
+  if (anotarCotizacion && p.cotizacion_id) {
     batch.update(doc(db, 'cotizaciones', p.cotizacion_id), {
       proyecto_cancelado: { fecha: Timestamp.now(), proyecto_consecutivo: p.consecutivo },
     })
