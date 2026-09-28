@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore'
+import { addDoc, collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useFirestore } from './useFirestore'
 import { derivarNumDen } from '../utils/indicadoresRegistros'
@@ -172,6 +172,24 @@ export function useIndicadorRegistros() {
     return escritos
   }, [update])
 
+  /**
+   * Retira `patron`/`config` de un indicador ya sembrado que salió de
+   * `SEED_PATRONES` (ej. SST-IND-26 al pasar a auto-alimentado por CF) — sin
+   * esto quedaría con un `patron:'registro'` fantasma que ya nadie mantiene
+   * (`sembrarPatronesSiFalta` es aditiva, nunca lo habría limpiado solo).
+   * No borra `indicador_registros`; eso es responsabilidad de quien retira
+   * el patrón, sobre datos que audite antes de tocar.
+   */
+  const retirarPatronSiExiste = useCallback(async (indicador: Pick<Indicador, 'id' | 'patron'>) => {
+    if (!indicador.patron) return false
+    await updateDoc(doc(db, 'indicadores_sst', indicador.id), {
+      patron: deleteField(),
+      config: deleteField(),
+      fecha_actualizacion: Timestamp.now(),
+    })
+    return true
+  }, [])
+
   return {
     cargarRegistros,
     agregarRegistro,
@@ -182,5 +200,6 @@ export function useIndicadorRegistros() {
     actualizarConfigIndicador,
     sembrarReferencia2025SiFalta,
     sembrarPatronesSiFalta,
+    retirarPatronSiExiste,
   }
 }

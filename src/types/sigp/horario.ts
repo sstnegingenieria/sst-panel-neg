@@ -134,6 +134,12 @@ export type TipoAusentismo = 'incapacidad' | 'permiso' | 'justificacion' | 'vaca
 
 export interface Ausentismo {
   id: string
+  /** Vínculo al maestro `empleados_directos` — fuente para el indicador SG-SST
+   *  de Ausentismo (SST-IND-26, auto-alimentado por CF). Los registros nuevos
+   *  siempre lo traen; los históricos pre-maestro no. */
+  empleado_id?: string
+  /** Legacy: apuntaba a `users` (la cuenta del panel), NO al maestro. Se
+   *  conserva por compatibilidad con registros anteriores a `empleado_id`. */
   empleado_uid?: string
   empleado_nombre: string
   tipo: TipoAusentismo

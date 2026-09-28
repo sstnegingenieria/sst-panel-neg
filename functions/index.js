@@ -38,6 +38,7 @@ const { crearProyectoAlAprobarCotizacion, crearProyectoAlAceptarPreventivo } = r
 const { registrarEventoHorario } = require('./horario');
 const { sincronizarClaims, resincronizarClaims } = require('./claims');
 const { emparejarAlRegistrarse, emparejarAlCargarNomina } = require('./nomina');
+const { recalcularAlEscribirAusentismo, recalcularAlEscribirEmpleado } = require('./indicadorAusentismo');
 
 exports.generarConsecutivo = generarConsecutivo;
 exports.asignarObraAlPrincipal = asignarObraAlPrincipal;
@@ -51,3 +52,5 @@ exports.sincronizarClaims = sincronizarClaims;
 exports.resincronizarClaims = resincronizarClaims;
 exports.emparejarAlRegistrarse = emparejarAlRegistrarse;
 exports.emparejarAlCargarNomina = emparejarAlCargarNomina;
+exports.recalcularAlEscribirAusentismo = recalcularAlEscribirAusentismo;
+exports.recalcularAlEscribirEmpleado = recalcularAlEscribirEmpleado;
