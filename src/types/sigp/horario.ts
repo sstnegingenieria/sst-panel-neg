@@ -132,6 +132,21 @@ export function fmtDuracion(ms: number): string {
 
 export type TipoAusentismo = 'incapacidad' | 'permiso' | 'justificacion' | 'vacaciones' | 'otro'
 
+/**
+ * Origen de la incapacidad (24-sep, pedido de Ingrid/GI) — eje ORTOGONAL a
+ * `tipo`, no un sub-tipo: `tipo` dice qué clase de ausencia es (flujo de
+ * captura); `origen` dice por qué, para el reporte legal ATEL vs EL. Solo
+ * aplica cuando `tipo === 'incapacidad'`; administrativo, nunca diagnóstico.
+ * El indicador SG-SST (SST-IND-26) cuenta AMBOS orígenes — su CF filtra
+ * únicamente por `tipo`, no lee este campo.
+ */
+export type OrigenIncapacidad = 'laboral' | 'comun'
+
+export const ORIGEN_INCAPACIDAD_LABEL: Record<OrigenIncapacidad, string> = {
+  laboral: 'Laboral (AT/EL)',
+  comun: 'Común (enfermedad general)',
+}
+
 export interface Ausentismo {
   id: string
   /** Vínculo al maestro `empleados_directos` — fuente para el indicador SG-SST
@@ -143,6 +158,9 @@ export interface Ausentismo {
   empleado_uid?: string
   empleado_nombre: string
   tipo: TipoAusentismo
+  /** Obligatorio (UI + regla) cuando tipo==='incapacidad'; ausente en los
+   *  demás tipos, donde no aplica. */
+  origen?: OrigenIncapacidad
   fecha_inicio: Timestamp
   fecha_fin: Timestamp
   descripcion?: string

@@ -17,8 +17,10 @@ import { db, storage } from '../../../firebase/config'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import SelectField from '../../shared/SelectField'
-import { TIPOS_AUSENTISMO, TIPO_AUSENTISMO_LABEL } from '../../../types/sigp/horario'
-import type { TipoAusentismo } from '../../../types/sigp/horario'
+import { TIPOS_AUSENTISMO, TIPO_AUSENTISMO_LABEL, ORIGEN_INCAPACIDAD_LABEL } from '../../../types/sigp/horario'
+import type { TipoAusentismo, OrigenIncapacidad } from '../../../types/sigp/horario'
+
+const ORIGENES_INCAPACIDAD: OrigenIncapacidad[] = ['laboral', 'comun']
 import { useEmpleadosDirectos } from '../../../hooks/useEmpleadosDirectos'
 import type { EmpleadoDirecto } from '../../../types/empleadoDirecto'
 
@@ -41,6 +43,7 @@ export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGes
   const [cargandoEmpleados, setCargandoEmpleados] = useState(false)
   const [empleadoId, setEmpleadoId] = useState('')
   const [tipo, setTipo] = useState<TipoAusentismo>('permiso')
+  const [origen, setOrigen] = useState<OrigenIncapacidad | ''>('')
   const [fechaInicio, setFechaInicio] = useState('')
   const [fechaFin, setFechaFin] = useState('')
   const [descripcion, setDescripcion] = useState('')
@@ -52,7 +55,7 @@ export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGes
 
   useEffect(() => {
     if (!isOpen) return
-    setEmpleadoId(''); setTipo('permiso'); setFechaInicio(''); setFechaFin('')
+    setEmpleadoId(''); setTipo('permiso'); setOrigen(''); setFechaInicio(''); setFechaFin('')
     setDescripcion(''); setArchivo(null); setDetalleAbierto(false)
     setDiagnostico(''); setObservaciones('')
     setCargandoEmpleados(true)
@@ -69,8 +72,17 @@ export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGes
 
   const onArchivo = (e: ChangeEvent<HTMLInputElement>) => setArchivo(e.target.files?.[0] ?? null)
 
+  // Cambiar de tipo lejos de 'incapacidad' limpia el origen — no debe
+  // quedar un valor viejo invisible que se cuele en el siguiente 'incapacidad'.
+  const onTipo = (v: string) => {
+    setTipo(v as TipoAusentismo)
+    if (v !== 'incapacidad') setOrigen('')
+  }
+
+  const esIncapacidad = tipo === 'incapacidad'
   const fechasValidas = fechaInicio !== '' && fechaFin !== '' && fechaFin >= fechaInicio
   const valido = empleadoSeleccionado !== null && fechasValidas && archivo !== null
+    && (!esIncapacidad || origen !== '')
 
   const guardar = async () => {
     if (!valido || !archivo || !empleadoSeleccionado) return
@@ -85,6 +97,7 @@ export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGes
         empleado_id: empleadoSeleccionado.id,
         empleado_nombre: empleadoSeleccionado.nombre,
         tipo,
+        ...(esIncapacidad ? { origen } : {}),
         fecha_inicio: Timestamp.fromDate(new Date(fechaInicio + 'T12:00:00')),
         fecha_fin: Timestamp.fromDate(new Date(fechaFin + 'T12:00:00')),
         ...(descripcion.trim() ? { descripcion: descripcion.trim() } : {}),
@@ -128,8 +141,13 @@ export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGes
             No hay empleados activos en el maestro. Pide a RRHH que lo cargue en Empleados directos antes de registrar el ausentismo.
           </p>
         )}
-        <SelectField label="Tipo" value={tipo} onChange={v => setTipo(v as TipoAusentismo)} required
+        <SelectField label="Tipo" value={tipo} onChange={onTipo} required
           options={TIPOS_AUSENTISMO.map(t => ({ value: t, label: TIPO_AUSENTISMO_LABEL[t] }))} />
+        {esIncapacidad && (
+          <SelectField label="Origen" value={origen} onChange={v => setOrigen(v as OrigenIncapacidad)} required
+            placeholder="Selecciona el origen"
+            options={ORIGENES_INCAPACIDAD.map(o => ({ value: o, label: ORIGEN_INCAPACIDAD_LABEL[o] }))} />
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="text-xs text-gray-500">
             Fecha inicio <span className="text-red-500">*</span>
