@@ -30,6 +30,7 @@ import type {
   AlcanceGrupo, CompraReembolso, RetencionLiquidacion, ModalidadContratista,
   Proyecto, EstadoProyecto, AnticipoGirado, ResumenAsignaciones,
   EvaluacionContratista, CriterioEvaluacion, AsignacionProyecto,
+  CierreAnticipado, TipoCierreAnticipado,
 } from './proyecto'
 import { modalidadDe, totalComprasReembolsos, anticipoValorDe, promedioEvaluacion, esPuntajeValido, CRITERIOS_EVALUACION } from './proyecto'
 
@@ -103,6 +104,10 @@ export const TRANSICIONES_ASIGNACION: Record<EstadoAsignacion, EstadoAsignacion[
   liquidada: [],
   cancelada: ['liquidada'],   // solo con incurrido > 0 (lo valida el builder)
 }
+// Nota (28-sep): anticipo_girado → preliquidacion_aprobada la produce SOLO
+// `patchCorregirAnticipo` al ANULAR un giro registrado por error — no es una
+// transición del flujo normal y por eso no vive en el mapa de arriba (que
+// gobierna los caminos operativos); el builder es su única vía.
 
 // ── Sub-tipos ────────────────────────────────────────────────────────────────
 
@@ -860,6 +865,55 @@ export function patchGirarAnticipo(
   }
 }
 
+/** Corrección de ANTICIPO GIRADO (bloque 28-sep — la pieza que faltaba: el
+ *  giro registrado era hecho consumado sin vía de corrección, y un giro
+ *  FALSO contaminaba el incurrido del cierre anticipado). Paridad con
+ *  "Corregir compra" de C3: dinero real con error no queda inarreglable.
+ *  - corregir: nuevo valor > 0, conserva fecha/registrado_por originales.
+ *  - anular: retira el objeto `anticipo` → la asignación REVIERTE a
+ *    preliquidacion_aprobada. BORDE RESUELTO (lean de Giovanny ratificado):
+ *    si el proyecto ya está en ejecución se PERMITE con aviso explícito en
+ *    la UI — la ejecución ocurrida es un hecho y el gate de "≥1 anticipo"
+ *    era para ENTRAR (gateEjecucion solo se consulta en la transición);
+ *    bloquear la corrección de un dato financiero falso por una puerta ya
+ *    cruzada sería peor.
+ *  Solo sobre estado anticipo_girado (jamás liquidada/cancelada — ahí el
+ *  giro ya se concilió o ya quedó congelado como incurrido). */
+export function patchCorregirAnticipo(
+  a: AsignacionContratista,
+  datos: { valor?: number; anular?: boolean },
+  motivo: string,
+  uid: string,
+  fecha: Timestamp,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; anula: boolean } | null {
+  const pre = a.preliquidacion
+  if (a.estado !== 'anticipo_girado' || !pre?.anticipo || !motivo.trim()) return null
+  const viejo = pre.anticipo.valor
+  if (datos.anular) {
+    const { anticipo: _a, ...sinAnticipo } = pre
+    return {
+      sub: {
+        estado: 'preliquidacion_aprobada',
+        preliquidacion: sinAnticipo as PreliquidacionAsignacion,
+        fecha_actualizacion: fecha,
+      },
+      anula: true,
+      entradaHistorial: entrada('anticipo_girado', 'preliquidacion_aprobada', uid, fecha,
+        `ANULACIÓN de anticipo — ${viejo} → $0 (el giro registrado no ocurrió) · Motivo: ${motivo.trim()}`),
+    }
+  }
+  if (!(datos.valor != null && datos.valor > 0) || datos.valor === viejo) return null
+  return {
+    sub: {
+      preliquidacion: { ...pre, anticipo: { ...pre.anticipo, valor: datos.valor } },
+      fecha_actualizacion: fecha,
+    },
+    anula: false,
+    entradaHistorial: entrada('anticipo_girado', 'anticipo_girado', uid, fecha,
+      `Corrección de anticipo — ${viejo} → ${datos.valor} · Motivo: ${motivo.trim()}`),
+  }
+}
+
 /** Corrección (Bloque 4 / Hotfix B, POR asignación):
  *  - asignación aprobada/girada y proyecto AÚN NO en ejecución → REVIERTE a
  *    definida (retira la aprobación del dato vivo; con giro previo, la
@@ -1322,4 +1376,98 @@ export function puenteLiquidadoContratista(
 ): boolean {
   if (estadoProyecto !== 'pagado_cliente' && estadoProyecto !== 'facturado') return false
   return asignacionesLiquidadas(asigsTrasPatch)
+}
+
+// ── CIERRE ANTICIPADO DEL PROYECTO (bloque 28-sep) ───────────────────────────
+// El nivel PROYECTO de lo que esta máquina ya sabía hacer: estado terminal
+// paralelo `cancelado` con motivo tipificado, incurrido registrado (el caso
+// general con ceros) y CASCADA — las asignaciones no conciliadas pasan a
+// `cancelada` con su propio incurrido en el mismo batch. Con plata afuera,
+// el camino `cancelada → liquidada` existente concilia después; sin plata,
+// terminal y listo. Sin borrado, nunca.
+
+/** Estados desde los que se puede cancelar: cualquiera ANTES de `facturado`
+ *  (con factura real, reversar es territorio administrativo — fuera de este
+ *  bloque) y jamás desde un terminal (`cerrado`/`cancelado` dan -1 o ≥ corte). */
+export function proyectoCancelable(estado: EstadoProyecto): boolean {
+  const i = ESTADOS_PROYECTO_RIEL.indexOf(estado)
+  return i >= 0 && i < ESTADOS_PROYECTO_RIEL.indexOf('facturado')
+}
+const ESTADOS_PROYECTO_RIEL: readonly string[] = [
+  'creado', 'contratista_asignado', 'permisos_en_tramite', 'preliquidacion_definida',
+  'preliquidacion_aprobada', 'anticipo_girado', 'en_ejecucion', 'ejecutado',
+  'entregado_cliente', 'soporte_recibido', 'enviado_a_facturacion', 'facturado',
+  'pagado_cliente', 'liquidado_contratista', 'cerrado',
+]
+
+export interface DatosCierreAnticipado {
+  tipo: TipoCierreAnticipado
+  motivo_texto?: string
+  proyecto_superviviente?: { id: string; consecutivo: string }
+}
+
+/** Cancela el PROYECTO. Devuelve el patch del padre + las cancelaciones en
+ *  cascada de cada asignación no conciliada + el resumen re-sincronizado.
+ *  null si: estado no cancelable · 'duplicado' sin referencia al
+ *  superviviente (o apuntándose a sí mismo) · 'otro' sin texto. */
+export function patchCancelarProyecto(
+  p: Pick<Proyecto, 'id' | 'estado' | 'snapshot'>,
+  asigs: AsignacionContratista[],
+  comprasCf: number,
+  datos: DatosCierreAnticipado,
+  uid: string,
+  fecha: Timestamp,
+): {
+  padre: Partial<Proyecto>
+  cancelaciones: { id: string; sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion }[]
+  resumen: ResumenAsignaciones
+  entradaHistorial: { de: EstadoProyecto; a: 'cancelado'; por: string; fecha: Timestamp; motivo: string }
+  incurrido: CierreAnticipado['incurrido']
+} | null {
+  if (!proyectoCancelable(p.estado)) return null
+  if (datos.tipo === 'duplicado' &&
+      !(datos.proyecto_superviviente?.id && datos.proyecto_superviviente.consecutivo
+        && datos.proyecto_superviviente.id !== p.id)) return null
+  if (datos.tipo === 'otro' && !datos.motivo_texto?.trim()) return null
+
+  // Incurrido = plata afuera SIN conciliar: anticipos y reembolsos de las
+  // asignaciones no liquidadas + TODO lo comprado por NEG (compras_proyecto,
+  // CF de C3) — sin ese término el incurrido mentiría por omisión.
+  const noLiquidadas = asigs.filter(a => a.estado !== 'liquidada')
+  const anticipos = noLiquidadas.reduce((s, a) => s + (a.preliquidacion?.anticipo?.valor ?? 0), 0)
+  const reembolsos = noLiquidadas.reduce((s, a) => s + totalComprasReembolsos(a.compras_reembolsos), 0)
+  const compras_cf = comprasCf > 0 ? comprasCf : 0
+  const incurrido = { anticipos, reembolsos, compras_cf, total: anticipos + reembolsos + compras_cf }
+
+  const motivoCascada = `Cierre anticipado del proyecto (${datos.tipo})` +
+    (datos.motivo_texto?.trim() ? ` — ${datos.motivo_texto.trim()}` : '')
+  const cancelaciones = asigs
+    .filter(a => a.estado !== 'liquidada' && a.estado !== 'cancelada')
+    .map(a => {
+      const r = patchCancelarAsignacion(a, motivoCascada, uid, fecha)!
+      return { id: a.id, sub: r.sub, entradaHistorial: r.entradaHistorial }
+    })
+
+  const asigsTras = asigs.map(a => {
+    const c = cancelaciones.find(x => x.id === a.id)
+    return c ? { ...a, ...c.sub } as AsignacionContratista : a
+  })
+
+  const cierre: CierreAnticipado = {
+    tipo: datos.tipo,
+    ...(datos.motivo_texto?.trim() ? { motivo_texto: datos.motivo_texto.trim() } : {}),
+    ...(datos.tipo === 'duplicado' ? { proyecto_superviviente: datos.proyecto_superviviente } : {}),
+    incurrido, por: uid, fecha,
+  }
+  const motivoPadre = `Cierre anticipado — ${datos.tipo}` +
+    (datos.proyecto_superviviente ? ` de ${datos.proyecto_superviviente.consecutivo}` : '') +
+    (datos.motivo_texto?.trim() ? ` · ${datos.motivo_texto.trim()}` : '') +
+    ` · incurrido ${incurrido.total}`
+  return {
+    padre: { estado: 'cancelado', cierre_anticipado: cierre, fecha_actualizacion: fecha },
+    cancelaciones,
+    resumen: resumenAsignacionesDe(asigsTras, p.snapshot.alcance ?? []),
+    entradaHistorial: { de: p.estado, a: 'cancelado', por: uid, fecha, motivo: motivoPadre },
+    incurrido,
+  }
 }

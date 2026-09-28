@@ -705,8 +705,12 @@ service cloud.firestore {
       // Bloque final: un proyecto CERRADO es inmutable — tampoco se borra.
       // §16: delete por la misma vía que create/update (sin comercial) — lo
       // atrapó la batería SB4: sin read no hay delete coherente.
+      // Cierre anticipado (28-sep): `cancelado` es tan terminal como cerrado
+      // — tampoco se borra ni se edita (la única excepción es conciliar sus
+      // asignaciones: vía de gerencia, abajo).
       allow delete: if puedeCrearProyectos()
-                    && resource.data.get('estado', '') != 'cerrado';
+                    && resource.data.get('estado', '') != 'cerrado'
+                    && resource.data.get('estado', '') != 'cancelado';
 
       // Bloque 3a/3b: liquidar al contratista exige el aval SST leído de la
       // PROYECCIÓN (gate NO esquivable). El get() solo se evalúa al intentar
@@ -726,8 +730,19 @@ service cloud.firestore {
       // se cierra con cuenta por cobrar abierta).
       // §16: la vía operativa también sin comercial (sin read no hay
       // update coherente — evita el write a ciegas por id).
+      // Cierre anticipado (28-sep): cancelado inmutable; y A `cancelado` solo
+      // desde estados PRE-facturado con el registro `cierre_anticipado` en el
+      // mismo write (desde facturado+ reversar es territorio administrativo).
       allow update: if puedeCrearProyectos()
                     && resource.data.get('estado', '') != 'cerrado'
+                    && resource.data.get('estado', '') != 'cancelado'
+                    && (request.resource.data.get('estado', '') != 'cancelado'
+                        || (resource.data.get('estado', '') in
+                              ['creado', 'contratista_asignado', 'permisos_en_tramite',
+                               'preliquidacion_definida', 'preliquidacion_aprobada', 'anticipo_girado',
+                               'en_ejecucion', 'ejecutado', 'entregado_cliente', 'soporte_recibido',
+                               'enviado_a_facturacion']
+                            && request.resource.data.get('cierre_anticipado', null) != null))
                     && (!fijaAprobacionPreliq()
                         || (rolActual() in ['admin', 'gerencia_general']
                             && salvedadPreliq() != ''))
@@ -749,6 +764,7 @@ service cloud.firestore {
       allow update: if isAuthed()
                     && rolActual() == 'gestion_integral'
                     && resource.data.get('estado', '') != 'cerrado'
+                    && resource.data.get('estado', '') != 'cancelado'
                     && request.resource.data.diff(resource.data)
                         .affectedKeys().hasOnly(['preliquidacion', 'estado', 'historial', 'fecha_actualizacion'])
                     && fijaAprobacionPreliq()
@@ -773,6 +789,13 @@ service cloud.firestore {
                     // CON el pago del cliente registrado (no se cierra con
                     // cuenta por cobrar abierta — anticipada, 23-jul)
                     && resource.data.get('estado', '') != 'cerrado'
+                    // Cierre anticipado (28-sep): sobre un CANCELADO, gerencia
+                    // solo re-sincroniza el resumen al liquidar asignaciones
+                    // canceladas con incurrido (cancelada → liquidada) — nada
+                    // más del padre se toca.
+                    && (resource.data.get('estado', '') != 'cancelado'
+                        || request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['resumen_asignaciones', 'fecha_actualizacion']))
                     && (request.resource.data.get('estado', '') != 'cerrado'
                         || (resource.data.get('estado', '') == 'liquidado_contratista'
                             && request.resource.data.get('pago_cliente', null) != null))
@@ -875,8 +898,14 @@ service cloud.firestore {
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['cierre_directa'])
                 || resource.data.get('tipo', '') == 'administracion_directa')
             && !fijaAprobacionPreliq()
+            // 28-sep (lo atrapó la batería del cierre anticipado): el guard
+            // viejo impedía CREAR un anticipo pero no RETIRARLO — un gestor
+            // podía borrar el giro registrado sin traza (y vaciar el
+            // incurrido del cierre por la puerta de atrás). Ahora la
+            // PRESENCIA del anticipo se conserva en ambas direcciones:
+            // crear y anular son de gerencia (patchCorregirAnticipo).
             && (('anticipo' in resource.data.get('preliquidacion', {}).keys())
-                || !('anticipo' in request.resource.data.get('preliquidacion', {}).keys()))
+                == ('anticipo' in request.resource.data.get('preliquidacion', {}).keys()))
             && (request.resource.data.get('estado', '') != 'liquidada'
                 || resource.data.get('tipo', '') == 'administracion_directa'))
           ||

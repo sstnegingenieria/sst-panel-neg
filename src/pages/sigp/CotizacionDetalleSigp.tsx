@@ -697,6 +697,13 @@ export default function CotizacionDetalleSigp() {
         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${ESTADO_COT_COLOR[est]}`}>{ESTADO_COT_LABEL[est]}</span>
         {etiquetaVersion(cotizacion.version_activa) && <span className="text-sm text-gray-400">{etiquetaVersion(cotizacion.version_activa)}</span>}
         <span className="text-sm text-gray-600">· {origen}{cotizacion.es_licitacion && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 font-semibold">LICITACIÓN</span>}</span>
+        {/* 28-sep: anotación del cierre anticipado — el estado NO se reescribe */}
+        {cotizacion.proyecto_cancelado && (
+          <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-700"
+            title={`El proyecto ${cotizacion.proyecto_cancelado.proyecto_consecutivo} se cerró anticipadamente; esta cotización queda como constancia de lo que sí se aprobó`}>
+            ⛔ proyecto cancelado
+          </span>
+        )}
         {version?.pdf_url && (
           <span className="inline-flex items-center gap-1.5">
             <button onClick={descargarPdf} title={version.pdf_hash ? `SHA-256: ${version.pdf_hash.slice(0, 16)}…` : undefined}

@@ -10,7 +10,7 @@ import {
   origenDiferenciaLiquidacion,
   ESTADOS_PROYECTO,
 } from '../proyecto'
-import type { CompraReembolso, EstadoProyecto } from '../proyecto'
+import type { CompraReembolso } from '../proyecto'
 
 const compra = (concepto: string, valor: number): CompraReembolso => ({
   concepto, valor, registrado_por: 'uid_gestor', fecha: Timestamp.fromMillis(1753200000000),
@@ -51,7 +51,7 @@ describe('saldoFinalLiquidacion — contra el giro REAL', () => {
 describe('puedeLiquidarseEn — solo tras el pago del cliente', () => {
   it('pagado_cliente es el único estado liquidable', () => {
     expect(puedeLiquidarseEn('pagado_cliente')).toBe(true)
-    const otros = ESTADOS_PROYECTO.filter((e): e is EstadoProyecto => e !== 'pagado_cliente')
+    const otros = ESTADOS_PROYECTO.filter(e => e !== 'pagado_cliente')
     for (const e of otros) expect(puedeLiquidarseEn(e), e).toBe(false)
   })
 })

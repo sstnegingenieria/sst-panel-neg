@@ -99,7 +99,7 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
   // hueco de que C2 no recibía el solo-lectura del bloque de cierre) — y el
   // buscador de la bandeja solo ofrece proyectos donde crear ES posible,
   // para que el atajo no lleve a otro callejón.
-  const proyectoCerrado = proyecto.estado === 'cerrado'
+  const proyectoCerrado = proyecto.estado === 'cerrado' || proyecto.estado === 'cancelado'
   const puedeCrear = puedeCrearOcUI(user?.rol) && !proyectoCerrado
   const puedeAprobar = apruebaOcUI(user?.rol)
   const { obtener } = useConsecutivo()
@@ -506,7 +506,9 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
           </p>
         </div>
         {proyectoCerrado && puedeCrearOcUI(user?.rol) && (
-          <p className="text-xs text-gray-400 flex-shrink-0">Proyecto cerrado — no admite órdenes nuevas.</p>
+          <p className="text-xs text-gray-400 flex-shrink-0">
+            Proyecto {proyecto.estado === 'cancelado' ? 'cancelado' : 'cerrado'} — no admite órdenes nuevas.
+          </p>
         )}
         {puedeCrear && (
           <button onClick={abrirCrear}

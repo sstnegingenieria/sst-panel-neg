@@ -13,7 +13,7 @@
 
 import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore'
 import { db } from '../../firebase/config'
-import { ESTADOS_PROYECTO } from '../../types/sigp/proyecto'
+import { ESTADOS_PROYECTO, idxRiel } from '../../types/sigp/proyecto'
 import type { Proyecto, EstadoProyecto } from '../../types/sigp/proyecto'
 import { esCoordenadaValida } from '../geo'
 import type { CoordenadasSitio } from '../geo'
@@ -86,9 +86,12 @@ export function construirObraEspejo(
 }
 
 /** Estado de la obra según el ciclo del proyecto: 'activa' mientras hay
- *  trabajo de campo; 'inactiva' desde el handoff a facturación en adelante. */
+ *  trabajo de campo; 'inactiva' desde el handoff a facturación en adelante —
+ *  y también en el CIERRE ANTICIPADO (28-sep): un proyecto cancelado no deja
+ *  una obra activa para algo que ya no existe. */
 export function estadoObraSegunProyecto(estado: EstadoProyecto): 'activa' | 'inactiva' {
-  const i = ESTADOS_PROYECTO.indexOf(estado)
+  if (estado === 'cancelado') return 'inactiva'
+  const i = idxRiel(estado)
   const corte = ESTADOS_PROYECTO.indexOf('enviado_a_facturacion')
   return i >= 0 && i >= corte ? 'inactiva' : 'activa'
 }
@@ -129,7 +132,11 @@ export async function sincronizarObraEspejo(
 ): Promise<boolean> {
   // Defensa en profundidad: antes de en_ejecucion NO existe trabajo de campo —
   // jamás crear una obra prematura (la UI ya gatea; esto lo garantiza).
-  if (ESTADOS_PROYECTO.indexOf(p.estado) < ESTADOS_PROYECTO.indexOf('en_ejecucion')) {
+  // EXCEPCIÓN cierre anticipado (28-sep): un proyecto 'cancelado' (idxRiel
+  // -1) SÍ sincroniza, pero SOLO para inactivar una obra EXISTENTE — si nunca
+  // hubo obra (canceló antes de ejecutar), no se fabrica una para apagarla.
+  const cancelado = p.estado === 'cancelado'
+  if (!cancelado && idxRiel(p.estado) < ESTADOS_PROYECTO.indexOf('en_ejecucion')) {
     console.warn(`obra-espejo: ignorado — el proyecto está en '${p.estado}' (aún sin ejecución)`)
     return false
   }
@@ -138,6 +145,7 @@ export async function sincronizarObraEspejo(
     const estado = estadoObraSegunProyecto(p.estado)
     const ahora = Timestamp.now()
     const existente = await getDoc(refObra)
+    if (cancelado && !existente.exists()) return true   // nada que apagar
     if (!existente.exists()) {
       const sitio = await obtenerSitioProyecto(p)
       await setDoc(refObra, {

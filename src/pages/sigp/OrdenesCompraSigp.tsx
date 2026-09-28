@@ -207,7 +207,7 @@ export default function OrdenesCompraSigp() {
     try {
       const snap = await getDocs(collection(db, 'proyectos'))
       const datos = snap.docs.map(d => ({ id: d.id, ...d.data() }) as Proyecto)
-        .filter(p => p.estado !== 'cerrado')
+        .filter(p => p.estado !== 'cerrado' && p.estado !== 'cancelado')
       datos.sort((a, b) => (b.fecha_creacion?.toMillis?.() ?? 0) - (a.fecha_creacion?.toMillis?.() ?? 0))
       setProyectosPicker(datos)
     } catch {
@@ -391,7 +391,7 @@ export default function OrdenesCompraSigp() {
             </div>
           )}
           <p className="text-[11px] text-gray-400">
-            Los proyectos cerrados no admiten órdenes nuevas y no aparecen en esta lista.
+            Los proyectos cerrados o cancelados no admiten órdenes nuevas y no aparecen en esta lista.
           </p>
         </div>
       </Modal>

@@ -26,7 +26,7 @@ import {
   construirAsignacionMulti, construirAsignacionHistorica,
   patchCancelarAsignacion, patchAjustarAtomos, patchResolverSenal,
   patchDefinirPreliquidacion, patchAprobarPreliquidacion, patchGirarAnticipo,
-  patchCorregirPreliquidacion, patchLiquidarAsignacion, patchAgregarReembolso, valorAlcanceDe,
+  patchCorregirPreliquidacion, patchCorregirAnticipo, patchLiquidarAsignacion, patchAgregarReembolso, valorAlcanceDe,
   tipoDe, patchMarcarAdministracionDirecta, patchEstimarDirecta, patchCerrarDirecta,
   puenteLiquidadoContratista, elegirSingular, construirSingularDesde,
   margenImplicitoDe, requiereRevisionCobertura, UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT,
@@ -355,6 +355,39 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       setGirarTarget(null)
       await recargarTodo()
     } catch { toast('Error al registrar el anticipo', 'error') } finally { setAplicando(false) }
+  }
+
+  // ── 28-sep: corrección del ANTICIPO registrado (valor o anulación) ──
+  const [corrAnticipoTarget, setCorrAnticipoTarget] = useState<AsignacionContratista | null>(null)
+  const [corrAnticipoValor, setCorrAnticipoValor] = useState<number | undefined>(undefined)
+  const [corrAnticipoAnular, setCorrAnticipoAnular] = useState(false)
+  const [corrAnticipoMotivo, setCorrAnticipoMotivo] = useState('')
+
+  const abrirCorregirAnticipo = (a: AsignacionContratista) => {
+    setCorrAnticipoValor(a.preliquidacion?.anticipo?.valor)
+    setCorrAnticipoAnular(false)
+    setCorrAnticipoMotivo('')
+    setCorrAnticipoTarget(a)
+  }
+
+  const guardarCorreccionAnticipo = async () => {
+    const target = corrAnticipoTarget
+    if (!target) return
+    const r = patchCorregirAnticipo(target,
+      corrAnticipoAnular ? { anular: true } : { valor: corrAnticipoValor },
+      corrAnticipoMotivo, user?.uid ?? '', Timestamp.now())
+    if (!r) { toast('Corrección inválida — revisa valor y motivo', 'error'); return }
+    setAplicando(true)
+    try {
+      const tras = asigs.map(x => x.id === target.id ? { ...x, ...r.sub } as AsignacionContratista : x)
+      await escribirAsignacion(proyecto.id, alcance, target.id,
+        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, tras)
+      toast(r.anula
+        ? 'Anticipo ANULADO — la asignación vuelve a preliquidación aprobada'
+        : 'Anticipo corregido')
+      setCorrAnticipoTarget(null)
+      await recargarTodo()
+    } catch { toast('Error al corregir el anticipo', 'error') } finally { setAplicando(false) }
   }
 
   const [corregirTarget, setCorregirTarget] = useState<AsignacionContratista | null>(null)
@@ -962,6 +995,16 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                         💸 Registrar anticipo girado
                       </button>
                     )}
+                    {/* 28-sep — corrección del GIRO registrado (solo gerencia,
+                        paridad "Corregir compra" C3): valor equivocado o giro
+                        que nunca ocurrió (anular). */}
+                    {puedeAprobar && a.estado === 'anticipo_girado' && a.preliquidacion?.anticipo && (
+                      <button onClick={() => abrirCorregirAnticipo(a)} disabled={aplicando}
+                        title="Corrige el VALOR del anticipo registrado o lo anula si el giro nunca ocurrió — con motivo y traza"
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-amber-400 text-amber-800 hover:bg-amber-50 font-medium disabled:opacity-50">
+                        ✎ Corregir anticipo
+                      </button>
+                    )}
                     {puedeGestionar && (a.estado === 'preliquidacion_aprobada' || a.estado === 'anticipo_girado') && (
                       <button onClick={() => abrirCorregir(a)} disabled={aplicando}
                         title={proyectoEnEjecucion
@@ -1274,6 +1317,55 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       </Modal>
 
       {/* ── Modal: registrar anticipo girado (gerencia) ── */}
+      {/* ── 28-sep: corregir/anular el anticipo registrado ── */}
+      <Modal isOpen={corrAnticipoTarget !== null} onClose={() => setCorrAnticipoTarget(null)}
+        title={`Corregir anticipo — ${corrAnticipoTarget?.contratista_nombre ?? ''}`}
+        actions={[
+          { label: 'Cancelar', onClick: () => setCorrAnticipoTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Guardando…' : corrAnticipoAnular ? 'Anular el anticipo' : 'Guardar corrección',
+            onClick: guardarCorreccionAnticipo, variant: 'primary', loading: aplicando,
+            disabled: !corrAnticipoMotivo.trim()
+              || (!corrAnticipoAnular && !(corrAnticipoValor != null && corrAnticipoValor > 0
+                  && corrAnticipoValor !== corrAnticipoTarget?.preliquidacion?.anticipo?.valor)),
+          },
+        ]}>
+        {corrAnticipoTarget && (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              Registrado: <b className="font-mono">{fmtMoney(corrAnticipoTarget.preliquidacion?.anticipo?.valor ?? 0)}</b>
+              {' '}el {fFecha(corrAnticipoTarget.preliquidacion?.anticipo?.fecha)}. La corrección deja
+              traza (valor viejo → nuevo + motivo); la fecha y quién lo registró se conservan.
+            </p>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={corrAnticipoAnular}
+                onChange={e => setCorrAnticipoAnular(e.target.checked)} className="w-4 h-4 accent-rose-600" />
+              El giro <b>nunca ocurrió</b> — anularlo (la asignación vuelve a «Preliquidación aprobada»)
+            </label>
+            {!corrAnticipoAnular && (
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Valor real girado <span className="text-red-500">*</span></span>
+                <InputExpresion valor={corrAnticipoValor} onValor={setCorrAnticipoValor}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-right focus:outline-none focus:ring-2 focus:ring-brand-300" />
+              </label>
+            )}
+            {corrAnticipoAnular && proyectoEnEjecucion && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                ⚠ Este proyecto ya está en ejecución y quedará <b>sin ningún anticipo girado</b>. La
+                ejecución ocurrida es un hecho — el gate de anticipo era para ENTRAR, no para quedarse —
+                pero quien anula debe saberlo antes de confirmar.
+              </p>
+            )}
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Motivo <span className="text-red-500">*</span></span>
+              <textarea value={corrAnticipoMotivo} onChange={e => setCorrAnticipoMotivo(e.target.value)} rows={2} autoFocus
+                placeholder="Por qué se corrige o anula el giro registrado…"
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+          </div>
+        )}
+      </Modal>
+
       <Modal isOpen={girarTarget !== null} onClose={() => setGirarTarget(null)}
         title={`Registrar anticipo girado — ${girarTarget?.contratista_nombre ?? ''}`}
         actions={[

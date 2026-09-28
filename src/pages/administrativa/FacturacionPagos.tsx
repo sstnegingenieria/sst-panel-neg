@@ -20,7 +20,7 @@ import { fmtMoney } from '../../utils/sigp/formato'
 import LiquidacionModal from '../../components/administrativa/LiquidacionModal'
 import ConfigEmpresaCard from '../../components/administrativa/ConfigEmpresaCard'
 import {
-  ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR,
+  idxRiel, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR,
   SECCIONES_ADMINISTRATIVA, enBandejaAdministrativa,
   enCaminoAdministrativa, ETIQUETA_EN_CAMINO, narrativaAdministrativa,
   enColaVerificacionSst, estadoSstGate, sstGateAlDia, SST_GATE_LABEL, SST_GATE_COLOR,
@@ -187,7 +187,7 @@ export default function FacturacionPagos() {
       : seccion === 'por_anticipo' ? (p.estado === 'preliquidacion_aprobada' || asignacionesPorGirar(p) > 0)
       : seccion === 'en_camino' ? enCaminoAdministrativa(p.estado)
       : estadoSeccion ? p.estado === estadoSeccion
-      : p.estado !== 'cerrado')
+      : (p.estado !== 'cerrado' && p.estado !== 'cancelado'))
     const lista = q
       ? base.filter(p =>
           p.consecutivo.toLowerCase().includes(q) ||
@@ -208,7 +208,7 @@ export default function FacturacionPagos() {
     // como criterio primario; en una sección concreta el orden va directo.
     const multiEtapa = seccion === 'todas' || seccion === 'en_camino'
     return [...lista].sort((a, b) =>
-      (multiEtapa ? ESTADOS_PROYECTO.indexOf(a.estado) - ESTADOS_PROYECTO.indexOf(b.estado) : 0) || porOrden(a, b))
+      (multiEtapa ? idxRiel(a.estado) - idxRiel(b.estado) : 0) || porOrden(a, b))
   }, [proyectos, busqueda, seccion, orden])
 
   const conteo = useMemo(() => Object.fromEntries(
@@ -346,7 +346,7 @@ export default function FacturacionPagos() {
       <div className="flex items-center gap-1.5 flex-wrap">
         <button onClick={() => setSeccion('todas')}
           className={`px-3 py-1.5 rounded-full text-xs font-medium border ${seccion === 'todas' ? 'bg-brand-700 border-brand-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
-          Todo el ciclo ({proyectos.filter(p => p.estado !== 'cerrado').length})
+          Todo el ciclo ({proyectos.filter(p => p.estado !== 'cerrado' && p.estado !== 'cancelado').length})
         </button>
         {SECCIONES_ADMINISTRATIVA.map(s => (
           <button key={s.clave} onClick={() => setSeccion(s.clave)}

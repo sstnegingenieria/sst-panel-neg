@@ -13,7 +13,7 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
 import InputExpresion from '../cotizaciones/InputExpresion'
 import { fmtMoney } from '../../../utils/sigp/formato'
-import { totalComprasReembolsos, ESTADOS_PROYECTO } from '../../../types/sigp/proyecto'
+import { totalComprasReembolsos, ESTADOS_PROYECTO, idxRiel } from '../../../types/sigp/proyecto'
 import type { Proyecto, CompraReembolso } from '../../../types/sigp/proyecto'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
@@ -57,7 +57,10 @@ export default function ComprasReembolsos({ proyecto, puedeGestionar, reload }: 
 
   // Se capturan durante el proyecto; tras liquidar, la lista queda congelada
   // (la liquidación tomó su snapshot).
-  const cerrado = ESTADOS_PROYECTO.indexOf(proyecto.estado) >= ESTADOS_PROYECTO.indexOf('liquidado_contratista')
+  // (28-sep) también congelada en el cierre anticipado: el incurrido quedó
+  // fotografiado al cancelar — capturar reembolsos después lo desmentiría.
+  const cerrado = idxRiel(proyecto.estado) >= ESTADOS_PROYECTO.indexOf('liquidado_contratista')
+    || proyecto.estado === 'cancelado'
   // Sin compras y sin permiso de captura: la sección no aporta — no se pinta.
   if (compras.length === 0 && (!puedeGestionar || cerrado)) return null
 

@@ -114,6 +114,7 @@ export default function ProyectosSigp() {
               className="text-sm px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300">
               <option value="">Todos los estados</option>
               {ESTADOS_PROYECTO.map(e => <option key={e} value={e}>{ESTADO_PRY_LABEL[e]}</option>)}
+              <option value="cancelado">{ESTADO_PRY_LABEL.cancelado}</option>
             </select>
           </div>
         </div>
