@@ -8,7 +8,7 @@ import {
   ESTADOS_PROYECTO, ESTADOS_SST_GATE, SST_GATE_LABEL, SST_GATE_COLOR,
   estadoSstGate, sstGateAlDia, enColaVerificacionSst,
 } from '../proyecto'
-import type { SstGateProyecto, EstadoProyecto } from '../proyecto'
+import type { SstGateProyecto } from '../proyecto'
 
 const gate = (estado: SstGateProyecto['estado'], observacion?: string): SstGateProyecto => ({
   estado,
@@ -47,7 +47,7 @@ describe('enColaVerificacionSst — tramo administrativo ejecutado', () => {
 
   it('ningún otro estado del ciclo entra', () => {
     const fuera = ESTADOS_PROYECTO.filter(
-      (e): e is EstadoProyecto => e !== 'facturado' && e !== 'pagado_cliente',
+      e => e !== 'facturado' && e !== 'pagado_cliente',
     )
     for (const e of fuera) expect(enColaVerificacionSst(e), e).toBe(false)
   })

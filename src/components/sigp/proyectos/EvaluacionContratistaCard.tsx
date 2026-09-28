@@ -14,7 +14,7 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
 import { fmtNum } from '../../../utils/sigp/formato'
 import {
-  CRITERIOS_EVALUACION, esPuntajeValido, promedioEvaluacion, ESTADOS_PROYECTO,
+  CRITERIOS_EVALUACION, esPuntajeValido, promedioEvaluacion, ESTADOS_PROYECTO, idxRiel,
 } from '../../../types/sigp/proyecto'
 import type { Proyecto, CriterioEvaluacion, EvaluacionContratista } from '../../../types/sigp/proyecto'
 import { patchEvaluarContratista, tipoDe } from '../../../types/sigp/asignacion'
@@ -83,7 +83,7 @@ export default function EvaluacionContratistaCard({ proyecto, puedeGestionar, re
   }, [esMulti, proyecto.id, proyecto.fecha_actualizacion])
 
   // Se evalúa una vez ejecutados los trabajos (con la experiencia completa).
-  const desdeEjecutado = ESTADOS_PROYECTO.indexOf(proyecto.estado) >= ESTADOS_PROYECTO.indexOf('ejecutado')
+  const desdeEjecutado = idxRiel(proyecto.estado) >= ESTADOS_PROYECTO.indexOf('ejecutado')
 
   const guardarAsignacion = async (a: AsignacionContratista) => {
     setAplicando(true)

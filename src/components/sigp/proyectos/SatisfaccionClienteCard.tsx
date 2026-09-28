@@ -5,7 +5,7 @@ import { doc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
 import { db } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
-import { ESTADOS_PROYECTO, esPuntajeValido } from '../../../types/sigp/proyecto'
+import { ESTADOS_PROYECTO, idxRiel, esPuntajeValido } from '../../../types/sigp/proyecto'
 import type { Proyecto } from '../../../types/sigp/proyecto'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
@@ -25,7 +25,7 @@ export default function SatisfaccionClienteCard({ proyecto, puedeGestionar, relo
   const [aplicando, setAplicando] = useState(false)
 
   // Se encuesta al cliente desde la entrega en adelante.
-  const desdeEntrega = ESTADOS_PROYECTO.indexOf(proyecto.estado) >= ESTADOS_PROYECTO.indexOf('entregado_cliente')
+  const desdeEntrega = idxRiel(proyecto.estado) >= ESTADOS_PROYECTO.indexOf('entregado_cliente')
   if (!ev && !desdeEntrega) return null
 
   const guardar = async () => {

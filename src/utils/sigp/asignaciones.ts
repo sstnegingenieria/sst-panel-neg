@@ -6,14 +6,14 @@
 // atómico). La UI no improvisa writes: todo pasa por los builders puros de
 // types/sigp/asignacion.ts.
 import {
-  collection, doc, getDocs, writeBatch, deleteField, Timestamp,
+  collection, doc, getDocs, writeBatch, deleteField, arrayUnion, Timestamp,
 } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import {
-  sintetizarAsignacionLegacy, resumenAsignacionesDe,
+  sintetizarAsignacionLegacy, resumenAsignacionesDe, patchCancelarProyecto,
 } from '../../types/sigp/asignacion'
-import type { AsignacionContratista } from '../../types/sigp/asignacion'
-import type { Proyecto } from '../../types/sigp/proyecto'
+import type { AsignacionContratista, DatosCierreAnticipado } from '../../types/sigp/asignacion'
+import type { Proyecto, CierreAnticipado } from '../../types/sigp/proyecto'
 
 export async function cargarAsignaciones(proyectoId: string): Promise<AsignacionContratista[]> {
   const snap = await getDocs(collection(db, 'proyectos', proyectoId, 'asignaciones'))
@@ -87,6 +87,41 @@ export async function escribirAsignacion(
     ...(patchPadreExtra ?? {}),
   })
   await batch.commit()
+}
+
+/** Cierre anticipado (28-sep): ejecuta el patch del builder en UN writeBatch —
+ *  padre (estado `cancelado` + cierre_anticipado + resumen + historial) +
+ *  cascada de cancelaciones por asignación + la ANOTACIÓN denormalizada en la
+ *  cotización (estado de la cotización INTACTO — se anota, no se reescribe).
+ *  El caller pasa asignaciones YA migradas (asegurarMigrado). Devuelve el
+ *  incurrido para el toast, o null si el builder rehusó. */
+export async function ejecutarCierreAnticipado(
+  p: Proyecto,
+  asigs: AsignacionContratista[],
+  comprasCf: number,
+  datos: DatosCierreAnticipado,
+  uid: string,
+): Promise<CierreAnticipado['incurrido'] | null> {
+  const r = patchCancelarProyecto(p, asigs, comprasCf, datos, uid, Timestamp.now())
+  if (!r) return null
+  const batch = writeBatch(db)
+  for (const c of r.cancelaciones) {
+    batch.update(doc(db, 'proyectos', p.id, 'asignaciones', c.id), {
+      ...c.sub, historial: arrayUnion(c.entradaHistorial),
+    })
+  }
+  batch.update(doc(db, 'proyectos', p.id), {
+    ...r.padre,
+    resumen_asignaciones: r.resumen,
+    historial: arrayUnion(r.entradaHistorial),
+  })
+  if (p.origen !== 'preventivo' && p.cotizacion_id) {
+    batch.update(doc(db, 'cotizaciones', p.cotizacion_id), {
+      proyecto_cancelado: { fecha: Timestamp.now(), proyecto_consecutivo: p.consecutivo },
+    })
+  }
+  await batch.commit()
+  return r.incurrido
 }
 
 /** Alta de una asignación nueva (sub-doc + resumen). */

@@ -19,10 +19,11 @@ import ComprasReembolsos from '../../components/sigp/proyectos/ComprasReembolsos
 import OrdenesCompraProyecto from '../../components/sigp/proyectos/OrdenesCompraProyecto'
 import ComprasMenoresProyecto from '../../components/sigp/proyectos/ComprasMenoresProyecto'
 import SatisfaccionClienteCard from '../../components/sigp/proyectos/SatisfaccionClienteCard'
+import CierreAnticipadoProyecto from '../../components/sigp/proyectos/CierreAnticipadoProyecto'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
-import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO, costoEjecutadoDe } from '../../types/sigp/proyecto'
+import { ESTADOS_PROYECTO, idxRiel, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO, costoEjecutadoDe, TIPO_CIERRE_LABEL } from '../../types/sigp/proyecto'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import { esCoordenadaValida, urlVerificarEnMaps } from '../../utils/geo'
 
@@ -38,7 +39,11 @@ export default function ProyectoDetalleSigp() {
   // componentes de la ficha reciben puedeGestionar=false (respaldado por la
   // regla de inmutabilidad en Firestore).
   const cerrado = proyecto?.estado === 'cerrado'
-  const puedeGestionar = puedeGestionarProyectosUI(user?.rol) && !cerrado
+  // Cierre anticipado (28-sep): `cancelado` es tan solo-lectura como cerrado
+  // — con la única excepción de liquidar asignaciones canceladas CON
+  // incurrido (vía de gerencia en AsignacionesProyecto, gateada aparte).
+  const cancelado = proyecto?.estado === 'cancelado'
+  const puedeGestionar = puedeGestionarProyectosUI(user?.rol) && !cerrado && !cancelado
   const puedeAprobar = puedeAprobarPreliquidacionUI(user?.rol) && !cerrado
   const [loading, setLoading] = useState(true)
   // 17-sep (arreglo #5): compras agregadas por la CF (C3) para la vía dual
@@ -81,11 +86,41 @@ export default function ProyectoDetalleSigp() {
   }
 
   const s = proyecto.snapshot
-  const idxEstado = ESTADOS_PROYECTO.indexOf(proyecto.estado)
+  const idxEstado = idxRiel(proyecto.estado)
 
   return (
     <div className="max-w-5xl mx-auto space-y-5 pb-16">
       <Link to="/sigp/proyectos" className="text-sm text-gray-500 hover:text-brand-700 inline-flex items-center gap-1">← Proyectos</Link>
+
+      {/* Cierre anticipado (28-sep) — cancelado = archivo de solo lectura
+          con el motivo y lo incurrido a la vista */}
+      {cancelado && proyecto.cierre_anticipado && (
+        <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2.5 text-sm text-rose-900">
+          <span>⛔</span>
+          <div>
+            <p className="font-semibold">
+              Proyecto cancelado — {TIPO_CIERRE_LABEL[proyecto.cierre_anticipado.tipo].toLowerCase()}
+              {proyecto.cierre_anticipado.proyecto_superviviente && (
+                <> · sobrevive{' '}
+                  <Link to={`/sigp/proyectos/${proyecto.cierre_anticipado.proyecto_superviviente.id}`}
+                    className="underline underline-offset-2 font-mono">
+                    {proyecto.cierre_anticipado.proyecto_superviviente.consecutivo}
+                  </Link>
+                </>
+              )}.
+            </p>
+            <p className="text-xs">
+              {fFecha(proyecto.cierre_anticipado.fecha)}
+              {proyecto.cierre_anticipado.motivo_texto && <> · {proyecto.cierre_anticipado.motivo_texto}</>}
+              {' '}· Incurrido al cancelar: <b className="font-mono">{fmtMoney(proyecto.cierre_anticipado.incurrido.total)}</b>
+              {proyecto.cierre_anticipado.incurrido.total > 0
+                ? ' — las asignaciones canceladas esperan su liquidación.'
+                : ' — cierre limpio.'}
+              {' '}Excluido de los indicadores.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Bloque final — cerrado = archivo de solo lectura */}
       {cerrado && (
@@ -107,6 +142,11 @@ export default function ProyectoDetalleSigp() {
         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${ESTADO_PRY_COLOR[proyecto.estado]}`}>
           {ESTADO_PRY_LABEL[proyecto.estado]}
         </span>
+        {/* Cierre anticipado (28-sep) — el botón solo aparece en estados
+            cancelables (pre-facturado); el componente se auto-gatea */}
+        {puedeGestionarProyectosUI(user?.rol) && !cerrado && !cancelado && (
+          <CierreAnticipadoProyecto proyecto={proyecto} comprasEjecutadas={comprasEjecutadas} reload={load} />
+        )}
         {/* Bloque D — reintento del espejo SST (upsert idempotente: no duplica) */}
         {puedeGestionar && idxEstado >= ESTADOS_PROYECTO.indexOf('en_ejecucion') && (
           <button

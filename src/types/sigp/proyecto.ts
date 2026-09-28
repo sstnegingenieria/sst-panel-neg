@@ -41,7 +41,24 @@ export const ESTADOS_PROYECTO = [
 /** Primer estado del tramo de Gerencia Administrativa (módulo futuro). */
 export const ESTADO_INICIO_ADMINISTRATIVA: (typeof ESTADOS_PROYECTO)[number] = 'facturado'
 
-export type EstadoProyecto = (typeof ESTADOS_PROYECTO)[number]
+/** Cierre anticipado (bloque 28-sep): `cancelado` es un estado TERMINAL
+ *  PARALELO, fuera del riel lineal (precedente: `aceptada` en solicitudes).
+ *  Los gates por `ESTADOS_PROYECTO.indexOf()` devuelven -1 para él — se
+ *  comporta como "antes de creado" y las puertas de progresión quedan
+ *  cerradas solas (censo del paso 0); los puntos que necesitan trato
+ *  explícito (obra espejo, reembolsos, pickers de OC, bandeja administrativa,
+ *  indicadores) lo reciben por nombre. */
+export type EstadoProyecto = (typeof ESTADOS_PROYECTO)[number] | 'cancelado'
+
+export const esProyectoCancelado = (p: Pick<Proyecto, 'estado'>): boolean =>
+  p.estado === 'cancelado'
+
+/** indexOf del RIEL para un estado que puede ser 'cancelado' (paralelo):
+ *  devuelve -1, que se comporta como "antes de creado" — los gates de
+ *  progresión `idx >= indexOf(x)` quedan CERRADOS solos. Único punto de
+ *  cast del union (censo del paso 0). */
+export const idxRiel = (e: EstadoProyecto): number =>
+  (ESTADOS_PROYECTO as readonly string[]).indexOf(e)
 
 export const ESTADO_PRY_LABEL: Record<EstadoProyecto, string> = {
   creado: 'Creado',
@@ -59,6 +76,7 @@ export const ESTADO_PRY_LABEL: Record<EstadoProyecto, string> = {
   pagado_cliente: 'Pagado por el cliente',
   liquidado_contratista: 'Liquidado al contratista',
   cerrado: 'Cerrado',
+  cancelado: 'Cancelado',
 }
 
 // Semánticos de progreso (sin azules — manual de marca): grises al inicio,
@@ -79,6 +97,48 @@ export const ESTADO_PRY_COLOR: Record<EstadoProyecto, string> = {
   pagado_cliente: 'bg-emerald-200 text-emerald-900',
   liquidado_contratista: 'bg-lime-200 text-lime-900',
   cerrado: 'bg-gray-200 text-gray-800',
+  cancelado: 'bg-rose-100 text-rose-800',
+}
+
+// ── Cierre anticipado (bloque 28-sep) ────────────────────────────────────────
+// Tercer caso real (fuerza mayor · el duplicado 025/056 · el que venga): el
+// caso GENERAL con ceros, no un atajo. Al cancelar se registra lo INCURRIDO
+// (anticipos + reembolsos de las asignaciones + compras de la CF — sin este
+// último término el incurrido mentiría por omisión); $0 → terminal y listo;
+// >$0 → las asignaciones quedan `cancelada` esperando su `cancelada →
+// liquidada`, que ya existe (P2-2). Sin borrado, nunca.
+
+export const TIPOS_CIERRE_ANTICIPADO = [
+  'fuerza_mayor',
+  'desistimiento_cliente',
+  'duplicado',
+  'modificacion_no_prospero',
+  'otro',
+] as const
+export type TipoCierreAnticipado = (typeof TIPOS_CIERRE_ANTICIPADO)[number]
+
+export const TIPO_CIERRE_LABEL: Record<TipoCierreAnticipado, string> = {
+  fuerza_mayor: 'Fuerza mayor',
+  desistimiento_cliente: 'Desistimiento del cliente',
+  duplicado: 'Duplicado de otro proyecto',
+  modificacion_no_prospero: 'Modificación que no prosperó',
+  otro: 'Otro',
+}
+
+export interface CierreAnticipado {
+  tipo: TipoCierreAnticipado
+  /** Obligatorio en 'otro'; opcional en el resto. */
+  motivo_texto?: string
+  /** OBLIGATORIO cuando tipo = 'duplicado' — referencia al proyecto que
+   *  sobrevive, jamás texto libre (un duplicado sin decir de qué es duplicado
+   *  no le sirve a nadie dentro de seis meses). */
+  proyecto_superviviente?: { id: string; consecutivo: string }
+  /** Lo ya incurrido al cancelar — la foto que hace del cierre el caso
+   *  general con ceros. `compras_cf` viene de `compras_proyecto` (OCs
+   *  compradas + menores, mantenido por la CF de C3). */
+  incurrido: { anticipos: number; reembolsos: number; compras_cf: number; total: number }
+  por: string
+  fecha: Timestamp
 }
 
 // ── Asignación de contratista (F2.1.b) ──
@@ -422,6 +482,10 @@ export const SECCIONES_ADMINISTRATIVA = [
   { clave: 'por_liquidar', etiqueta: 'Por liquidar', estado: 'pagado_cliente' },
   { clave: 'por_cerrar', etiqueta: 'Por cerrar', estado: 'liquidado_contratista' },
   { clave: 'cerrados', etiqueta: 'Cerrados / Histórico', estado: 'cerrado' },
+  // Cierre anticipado (28-sep): informativa — un cancelado con incurrido > 0
+  // espera la liquidación de sus asignaciones (cancelada → liquidada, en la
+  // ficha); sin incurrido es histórico puro. Fuera de "Todo el ciclo".
+  { clave: 'cancelados', etiqueta: 'Cancelados', estado: 'cancelado' },
 ] as const satisfies readonly { clave: string; etiqueta: string; estado: EstadoProyecto }[]
 
 export const enBandejaAdministrativa = (estado: EstadoProyecto): boolean =>
@@ -476,7 +540,9 @@ export const ETIQUETA_EN_CAMINO: Record<(typeof ESTADOS_EN_CAMINO_ADMINISTRATIVA
 /** Resumen NARRATIVO de la bandeja (una línea): qué hay por hacer ahora y
  *  qué viene. Con todo en cero: "Todo al día · N en camino." */
 export function narrativaAdministrativa(conteo: Record<string, number>, enCamino: number): string {
-  const acciones = SECCIONES_ADMINISTRATIVA.filter(s => s.clave !== 'cerrados')
+  // 'cerrados' y 'cancelados' (28-sep) son históricas/informativas — la
+  // narrativa cuenta SOLO las colas donde gerencia actúa.
+  const acciones = SECCIONES_ADMINISTRATIVA.filter(s => s.clave !== 'cerrados' && s.clave !== 'cancelados')
   const total = acciones.reduce((sum, a) => sum + (conteo[a.clave] ?? 0), 0)
   if (total === 0) return `Todo al día · ${enCamino} en camino.`
   const partes = acciones.map(a => `${conteo[a.clave] ?? 0} ${a.etiqueta.toLowerCase()}`)
@@ -580,7 +646,7 @@ export const pendientesVerificacionDe = (
 /** ¿El proyecto pertenece a la bandeja de Facturación y Pagos? (desde el
  *  handoff en adelante — territorio del módulo administrativo). */
 export const enBandejaFacturacion = (estado: EstadoProyecto): boolean => {
-  const i = ESTADOS_PROYECTO.indexOf(estado)
+  const i = idxRiel(estado)
   return i >= 0 && i >= ESTADOS_PROYECTO.indexOf('enviado_a_facturacion')
 }
 
@@ -605,7 +671,7 @@ export const costoPresupuestadoDe = (
  *  nada. PENDIENTE EXTERNO: reflejar el gate en la Caracterización v02 con
  *  aval de Ingrid (GI). */
 export const alcanzoEjecutado = (estado: EstadoProyecto): boolean =>
-  ESTADOS_PROYECTO.indexOf(estado) >= ESTADOS_PROYECTO.indexOf('ejecutado')
+  idxRiel(estado) >= ESTADOS_PROYECTO.indexOf('ejecutado')
 
 /** Costo ejecutado real (C3 — DERIVADO): null si el proyecto no alcanzó
  *  'ejecutado' (no entra al indicador); el manual histórico GANA siempre
@@ -708,7 +774,7 @@ export function cambiosPreliquidacion(
  *  administrativo y la corrección del contratista se verá allí si el área
  *  la pide. */
 export const puedeCorregirPreliquidacionEn = (estado: EstadoProyecto): boolean => {
-  const i = ESTADOS_PROYECTO.indexOf(estado)
+  const i = idxRiel(estado)
   return i >= ESTADOS_PROYECTO.indexOf('preliquidacion_definida') &&
          i <= ESTADOS_PROYECTO.indexOf('enviado_a_facturacion')
 }
@@ -726,7 +792,7 @@ export const correccionRevierteAprobacion = (estado: EstadoProyecto): boolean =>
  *  NUNCA frena el avance del proyecto. La reconciliación es de Gerencia
  *  Administrativa en la LIQUIDACIÓN (Bloque 3 del módulo administrativo). */
 export const correccionEsAjusteEnEjecucion = (estado: EstadoProyecto): boolean => {
-  const i = ESTADOS_PROYECTO.indexOf(estado)
+  const i = idxRiel(estado)
   return i >= ESTADOS_PROYECTO.indexOf('en_ejecucion') &&
          i <= ESTADOS_PROYECTO.indexOf('enviado_a_facturacion')
 }
@@ -1070,6 +1136,7 @@ export interface Proyecto {
   compras_reembolsos?: CompraReembolso[] // Administrativa B3b — línea propia, separada de la mano de obra
   liquidacion?: LiquidacionProyecto    // Administrativa B3b — cierre con el contratista
   cierre?: CierreProyecto              // Administrativa Bfinal — cierre formal del proyecto
+  cierre_anticipado?: CierreAnticipado // bloque 28-sep — estado terminal `cancelado`
   // El gate SST (Bloque 3a) NO vive aquí: vive en la proyección
   // `verificaciones_sst/{proyectoId}` (ver types/sigp/verificacionSst.ts) —
   // SST no tiene acceso a `proyectos` (confidencialidad financiera).

@@ -180,6 +180,7 @@ export default function PanelSigp() {
 
   const [periodo, setPeriodo] = useState<Periodo>(periodoActual)
   const [proyectos, setProyectos] = useState<Proyecto[]>([])
+  const [canceladosExcluidos, setCanceladosExcluidos] = useState(0)
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([])
   const [visitas, setVisitas] = useState<DocConFecha[]>([])
   const [cotizaciones, setCotizaciones] = useState<DocConFecha[]>([])
@@ -222,7 +223,13 @@ export default function PanelSigp() {
         // (gerencia_general/admin). Ausente/error → sin meta (sin semáforo).
         getDoc(doc(db, 'configuracion', 'indicadores')).catch(() => null),
       ])
-      setProyectos(pr as Proyecto[])  // sin acceso a proyectos → siempre []
+      // Cierre anticipado (28-sep): los CANCELADOS quedan FUERA de toda la
+      // medición en este único punto — un cancelado con presupuesto completo
+      // y cero ejecución distorsionaría los indicadores de todos los demás.
+      // El conteo se conserva y se muestra: excluidos, no desaparecidos.
+      const todosPr = pr as Proyecto[]
+      setCanceladosExcluidos(todosPr.filter(x => x.estado === 'cancelado').length)
+      setProyectos(todosPr.filter(x => x.estado !== 'cancelado'))  // sin acceso a proyectos → siempre []
       setSolicitudes(so as Solicitud[])
       setVisitas(vi as DocConFecha[])
       setCotizaciones(co as DocConFecha[])
@@ -559,7 +566,10 @@ export default function PanelSigp() {
                     </div>
                   </div>
                 )}
-                <p className="text-[11px] text-gray-400 mt-3.5">Alcance de Proyectos: hasta <b>enviado a facturación</b>.</p>
+                <p className="text-[11px] text-gray-400 mt-3.5">
+                  Alcance de Proyectos: hasta <b>enviado a facturación</b>.
+                  {canceladosExcluidos > 0 && <> · <b>{canceladosExcluidos}</b> cancelado(s) excluido(s) de la medición.</>}
+                </p>
               </div>
 
               {/* Embudo comercial (funnel verde, rampa ordinal) */}

@@ -7,7 +7,7 @@ import {
   puedeLiquidarseEn, puedeLiquidarseAnticipadoEn, pagoClientePendiente,
   puedeCerrarseProyecto, ESTADOS_PROYECTO,
 } from '../proyecto'
-import type { EstadoProyecto, PagoClienteProyecto } from '../proyecto'
+import type { PagoClienteProyecto } from '../proyecto'
 
 const pago = {} as PagoClienteProyecto
 
@@ -41,7 +41,7 @@ describe('pagoClientePendiente — la sección "Por cobrar"', () => {
   })
 
   it('los demás estados no están por cobrar', () => {
-    for (const e of ESTADOS_PROYECTO.filter((x): x is EstadoProyecto =>
+    for (const e of ESTADOS_PROYECTO.filter(x =>
       x !== 'facturado' && x !== 'liquidado_contratista')) {
       expect(pagoClientePendiente({ estado: e }), e).toBe(false)
     }
@@ -55,7 +55,7 @@ describe('puedeCerrarseProyecto — no cerrar con cuenta por cobrar abierta', ()
   })
 
   it('ningún otro estado es cerrable, ni con pago', () => {
-    for (const e of ESTADOS_PROYECTO.filter((x): x is EstadoProyecto => x !== 'liquidado_contratista')) {
+    for (const e of ESTADOS_PROYECTO.filter(x => x !== 'liquidado_contratista')) {
       expect(puedeCerrarseProyecto({ estado: e, pago_cliente: pago }), e).toBe(false)
     }
   })

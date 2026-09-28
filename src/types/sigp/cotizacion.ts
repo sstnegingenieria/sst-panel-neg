@@ -369,6 +369,12 @@ export interface Cotizacion {
   coordenadas_sitio?: CoordenadasSitio
 
   es_licitacion: boolean
+  /** Cierre anticipado (28-sep): ANOTACIÓN denormalizada que escribe la
+   *  cancelación del proyecto — el ESTADO de la cotización queda INTACTO
+   *  (decisión de Giovanny, opción a: que el cliente la aprobó es un hecho
+   *  ocurrido; se anota, no se reescribe). Denormalizado porque comercial no
+   *  puede leer `proyectos` (§16) y el chip debe verse en su bandeja. */
+  proyecto_cancelado?: { fecha: Timestamp; proyecto_consecutivo: string }
   // `tipo_inversion` (OPEX/CAPEX, PR #34) se RETIRÓ en la tanda 5 · #3:
   // censo de prod 24-sep — bandera apagada en los 16 clientes, 0/60
   // cotizaciones y 0/59 proyectos con el campo. La clasificación opex/capex

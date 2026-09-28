@@ -66,6 +66,13 @@ export default function CotizacionesTable({ cotizaciones, loading, clienteNombre
                   <td className="py-3 px-4 font-mono text-xs text-gray-700">
                     {c.consecutivo || <span className="text-gray-400 italic font-sans" title="El COT se asigna al diligenciar (no se queman consecutivos en pendientes)">sin código · pendiente</span>}
                     {c.es_licitacion && <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-50 text-violet-700">LIC</span>}
+                    {/* 28-sep: chip DERIVADO — el estado de la cotización queda intacto (se anota, no se reescribe) */}
+                    {c.proyecto_cancelado && (
+                      <span className="ml-1 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-50 text-rose-700"
+                        title={`El proyecto que generó (${c.proyecto_cancelado.proyecto_consecutivo}) se cerró anticipadamente — la aprobación del cliente sigue siendo un hecho ocurrido`}>
+                        proyecto cancelado
+                      </span>
+                    )}
                   </td>
                   <td className="py-3 px-4 font-medium text-gray-800">{origen(c, clienteNombres)}</td>
                   <td className="py-3 px-4 text-gray-600 max-w-[16rem] truncate" title={c.asunto}>{c.asunto || '—'}</td>

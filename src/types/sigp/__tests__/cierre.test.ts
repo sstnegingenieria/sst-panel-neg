@@ -9,11 +9,11 @@ import {
 } from '../proyecto'
 import type { EstadoProyecto } from '../proyecto'
 
-describe('bandeja Gestión Administrativa — las 7 secciones del ciclo', () => {
-  it('cubre exactamente los 7 momentos de gerencia, en orden del ciclo', () => {
+describe('bandeja Gestión Administrativa — las secciones del ciclo', () => {
+  it('los 7 momentos de gerencia en orden + la informativa de cancelados (28-sep)', () => {
     expect(SECCIONES_ADMINISTRATIVA.map(s => s.estado)).toEqual([
       'preliquidacion_definida', 'preliquidacion_aprobada', 'enviado_a_facturacion',
-      'facturado', 'pagado_cliente', 'liquidado_contratista', 'cerrado',
+      'facturado', 'pagado_cliente', 'liquidado_contratista', 'cerrado', 'cancelado',
     ])
   })
 
@@ -31,7 +31,7 @@ describe('bandeja Gestión Administrativa — las 7 secciones del ciclo', () => 
 describe('puedeCerrarseEn — solo desde liquidado_contratista', () => {
   it('liquidado_contratista es el único estado cerrable', () => {
     expect(puedeCerrarseEn('liquidado_contratista')).toBe(true)
-    const otros = ESTADOS_PROYECTO.filter((e): e is EstadoProyecto => e !== 'liquidado_contratista')
+    const otros = ESTADOS_PROYECTO.filter(e => e !== 'liquidado_contratista')
     for (const e of otros) expect(puedeCerrarseEn(e), e).toBe(false)
   })
 })
