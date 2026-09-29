@@ -95,6 +95,12 @@ describe('construirSnapshotPreventivo — staging §16 (ii)', () => {
       valor_venta: precio.total,
       esquema_tributario: 'iva_pleno',
       alcance: [{ grupo: 'Mantenimiento preventivo pesado — VILLA MONACO', items: 1, subtotal: precio.total }],
+      // Bloque átomo-ítem: el preventivo trae su ítem sintético de clave estable
+      items_alcance: [{
+        clave: 'prev:1', descripcion: 'Mantenimiento preventivo pesado — VILLA MONACO',
+        unidad: 'glb', cantidad: 1, valor_total: precio.total,
+        grupo: 'Mantenimiento preventivo pesado — VILLA MONACO',
+      }],
       total_items: 1,
     })
     expect(precio.total).toBe(2_856_685)  // jungle Z3 GF pesado + transporte

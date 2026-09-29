@@ -12,7 +12,7 @@ import { db } from '../../firebase/config'
 import {
   sintetizarAsignacionLegacy, resumenAsignacionesDe, patchCancelarProyecto,
 } from '../../types/sigp/asignacion'
-import type { AsignacionContratista, DatosCierreAnticipado } from '../../types/sigp/asignacion'
+import type { AsignacionContratista, DatosCierreAnticipado, ContextoAlcance } from '../../types/sigp/asignacion'
 import type { Proyecto, CierreAnticipado } from '../../types/sigp/proyecto'
 
 export async function cargarAsignaciones(proyectoId: string): Promise<AsignacionContratista[]> {
@@ -36,7 +36,7 @@ export function planMigracionLegacy(p: Proyecto): {
 } | null {
   const legacy = sintetizarAsignacionLegacy(p)
   if (!legacy) return null
-  const resumen = resumenAsignacionesDe([{ ...legacy, id: 'legacy' }], p.snapshot.alcance ?? [])
+  const resumen = resumenAsignacionesDe([{ ...legacy, id: 'legacy' }], p.snapshot)
   return {
     subdoc: legacy,
     patchPadre: {
@@ -70,7 +70,7 @@ export async function asegurarMigrado(
  *  resumen (fuente única, jamás aritmética incremental). */
 export async function escribirAsignacion(
   proyectoId: string,
-  alcance: Proyecto['snapshot']['alcance'],
+  alcance: ContextoAlcance,
   asignacionId: string,
   patchSub: Record<string, unknown>,
   todasTrasPatch: AsignacionContratista[],
@@ -137,7 +137,7 @@ export async function ejecutarCierreAnticipado(
 /** Alta de una asignación nueva (sub-doc + resumen). */
 export async function crearAsignacion(
   proyectoId: string,
-  alcance: Proyecto['snapshot']['alcance'],
+  alcance: ContextoAlcance,
   subdoc: Omit<AsignacionContratista, 'id'>,
   existentes: AsignacionContratista[],
 ): Promise<string> {

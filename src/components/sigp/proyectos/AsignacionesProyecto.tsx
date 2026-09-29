@@ -30,7 +30,7 @@ import {
   tipoDe, patchMarcarAdministracionDirecta, patchEstimarDirecta, patchCerrarDirecta,
   puenteLiquidadoContratista, elegirSingular, construirSingularDesde,
   margenImplicitoDe, requiereRevisionCobertura, UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT,
-  baseMargenDe, ETIQUETA_BASE_MARGEN, atomosTomados,
+  baseMargenDe, ETIQUETA_BASE_MARGEN, universoDe, atomosEfectivosDe, resumenAtomosPorGrupo,
   ESTADO_ASIG_LABEL, ESTADO_ASIG_COLOR,
 } from '../../../types/sigp/asignacion'
 import type { AsignacionContratista } from '../../../types/sigp/asignacion'
@@ -76,10 +76,11 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
 
   // LECTURA DUAL — el único punto de consumo.
   const asigs = asignacionesDe(proyecto, subdocs)
-  const cobertura = coberturaDe(alcance, asigs)
+  const universo = universoDe(proyecto.snapshot)
+  const cobertura = coberturaDe(proyecto.snapshot, asigs)
   // Condición 1: la subcolección es el detector natural del resumen.
   const desinc = subdocs.length > 0
-    ? detectarDesincronizacion(proyecto.resumen_asignaciones, subdocs, alcance)
+    ? detectarDesincronizacion(proyecto.resumen_asignaciones, subdocs, proyecto.snapshot)
     : []
 
   const recargarTodo = async () => { await load(); await reload() }
@@ -89,7 +90,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     setAplicando(true)
     try {
       await updateDoc(doc(db, 'proyectos', proyecto.id), {
-        resumen_asignaciones: resumenAsignacionesDe(subdocs, alcance),
+        resumen_asignaciones: resumenAsignacionesDe(subdocs, proyecto.snapshot),
         fecha_actualizacion: Timestamp.now(),
       })
       toast('Resumen recalculado desde la subcolección')
@@ -131,7 +132,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     } catch { toast('Error al cargar contratistas', 'error') }
   }
 
-  const cdSeleccionado = alcance.filter(g => atomosSel.has(g.grupo)).reduce((s, g) => s + (g.subtotal || 0), 0)
+  const cdSeleccionado = universo.unidades.filter(x => atomosSel.has(x.clave)).reduce((s, x) => s + x.valor, 0)
 
   const asignar = async () => {
     const c = contratistas.find(x => x.id === contratistaId)
@@ -147,9 +148,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
             alcance, vigentes, user?.uid ?? '', ahora)
         : construirAsignacionMulti(
             c, [...atomosSel], esDirectaNueva ? 'todo_costo' : modalidad,
-            esDirectaNueva ? undefined : materiales, alcance, vigentes, user?.uid ?? '', ahora, nota,
+            esDirectaNueva ? undefined : materiales, proyecto.snapshot, vigentes, user?.uid ?? '', ahora, nota,
             esDirectaNueva ? 'administracion_directa' : undefined)
-      await crearAsignacion(proyecto.id, alcance, nuevo, vigentes)
+      await crearAsignacion(proyecto.id, proyecto.snapshot, nuevo, vigentes)
       // Transición del proyecto (máquina actual, sin cambios hasta el switch)
       // + 21-sep (3b/3c — RESTAURACIÓN deliberada, no diseño final): la
       // primera asignación NO histórica fija el campo SINGULAR del padre,
@@ -211,7 +212,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
           }),
         }
       }
-      await escribirAsignacion(proyecto.id, alcance, target.id,
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch, patchSingular)
       toast(r.incurrido.total > 0
         ? `Cancelada — queda PENDIENTE de liquidar lo incurrido (${fmtMoney(r.incurrido.total)})`
@@ -238,11 +239,11 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const ahora = Timestamp.now()
       const vigentes = await asegurarMigrado(proyecto, subdocs)
       const target = vigentes.find(a => a.id === ajustarTarget.id) ?? ajustarTarget
-      const r = patchAjustarAtomos(target, [...ajustarSel], alcance, vigentes, ajustarMotivo, user?.uid ?? '', ahora)
+      const r = patchAjustarAtomos(target, [...ajustarSel], proyecto.snapshot, vigentes, ajustarMotivo, user?.uid ?? '', ahora)
       if (!r) { toast('Sin cambios que aplicar', 'error'); return }
       const trasPatch = vigentes.map(a => a.id === target.id
         ? { ...a, ...r.sub, historial: [...a.historial, r.entradaHistorial] } as AsignacionContratista : a)
-      await escribirAsignacion(proyecto.id, alcance, target.id,
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
       toast('Átomos ajustados' + (target.preliquidacion ? ' — la preliquidación queda pendiente de revisar' : ''))
       setAjustarTarget(null)
@@ -265,7 +266,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       if (!r) return
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, alcance_desactualizado: undefined, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
-      await escribirAsignacion(proyecto.id, alcance, target.id,
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { alcance_desactualizado: deleteField(), historial: arrayUnion(r.entradaHistorial) }, trasPatch)
       toast('Señal resuelta — preliquidación confirmada sin cambios')
       await recargarTodo()
@@ -291,11 +292,11 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const vigentes = await asegurarMigrado(proyecto, subdocs)
       const target = vigentes.find(x => x.id === definirTarget.id) ?? definirTarget
       const r = patchDefinirPreliquidacion(target,
-        { valor_contratista: definirValor, anticipo_pct: definirPct ?? 50 }, alcance, user?.uid ?? '', ahora)
+        { valor_contratista: definirValor, anticipo_pct: definirPct ?? 50 }, proyecto.snapshot, user?.uid ?? '', ahora)
       if (!r) { toast('La preliquidación solo se define antes de aprobar', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
-      await escribirAsignacion(proyecto.id, alcance, target.id,
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
       toast(`Preliquidación definida — ${fmtMoney(definirValor)} · pendiente de aprobación de Gerencia Administrativa`)
       setDefinirTarget(null)
@@ -319,7 +320,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       if (!r) { toast('Solo se aprueba una preliquidación definida', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
-      await escribirAsignacion(proyecto.id, alcance, target.id,
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
       toast(esRespaldo ? 'Aprobada como RESPALDO — salvedad registrada' : 'Preliquidación aprobada')
       setAprobarTarget(null); setSalvedad('')
@@ -349,7 +350,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       if (!r) { toast('El anticipo se registra sobre una preliquidación aprobada', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
-      await escribirAsignacion(proyecto.id, alcance, target.id,
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
       toast(`Anticipo registrado — ${fmtMoney(girarValor)}`)
       setGirarTarget(null)
@@ -380,7 +381,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     setAplicando(true)
     try {
       const tras = asigs.map(x => x.id === target.id ? { ...x, ...r.sub } as AsignacionContratista : x)
-      await escribirAsignacion(proyecto.id, alcance, target.id,
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, tras)
       toast(r.anula
         ? 'Anticipo ANULADO — la asignación vuelve a preliquidación aprobada'
@@ -421,7 +422,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
             ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial],
             ...(r.resuelveSenal ? { alcance_desactualizado: undefined } : {}),
           } as AsignacionContratista : x)
-      await escribirAsignacion(proyecto.id, alcance, target.id, patchSub, trasPatch)
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id, patchSub, trasPatch)
       toast(r.revierte
         ? 'Corregida — REVIERTE la aprobación: requiere re-aprobación de Gerencia'
         : r.ajuste
@@ -441,6 +442,11 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     setAplicando(true)
     try {
       const { cargarAssetsPdf, generarPdfPreliquidacion } = await import('../../../utils/sigp/preliquidacionPdf')
+      // Bloque átomo-ítem: con universo de ítems el filtro es POR CLAVE —
+      // el PDF muestra EXACTAMENTE los ítems de esta asignación (un grupo
+      // repartido entre dos contratistas produce dos PDFs disjuntos).
+      const modoItem = universo.modo === 'item'
+      const claves = new Set(atomosEfectivosDe(a, proyecto.snapshot))
       const atomos = new Set(a.atomos)
       const buckets = new Map<string, { nombre: string; items: { codigo?: string; descripcion: string; cantidad: number; unidad: string; observacion?: string }[] }>()
       if (proyecto.cotizacion_id) {
@@ -455,7 +461,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
             ? (it.actividad_id && nombres.has(it.actividad_id) ? it.actividad_id : GRUPO_OTROS_ID)
             : (it.capitulo?.trim() || GRUPO_OTROS_ID)
           const nombre = nombres.get(id) ?? 'Otros'
-          if (!atomos.has(nombre)) return   // átomo de OTRA asignación — fuera
+          if (modoItem) {
+            if (!claves.has(claveItemAlcance(it, idx))) return   // ítem de OTRA asignación — fuera
+          } else if (!atomos.has(nombre)) return   // átomo de OTRA asignación — fuera
           if (!buckets.has(id)) buckets.set(id, { nombre, items: [] })
           const observacion = pre.observaciones?.[claveItemAlcance(it, idx)]
           buckets.get(id)!.items.push({
@@ -533,7 +541,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
       // Mismo batch sub + resumen: el reembolso entra al indicador al instante
-      await escribirAsignacion(proyecto.id, alcance, target.id,
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
       toast(`Reembolso de ${target.contratista_nombre} registrado — ${fmtMoney(reembValor)} · se reconoce en SU liquidación`)
       setReembTarget(null)
@@ -603,7 +611,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       if (!r) { toast('Solo se marca una asignación sin tipo, sin economía y en estado asignada', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
-      await escribirAsignacion(proyecto.id, alcance, target.id,
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
       toast('Marcada como administración directa — sin ciclo de pago')
       await recargarTodo()
@@ -627,7 +635,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const ahora = Timestamp.now()
       const vigentes = await asegurarMigrado(proyecto, subdocs)
       const target = vigentes.find(x => x.id === estimarTarget.id) ?? estimarTarget
-      const r = patchEstimarDirecta(target, estimarCosto, estimarDias, alcance,
+      const r = patchEstimarDirecta(target, estimarCosto, estimarDias, proyecto.snapshot,
         user?.uid ?? '', ahora, estimarMotivo.trim() || undefined)
       if (!r) { toast('Re-estimar exige motivo (o la asignación no admite estimación)', 'error'); return }
       const patchSub: Record<string, unknown> = {
@@ -637,7 +645,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial],
             ...(r.resuelveSenal ? { alcance_desactualizado: undefined } : {}) } as AsignacionContratista : x)
-      await escribirAsignacion(proyecto.id, alcance, target.id, patchSub, trasPatch)
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id, patchSub, trasPatch)
       toast(`Costo propio estimado — ${fmtMoney(estimarCosto)}${r.resuelveSenal ? ' · señal de alcance resuelta' : ''}`)
       setEstimarTarget(null)
       await recargarTodo()
@@ -664,7 +672,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       // liquidado y el ciclo administrativo ya llegó (pagado/facturado), el
       // padre transiciona en el mismo batch.
       const puente = puenteLiquidadoContratista(trasPatch, proyecto.estado)
-      await escribirAsignacion(proyecto.id, alcance, target.id,
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch,
         puente ? {
           estado: 'liquidado_contratista',
@@ -724,7 +732,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       // padre en el MISMO batch — la bandeja "Por cerrar" y la proyección
       // SST lo heredan; la guarda del padre (gate al_dia) protege el batch.
       const puente = puenteLiquidadoContratista(trasPatch, proyecto.estado)
-      await escribirAsignacion(proyecto.id, alcance, target.id,
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch,
         puente ? {
           estado: 'liquidado_contratista',
@@ -740,31 +748,110 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     } catch (e) { toast(e instanceof Error ? e.message : 'Error al liquidar', 'error') } finally { setAplicando(false) }
   }
 
+  // Bloque átomo-ítem: en modo ÍTEM el selector es un árbol grupo → ítems con
+  // casilla TRI-ESTADO por grupo (vacía / llena / parcial vía `indeterminate`)
+  // — PURO atajo de interfaz: lo que se persiste son SIEMPRE las claves de
+  // ítems, jamás "el grupo" (una sola granularidad, o la cobertura vuelve a
+  // mentir). Marcar el grupo toma SOLO los disponibles; los tomados se ven
+  // bloqueados con el nombre de quién los tiene. En modo grupo (proyectos
+  // sin backfill) el selector de siempre, intacto.
   const selectorAtomos = (sel: Set<string>, setSel: (s: Set<string>) => void, exceptoId?: string) => {
-    const tomadosPorOtras = atomosTomados(asigs.filter(a => a.id !== exceptoId))
-    const duenoDe = (grupo: string) =>
-      asigs.find(a => a.id !== exceptoId && a.estado !== 'cancelada' && a.atomos.includes(grupo))?.contratista_nombre
+    const otras = asigs.filter(a => a.id !== exceptoId)
+    const tomadosPorOtras = new Set<string>()
+    for (const a of otras) {
+      if (a.estado === 'cancelada') continue
+      for (const at of atomosEfectivosDe(a, proyecto.snapshot)) tomadosPorOtras.add(at)
+    }
+    const duenoDe = (clave: string) =>
+      otras.find(a => a.estado !== 'cancelada' && atomosEfectivosDe(a, proyecto.snapshot).includes(clave))?.contratista_nombre
+
+    if (universo.modo === 'grupo') {
+      return (
+        <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+          {alcance.map(g => {
+            const ocupado = tomadosPorOtras.has(g.grupo)
+            return (
+              <label key={g.grupo}
+                className={`flex items-center justify-between gap-2 px-3 py-2 text-sm ${ocupado ? 'opacity-50' : 'hover:bg-gray-50 cursor-pointer'}`}>
+                <span className="flex items-center gap-2.5 min-w-0">
+                  <input type="checkbox" className="accent-brand-700 flex-shrink-0" disabled={ocupado}
+                    checked={sel.has(g.grupo)}
+                    onChange={e => {
+                      const s = new Set(sel)
+                      if (e.target.checked) s.add(g.grupo); else s.delete(g.grupo)
+                      setSel(s)
+                    }} />
+                  <span className="text-gray-700 truncate">{g.grupo}</span>
+                  {ocupado && <span className="text-[11px] text-gray-400 flex-shrink-0">→ {duenoDe(g.grupo)}</span>}
+                </span>
+                {/* Condición: el VALOR de cada actividad al lado del nombre */}
+                <span className="font-mono text-gray-600 flex-shrink-0">{fmtMoney(g.subtotal)}</span>
+              </label>
+            )
+          })}
+        </div>
+      )
+    }
+
+    // ── modo ÍTEM ──
+    const grupos = [...new Set(universo.unidades.map(x => x.grupo))]
     return (
       <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
-        {alcance.map(g => {
-          const ocupado = tomadosPorOtras.has(g.grupo)
+        {grupos.map(grupo => {
+          const items = universo.unidades.filter(x => x.grupo === grupo)
+          const disponibles = items.filter(x => !tomadosPorOtras.has(x.clave))
+          const marcados = items.filter(x => sel.has(x.clave))
+          const llena = disponibles.length > 0 && marcados.length === disponibles.length
+          const parcial = marcados.length > 0 && !llena
+          // "grupo completo" = ESTA selección cubre todos los ítems del grupo
+          const grupoCompleto = marcados.length === items.length
           return (
-            <label key={g.grupo}
-              className={`flex items-center justify-between gap-2 px-3 py-2 text-sm ${ocupado ? 'opacity-50' : 'hover:bg-gray-50 cursor-pointer'}`}>
-              <span className="flex items-center gap-2.5 min-w-0">
-                <input type="checkbox" className="accent-brand-700 flex-shrink-0" disabled={ocupado}
-                  checked={sel.has(g.grupo)}
-                  onChange={e => {
-                    const s = new Set(sel)
-                    if (e.target.checked) s.add(g.grupo); else s.delete(g.grupo)
-                    setSel(s)
-                  }} />
-                <span className="text-gray-700 truncate">{g.grupo}</span>
-                {ocupado && <span className="text-[11px] text-gray-400 flex-shrink-0">→ {duenoDe(g.grupo)}</span>}
-              </span>
-              {/* Condición: el VALOR de cada actividad al lado del nombre */}
-              <span className="font-mono text-gray-600 flex-shrink-0">{fmtMoney(g.subtotal)}</span>
-            </label>
+            <div key={grupo}>
+              <label className="flex items-center justify-between gap-2 px-3 py-2 text-sm bg-gray-50 font-medium">
+                <span className="flex items-center gap-2.5 min-w-0">
+                  <input type="checkbox" className="accent-brand-700 flex-shrink-0"
+                    disabled={disponibles.length === 0}
+                    checked={llena}
+                    ref={el => { if (el) el.indeterminate = parcial }}
+                    onChange={e => {
+                      const s = new Set(sel)
+                      // marcar el grupo toma SOLO los disponibles; desmarcar
+                      // suelta los propios (los de otros ni se tocan)
+                      for (const x of disponibles) { if (e.target.checked) s.add(x.clave); else s.delete(x.clave) }
+                      setSel(s)
+                    }} />
+                  <span className="text-gray-800 truncate">{grupo}</span>
+                  {grupoCompleto
+                    ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold flex-shrink-0">grupo completo</span>
+                    : marcados.length > 0
+                      ? <span className="text-[11px] text-gray-500 flex-shrink-0">{marcados.length} de {items.length}</span>
+                      : null}
+                </span>
+                <span className="font-mono text-gray-600 flex-shrink-0">
+                  {fmtMoney(items.reduce((s, x) => s + x.valor, 0))}
+                </span>
+              </label>
+              {items.map(x => {
+                const ocupado = tomadosPorOtras.has(x.clave)
+                return (
+                  <label key={x.clave}
+                    className={`flex items-center justify-between gap-2 pl-8 pr-3 py-1.5 text-sm ${ocupado ? 'opacity-50' : 'hover:bg-gray-50 cursor-pointer'}`}>
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <input type="checkbox" className="accent-brand-700 flex-shrink-0" disabled={ocupado}
+                        checked={sel.has(x.clave)}
+                        onChange={e => {
+                          const s = new Set(sel)
+                          if (e.target.checked) s.add(x.clave); else s.delete(x.clave)
+                          setSel(s)
+                        }} />
+                      <span className="text-gray-700 truncate" title={x.etiqueta}>{x.etiqueta}</span>
+                      {ocupado && <span className="text-[11px] text-gray-400 flex-shrink-0">→ {duenoDe(x.clave)}</span>}
+                    </span>
+                    <span className="font-mono text-gray-600 flex-shrink-0">{fmtMoney(x.valor)}</span>
+                  </label>
+                )
+              })}
+            </div>
           )
         })}
       </div>
@@ -809,8 +896,8 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       ) : (
         <div className="divide-y divide-gray-100 border border-gray-100 rounded-lg">
           {asigs.map(a => {
-            const margen = margenImplicitoDe(a, alcance)
-            const revisar = requiereRevisionCobertura(a, alcance)
+            const margen = margenImplicitoDe(a, proyecto.snapshot)
+            const revisar = requiereRevisionCobertura(a, proyecto.snapshot)
             const dir = tipoDe(a) === 'administracion_directa'
             return (
               <div key={a.id} className="px-3 py-3 space-y-1.5">
@@ -851,9 +938,13 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                     </span>
                   )}
                 </div>
+                {/* Bloque átomo-ítem: rollup por grupo — "entero o partido"
+                    de un golpe (adenda): "Ensayos · completo" vs "· 4 de 6" */}
                 <p className="text-xs text-gray-500">
-                  {a.atomos.length} actividad(es): {a.atomos.join(' · ')} ·{' '}
-                  <span className="font-mono">CD {fmtMoney(alcance.length ? a.atomos.reduce((s, at) => s + (alcance.find(g => g.grupo === at)?.subtotal ?? 0), 0) : 0)}</span>
+                  {resumenAtomosPorGrupo(a, proyecto.snapshot).map(g =>
+                    `${g.grupo}${g.completo ? (g.total > 1 ? ' · completo' : '') : ` · ${g.tomados} de ${g.total}`}`,
+                  ).join('  ·  ')}{' · '}
+                  <span className="font-mono">CD {fmtMoney(valorAlcanceDe(a.atomos, proyecto.snapshot, a.atomos_nivel))}</span>
                 </p>
                 {a.preliquidacion && dir && (
                   <p className="text-xs text-gray-500">
@@ -1052,12 +1143,18 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         ) : (
           <div className="rounded-lg bg-amber-50 border border-amber-300 px-3 py-2.5">
             <p className="text-sm font-semibold text-amber-800">
-              Sin asignar: {cobertura.sin_asignar.length} actividad(es) · {fmtMoney(cobertura.valor_sin_costear)} sin costear
+              Sin asignar: {cobertura.sin_asignar.length} {universo.modo === 'item' ? 'grupo(s) con ítems libres' : 'actividad(es)'} · {fmtMoney(cobertura.valor_sin_costear)} sin costear
             </p>
+            {/* Bloque átomo-ítem — el radar directo: un grupo PARTIDO canta
+                sus ítems y su plata sin asignar, no "se declara cubierto" */}
             <ul className="mt-1 text-xs text-amber-800 space-y-0.5">
               {cobertura.sin_asignar.map(g => (
                 <li key={g.grupo} className="flex justify-between gap-3">
-                  <span>{g.grupo}</span><span className="font-mono">{fmtMoney(g.subtotal)}</span>
+                  <span>
+                    {g.grupo}
+                    {g.parcial && <span className="ml-1.5 font-semibold">· {g.items_sin} de {g.items_total} ítems sin asignar</span>}
+                  </span>
+                  <span className="font-mono">{fmtMoney(g.subtotal)}</span>
                 </li>
               ))}
             </ul>

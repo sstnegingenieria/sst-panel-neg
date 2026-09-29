@@ -975,6 +975,24 @@ export interface AlcanceGrupo {
   subtotal: number             // antes de impuestos (Σ = costos directos)
 }
 
+/** ÍTEM del alcance congelado (bloque átomo-ítem, 29-sep): el átomo asignable
+ *  baja del grupo al ítem — un grupo con varios estudios puede repartirse
+ *  entre contratistas SIN perder de vista la plata no asignada. La `clave` se
+ *  MATERIALIZA al construir el snapshot con `claveItemAlcance` (instancia_id
+ *  en la práctica: 0 ítems sin él en prod, censo 29-sep; el fallback por
+ *  índice queda CONGELADO acá y ya no depende de reordenamientos futuros).
+ *  Un ítem individual JAMÁS se reparte entre dos contratistas (confirmado
+ *  por Giovanny) — el invariante de átomo único se conserva tal cual. */
+export interface ItemAlcance {
+  clave: string
+  codigo?: string
+  descripcion: string
+  unidad: string
+  cantidad: number
+  valor_total: number          // antes de impuestos (Σ por grupo = subtotal)
+  grupo: string                // nombre del grupo del resumen `alcance`
+}
+
 /** COPIA de lo pactado en la versión aprobada — nunca referencia. */
 export interface SnapshotProyecto {
   cliente: string              // nombre del cliente o prospecto
@@ -992,6 +1010,14 @@ export interface SnapshotProyecto {
   valor_venta: number          // total de la versión aprobada (con impuestos)
   esquema_tributario: EsquemaTributario
   alcance: AlcanceGrupo[]
+  /** Bloque átomo-ítem (29-sep): los ÍTEMS congelados del alcance, con clave
+   *  materializada. `alcance` (resumen por grupo) SE CONSERVA — sus lectores
+   *  (Lo pactado, LiquidacionModal, actividades_plan, diff PRC) no cambian.
+   *  Ausente en snapshots pre-bloque hasta el backfill (que RECONCILIA
+   *  contra el resumen, no asume: Σ por grupo == subtotal y conteo == items,
+   *  o el proyecto se reporta y no se rellena). Costo medido en prod:
+   *  máx ≈ 6 KB con 17 ítems — despreciable frente al límite de 1MB. */
+  items_alcance?: ItemAlcance[]
   total_items: number
 }
 
@@ -1171,15 +1197,30 @@ export function construirSnapshotProyecto(
   const modo = modoAgrupacionDe(version)
   const actividades = actividadesDe(version)
   const grupos = subtotalesPorGrupo(version.items, modo, actividades)
+  const nombreDeGrupo = new Map(grupos.map(g => [g.grupo_id, g.grupo_nombre]))
 
-  // Conteo de ítems por grupo con el MISMO mapeo de huérfanos que el PDF.
+  // Conteo de ítems por grupo con el MISMO mapeo de huérfanos que el PDF —
+  // y (bloque átomo-ítem) los ÍTEMS congelados con clave materializada:
+  // `claveItemAlcance` sobre el orden de la versión aprobada (inmutable), la
+  // MISMA función y los MISMOS inputs de las observaciones de preliquidación
+  // y del PDF del contratista — coinciden por construcción.
   const porGrupo = new Map<string, number>(grupos.map(g => [g.grupo_id, 0]))
-  for (const it of version.items) {
+  const itemsAlcance: ItemAlcance[] = []
+  version.items.forEach((it, idx) => {
     const id = modo === 'actividad'
       ? (it.actividad_id && porGrupo.has(it.actividad_id) ? it.actividad_id : GRUPO_OTROS_ID)
       : (it.capitulo?.trim() || GRUPO_OTROS_ID)
     porGrupo.set(id, (porGrupo.get(id) ?? 0) + 1)
-  }
+    itemsAlcance.push({
+      clave: claveItemAlcance(it, idx),
+      ...(it.codigo?.trim() ? { codigo: it.codigo.trim() } : {}),
+      descripcion: it.descripcion,
+      unidad: it.unidad,
+      cantidad: it.cantidad,
+      valor_total: it.valor_total,
+      grupo: nombreDeGrupo.get(id) ?? 'Otros',
+    })
+  })
 
   return {
     cliente: clienteNombre ?? cotizacion.prospecto_nombre ?? '—',
@@ -1194,6 +1235,7 @@ export function construirSnapshotProyecto(
     alcance: grupos
       .filter(g => (porGrupo.get(g.grupo_id) ?? 0) > 0)
       .map(g => ({ grupo: g.grupo_nombre, items: porGrupo.get(g.grupo_id) ?? 0, subtotal: g.subtotal })),
+    items_alcance: itemsAlcance,
     total_items: version.items.length,
   }
 }

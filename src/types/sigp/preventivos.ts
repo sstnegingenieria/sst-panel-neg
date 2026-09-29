@@ -129,6 +129,12 @@ export function construirSnapshotPreventivo(
     valor_venta: precio.total,
     esquema_tributario: 'iva_pleno',
     alcance: [{ grupo: renglon, items: 1, subtotal: precio.total }],
+    // Bloque átomo-ítem: el preventivo es UN renglón de matriz → un ítem
+    // sintético con clave estable (no hay versión de cotización detrás).
+    items_alcance: [{
+      clave: 'prev:1', descripcion: renglon, unidad: 'glb', cantidad: 1,
+      valor_total: precio.total, grupo: renglon,
+    }],
     total_items: 1,
   }
 }
