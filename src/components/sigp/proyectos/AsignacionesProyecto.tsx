@@ -248,11 +248,15 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
   const [ajustarTarget, setAjustarTarget] = useState<AsignacionContratista | null>(null)
   const [ajustarSel, setAjustarSel] = useState<Set<string>>(new Set())
   const [ajustarMotivo, setAjustarMotivo] = useState('')
+  // 29-sep — "el ítem bloqueado dice QUÉ HACER": el enlace «quitárselo» de la
+  // fila bloqueada salta al ajuste del dueño con este ítem RESALTADO.
+  const [itemResaltado, setItemResaltado] = useState<string | null>(null)
   // 29-sep (caso Triara): el valor acordado se REVISA en el mismo acto —
   // obligatorio cuando hay preliquidación, con el anterior a la vista.
   const [ajustarValor, setAjustarValor] = useState<number | undefined>(undefined)
 
   const abrirAjustar = (a: AsignacionContratista) => {
+    setItemResaltado(null)
     setAjustarTarget(a)
     // Siembra en el UNIVERSO vigente: una asignación de nivel grupo en un
     // proyecto con ítems se abre con SUS ÍTEMS expandidos — quitar uno es
@@ -281,6 +285,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         (r.revierte ? ' · REVIERTE la aprobación (re-aprobar en Gerencia)' : '') +
         (proyectoEnEjecucion && target.preliquidacion?.aprobada_por ? ' · ajuste pendiente de reconocer en la liquidación' : ''))
       setAjustarTarget(null)
+      setItemResaltado(null)
       await recargarTodo()
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Error al ajustar', 'error')
@@ -881,9 +886,19 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
               </label>
               {items.map(x => {
                 const ocupado = tomadosPorOtras.has(x.clave)
+                // "quitárselo": solo en el modal de CREAR (sin exceptoId), si
+                // quien mira puede gestionar y la dueña aún es AJUSTABLE (una
+                // liquidada/cancelada no se ajusta — ahí no hay salida corta).
+                const duena = ocupado
+                  ? otras.find(a => a.estado !== 'cancelada' && atomosEfectivosDe(a, proyecto.snapshot).includes(x.clave))
+                  : undefined
+                const ofreceQuitar = ocupado && !exceptoId && puedeGestionar
+                  && duena && duena.estado !== 'liquidada'
                 return (
                   <label key={x.clave}
-                    className={`flex items-center justify-between gap-2 pl-8 pr-3 py-1.5 text-sm ${ocupado ? 'opacity-50' : 'hover:bg-gray-50 cursor-pointer'}`}>
+                    className={`flex items-center justify-between gap-2 pl-8 pr-3 py-1.5 text-sm ${
+                      x.clave === itemResaltado ? 'ring-2 ring-amber-400 rounded bg-amber-50/60' : ''} ${
+                      ocupado ? 'opacity-60' : 'hover:bg-gray-50 cursor-pointer'}`}>
                     <span className="flex items-center gap-2.5 min-w-0">
                       <input type="checkbox" className="accent-brand-700 flex-shrink-0" disabled={ocupado}
                         checked={sel.has(x.clave)}
@@ -894,6 +909,21 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                         }} />
                       <span className="text-gray-700 truncate" title={x.etiqueta}>{x.etiqueta}</span>
                       {ocupado && <span className="text-[11px] text-gray-400 flex-shrink-0">→ {duenoDe(x.clave)}</span>}
+                      {ofreceQuitar && (
+                        <button type="button"
+                          onClick={e => {
+                            e.preventDefault()
+                            // salto directo: cerrar este modal → abrir el AJUSTE
+                            // del dueño con el ítem resaltado (misma pantalla
+                            // donde se suelta y se confirma el valor).
+                            setFormOpen(false)
+                            abrirAjustar(duena!)
+                            setItemResaltado(x.clave)
+                          }}
+                          className="text-[11px] text-brand-700 underline underline-offset-2 font-medium flex-shrink-0 hover:text-brand-800">
+                          quitárselo
+                        </button>
+                      )}
                     </span>
                     <span className="font-mono text-gray-600 flex-shrink-0">{fmtMoney(x.valor)}</span>
                   </label>
@@ -1373,10 +1403,10 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
 
       {/* ── Modal: ajustar átomos (29-sep: partir un grupo vivo + revisar
           el valor EN EL MISMO ACTO — caso Triara) ── */}
-      <Modal isOpen={ajustarTarget !== null} onClose={() => setAjustarTarget(null)}
+      <Modal isOpen={ajustarTarget !== null} onClose={() => { setAjustarTarget(null); setItemResaltado(null) }}
         title={`Ajustar átomos — ${ajustarTarget?.contratista_nombre ?? ''}`} size="lg"
         actions={[
-          { label: 'Volver', onClick: () => setAjustarTarget(null), variant: 'secondary' },
+          { label: 'Volver', onClick: () => { setAjustarTarget(null); setItemResaltado(null) }, variant: 'secondary' },
           {
             label: aplicando ? 'Aplicando…' : 'Aplicar ajuste', onClick: ajustar, variant: 'primary',
             loading: aplicando,
@@ -1388,6 +1418,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
           <p className="text-sm text-gray-600">
             Qué ejecuta REALMENTE este contratista. Los ítems que sueltes quedan
             <b> libres al instante</b> para asignarlos a otro contratista.
+            {itemResaltado && <> El ítem <b>resaltado en ámbar</b> es el que venías a quitarle — desmárcalo y aplica.</>}
           </p>
           {ajustarTarget && selectorAtomos(ajustarSel, setAjustarSel, ajustarTarget.id)}
           {ajustarTarget?.preliquidacion && (
