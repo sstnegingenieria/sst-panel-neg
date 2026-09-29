@@ -11,7 +11,8 @@
 //
 // El selector de átomos muestra EL VALOR de cada actividad (condición: quien
 // asigna ve cuánto CD pone en manos de cada contratista, no solo el nombre).
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   collection, getDocs, getDoc, doc, updateDoc, arrayUnion, deleteField, Timestamp,
 } from 'firebase/firestore'
@@ -35,6 +36,8 @@ import {
 } from '../../../types/sigp/asignacion'
 import type { AsignacionContratista } from '../../../types/sigp/asignacion'
 import { cargarAsignaciones, asegurarMigrado, crearAsignacion, escribirAsignacion } from '../../../utils/sigp/asignaciones'
+import { ID_TAREA_SENAL, patchCerrarTarea } from '../../../types/sigp/tarea'
+import type { Tarea } from '../../../types/sigp/tarea'
 import { MODALIDAD_CONTRATISTA_LABEL, MODALIDADES_CONTRATISTA, anticipoValorDe, sstGateAlDia, totalComprasReembolsos, claveItemAlcance } from '../../../types/sigp/proyecto'
 import { modoAgrupacionDe, actividadesDe, subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../../types/sigp/cotizacion'
 import type { VersionCotizacion } from '../../../types/sigp/cotizacion'
@@ -84,6 +87,23 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     : []
 
   const recargarTodo = async () => { await load(); await reload() }
+
+  // Deep-link de la cola de señales (29-sep): `?senal=1` hace scroll a esta
+  // sección y RESALTA las asignaciones señaladas (patrón ?oc=crear; el param
+  // se consume para que un F5 no re-dispare).
+  const seccionRef = useRef<HTMLDivElement>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [resaltarSenales, setResaltarSenales] = useState(false)
+  const senalParamRef = useRef(false)
+  useEffect(() => {
+    if (senalParamRef.current || searchParams.get('senal') !== '1') return
+    senalParamRef.current = true
+    setResaltarSenales(true)
+    seccionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const next = new URLSearchParams(searchParams)
+    next.delete('senal')
+    setSearchParams(next, { replace: true })
+  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Reparar resumen (cuando el detector encontró discrepancias) ──
   const repararResumen = async () => {
@@ -276,13 +296,27 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const ahora = Timestamp.now()
       const vigentes = await asegurarMigrado(proyecto, subdocs)
       const target = vigentes.find(x => x.id === a.id) ?? a
-      const r = patchResolverSenal(target, motivo, user?.uid ?? '', ahora)
+      // Agregado 2 (29-sep): el cierre CONGELA el monto del desfase en la traza.
+      const r = patchResolverSenal(target, proyecto.snapshot, proyecto.snapshot.valor_venta,
+        motivo, user?.uid ?? '', ahora)
       if (!r) return
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, alcance_desactualizado: undefined, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { alcance_desactualizado: deleteField(), historial: arrayUnion(r.entradaHistorial) }, trasPatch)
-      toast('Señal resuelta — preliquidación confirmada sin cambios')
+      // Cierre de la tarea de señal (facturados) SI quien resuelve es su
+      // responsable — si no, la tarea queda para que él verifique y cierre.
+      try {
+        const tRef = doc(db, 'tareas', ID_TAREA_SENAL(proyecto.id, target.id))
+        const tSnap = await getDoc(tRef)
+        if (tSnap.exists() && tSnap.data().asignada_a === user?.uid && tSnap.data().activa) {
+          const patchT = patchCerrarTarea(tSnap.data() as Tarea, { uid: user?.uid ?? '', nombre: user?.nombre }, ahora,
+            `Señal resuelta: confirmada sin cambios — ${motivo.trim()}${r.desfase != null ? ` (desfase descartado ${fmtMoney(Math.abs(r.desfase))})` : ''}`)
+          if (patchT) await updateDoc(tRef, patchT as Record<string, unknown>)
+        }
+      } catch { /* la tarea es del responsable; sin permiso queda para su verificación */ }
+      toast('Señal resuelta — confirmada sin cambios' +
+        (r.desfase != null ? ` · desfase descartado ${fmtMoney(Math.abs(r.desfase))} (congelado en el historial)` : ''))
       await recargarTodo()
     } catch { toast('Error al resolver la señal', 'error') } finally { setAplicando(false) }
   }
@@ -873,7 +907,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
   }
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 space-y-4">
+    <div ref={seccionRef} className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 space-y-4 scroll-mt-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="font-semibold text-gray-800">Contratistas y cobertura del alcance</h2>
@@ -914,7 +948,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
             const revisar = requiereRevisionCobertura(a, proyecto.snapshot)
             const dir = tipoDe(a) === 'administracion_directa'
             return (
-              <div key={a.id} className="px-3 py-3 space-y-1.5">
+              <div key={a.id} className={`px-3 py-3 space-y-1.5 ${resaltarSenales && a.alcance_desactualizado ? 'ring-2 ring-amber-400 rounded-lg bg-amber-50/40' : ''}`}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-sm text-gray-800">{a.contratista_nombre}</span>
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold ${ESTADO_ASIG_COLOR[a.estado]}`}>

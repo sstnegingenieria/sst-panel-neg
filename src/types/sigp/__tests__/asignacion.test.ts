@@ -15,6 +15,7 @@ import {
   resumenAsignacionesDe, detectarDesincronizacion, subEtapaDe, SUB_ETAPAS_PREPARACION,
   mapearEstadoV2, asignacionesLiquidadas, costoPresupuestadoAsignaciones, costoContratistasDe,
   atomosTomados, TRANSICIONES_ASIGNACION, ESTADOS_ASIGNACION,
+  separarSenales, diasSenal, UMBRAL_SENAL_ALCANCE_DIAS,
 } from '../asignacion'
 import { subEtapaProyectoDe, ESTADOS_PREPARACION_PROYECTO } from '../asignacion'
 import {
@@ -644,10 +645,34 @@ describe('máquina v2 y derivados', () => {
     expect(TRANSICIONES_ASIGNACION.cancelada).toEqual(['liquidada'])
     for (const e of ESTADOS_ASIGNACION) expect(TRANSICIONES_ASIGNACION[e]).toBeDefined()
   })
-  it('patchResolverSenal exige señal y motivo', () => {
-    expect(patchResolverSenal(base(), 'x', 'u', ts)).toBeNull()
-    const con = base({ alcance_desactualizado: { version: 5, fecha: ts, atomos_afectados: [] } })
-    expect(patchResolverSenal(con, 'no toca este alcance', 'u', ts)!.entradaHistorial.motivo).toMatch(/CONFIRMADA/)
+  it('patchResolverSenal exige señal y motivo — y CONGELA el desfase descartado (agregado 2)', () => {
+    expect(patchResolverSenal(base(), ALCANCE_MEGACENTER, 0, 'x', 'u', ts)).toBeNull()
+    const preSenal = { valor_alcance: 4_000_000, base_margen: 'cd_atomos' as const, valor_contratista: 1, anticipo_pct: 50, definida_por: 'g', fecha_definicion: ts }
+    const con = base({ preliquidacion: preSenal, alcance_desactualizado: { version: 5, fecha: ts, atomos_afectados: [] } })
+    const r = patchResolverSenal(con, ALCANCE_MEGACENTER, 0, 'no toca este alcance', 'u', ts)!
+    expect(r.entradaHistorial.motivo).toMatch(/CONFIRMADA/)
+    // base cd_atomos: registrado 4.000.000 vs CD vigente de Ensayos 6.463.735
+    // → desfase −2.463.735 CONGELADO en la traza (un descarte de $2,4M no
+    // puede quedar idéntico a uno de $12.000)
+    expect(r.desfase).toBe(4_000_000 - 6_463_735)
+    expect(r.entradaHistorial.motivo).toContain('desfase DESCARTADO: 2463735')
+    // base venta_total_legacy compara contra la VENTA vigente
+    const leg = base({ legacy: true,
+      preliquidacion: { ...preSenal, base_margen: undefined } as never,
+      alcance_desactualizado: { version: 2, fecha: ts, atomos_afectados: [] } })
+    const rl = patchResolverSenal(leg, ALCANCE_MEGACENTER, 5_000_000, 'ok', 'u', ts)!
+    expect(rl.desfase).toBe(4_000_000 - 5_000_000)
+  })
+  it('separarSenales: operativas vs facturadas por el contador del resumen (condición 3)', () => {
+    const px = (estado: string, n: number) => ({ estado, resumen_asignaciones: { alcance_desactualizado: n } }) as never
+    const r = separarSenales([px('en_ejecucion', 1), px('facturado', 1), px('facturado', 0), px('creado', 2)])
+    expect(r.operativas.map((p: { estado: string }) => p.estado)).toEqual(['en_ejecucion', 'creado'])
+    expect(r.facturadas.map((p: { estado: string }) => p.estado)).toEqual(['facturado'])
+  })
+  it('diasSenal + umbral nombrado', () => {
+    const hace20 = Timestamp.fromMillis(Date.now() - 20 * 86_400_000)
+    expect(diasSenal(hace20)).toBe(20)
+    expect(diasSenal(hace20) > UMBRAL_SENAL_ALCANCE_DIAS).toBe(true)
   })
   it('atomosTomados excluye canceladas', () => {
     expect(atomosTomados([base({ estado: 'cancelada' })]).size).toBe(0)

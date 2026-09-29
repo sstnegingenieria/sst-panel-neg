@@ -15,7 +15,7 @@
  * y devuelven el objeto a persistir, o `null` si el movimiento no es legal —
  * la UI no improvisa writes.
  */
-import type { Timestamp } from 'firebase/firestore'
+import { Timestamp } from 'firebase/firestore'
 
 // ── Estados y catálogo ───────────────────────────────────────────────────────
 
@@ -159,6 +159,52 @@ const evento = (
   ...(actor.nombre ? { por_nombre: actor.nombre } : {}),
   de, a, ...(nota ? { nota } : {}),
 })
+
+/** Tarea de SEÑAL DE ALCANCE en proyecto FACTURADO (cola de señales, 29-sep
+ *  — agregado 1 de Giovanny: un aviso que Marcela no puede resolver se
+ *  vuelve papel tapiz; el hallazgo necesita RESPONSABLE Y FECHA, patrón de
+ *  acción correctiva del SGI). Idempotencia POR ID: el doc se crea con id
+ *  determinístico `senal_{proyectoId}_{asignacionId}` y el caller verifica
+ *  existencia antes — reabrir la bandeja jamás duplica. El CIERRE lo hace su
+ *  responsable con comentario al VERIFICAR la resolución (si quien resuelve
+ *  la señal ES el responsable, se cierra en el mismo acto). */
+export const ID_TAREA_SENAL = (proyectoId: string, asignacionId: string) =>
+  `senal_${proyectoId}_${asignacionId}`
+
+export function construirTareaSenal(
+  datos: {
+    proyectoId: string; proyectoConsecutivo: string; asignacionId: string
+    contratista: string; senalVersion: number; senalFecha: Timestamp
+    responsable: { uid: string; nombre: string }
+  },
+  creador: { uid: string; nombre: string },
+  ahora: Timestamp,
+  diasLimite: number,
+): Tarea {
+  return {
+    titulo: `Señal de alcance sin resolver — ${datos.proyectoConsecutivo} (facturado)`,
+    descripcion: `La asignación de ${datos.contratista} tiene una señal de alcance viva ` +
+      `(v${datos.senalVersion}, del ${datos.senalFecha.toDate().toLocaleDateString('es-CO')}) en un proyecto YA FACTURADO: ` +
+      'no hay ajuste hacia adelante — es un número histórico que corregir, y eso requiere decisión con OK y acto propio con traza ' +
+      '(o confirmarse "revisado, sin cambio" con el desfase congelado). Cierra esta tarea cuando VERIFIQUES la resolución en la ficha.',
+    asignada_a: datos.responsable.uid,
+    asignada_a_nombre: datos.responsable.nombre,
+    asignada_por: creador.uid,
+    asignada_por_nombre: creador.nombre,
+    creada_por: creador.uid,
+    estado: 'pendiente',
+    activa: true,
+    prioridad: 'alta',
+    fecha_limite: Timestamp.fromMillis(ahora.toMillis() + diasLimite * 86_400_000),
+    contexto: {
+      tipo: 'proyecto', id: datos.proyectoId,
+      label: `${datos.proyectoConsecutivo} · señal de alcance (${datos.contratista})`,
+    },
+    fecha_creacion: ahora,
+    historial: [evento(ahora, creador, 'pendiente', 'pendiente',
+      'Creada automáticamente por la cola de señales de alcance (proyecto facturado)')],
+  }
+}
 
 /** El asignado arranca la tarea. */
 export function patchIniciarTarea(t: Tarea, actor: ActorTarea, ahora: Timestamp) {

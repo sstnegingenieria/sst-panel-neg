@@ -7,7 +7,11 @@ import { useFeatureFlag } from '../../hooks/useFeatureFlag'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney } from '../../utils/sigp/formato'
 import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR } from '../../types/sigp/proyecto'
-import { subEtapaProyectoDe, SUB_ETAPAS_PREPARACION, SUB_ETAPA_LABEL } from '../../types/sigp/asignacion'
+import {
+  subEtapaProyectoDe, SUB_ETAPAS_PREPARACION, SUB_ETAPA_LABEL,
+  separarSenales, diasSenal, UMBRAL_SENAL_ALCANCE_DIAS,
+} from '../../types/sigp/asignacion'
+import { cargarAsignaciones } from '../../utils/sigp/asignaciones'
 import type { SubEtapaPreparacion } from '../../types/sigp/asignacion'
 import type { Proyecto } from '../../types/sigp/proyecto'
 
@@ -27,6 +31,12 @@ export default function ProyectosSigp() {
   // solo clientes con proyectos, con conteo dentro de la opción. Compone en
   // AND con estado + sub-etapa + búsqueda.
   const [filtroCliente, setFiltroCliente] = useState('')
+  // Cola de señales de alcance (29-sep): las OPERATIVAS viven acá — la
+  // pantalla diaria de quien las resuelve. Antigüedad lazy: se leen las
+  // subcolecciones SOLO de los señalados (opción b — cero migración; hoy
+  // son 3; si algún día son decenas, el problema es la cola, no la query).
+  const [filtroSenal, setFiltroSenal] = useState(false)
+  const [diasSenalPorProyecto, setDiasSenalPorProyecto] = useState<Record<string, number>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -42,6 +52,25 @@ export default function ProyectosSigp() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (f2Enabled) load() }, [f2Enabled, load])
+
+  const senalesOperativas = useMemo(() => separarSenales(proyectos).operativas, [proyectos])
+
+  useEffect(() => {
+    let vivo = true
+    ;(async () => {
+      const dias: Record<string, number> = {}
+      for (const p of senalesOperativas) {
+        try {
+          const asigs = await cargarAsignaciones(p.id)
+          const fechas = asigs.filter(a => a.alcance_desactualizado && a.estado !== 'cancelada')
+            .map(a => diasSenal(a.alcance_desactualizado!.fecha))
+          if (fechas.length) dias[p.id] = Math.max(...fechas)
+        } catch { /* sin detalle: el contador del resumen igual la lista */ }
+      }
+      if (vivo) setDiasSenalPorProyecto(dias)
+    })()
+    return () => { vivo = false }
+  }, [senalesOperativas])
 
   const conteoSubEtapas = useMemo(() => {
     const c: Partial<Record<SubEtapaPreparacion, number>> = {}
@@ -67,6 +96,7 @@ export default function ProyectosSigp() {
       (!filtroEstado || p.estado === filtroEstado) &&
       (!filtroSubEtapa || subEtapaProyectoDe(p) === filtroSubEtapa) &&
       (!filtroCliente || p.snapshot.cliente?.trim() === filtroCliente) &&
+      (!filtroSenal || senalesOperativas.some(s => s.id === p.id)) &&
       (!q ||
         p.consecutivo.toLowerCase().includes(q) ||
         p.snapshot.cliente.toLowerCase().includes(q) ||
@@ -76,7 +106,7 @@ export default function ProyectosSigp() {
         (p.cotizacion_consecutivo ?? '').toLowerCase().includes(q) ||
         (p.solicitud_consecutivo ?? '').toLowerCase().includes(q)),
     )
-  }, [proyectos, filtroEstado, filtroSubEtapa, filtroCliente, busqueda])
+  }, [proyectos, filtroEstado, filtroSubEtapa, filtroCliente, filtroSenal, senalesOperativas, busqueda])
 
   if (!f2Enabled) {
     return (
@@ -95,6 +125,21 @@ export default function ProyectosSigp() {
           Ejecución de lo aprobado · un proyecto nace automáticamente al aprobar una cotización
         </p>
       </div>
+
+      {/* Cola de señales de alcance — tiene que DOLER (patrón "Pendientes
+          para el acta"): banner clickeable con la más vieja a la vista */}
+      {senalesOperativas.length > 0 && (
+        <button onClick={() => setFiltroSenal(f => !f)}
+          className={`w-full text-left rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
+            filtroSenal ? 'bg-amber-100 border-amber-400 text-amber-900' : 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'}`}>
+          ⚠ {senalesOperativas.length} señal(es) de alcance sin resolver
+          {(() => {
+            const max = Math.max(0, ...Object.values(diasSenalPorProyecto))
+            return max > 0 ? <> · la más vieja lleva <b className={max > UMBRAL_SENAL_ALCANCE_DIAS ? 'text-red-700' : ''}>{max} días</b></> : null
+          })()}
+          {' '}— {filtroSenal ? 'mostrando solo señaladas (clic para quitar)' : 'clic para verlas'}
+        </button>
+      )}
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-100">
@@ -173,6 +218,17 @@ export default function ProyectosSigp() {
                       <Link to={`/sigp/proyectos/${p.id}`} className="font-mono text-brand-700 font-semibold hover:underline">
                         {p.consecutivo}
                       </Link>
+                      {senalesOperativas.some(s => s.id === p.id) && (() => {
+                        const d = diasSenalPorProyecto[p.id]
+                        const tarde = d != null && d > UMBRAL_SENAL_ALCANCE_DIAS
+                        return (
+                          <Link to={`/sigp/proyectos/${p.id}?senal=1`}
+                            className={`ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold ${tarde ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}
+                            title="Señal de alcance sin resolver — clic para ir a revisarla">
+                            ⚠ señal{d != null ? ` · hace ${d} días` : ''}
+                          </Link>
+                        )
+                      })()}
                     </td>
                     <td className="px-4 py-2.5 font-medium text-gray-800">
                       {p.snapshot.nombre_sitio || <span className="text-gray-300 font-normal">—</span>}
