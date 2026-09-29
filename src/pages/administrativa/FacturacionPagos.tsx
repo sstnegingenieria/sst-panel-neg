@@ -9,7 +9,7 @@
 // (lectura). Los gestores de proyectos no entran aquí (segregación).
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { collection, getDocs, doc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
+import { collection, getDocs, getDoc, setDoc, doc, updateDoc, arrayUnion, query, where, Timestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../firebase/config'
 import { useAuth } from '../../contexts/AuthContext'
@@ -28,7 +28,10 @@ import {
   asignacionesPorAprobar, asignacionesPorGirar, asignacionesPorLiquidar,
   MEDIOS_PAGO, MEDIO_PAGO_LABEL,
 } from '../../types/sigp/proyecto'
-import { puedeRegistrarFacturaUI, puedeLiquidarUI, puedeCerrarProyectoUI, puedeAprobarPreliquidacionUI } from '../../types/sigp/permisos'
+import { puedeRegistrarFacturaUI, puedeLiquidarUI, puedeCerrarProyectoUI, puedeAprobarPreliquidacionUI, puedeAsignarTareasUI } from '../../types/sigp/permisos'
+import { separarSenales, diasSenal, UMBRAL_SENAL_ALCANCE_DIAS } from '../../types/sigp/asignacion'
+import { cargarAsignaciones } from '../../utils/sigp/asignaciones'
+import { ID_TAREA_SENAL, construirTareaSenal } from '../../types/sigp/tarea'
 import type { Proyecto, MedioPago } from '../../types/sigp/proyecto'
 import type { VerificacionSst } from '../../types/sigp/verificacionSst'
 
@@ -42,6 +45,10 @@ export default function FacturacionPagos() {
   const { user } = useAuth()
   const puedeRegistrar = puedeRegistrarFacturaUI(user?.rol)
   const [proyectos, setProyectos] = useState<Proyecto[]>([])
+  // Cola de señales (29-sep): las de FACTURADOS viven acá como referencia,
+  // pero EL QUE OBLIGA es la TAREA (agregado 1: responsable + fecha, patrón
+  // de acción correctiva SGI). Detalle lazy por señalado + antigüedad.
+  const [senalesFact, setSenalesFact] = useState<{ pid: string; consecutivo: string; asigId: string; contratista: string; dias: number; version: number }[]>([])
   // Bloque 3a: gate SST por proyecto, leído de la proyección verificaciones_sst
   const [gates, setGates] = useState<Record<string, VerificacionSst>>({})
   const [loading, setLoading] = useState(true)
@@ -172,6 +179,51 @@ export default function FacturacionPagos() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // ── Señales de alcance en FACTURADOS: detalle lazy + TAREA idempotente ──
+  useEffect(() => {
+    let vivo = true
+    ;(async () => {
+      const facturadas = separarSenales(proyectos).facturadas
+      const detalle: typeof senalesFact = []
+      for (const p of facturadas) {
+        try {
+          const asigs = await cargarAsignaciones(p.id)
+          for (const a of asigs) {
+            if (!a.alcance_desactualizado || a.estado === 'cancelada') continue
+            detalle.push({
+              pid: p.id, consecutivo: p.consecutivo, asigId: a.id,
+              contratista: a.contratista_nombre,
+              dias: diasSenal(a.alcance_desactualizado.fecha),
+              version: a.alcance_desactualizado.version,
+            })
+            // TAREA idempotente por id determinístico (una sola vez por señal;
+            // reabrir la bandeja jamás duplica). La crea quien pueda asignar.
+            if (!puedeAsignarTareasUI(user?.rol)) continue
+            const tRef = doc(db, 'tareas', ID_TAREA_SENAL(p.id, a.id))
+            const tSnap = await getDoc(tRef)
+            if (tSnap.exists()) continue
+            // Responsable: quien decide corregir cifras de proyectos cerrados
+            // — gerencia_general activo; fallback admin. Jamás hardcodeado.
+            const uSnap = await getDocs(query(collection(db, 'users'),
+              where('rol', '==', 'gerencia_general'), where('estado', '==', 'activo')))
+            const resp = uSnap.docs[0] ?? (await getDocs(query(collection(db, 'users'),
+              where('rol', '==', 'admin'), where('estado', '==', 'activo')))).docs[0]
+            if (!resp) continue
+            const ahora = Timestamp.now()
+            await setDoc(tRef, construirTareaSenal({
+              proyectoId: p.id, proyectoConsecutivo: p.consecutivo, asignacionId: a.id,
+              contratista: a.contratista_nombre, senalVersion: a.alcance_desactualizado.version,
+              senalFecha: a.alcance_desactualizado.fecha,
+              responsable: { uid: resp.id, nombre: (resp.data().nombre as string) ?? '' },
+            }, { uid: user?.uid ?? '', nombre: user?.nombre ?? '' }, ahora, UMBRAL_SENAL_ALCANCE_DIAS))
+          }
+        } catch { /* el aviso igual lista por el contador; la tarea se reintenta al reabrir */ }
+      }
+      if (vivo) setSenalesFact(detalle)
+    })()
+    return () => { vivo = false }
+  }, [proyectos]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
@@ -339,6 +391,31 @@ export default function FacturacionPagos() {
         <p className="text-sm text-gray-700 bg-brand-50/60 border border-brand-100 rounded-lg px-3 py-2">
           {narrativaAdministrativa(conteo, enCamino)}
         </p>
+      )}
+
+      {/* Cola de señales (29-sep) — FACTURADOS: la referencia vive acá, pero
+          EL QUE OBLIGA es la tarea (responsable + fecha). Sin acción de un
+          clic: corregir una cifra registrada exige acto propio con OK. */}
+      {senalesFact.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          <p className="font-semibold">
+            ⚠ Señales de alcance en proyectos FACTURADOS ({senalesFact.length}) — cada una tiene su
+            tarea con responsable y fecha en el módulo de Tareas.
+          </p>
+          <ul className="mt-1 text-xs space-y-0.5">
+            {senalesFact.map(s => (
+              <li key={`${s.pid}_${s.asigId}`}>
+                <Link to={`/sigp/proyectos/${s.pid}?senal=1`} className="underline underline-offset-2 font-mono">{s.consecutivo}</Link>
+                {' '}· {s.contratista} · señal v{s.version} ·{' '}
+                <span className={s.dias > UMBRAL_SENAL_ALCANCE_DIAS ? 'font-bold text-red-700' : ''}>hace {s.dias} días</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-[11px] text-amber-700">
+            Corregir la cifra registrada de un proyecto facturado requiere decisión con OK y acto
+            propio con traza — no hay acción de un clic aquí a propósito.
+          </p>
+        </div>
       )}
 
       {/* Las 7 secciones del ciclo, con contador. 'Todo el ciclo' = todo lo

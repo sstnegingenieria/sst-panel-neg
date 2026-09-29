@@ -1373,14 +1373,67 @@ export function patchAjustarAtomos(
   }
 }
 
-/** Confirmar la preliquidación sin cambios tras una señal (limpia el flag). */
-export function patchResolverSenal(
-  a: AsignacionContratista, motivo: string, uid: string, fecha: Timestamp,
-): { entradaHistorial: EntradaHistorialAsignacion } | null {
-  if (!a.alcance_desactualizado || !motivo.trim()) return null
+// ── Cola de señales de alcance (29-sep — el hallazgo del censo) ─────────────
+//
+// La señal funcionaba y nadie la miraba: 3 vivas, 2 en facturados. La cola
+// vive donde vive quien resuelve: operativas en la bandeja de Proyectos
+// (gestores: ajustar o confirmar), facturadas en Gestión Administrativa +
+// TAREA con responsable y fecha (agregado 1 de Giovanny: un hallazgo sin
+// responsable y sin fecha no es un control).
+
+/** Umbral de antigüedad de una señal — SUPUESTO NOMBRADO, SIN CALIBRAR (no
+ *  hay distribución todavía): una señal es un desfase de plata ACTIVO y no
+ *  puede esperar el ciclo mensual del acta. Ajustable con el uso real. */
+export const UMBRAL_SENAL_ALCANCE_DIAS = 15
+
+export const diasSenal = (fecha: Timestamp, ahora: Date = new Date()): number =>
+  Math.floor((ahora.getTime() - fecha.toMillis()) / 86_400_000)
+
+/** Split de la cola por TRAMO (condición 3: no son la misma cosa operativa):
+ *  operativas (pre-facturado — se ajusta o se confirma hacia adelante) vs
+ *  facturadas (solo un número histórico que corregir, con acto propio).
+ *  Trabaja sobre el CONTADOR denormalizado del resumen (una query); el
+ *  detalle por asignación se carga lazy solo para los señalados. */
+export function separarSenales<T extends Pick<Proyecto, 'estado'> & { resumen_asignaciones?: ResumenAsignaciones }>(
+  proyectos: T[],
+): { operativas: T[]; facturadas: T[] } {
+  const conSenal = proyectos.filter(p => (p.resumen_asignaciones?.alcance_desactualizado ?? 0) > 0)
+  const corte = ESTADOS_PROYECTO_RIEL.indexOf('facturado')
   return {
+    operativas: conSenal.filter(p => {
+      const i = ESTADOS_PROYECTO_RIEL.indexOf(p.estado)
+      return i >= 0 && i < corte
+    }),
+    facturadas: conSenal.filter(p => ESTADOS_PROYECTO_RIEL.indexOf(p.estado) >= corte),
+  }
+}
+
+/** Confirmar la preliquidación sin cambios tras una señal (limpia el flag).
+ *  Agregado 2 (29-sep): el cierre CONGELA EL MONTO del desfase descartado —
+ *  un "sin cambio" que descartó $2.300.000 y uno que descartó $12.000 no
+ *  pueden quedar idénticos en el historial. Evidencia auditable sin
+ *  fricción: cualquier gestor cierra, pero queda DE CUÁNTO era. */
+export function patchResolverSenal(
+  a: AsignacionContratista,
+  ctx: ContextoAlcance,
+  ventaVigente: number,
+  motivo: string, uid: string, fecha: Timestamp,
+): { entradaHistorial: EntradaHistorialAsignacion; desfase: number | null } | null {
+  if (!a.alcance_desactualizado || !motivo.trim()) return null
+  const registrado = a.preliquidacion?.valor_alcance
+  let desfase: number | null = null
+  let detalle = ''
+  if (registrado != null) {
+    const vigente = baseMargenDe(a) === 'venta_total_legacy'
+      ? ventaVigente
+      : valorAlcanceDe(a.atomos, ctx, a.atomos_nivel)
+    desfase = registrado - vigente
+    detalle = ` · desfase DESCARTADO: ${Math.abs(Math.round(desfase))} (valor_alcance registrado ${Math.round(registrado)} vs vigente ${Math.round(vigente)})`
+  }
+  return {
+    desfase,
     entradaHistorial: entrada(a.estado, a.estado, uid, fecha,
-      `Preliquidación CONFIRMADA sin cambios tras la señal de alcance (v${a.alcance_desactualizado.version}) — ${motivo.trim()}`),
+      `Preliquidación CONFIRMADA sin cambios tras la señal de alcance (v${a.alcance_desactualizado.version}) — ${motivo.trim()}${detalle}`),
   }
 }
 
