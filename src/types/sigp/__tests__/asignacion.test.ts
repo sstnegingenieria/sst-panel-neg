@@ -447,6 +447,18 @@ describe('ajustar átomos — el caso Megacenter tras la migración', () => {
     expect(r.sub.preliquidacion!.anticipo?.valor).toBe(3_120_000)  // el giro es un hecho, se conserva
     expect(r.entradaHistorial.motivo).toContain('5200000 → 3000000')
   })
+  it('guarda de SOBRE-GIRO: valor confirmado bajo el anticipo girado ADVIERTE (historial), no bloquea', () => {
+    // anticipo girado 3.120.000; confirmar 2.000.000 → sobrepago de 1.120.000
+    const r = patchAjustarAtomos(legacy, ['Ensayos y diagnóstico estructural'], ALCANCE_MEGACENTER, [legacy], 'recorte fuerte', 'u', ts, 2_000_000, true)!
+    expect(r.sobreGiro).toBe(true)
+    expect(r.entradaHistorial.motivo).toContain('SOBRE-GIRO')
+    expect(r.entradaHistorial.motivo).toContain('3120000')
+    expect(r.sub.preliquidacion!.valor_contratista).toBe(2_000_000)   // se aplica igual
+    // por encima del girado → sin la marca
+    const sin = patchAjustarAtomos(legacy, ['Ensayos y diagnóstico estructural'], ALCANCE_MEGACENTER, [legacy], 'x', 'u', ts, 4_000_000, true)!
+    expect(sin.sobreGiro).toBe(false)
+    expect(sin.entradaHistorial.motivo).not.toContain('SOBRE-GIRO')
+  })
   it('átomo tomado por otra viva → lanza; sin cambio → null', () => {
     const otra = base({ id: 'a2', atomos: ['Protección de equipos y limpieza'] })
     expect(() => patchAjustarAtomos(legacy, ['Protección de equipos y limpieza'], ALCANCE_MEGACENTER, [legacy, otra], 'x', 'u', ts, 1, true)).toThrow(/ya está asignada/)

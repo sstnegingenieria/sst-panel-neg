@@ -1312,7 +1312,7 @@ export function patchAjustarAtomos(
   fecha: Timestamp,
   valorConfirmado?: number,
   proyectoEnEjecucion?: boolean,
-): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; revierte: boolean; resuelveSenal: boolean } | null {
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; revierte: boolean; resuelveSenal: boolean; sobreGiro: boolean } | null {
   if (!motivo.trim()) return null
   if (a.estado === 'liquidada' || a.estado === 'cancelada') return null
   if (atomosNuevos.length === 0) return null
@@ -1334,6 +1334,12 @@ export function patchAjustarAtomos(
   const estabaAprobada = !!pre?.aprobada_por
   const revierte = !!pre && estabaAprobada && !proyectoEnEjecucion
   const ajusteEnEjecucion = !!pre && !!proyectoEnEjecucion
+  // Guarda (29-sep): valor confirmado por DEBAJO del anticipo ya girado —
+  // el giro pasa a SOBREPAGO a recuperar del contratista. NO bloquea (puede
+  // ser legítimo y resolverse en la liquidación) pero queda DICHO en el
+  // momento y en el historial — no como descubrimiento tres meses después.
+  const girado = pre?.anticipo?.valor ?? 0
+  const sobreGiro = !!pre && girado > 0 && valorConfirmado! < girado
 
   let preNueva: PreliquidacionAsignacion | undefined
   if (pre) {
@@ -1356,9 +1362,11 @@ export function patchAjustarAtomos(
     sub,
     revierte,
     resuelveSenal: !!a.alcance_desactualizado,
+    sobreGiro,
     entradaHistorial: entrada(a.estado, revierte ? 'preliquidacion_definida' : a.estado, uid, fecha,
       `Átomos ajustados — quedan: ${v.etiquetas.join(' · ')} · Motivo: ${motivo.trim()}` +
       (pre ? ` · valor contratista ${valorViejo} → ${valorConfirmado} (${valorViejo === valorConfirmado ? 'CONFIRMADO igual' : 'CAMBIADO'})` : '') +
+      (sobreGiro ? ` · ⚠ SOBRE-GIRO: el anticipo girado (${girado}) supera el valor confirmado (${valorConfirmado}) — sobrepago a recuperar del contratista, reconciliar en la liquidación` : '') +
       (revierte ? ' · REVIERTE la aprobación: requiere re-aprobación de Gerencia' : '') +
       (ajusteEnEjecucion && estabaAprobada ? ' · AJUSTE en ejecución — pendiente de reconocer en la liquidación' : '') +
       (a.alcance_desactualizado ? ' · resuelve la señal de alcance desactualizado' : '')),
