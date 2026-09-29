@@ -257,6 +257,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         { ...r.sub, ...(r.resuelveSenal ? { alcance_desactualizado: deleteField() } : {}), historial: arrayUnion(r.entradaHistorial) }, trasPatch)
       toast('Átomos ajustados — valor del contratista ' +
         (target.preliquidacion?.valor_contratista === ajustarValor ? 'confirmado' : 'actualizado') +
+        (r.sobreGiro ? ' · ⚠ SOBRE-GIRO registrado (anticipo > valor)' : '') +
         (r.revierte ? ' · REVIERTE la aprobación (re-aprobar en Gerencia)' : '') +
         (proyectoEnEjecucion && target.preliquidacion?.aprobada_por ? ' · ajuste pendiente de reconocer en la liquidación' : ''))
       setAjustarTarget(null)
@@ -1378,6 +1379,18 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                   {proyectoEnEjecucion
                     ? 'Proyecto en ejecución: la aprobación se conserva y el cambio queda como AJUSTE pendiente de reconocer en la liquidación.'
                     : 'La preliquidación está APROBADA: el ajuste revierte la aprobación y Gerencia debe re-aprobar.'}
+                </p>
+              )}
+              {/* Guarda 29-sep: sobre-giro dicho EN EL MOMENTO, no descubierto
+                  en la liquidación tres meses después. Advierte, no bloquea. */}
+              {(ajustarTarget.preliquidacion.anticipo?.valor ?? 0) > 0
+                && ajustarValor != null && ajustarValor < ajustarTarget.preliquidacion.anticipo!.valor && (
+                <p className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                  ⚠ El valor confirmado ({fmtMoney(ajustarValor)}) queda POR DEBAJO del anticipo ya
+                  girado ({fmtMoney(ajustarTarget.preliquidacion.anticipo!.valor)}): el giro pasa a ser un
+                  SOBREPAGO de {fmtMoney(ajustarTarget.preliquidacion.anticipo!.valor - ajustarValor)} a
+                  recuperar del contratista. Se puede aplicar igual — quedará en el historial y se
+                  reconcilia en la liquidación.
                 </p>
               )}
             </div>
