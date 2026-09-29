@@ -228,9 +228,18 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
   const [ajustarTarget, setAjustarTarget] = useState<AsignacionContratista | null>(null)
   const [ajustarSel, setAjustarSel] = useState<Set<string>>(new Set())
   const [ajustarMotivo, setAjustarMotivo] = useState('')
+  // 29-sep (caso Triara): el valor acordado se REVISA en el mismo acto —
+  // obligatorio cuando hay preliquidación, con el anterior a la vista.
+  const [ajustarValor, setAjustarValor] = useState<number | undefined>(undefined)
 
   const abrirAjustar = (a: AsignacionContratista) => {
-    setAjustarTarget(a); setAjustarSel(new Set(a.atomos)); setAjustarMotivo('')
+    setAjustarTarget(a)
+    // Siembra en el UNIVERSO vigente: una asignación de nivel grupo en un
+    // proyecto con ítems se abre con SUS ÍTEMS expandidos — quitar uno es
+    // exactamente el caso "partir el grupo vivo".
+    setAjustarSel(new Set(atomosEfectivosDe(a, proyecto.snapshot)))
+    setAjustarMotivo('')
+    setAjustarValor(a.preliquidacion?.valor_contratista)
   }
   const ajustar = async () => {
     if (!ajustarTarget) return
@@ -239,13 +248,17 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const ahora = Timestamp.now()
       const vigentes = await asegurarMigrado(proyecto, subdocs)
       const target = vigentes.find(a => a.id === ajustarTarget.id) ?? ajustarTarget
-      const r = patchAjustarAtomos(target, [...ajustarSel], proyecto.snapshot, vigentes, ajustarMotivo, user?.uid ?? '', ahora)
-      if (!r) { toast('Sin cambios que aplicar', 'error'); return }
+      const r = patchAjustarAtomos(target, [...ajustarSel], proyecto.snapshot, vigentes, ajustarMotivo,
+        user?.uid ?? '', ahora, ajustarValor, proyectoEnEjecucion)
+      if (!r) { toast('Sin cambios que aplicar (¿falta confirmar el valor?)', 'error'); return }
       const trasPatch = vigentes.map(a => a.id === target.id
-        ? { ...a, ...r.sub, historial: [...a.historial, r.entradaHistorial] } as AsignacionContratista : a)
+        ? { ...a, ...r.sub, ...(r.resuelveSenal ? { alcance_desactualizado: undefined } : {}), historial: [...a.historial, r.entradaHistorial] } as AsignacionContratista : a)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
-      toast('Átomos ajustados' + (target.preliquidacion ? ' — la preliquidación queda pendiente de revisar' : ''))
+        { ...r.sub, ...(r.resuelveSenal ? { alcance_desactualizado: deleteField() } : {}), historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+      toast('Átomos ajustados — valor del contratista ' +
+        (target.preliquidacion?.valor_contratista === ajustarValor ? 'confirmado' : 'actualizado') +
+        (r.revierte ? ' · REVIERTE la aprobación (re-aprobar en Gerencia)' : '') +
+        (proyectoEnEjecucion && target.preliquidacion?.aprobada_por ? ' · ajuste pendiente de reconocer en la liquidación' : ''))
       setAjustarTarget(null)
       await recargarTodo()
     } catch (e) {
@@ -1323,19 +1336,52 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         </div>
       </Modal>
 
-      {/* ── Modal: ajustar átomos ── */}
+      {/* ── Modal: ajustar átomos (29-sep: partir un grupo vivo + revisar
+          el valor EN EL MISMO ACTO — caso Triara) ── */}
       <Modal isOpen={ajustarTarget !== null} onClose={() => setAjustarTarget(null)}
         title={`Ajustar átomos — ${ajustarTarget?.contratista_nombre ?? ''}`} size="lg"
         actions={[
           { label: 'Volver', onClick: () => setAjustarTarget(null), variant: 'secondary' },
-          { label: aplicando ? 'Aplicando…' : 'Aplicar ajuste', onClick: ajustar, variant: 'primary', loading: aplicando, disabled: ajustarSel.size === 0 || !ajustarMotivo.trim() },
+          {
+            label: aplicando ? 'Aplicando…' : 'Aplicar ajuste', onClick: ajustar, variant: 'primary',
+            loading: aplicando,
+            disabled: ajustarSel.size === 0 || !ajustarMotivo.trim()
+              || (!!ajustarTarget?.preliquidacion && !(ajustarValor != null && ajustarValor > 0)),
+          },
         ]}>
         <div className="space-y-3">
           <p className="text-sm text-gray-600">
-            Qué actividades ejecuta REALMENTE este contratista. Si ya tiene preliquidación, quedará
-            marcada como pendiente de revisar (el valor pactado es decisión humana).
+            Qué ejecuta REALMENTE este contratista. Los ítems que sueltes quedan
+            <b> libres al instante</b> para asignarlos a otro contratista.
           </p>
           {ajustarTarget && selectorAtomos(ajustarSel, setAjustarSel, ajustarTarget.id)}
+          {ajustarTarget?.preliquidacion && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2">
+              <p className="text-xs text-amber-800">
+                <b>El valor acordado se revisa en este mismo acto.</b> No se recalcula solo —
+                el precio con el contratista es negociado, no proporcional al alcance. Confirma el
+                vigente o teclea el nuevo; queda trazado en el historial.
+              </p>
+              <div className="flex items-center gap-3 flex-wrap text-sm">
+                <span className="text-gray-600">
+                  Anterior: <b className="font-mono">{fmtMoney(ajustarTarget.preliquidacion.valor_contratista)}</b>
+                  {' '}· CD del alcance nuevo: <b className="font-mono">{fmtMoney(universo.unidades.filter(x => ajustarSel.has(x.clave)).reduce((s, x) => s + x.valor, 0))}</b>
+                </span>
+                <label className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-gray-700">Valor acordado <span className="text-red-500">*</span></span>
+                  <InputExpresion valor={ajustarValor} onValor={setAjustarValor}
+                    className="w-36 px-2 py-1.5 border border-gray-300 rounded-lg text-sm font-mono text-right focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                </label>
+              </div>
+              {ajustarTarget.preliquidacion.aprobada_por && (
+                <p className="text-[11px] text-amber-700">
+                  {proyectoEnEjecucion
+                    ? 'Proyecto en ejecución: la aprobación se conserva y el cambio queda como AJUSTE pendiente de reconocer en la liquidación.'
+                    : 'La preliquidación está APROBADA: el ajuste revierte la aprobación y Gerencia debe re-aprobar.'}
+                </p>
+              )}
+            </div>
+          )}
           <input value={ajustarMotivo} onChange={e => setAjustarMotivo(e.target.value)}
             placeholder="Motivo del ajuste (obligatorio)…"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />

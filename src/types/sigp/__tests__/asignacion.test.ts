@@ -412,12 +412,18 @@ describe('ajustar átomos — el caso Megacenter tras la migración', () => {
     estado: 'anticipo_girado',
     preliquidacion: { valor_alcance: 105_622_769, valor_contratista: 5_200_000, anticipo_pct: 60, definida_por: 'g', fecha_definicion: ts, aprobada_por: 'm', fecha_aprobacion: ts, anticipo: { fecha: ts, valor: 3_120_000, registrado_por: 'm' } },
   })
-  it('recortar a Ensayos: recalcula valor_alcance, pone la señal, libera 3 átomos', () => {
-    const r = patchAjustarAtomos(legacy, ['Ensayos y diagnóstico estructural'], ALCANCE_MEGACENTER, [legacy], 'átomo confirmado por Giovanny', 'u', ts)!
+  it('recortar a Ensayos: recalcula valor_alcance, libera 3 átomos — el valor se CONFIRMA en el acto (29-sep)', () => {
+    // proyecto en ejecución (caso real): conserva la aprobación y marca AJUSTE
+    const r = patchAjustarAtomos(legacy, ['Ensayos y diagnóstico estructural'], ALCANCE_MEGACENTER, [legacy], 'átomo confirmado por Giovanny', 'u', ts, 5_200_000, true)!
     expect(r.sub.atomos).toEqual(['Ensayos y diagnóstico estructural'])
     expect(r.sub.preliquidacion!.valor_alcance).toBe(6_463_735)
-    expect(r.sub.alcance_desactualizado!.version).toBe(0)          // ajuste manual
-    expect(r.sub.alcance_desactualizado!.atomos_afectados.length).toBe(3)
+    // el valor fue REVISADO en el mismo acto → SIN señal nueva; queda el flag
+    // de ajuste para reconciliar en la liquidación (Hotfix B)
+    expect(r.sub.alcance_desactualizado).toBeUndefined()
+    expect(r.sub.preliquidacion!.ajuste_pendiente_liquidacion).toBe(true)
+    expect(r.sub.preliquidacion!.aprobada_por).toBe('m')           // conservada (en ejecución)
+    expect(r.revierte).toBe(false)
+    expect(r.entradaHistorial.motivo).toContain('CONFIRMADO igual')
     // y la cobertura del proyecto pasa a mostrar la verdad:
     const despues = { ...legacy, ...r.sub } as AsignacionContratista
     expect(coberturaDe(ALCANCE_MEGACENTER, [despues]).valor_sin_costear).toBe(45_427_976)
@@ -429,10 +435,47 @@ describe('ajustar átomos — el caso Megacenter tras la migración', () => {
     // sin ajuste, la migrada sigue rotulada con la base anterior:
     expect(baseMargenDe(legacy)).toBe('venta_total_legacy')
   })
+  it('con preliquidación y SIN valor confirmado → null (la pantalla no deja reducir sin revisar el precio)', () => {
+    expect(patchAjustarAtomos(legacy, ['Ensayos y diagnóstico estructural'], ALCANCE_MEGACENTER, [legacy], 'x', 'u', ts)).toBeNull()
+  })
+  it('PRE-ejecución sobre aprobada: REVIERTE a definida (re-aprobación) y el valor nuevo queda', () => {
+    const r = patchAjustarAtomos(legacy, ['Ensayos y diagnóstico estructural'], ALCANCE_MEGACENTER, [legacy], 'recorte', 'u', ts, 3_000_000, false)!
+    expect(r.revierte).toBe(true)
+    expect(r.sub.estado).toBe('preliquidacion_definida')
+    expect(r.sub.preliquidacion!.aprobada_por).toBeUndefined()
+    expect(r.sub.preliquidacion!.valor_contratista).toBe(3_000_000)
+    expect(r.sub.preliquidacion!.anticipo?.valor).toBe(3_120_000)  // el giro es un hecho, se conserva
+    expect(r.entradaHistorial.motivo).toContain('5200000 → 3000000')
+  })
   it('átomo tomado por otra viva → lanza; sin cambio → null', () => {
     const otra = base({ id: 'a2', atomos: ['Protección de equipos y limpieza'] })
-    expect(() => patchAjustarAtomos(legacy, ['Protección de equipos y limpieza'], ALCANCE_MEGACENTER, [legacy, otra], 'x', 'u', ts)).toThrow(/ya está asignada/)
-    expect(patchAjustarAtomos(legacy, legacy.atomos, ALCANCE_MEGACENTER, [legacy], 'x', 'u', ts)).toBeNull()
+    expect(() => patchAjustarAtomos(legacy, ['Protección de equipos y limpieza'], ALCANCE_MEGACENTER, [legacy, otra], 'x', 'u', ts, 1, true)).toThrow(/ya está asignada/)
+    expect(patchAjustarAtomos(legacy, legacy.atomos, ALCANCE_MEGACENTER, [legacy], 'x', 'u', ts, 5_200_000, true)).toBeNull()
+  })
+  it('el caso TRIARA: partir el grupo vivo — quitar UN ítem lo libera para otro contratista en el acto', () => {
+    const SNAP = {
+      alcance: [{ grupo: 'ENSAYOS', items: 2, subtotal: 6_367_797 }],
+      items_alcance: [
+        { clave: 'en3', codigo: 'NEG-EN-03', descripcion: 'Verticalidad torre A', unidad: 'glb', cantidad: 1, valor_total: 4_067_797, grupo: 'ENSAYOS' },
+        { clave: 'en4', codigo: 'NEG-EN-04', descripcion: 'Verticalidad torre B', unidad: 'glb', cantidad: 1, valor_total: 2_300_000, grupo: 'ENSAYOS' },
+      ],
+    }
+    const jairo = base({ id: 'legacy', legacy: true, atomos: ['ENSAYOS'], estado: 'anticipo_girado',
+      alcance_desactualizado: { version: 4, fecha: ts, atomos_afectados: ['ENSAYOS'] },
+      preliquidacion: { valor_alcance: 4_067_797, valor_contratista: 2_400_000, anticipo_pct: 50, definida_por: 'g', fecha_definicion: ts, aprobada_por: 'm', fecha_aprobacion: ts, anticipo: { fecha: ts, valor: 1_200_000, registrado_por: 'm' } } })
+    const r = patchAjustarAtomos(jairo, ['en3'], SNAP, [jairo], 'NEG-EN-04 pasa a otro topógrafo', 'u', ts, 2_400_000, true)!
+    expect(r.sub.atomos).toEqual(['en3'])
+    expect(r.sub.atomos_nivel).toBe('item')                         // elevada a ítem
+    expect(r.sub.preliquidacion!.valor_alcance).toBe(4_067_797)     // CD del ítem que queda
+    expect(r.resuelveSenal).toBe(true)                              // la señal v4 se resuelve en el acto
+    const despues = { ...jairo, ...r.sub, alcance_desactualizado: undefined } as AsignacionContratista
+    // en4 quedó LIBRE: una asignación nueva lo toma sin pasos intermedios
+    const cob = coberturaDe(SNAP, [despues])
+    expect(cob.sin_asignar[0]).toMatchObject({ items_sin: 1, subtotal: 2_300_000, parcial: true })
+    const nueva = construirAsignacionMulti({ id: 'c2', nombre: 'Topógrafo Dos', nit: '9', estado: 'activo' },
+      ['en4'], 'todo_costo', undefined, SNAP, [despues], 'u', ts)
+    expect(nueva.atomos).toEqual(['en4'])
+    expect(coberturaDe(SNAP, [despues, { ...nueva, id: 'n' } as AsignacionContratista]).completa).toBe(true)
   })
 })
 

@@ -1287,9 +1287,21 @@ export function patchCancelarAsignacion(
 }
 
 /** Ajustar los átomos de una asignación viva (caso Megacenter: recortar a
- *  Héctor a solo "Ensayos"). Valida el invariante contra las demás vivas; si
- *  la preliquidación ya existe, recalcula `valor_alcance` y PONE la señal
- *  (version 0 = ajuste manual) — el valor del contratista es decisión humana. */
+ *  Héctor; caso Triara: PARTIR un grupo vivo quitando ítems para liberarlos
+ *  a un segundo contratista). Valida el invariante contra las demás vivas.
+ *
+ *  CONDICIÓN (29-sep, caso de aceptación de Giovanny): con preliquidación
+ *  presente, el VALOR ACORDADO se revisa EN EL MISMO ACTO — `valorConfirmado`
+ *  es OBLIGATORIO (null sin él). No se recalcula automático (el precio es
+ *  negociado, no proporcional al alcance): el humano confirma el vigente o
+ *  teclea el nuevo, con traza viejo → confirmado en el historial. Como el
+ *  valor se revisa aquí, la señal NO se pone — al contrario: si había una
+ *  señal viva, este acto la RESUELVE (corregir ES revisar). La máquina del
+ *  Hotfix B aplica al par (alcance, valor):
+ *   - pre-ejecución y estaba aprobada/girada → REVIERTE a definida (retira
+ *     la aprobación del dato vivo; el giro se conserva como hecho).
+ *   - en ejecución → conserva aprobación y marca ajuste_pendiente_liquidacion
+ *     (la reconciliación es de la liquidación — jamás frena el avance). */
 export function patchAjustarAtomos(
   a: AsignacionContratista,
   atomosNuevos: string[],
@@ -1298,7 +1310,9 @@ export function patchAjustarAtomos(
   motivo: string,
   uid: string,
   fecha: Timestamp,
-): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion } | null {
+  valorConfirmado?: number,
+  proyectoEnEjecucion?: boolean,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; revierte: boolean; resuelveSenal: boolean } | null {
   if (!motivo.trim()) return null
   if (a.estado === 'liquidada' || a.estado === 'cancelada') return null
   if (atomosNuevos.length === 0) return null
@@ -1313,25 +1327,41 @@ export function patchAjustarAtomos(
     ...atomosNuevos.filter(at => !viejos.has(at)),
   ]
   if (afectados.length === 0) return null
+
+  const pre = a.preliquidacion
+  if (pre && !(valorConfirmado != null && valorConfirmado > 0)) return null
+  const valorViejo = pre?.valor_contratista
+  const estabaAprobada = !!pre?.aprobada_por
+  const revierte = !!pre && estabaAprobada && !proyectoEnEjecucion
+  const ajusteEnEjecucion = !!pre && !!proyectoEnEjecucion
+
+  let preNueva: PreliquidacionAsignacion | undefined
+  if (pre) {
+    const { aprobada_por: _ap, fecha_aprobacion: _fa, ...base } = pre
+    preNueva = {
+      ...(revierte ? base : pre),
+      valor_alcance: valorAlcanceDe(atomosNuevos, alcance, v.nivel),
+      base_margen: 'cd_atomos' as BaseMargenAsignacion,
+      valor_contratista: valorConfirmado!,
+      ...(ajusteEnEjecucion && estabaAprobada ? { ajuste_pendiente_liquidacion: true } : {}),
+    }
+  }
   const sub: Partial<AsignacionContratista> = {
     atomos: [...atomosNuevos], fecha_actualizacion: fecha,
     ...(v.nivel ? { atomos_nivel: v.nivel, atomos_grupos: v.grupos } : {}),
-    ...(a.preliquidacion ? {
-      // La base pasa a ser CD de los átomos — se DECLARA (condición A: el
-      // rótulo viaja con la base, aunque la asignación siga siendo `legacy`).
-      preliquidacion: {
-        ...a.preliquidacion,
-        valor_alcance: valorAlcanceDe(atomosNuevos, alcance, v.nivel),
-        base_margen: 'cd_atomos' as BaseMargenAsignacion,
-      },
-      alcance_desactualizado: { version: 0, fecha, atomos_afectados: afectados },
-    } : {}),
+    ...(preNueva ? { preliquidacion: preNueva } : {}),
+    ...(revierte ? { estado: 'preliquidacion_definida' as EstadoAsignacion } : {}),
   }
   return {
     sub,
-    entradaHistorial: entrada(a.estado, a.estado, uid, fecha,
+    revierte,
+    resuelveSenal: !!a.alcance_desactualizado,
+    entradaHistorial: entrada(a.estado, revierte ? 'preliquidacion_definida' : a.estado, uid, fecha,
       `Átomos ajustados — quedan: ${v.etiquetas.join(' · ')} · Motivo: ${motivo.trim()}` +
-      (a.preliquidacion ? ' · la preliquidación queda PENDIENTE DE REVISAR (señal puesta)' : '')),
+      (pre ? ` · valor contratista ${valorViejo} → ${valorConfirmado} (${valorViejo === valorConfirmado ? 'CONFIRMADO igual' : 'CAMBIADO'})` : '') +
+      (revierte ? ' · REVIERTE la aprobación: requiere re-aprobación de Gerencia' : '') +
+      (ajusteEnEjecucion && estabaAprobada ? ' · AJUSTE en ejecución — pendiente de reconocer en la liquidación' : '') +
+      (a.alcance_desactualizado ? ' · resuelve la señal de alcance desactualizado' : '')),
   }
 }
 
