@@ -227,11 +227,20 @@ export interface AsignacionContratista {
   }
   evaluacion_snapshot?: { puntaje?: number; fecha?: Timestamp; detalle?: string }
   nota_criterio?: string
-  /** Átomos = NOMBRES de grupo del alcance de la versión aprobada. Cada átomo
-   *  vive en ≤1 asignación VIVA (invariante duro del builder). Un rename de
-   *  actividad en una versión de cambio se lee como cancelación+adicional —
-   *  consecuencia conocida. */
+  /** Átomos: NOMBRES de grupo (legacy, `atomos_nivel` ausente) o CLAVES de
+   *  ítem del snapshot (`atomos_nivel: 'item'` — bloque átomo-ítem 29-sep).
+   *  Cada átomo vive en ≤1 asignación VIVA (invariante duro del builder; un
+   *  ítem JAMÁS se reparte — Giovanny). Un rename de actividad en una
+   *  versión de cambio se lee como cancelación+adicional — consecuencia
+   *  conocida. */
   atomos: string[]
+  /** Nivel de los átomos. AUSENTE = grupo (las migra el script del PR B, que
+   *  SALTA las ya marcadas 'item' — re-expandir una clave sería basura). */
+  atomos_nivel?: 'grupo' | 'item'
+  /** Denormalizado con nivel 'item': los NOMBRES de grupo que sus ítems
+   *  tocan — para el rótulo humano y para la señal de alcance de la CF
+   *  (que intersecta por grupo y no conoce claves). */
+  atomos_grupos?: string[]
   modalidad: ModalidadContratista
   valor_materiales?: number
   estado: EstadoAsignacion
@@ -279,10 +288,98 @@ export const atomosTomados = (asigs: AsignacionContratista[]): Set<string> => {
   return s
 }
 
-/** CD de los átomos (Σ subtotales del alcance) — la base del margen nuevo. */
-export const valorAlcanceDe = (atomos: string[], alcance: AlcanceGrupo[]): number => {
-  const porGrupo = new Map(alcance.map(g => [g.grupo, g.subtotal || 0]))
-  return atomos.reduce((s, at) => s + (porGrupo.get(at) ?? 0), 0)
+// ── Bloque átomo-ítem (29-sep): el UNIVERSO del alcance ─────────────────────
+//
+// El átomo asignable baja del grupo al ÍTEM cuando el snapshot trae
+// `items_alcance` (nacimientos nuevos + backfill reconciliado); sin él, el
+// universo sigue siendo el grupo — LECTURA DUAL permanente, jamás adivinar
+// por la forma del string. `atomos_nivel: 'item'` marca las asignaciones
+// nuevas; ausente = átomos de grupo (las migra el script del PR B, que SALTA
+// las ya marcadas). El invariante no cambia: un átomo (ahora ítem) pertenece
+// a lo sumo a una asignación viva — un ítem JAMÁS se reparte (Giovanny).
+
+/** Unidad asignable del universo: un ítem (modo 'item') o un grupo (legacy). */
+export interface UnidadAlcance {
+  clave: string
+  etiqueta: string
+  grupo: string
+  valor: number
+}
+
+/** Contexto del alcance: el array de grupos de siempre (modo grupo, retro-
+ *  compatible con todos los callers y tests) o el snapshot con ítems. */
+export type ContextoAlcance =
+  | AlcanceGrupo[]
+  | { alcance?: AlcanceGrupo[]; items_alcance?: { clave: string; codigo?: string; descripcion: string; grupo: string; valor_total: number }[] }
+
+export function universoDe(ctx: ContextoAlcance): { modo: 'item' | 'grupo'; unidades: UnidadAlcance[] } {
+  const c = Array.isArray(ctx) ? { alcance: ctx } : ctx
+  if (c.items_alcance && c.items_alcance.length > 0) {
+    return {
+      modo: 'item',
+      unidades: c.items_alcance.map(it => ({
+        clave: it.clave,
+        etiqueta: it.codigo?.trim() || (it.descripcion.length > 48 ? it.descripcion.slice(0, 48) + '…' : it.descripcion),
+        grupo: it.grupo,
+        valor: it.valor_total || 0,
+      })),
+    }
+  }
+  return {
+    modo: 'grupo',
+    unidades: (c.alcance ?? []).map(g => ({ clave: g.grupo, etiqueta: g.grupo, grupo: g.grupo, valor: g.subtotal || 0 })),
+  }
+}
+
+/** Átomos EFECTIVOS de una asignación en el universo dado: los de nivel
+ *  'item' van tal cual; los de nivel grupo se EXPANDEN a las claves de los
+ *  ítems de sus grupos cuando el universo es de ítems (así una asignación
+ *  vieja convive con las nuevas sin migrar nada para leer). */
+export function atomosEfectivosDe(
+  a: Pick<AsignacionContratista, 'atomos' | 'atomos_nivel'>,
+  ctx: ContextoAlcance,
+): string[] {
+  const u = universoDe(ctx)
+  if (u.modo === 'grupo' || a.atomos_nivel === 'item') return a.atomos
+  const grupos = new Set(a.atomos)
+  return u.unidades.filter(x => grupos.has(x.grupo)).map(x => x.clave)
+}
+
+/** Rollup por GRUPO de los átomos de una asignación — la lectura de la
+ *  adenda: "¿el subconjunto quedó entero o partido?" de un golpe.
+ *  completo = la asignación tiene TODOS los ítems del grupo. En modo grupo
+ *  cada átomo es su grupo completo (comportamiento de siempre). */
+export function resumenAtomosPorGrupo(
+  a: Pick<AsignacionContratista, 'atomos' | 'atomos_nivel'>,
+  ctx: ContextoAlcance,
+): { grupo: string; tomados: number; total: number; completo: boolean }[] {
+  const u = universoDe(ctx)
+  if (u.modo === 'grupo') return a.atomos.map(g => ({ grupo: g, tomados: 1, total: 1, completo: true }))
+  const efectivos = new Set(atomosEfectivosDe(a, ctx))
+  const porGrupo = new Map<string, { tomados: number; total: number }>()
+  for (const x of u.unidades) {
+    const g = porGrupo.get(x.grupo) ?? { tomados: 0, total: 0 }
+    g.total += 1
+    if (efectivos.has(x.clave)) g.tomados += 1
+    porGrupo.set(x.grupo, g)
+  }
+  return [...porGrupo.entries()]
+    .filter(([, g]) => g.tomados > 0)
+    .map(([grupo, g]) => ({ grupo, tomados: g.tomados, total: g.total, completo: g.tomados === g.total }))
+}
+
+/** CD de los átomos (Σ valores del universo) — la base del margen. Con
+ *  ítems, la suma por ítem; con grupos, los subtotales de siempre. */
+export const valorAlcanceDe = (
+  atomos: string[], ctx: ContextoAlcance,
+  nivel?: AsignacionContratista['atomos_nivel'],
+): number => {
+  const u = universoDe(ctx)
+  const efectivos = (u.modo === 'item' && nivel !== 'item')
+    ? atomosEfectivosDe({ atomos, atomos_nivel: nivel }, ctx)
+    : atomos
+  const porClave = new Map(u.unidades.map(x => [x.clave, x.valor]))
+  return efectivos.reduce((s, at) => s + (porClave.get(at) ?? 0), 0)
 }
 
 /** CONDICIÓN A: contra qué base está calculado el margen de esta asignación.
@@ -295,22 +392,41 @@ export const baseMargenDe = (
   a.preliquidacion?.base_margen ?? (a.legacy ? 'venta_total_legacy' : 'cd_atomos')
 
 export interface CoberturaProyecto {
-  sin_asignar: { grupo: string; subtotal: number }[]
+  /** Por GRUPO para la lectura humana: en modo ítem, `subtotal` es la plata
+   *  de los ÍTEMS sin asignar de ese grupo y `parcial` dice que el grupo
+   *  quedó partido — el arreglo del radar ciego: un grupo de $6M con un solo
+   *  ítem de $1M asignado ya no "se declara cubierto"; canta los $5M. */
+  sin_asignar: { grupo: string; subtotal: number; items_sin?: number; items_total?: number; parcial?: boolean }[]
   valor_sin_costear: number
   completa: boolean
 }
 
 /** Decisión 3: la cobertura incompleta SE VE — cuántas actividades y cuánto
- *  valor están sin costear. */
-export function coberturaDe(alcance: AlcanceGrupo[], asigs: AsignacionContratista[]): CoberturaProyecto {
-  const tomados = atomosTomados(asigs)
-  const sin = alcance.filter(g => !tomados.has(g.grupo))
-    .map(g => ({ grupo: g.grupo, subtotal: g.subtotal || 0 }))
-  return {
-    sin_asignar: sin,
-    valor_sin_costear: sin.reduce((s, g) => s + g.subtotal, 0),
-    completa: sin.length === 0,
+ *  valor están sin costear. Bloque átomo-ítem: por ÍTEM cuando el universo
+ *  lo permite, con rollup por grupo para la pantalla. */
+export function coberturaDe(ctx: ContextoAlcance, asigs: AsignacionContratista[]): CoberturaProyecto {
+  const u = universoDe(ctx)
+  const tomados = new Set<string>()
+  for (const a of asignacionesVivas(asigs)) for (const at of atomosEfectivosDe(a, ctx)) tomados.add(at)
+  const libres = u.unidades.filter(x => !tomados.has(x.clave))
+  if (u.modo === 'grupo') {
+    const sin = libres.map(x => ({ grupo: x.grupo, subtotal: x.valor }))
+    return { sin_asignar: sin, valor_sin_costear: sin.reduce((s, g) => s + g.subtotal, 0), completa: sin.length === 0 }
   }
+  const totalPorGrupo = new Map<string, number>()
+  for (const x of u.unidades) totalPorGrupo.set(x.grupo, (totalPorGrupo.get(x.grupo) ?? 0) + 1)
+  const porGrupo = new Map<string, { subtotal: number; items_sin: number }>()
+  for (const x of libres) {
+    const g = porGrupo.get(x.grupo) ?? { subtotal: 0, items_sin: 0 }
+    g.subtotal += x.valor; g.items_sin += 1
+    porGrupo.set(x.grupo, g)
+  }
+  const sin = [...porGrupo.entries()].map(([grupo, g]) => ({
+    grupo, subtotal: g.subtotal, items_sin: g.items_sin,
+    items_total: totalPorGrupo.get(grupo) ?? g.items_sin,
+    parcial: g.items_sin < (totalPorGrupo.get(grupo) ?? g.items_sin),
+  }))
+  return { sin_asignar: sin, valor_sin_costear: sin.reduce((s, g) => s + g.subtotal, 0), completa: sin.length === 0 }
 }
 
 /** Presupuesto del proyecto = Σ asignaciones vivas (contratista + materiales
@@ -374,12 +490,12 @@ export const UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT = 70
  *  el costo incluye los materiales NEG (un margen alto ahí sería falso).
  *  null sin preliquidación o sin CD. */
 export function margenImplicitoDe(
-  a: Pick<AsignacionContratista, 'atomos' | 'modalidad' | 'valor_materiales' | 'preliquidacion'>,
-  alcance: AlcanceGrupo[],
+  a: Pick<AsignacionContratista, 'atomos' | 'atomos_nivel' | 'modalidad' | 'valor_materiales' | 'preliquidacion'>,
+  ctx: ContextoAlcance,
 ): number | null {
   const pre = a.preliquidacion
   if (!pre) return null
-  const cd = valorAlcanceDe(a.atomos, alcance)
+  const cd = valorAlcanceDe(a.atomos, ctx, a.atomos_nivel)
   if (cd <= 0) return null
   const costo = pre.valor_contratista + (a.modalidad === 'solo_mano_obra' ? (a.valor_materiales ?? 0) : 0)
   return ((cd - costo) / cd) * 100
@@ -388,15 +504,15 @@ export function margenImplicitoDe(
 /** ¿Entra a la lista "revisar cobertura"? (viva, con margen implícito sobre
  *  el umbral). */
 export function requiereRevisionCobertura(
-  a: AsignacionContratista, alcance: AlcanceGrupo[],
+  a: AsignacionContratista, ctx: ContextoAlcance,
 ): boolean {
   if (a.estado === 'cancelada') return false
-  const m = margenImplicitoDe(a, alcance)
+  const m = margenImplicitoDe(a, ctx)
   return m != null && m >= UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT
 }
 
 export function resumenAsignacionesDe(
-  asigs: AsignacionContratista[], alcance: AlcanceGrupo[],
+  asigs: AsignacionContratista[], alcance: ContextoAlcance,
 ): ResumenAsignaciones {
   const cob = coberturaDe(alcance, asigs)
   const por_estado: Partial<Record<EstadoAsignacion, number>> = {}
@@ -436,7 +552,7 @@ export function resumenAsignacionesDe(
  *  detector natural. Si el resumen del padre discrepa, SE VE (banner), no se
  *  prefiere una fuente en silencio. Devuelve las discrepancias legibles. */
 export function detectarDesincronizacion(
-  resumen: ResumenAsignaciones | undefined, asigs: AsignacionContratista[], alcance: AlcanceGrupo[],
+  resumen: ResumenAsignaciones | undefined, asigs: AsignacionContratista[], alcance: ContextoAlcance,
 ): string[] {
   if (!resumen) return asigs.length > 0 ? ['el padre no tiene resumen y la subcolección tiene asignaciones'] : []
   const real = resumenAsignacionesDe(asigs, alcance)
@@ -551,12 +667,40 @@ const entrada = (
  *    tomado por una asignación viva (invariante duro — decisión 2)
  *  - modalidad solo_mano_obra sin presupuesto de materiales.
  */
+/** Validación común de átomos contra el universo (bloque átomo-ítem):
+ *  existen, y ninguno está tomado por una asignación VIVA — comparando en el
+ *  MISMO universo (las existentes de nivel grupo se expanden a claves).
+ *  Devuelve los metadatos del nivel para persistir. */
+function validarAtomos(
+  atomos: string[], ctx: ContextoAlcance, existentes: AsignacionContratista[],
+): { nivel?: 'item'; grupos?: string[]; etiquetas: string[] } {
+  const u = universoDe(ctx)
+  const porClave = new Map(u.unidades.map(x => [x.clave, x]))
+  for (const at of atomos) {
+    if (!porClave.has(at)) throw new Error(`La actividad «${at}» no existe en el alcance vigente`)
+  }
+  const tomados = new Set<string>()
+  for (const a of asignacionesVivas(existentes)) for (const at of atomosEfectivosDe(a, ctx)) tomados.add(at)
+  for (const at of atomos) {
+    if (tomados.has(at)) {
+      const et = porClave.get(at)?.etiqueta ?? at
+      throw new Error(`«${et}» ya está asignada a otro contratista`)
+    }
+  }
+  const etiquetas = atomos.map(at => porClave.get(at)?.etiqueta ?? at)
+  if (u.modo === 'item') {
+    const grupos = [...new Set(atomos.map(at => porClave.get(at)!.grupo))]
+    return { nivel: 'item', grupos, etiquetas }
+  }
+  return { etiquetas }
+}
+
 export function construirAsignacionMulti(
   contratista: { id: string; nombre: string; nit?: string; cedula?: string; estado: string },
   atomos: string[],
   modalidad: ModalidadContratista,
   valorMateriales: number | undefined,
-  alcance: AlcanceGrupo[],
+  ctx: ContextoAlcance,
   existentes: AsignacionContratista[],
   uid: string,
   fecha: Timestamp,
@@ -570,14 +714,7 @@ export function construirAsignacionMulti(
     throw new Error('Solo se pueden asignar contratistas habilitados (estado activo)')
   if (atomos.length === 0)
     throw new Error('La asignación necesita al menos una actividad del alcance')
-  const enAlcance = new Set(alcance.map(g => g.grupo))
-  for (const at of atomos) {
-    if (!enAlcance.has(at)) throw new Error(`La actividad «${at}» no existe en el alcance vigente`)
-  }
-  const tomados = atomosTomados(existentes)
-  for (const at of atomos) {
-    if (tomados.has(at)) throw new Error(`La actividad «${at}» ya está asignada a otro contratista`)
-  }
+  const v = validarAtomos(atomos, ctx, existentes)
   if (modalidad === 'solo_mano_obra' && !(valorMateriales !== undefined && valorMateriales >= 0))
     throw new Error('La modalidad solo mano de obra exige el presupuesto de materiales de NEG')
   const documento = contratista.nit || contratista.cedula
@@ -592,6 +729,7 @@ export function construirAsignacionMulti(
       fecha_consulta: fecha,
     },
     atomos: [...atomos],
+    ...(v.nivel ? { atomos_nivel: v.nivel, atomos_grupos: v.grupos } : {}),
     modalidad,
     ...(modalidad === 'solo_mano_obra' ? { valor_materiales: valorMateriales } : {}),
     estado: 'asignada',
@@ -600,7 +738,7 @@ export function construirAsignacionMulti(
     fecha,
     historial: [entrada(null, 'asignada', uid, fecha,
       (tipo === 'administracion_directa' ? 'ADMINISTRACIÓN DIRECTA (personal propio, sin ciclo de pago) — ' : '') +
-      `Asignación de ${contratista.nombre} — ${atomos.length} actividad(es): ${atomos.join(' · ')}` +
+      `Asignación de ${contratista.nombre} — ${atomos.length} ${v.nivel ? 'ítem(s)' : 'actividad(es)'}: ${v.etiquetas.join(' · ')}` +
       (notaCriterio?.trim() ? ` · Criterio: ${notaCriterio.trim()}` : ''))],
     ...(notaCriterio?.trim() ? { nota_criterio: notaCriterio.trim() } : {}),
     fecha_creacion: fecha,
@@ -633,7 +771,7 @@ export function construirAsignacionHistorica(
   valorMateriales: number | undefined,
   valorPagado: number,
   motivo: string,
-  alcance: AlcanceGrupo[],
+  alcance: ContextoAlcance,
   existentes: AsignacionContratista[],
   uid: string,
   fecha: Timestamp,
@@ -644,14 +782,7 @@ export function construirAsignacionHistorica(
     throw new Error('El registro histórico exige el valor realmente pagado (> 0)')
   if (atomos.length === 0)
     throw new Error('La asignación necesita al menos una actividad del alcance')
-  const enAlcance = new Set(alcance.map(g => g.grupo))
-  for (const at of atomos) {
-    if (!enAlcance.has(at)) throw new Error(`La actividad «${at}» no existe en el alcance vigente`)
-  }
-  const tomados = atomosTomados(existentes)
-  for (const at of atomos) {
-    if (tomados.has(at)) throw new Error(`La actividad «${at}» ya está asignada a otro contratista`)
-  }
+  const v = validarAtomos(atomos, alcance, existentes)
   const documento = contratista.nit || contratista.cedula
   return {
     contratista_id: contratista.id,
@@ -663,11 +794,12 @@ export function construirAsignacionHistorica(
       fecha_consulta: fecha,
     },
     atomos: [...atomos],
+    ...(v.nivel ? { atomos_nivel: v.nivel, atomos_grupos: v.grupos } : {}),
     modalidad,
     ...(modalidad === 'solo_mano_obra' ? { valor_materiales: valorMateriales ?? 0 } : {}),
     estado: 'liquidada',
     preliquidacion: {
-      valor_alcance: valorAlcanceDe(atomos, alcance),
+      valor_alcance: valorAlcanceDe(atomos, alcance, v.nivel),
       base_margen: 'cd_atomos',
       valor_contratista: valorPagado,
       anticipo_pct: 0,
@@ -680,7 +812,7 @@ export function construirAsignacionHistorica(
     asignado_por: uid,
     fecha,
     historial: [entrada(null, 'liquidada', uid, fecha,
-      `REGISTRO HISTÓRICO retroactivo — pagado por fuera del panel (${atomos.join(' · ')}, ` +
+      `REGISTRO HISTÓRICO retroactivo — pagado por fuera del panel (${v.etiquetas.join(' · ')}, ` +
       `valor pagado cargado a mano). Motivo: ${motivo.trim()}. ` +
       'No siguió el flujo definir → aprobar → girar → liquidar.')],
     fecha_creacion: fecha,
@@ -728,7 +860,7 @@ export function patchEstimarDirecta(
   a: AsignacionContratista,
   costoEstimado: number,
   diasEquipo: number | undefined,
-  alcance: AlcanceGrupo[],
+  alcance: ContextoAlcance,
   uid: string,
   fecha: Timestamp,
   motivo?: string,
@@ -739,7 +871,7 @@ export function patchEstimarDirecta(
   const reEstima = a.estado === 'estimada'
   if (reEstima && !motivo?.trim()) return null   // re-estimar exige motivo
   const pre: PreliquidacionAsignacion = {
-    valor_alcance: valorAlcanceDe(a.atomos, alcance),
+    valor_alcance: valorAlcanceDe(a.atomos, alcance, a.atomos_nivel),
     base_margen: 'cd_atomos',
     valor_contratista: costoEstimado,
     anticipo_pct: 0,
@@ -802,7 +934,7 @@ export function patchCerrarDirecta(
 export function patchDefinirPreliquidacion(
   a: AsignacionContratista,
   datos: { valor_contratista: number; anticipo_pct: number; observaciones?: Record<string, string> },
-  alcance: AlcanceGrupo[],
+  alcance: ContextoAlcance,
   uid: string,
   fecha: Timestamp,
 ): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion } | null {
@@ -812,7 +944,7 @@ export function patchDefinirPreliquidacion(
   if (a.estado !== 'asignada' && a.estado !== 'preliquidacion_definida') return null
   if (!(datos.valor_contratista > 0)) return null
   const pre: PreliquidacionAsignacion = {
-    valor_alcance: valorAlcanceDe(a.atomos, alcance),
+    valor_alcance: valorAlcanceDe(a.atomos, alcance, a.atomos_nivel),
     valor_contratista: datos.valor_contratista,
     anticipo_pct: datos.anticipo_pct,
     ...(datos.observaciones ? { observaciones: datos.observaciones } : {}),
@@ -1161,7 +1293,7 @@ export function patchCancelarAsignacion(
 export function patchAjustarAtomos(
   a: AsignacionContratista,
   atomosNuevos: string[],
-  alcance: AlcanceGrupo[],
+  alcance: ContextoAlcance,
   demas: AsignacionContratista[],
   motivo: string,
   uid: string,
@@ -1170,14 +1302,10 @@ export function patchAjustarAtomos(
   if (!motivo.trim()) return null
   if (a.estado === 'liquidada' || a.estado === 'cancelada') return null
   if (atomosNuevos.length === 0) return null
-  const enAlcance = new Set(alcance.map(g => g.grupo))
-  for (const at of atomosNuevos) {
-    if (!enAlcance.has(at)) throw new Error(`La actividad «${at}» no existe en el alcance vigente`)
-  }
-  const tomadosPorOtras = atomosTomados(demas.filter(x => x.id !== a.id))
-  for (const at of atomosNuevos) {
-    if (tomadosPorOtras.has(at)) throw new Error(`La actividad «${at}» ya está asignada a otro contratista`)
-  }
+  // Mismo universo del builder de alta: existen + no tomados por otras vivas
+  // (bloque átomo-ítem: el ajuste sobre un proyecto con ítems escribe claves
+  // y ELEVA la asignación a nivel 'item' aunque naciera de grupo).
+  const v = validarAtomos(atomosNuevos, alcance, demas.filter(x => x.id !== a.id))
   const viejos = new Set(a.atomos)
   const nuevos = new Set(atomosNuevos)
   const afectados = [
@@ -1187,12 +1315,13 @@ export function patchAjustarAtomos(
   if (afectados.length === 0) return null
   const sub: Partial<AsignacionContratista> = {
     atomos: [...atomosNuevos], fecha_actualizacion: fecha,
+    ...(v.nivel ? { atomos_nivel: v.nivel, atomos_grupos: v.grupos } : {}),
     ...(a.preliquidacion ? {
       // La base pasa a ser CD de los átomos — se DECLARA (condición A: el
       // rótulo viaja con la base, aunque la asignación siga siendo `legacy`).
       preliquidacion: {
         ...a.preliquidacion,
-        valor_alcance: valorAlcanceDe(atomosNuevos, alcance),
+        valor_alcance: valorAlcanceDe(atomosNuevos, alcance, v.nivel),
         base_margen: 'cd_atomos' as BaseMargenAsignacion,
       },
       alcance_desactualizado: { version: 0, fecha, atomos_afectados: afectados },
@@ -1201,7 +1330,7 @@ export function patchAjustarAtomos(
   return {
     sub,
     entradaHistorial: entrada(a.estado, a.estado, uid, fecha,
-      `Átomos ajustados — quedan: ${atomosNuevos.join(' · ')} · Motivo: ${motivo.trim()}` +
+      `Átomos ajustados — quedan: ${v.etiquetas.join(' · ')} · Motivo: ${motivo.trim()}` +
       (a.preliquidacion ? ' · la preliquidación queda PENDIENTE DE REVISAR (señal puesta)' : '')),
   }
 }
@@ -1466,7 +1595,7 @@ export function patchCancelarProyecto(
   return {
     padre: { estado: 'cancelado', cierre_anticipado: cierre, fecha_actualizacion: fecha },
     cancelaciones,
-    resumen: resumenAsignacionesDe(asigsTras, p.snapshot.alcance ?? []),
+    resumen: resumenAsignacionesDe(asigsTras, p.snapshot),
     entradaHistorial: { de: p.estado, a: 'cancelado', por: uid, fecha, motivo: motivoPadre },
     incurrido,
   }
