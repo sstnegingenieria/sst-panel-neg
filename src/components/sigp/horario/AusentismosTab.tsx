@@ -176,7 +176,7 @@ export default function AusentismosTab() {
         title={`Anular ausentismo — ${anularTarget?.empleado_nombre ?? ''}`}
         onClose={() => setAnularTarget(null)}
         actions={[
-          { label: 'Cancelar', onClick: () => setAnularTarget(null), variant: 'secondary' },
+          { label: 'Volver', onClick: () => setAnularTarget(null), variant: 'secondary' },
           { label: anulando ? 'Anulando…' : 'Anular', onClick: anular, variant: 'danger', loading: anulando, disabled: !motivoAnulacion.trim() },
         ]}
       >

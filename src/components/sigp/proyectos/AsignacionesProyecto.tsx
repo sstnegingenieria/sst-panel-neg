@@ -1542,7 +1542,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       <Modal isOpen={corrAnticipoTarget !== null} onClose={() => setCorrAnticipoTarget(null)}
         title={`Corregir anticipo — ${corrAnticipoTarget?.contratista_nombre ?? ''}`}
         actions={[
-          { label: 'Cancelar', onClick: () => setCorrAnticipoTarget(null), variant: 'secondary' },
+          { label: 'Volver', onClick: () => setCorrAnticipoTarget(null), variant: 'secondary' },
           {
             label: aplicando ? 'Guardando…' : corrAnticipoAnular ? 'Anular el anticipo' : 'Guardar corrección',
             onClick: guardarCorreccionAnticipo, variant: 'primary', loading: aplicando,

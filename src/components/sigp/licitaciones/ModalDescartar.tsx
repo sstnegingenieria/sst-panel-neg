@@ -27,7 +27,7 @@ export default function ModalDescartar({ abierto, onCerrar, onConfirmar }: Props
       onClose={onCerrar}
       size="md"
       actions={[
-        { label: 'Cancelar', onClick: onCerrar, variant: 'secondary' },
+        { label: 'Volver', onClick: onCerrar, variant: 'secondary' },
         {
           label: 'Descartar',
           onClick: () => onConfirmar(motivo as MotivoDescarte),

@@ -142,11 +142,6 @@ export default function ProyectoDetalleSigp() {
         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${ESTADO_PRY_COLOR[proyecto.estado]}`}>
           {ESTADO_PRY_LABEL[proyecto.estado]}
         </span>
-        {/* Cierre anticipado (28-sep) — el botón solo aparece en estados
-            cancelables (pre-facturado); el componente se auto-gatea */}
-        {puedeGestionarProyectosUI(user?.rol) && !cerrado && !cancelado && (
-          <CierreAnticipadoProyecto proyecto={proyecto} comprasEjecutadas={comprasEjecutadas} reload={load} />
-        )}
         {/* Bloque D — reintento del espejo SST (upsert idempotente: no duplica) */}
         {puedeGestionar && idxEstado >= ESTADOS_PROYECTO.indexOf('en_ejecucion') && (
           <button
@@ -457,6 +452,13 @@ export default function ProyectoDetalleSigp() {
           ))}
         </ol>
       </div>
+
+      {/* Cancelación del proyecto (guarda 01-oct, incidente PRY-2026-057):
+          danger zone AL FONDO — un terminal destructivo no compite en el
+          encabezado con actos rutinarios; el componente se auto-gatea */}
+      {puedeGestionarProyectosUI(user?.rol) && !cerrado && !cancelado && (
+        <CierreAnticipadoProyecto proyecto={proyecto} comprasEjecutadas={comprasEjecutadas} reload={load} />
+      )}
     </div>
   )
 }

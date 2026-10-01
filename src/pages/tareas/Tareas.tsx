@@ -692,7 +692,7 @@ export default function Tareas() {
       <Modal isOpen={anularTarget !== null} title={`Anular — ${anularTarget?.titulo ?? ''}`}
         onClose={() => setAnularTarget(null)}
         actions={[
-          { label: 'Cancelar', onClick: () => setAnularTarget(null), variant: 'secondary' },
+          { label: 'Volver', onClick: () => setAnularTarget(null), variant: 'secondary' },
           { label: guardando ? 'Anulando…' : 'Anular', onClick: confirmarAnular, variant: 'danger',
             loading: guardando, disabled: !anularMotivo.trim() },
         ]}>
