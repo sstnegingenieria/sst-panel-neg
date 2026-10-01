@@ -775,7 +775,7 @@ export default function FacturacionPagos() {
         title={`Cerrar proyecto — ${cierreTarget?.consecutivo ?? ''}`}
         onClose={() => setCierreTarget(null)}
         actions={[
-          { label: 'Cancelar', onClick: () => setCierreTarget(null), variant: 'secondary' },
+          { label: 'Volver', onClick: () => setCierreTarget(null), variant: 'secondary' },
           {
             label: aplicando ? 'Cerrando…'
               : cierreTarget && !puedeCerrarseProyecto(cierreTarget)

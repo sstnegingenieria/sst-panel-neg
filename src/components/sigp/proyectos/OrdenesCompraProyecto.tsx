@@ -496,7 +496,7 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
     [...oc.historial].reverse().find(h => h.a === 'anulada')?.motivo
 
   return (
-    <div ref={seccionRef} className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 scroll-mt-4">
+    <div ref={seccionRef} id="seccion-ordenes-compra" className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 scroll-mt-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="font-semibold text-gray-800">Órdenes de compra</h2>
@@ -857,7 +857,7 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
         title={`Anular orden de compra — ${anularTarget?.consecutivo || 'borrador'}`}
         onClose={() => setAnularTarget(null)}
         actions={[
-          { label: 'Cancelar', onClick: () => setAnularTarget(null), variant: 'secondary' },
+          { label: 'Volver', onClick: () => setAnularTarget(null), variant: 'secondary' },
           {
             label: aplicandoId === anularTarget?.id ? 'Anulando…' : 'Anular',
             onClick: anular, variant: 'danger', loading: aplicandoId === anularTarget?.id, disabled: !anularMotivo.trim(),

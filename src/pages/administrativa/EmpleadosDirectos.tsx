@@ -246,7 +246,7 @@ export default function EmpleadosDirectos() {
         title="Dar de baja"
         size="sm"
         actions={[
-          { label: 'Cancelar', onClick: () => setBajaTarget(null), variant: 'secondary' },
+          { label: 'Volver', onClick: () => setBajaTarget(null), variant: 'secondary' },
           { label: 'Confirmar baja', onClick: confirmarBaja, variant: 'danger', loading: bajando },
         ]}
       >

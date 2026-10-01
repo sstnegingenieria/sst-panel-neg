@@ -195,7 +195,7 @@ export default function PreventivoPanel({ solicitud, puedeGestionar, reload }: P
       {/* Modal rechazo (motivo obligatorio) */}
       <Modal isOpen={modalRechazo} onClose={() => setModalRechazo(false)} title={`Rechazar preventivo ${solicitud.consecutivo}`}
         actions={[
-          { label: 'Cancelar', onClick: () => setModalRechazo(false), variant: 'secondary' },
+          { label: 'Volver', onClick: () => setModalRechazo(false), variant: 'secondary' },
           { label: 'Rechazar', onClick: rechazar, variant: 'danger', loading: aplicando },
         ]}>
         <div className="space-y-2">

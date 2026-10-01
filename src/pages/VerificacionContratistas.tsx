@@ -188,7 +188,7 @@ export default function VerificacionContratistas() {
         title={`Novedad SST — ${novedadTarget?.consecutivo ?? ''}`}
         onClose={() => setNovedadTarget(null)}
         actions={[
-          { label: 'Cancelar', onClick: () => setNovedadTarget(null), variant: 'secondary' },
+          { label: 'Volver', onClick: () => setNovedadTarget(null), variant: 'secondary' },
           {
             label: aplicando ? 'Registrando…' : 'Registrar novedad (bloquea liquidación)',
             onClick: () => { if (observacion.trim() && novedadTarget) marcar(novedadTarget, 'con_novedad', observacion) },

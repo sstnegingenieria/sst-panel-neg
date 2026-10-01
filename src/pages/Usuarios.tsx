@@ -299,7 +299,7 @@ export default function Usuarios() {
         title={`Rechazar registro — ${rechazoTarget?.nombre ?? ''}`}
         onClose={() => setRechazoTarget(null)}
         actions={[
-          { label: 'Cancelar', onClick: () => setRechazoTarget(null), variant: 'secondary' },
+          { label: 'Volver', onClick: () => setRechazoTarget(null), variant: 'secondary' },
           {
             label: 'Rechazar con motivo',
             onClick: confirmarRechazo,
