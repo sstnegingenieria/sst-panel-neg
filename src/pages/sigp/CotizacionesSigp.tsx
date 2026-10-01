@@ -35,6 +35,7 @@ export default function CotizacionesSigp() {
   }
   const [filtroEstado, setFiltroEstado] = useState(searchParams.get('pendientes') ? 'pendiente_diligenciar' : '')
   const [filtroCliente, setFiltroCliente] = useState('')
+  const [busqueda, setBusqueda] = useState('')
   const [formOpen, setFormOpen] = useState(false)
 
   const loadClientes = useCallback(async () => {
@@ -53,10 +54,20 @@ export default function CotizacionesSigp() {
     [clientes],
   )
 
-  const filtradas = useMemo(() => cotizaciones.filter(c =>
-    (!filtroEstado || estadoEfectivo(c) === filtroEstado) &&
-    (!filtroCliente || c.cliente_id === filtroCliente),
-  ), [cotizaciones, filtroEstado, filtroCliente])
+  const filtradas = useMemo(() => {
+    const q = busqueda.trim().toLowerCase()
+    const matchQ = (c: (typeof cotizaciones)[number]) => !q ||
+      (c.consecutivo ?? '').toLowerCase().includes(q) ||
+      (c.nombre_sitio ?? '').toLowerCase().includes(q) ||
+      (c.codigo_sitio_cliente ?? '').toLowerCase().includes(q) ||
+      (c.asunto ?? '').toLowerCase().includes(q) ||
+      (c.cliente_id ? (clienteNombres[c.cliente_id] ?? '') : (c.prospecto_nombre ?? '')).toLowerCase().includes(q)
+    return cotizaciones.filter(c =>
+      (!filtroEstado || estadoEfectivo(c) === filtroEstado) &&
+      (!filtroCliente || c.cliente_id === filtroCliente) &&
+      matchQ(c),
+    )
+  }, [cotizaciones, filtroEstado, filtroCliente, busqueda, clienteNombres])
 
   const stats = useMemo(() => {
     const efectivos = cotizaciones.map(estadoEfectivo)
@@ -135,7 +146,10 @@ export default function CotizacionesSigp() {
             Listado
             {!loading && <span className="ml-2 text-xs font-normal text-gray-400">({filtradas.length})</span>}
           </h2>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+              placeholder="Buscar por COT, sitio, cliente o asunto…"
+              className="w-64 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
             <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}
               className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
               <option value="">Todos los estados</option>
