@@ -33,6 +33,7 @@ export default function CotizacionesTable({ cotizaciones, loading, clienteNombre
           <tr className="border-b border-gray-200 text-left">
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Consecutivo</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Cliente / Prospecto</th>
+            <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Sitio</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Asunto</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Estado</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide text-right">Total</th>
@@ -44,14 +45,14 @@ export default function CotizacionesTable({ cotizaciones, loading, clienteNombre
           {loading &&
             Array.from({ length: 4 }).map((_, i) => (
               <tr key={i} className="border-b border-gray-100">
-                {Array.from({ length: 7 }).map((__, j) => (
+                {Array.from({ length: 8 }).map((__, j) => (
                   <td key={j} className="py-3 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-24" /></td>
                 ))}
               </tr>
             ))}
 
           {!loading && cotizaciones.length === 0 && (
-            <tr><td colSpan={7} className="py-12 text-center text-gray-400">No hay cotizaciones registradas.</td></tr>
+            <tr><td colSpan={8} className="py-12 text-center text-gray-400">No hay cotizaciones registradas.</td></tr>
           )}
 
           {!loading &&
@@ -75,7 +76,8 @@ export default function CotizacionesTable({ cotizaciones, loading, clienteNombre
                     )}
                   </td>
                   <td className="py-3 px-4 font-medium text-gray-800">{origen(c, clienteNombres)}</td>
-                  <td className="py-3 px-4 text-gray-600 max-w-[16rem] truncate" title={c.asunto}>{c.asunto || '—'}</td>
+                  <td className="py-3 px-4 text-gray-600 max-w-[11rem] truncate" title={c.nombre_sitio}>{c.nombre_sitio || '—'}</td>
+                  <td className="py-3 px-4 text-gray-600 max-w-[14rem] truncate" title={c.asunto}>{c.asunto || '—'}</td>
                   <td className="py-3 px-4 whitespace-nowrap">
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${ESTADO_COT_COLOR[est]}`}>
                       {ESTADO_COT_LABEL[est]}
