@@ -23,6 +23,20 @@ export interface RegistroHorario {
   /** true/false = juzgado contra configuracion/horario.ips_oficina;
    *  null = sin config o sin IP determinable — la UI muestra "—". */
   en_oficina: boolean | null
+  /** SOLO LECTURA — existe únicamente en 7 documentos del 01–06 oct-2026.
+   *  Origen: ETB reasignó la IP pública de la oficina el 01-oct y la config
+   *  tenía la vieja hasta el 07-oct, así que esas marcaciones (hechas DESDE
+   *  la oficina, IP 186.28.10.84) quedaron etiquetadas en_oficina=false por
+   *  artefacto de la config. Se corrigieron por ACTO DE DATOS autorizado
+   *  nominalmente (dry-run → autorización de Giovanny → commit atómico →
+   *  post-verificación; bitácora v2.5.71), dejando esta traza en el doc.
+   *  NO EXISTE NI DEBE EXISTIR camino en el panel para producir este campo:
+   *  `registros_horario` es inmutable desde el cliente (regla
+   *  `create/update/delete: if false` — nadie corrige el reloj) y eso se
+   *  REAFIRMÓ al cierre del incidente. Fue un acto irrepetible con fricción
+   *  deliberada (instrucción explícita + autorización nominal + traza), no
+   *  una funcionalidad. */
+  correccion_en_oficina?: { fecha: Timestamp; motivo: string }
   dispositivo: DispositivoHorario
   user_agent?: string
 }
