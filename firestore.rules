@@ -185,12 +185,8 @@ service cloud.firestore {
         'gerencia_administrativa', 'gestion_integral', 'admin'
       ];
     }
-    // ¿Este write FIJA la aprobación de la OC? (patrón fijaAprobacionPreliq:
-    // escribir un aprobador nuevo/distinto; retirarlo no cuenta)
-    function fijaAprobacionOC() {
-      return request.resource.data.get('aprobada_por', '') != ''
-          && request.resource.data.get('aprobada_por', '') != resource.data.get('aprobada_por', '');
-    }
+    // (OC2 paso B: fijaAprobacionOC() se retiró — la entrada a `aprobada`
+    //  quedó cerrada; apruebaOC() queda SOLO para anular las legacy.)
 
     // 8. §16 (07-ago): la frontera de comercial es la COTIZACIÓN — los
     //    proyectos son dominio de ejecución. operacion_comercial queda fuera
@@ -595,16 +591,13 @@ service cloud.firestore {
                     && (request.resource.data.get('estado', '') != 'emitida'
                         || resource.data.get('estado', '') == 'emitida'
                         || request.resource.data.get('cotizacion_proveedor_url', '') != '')
-                    // APROBAR blindado por-campo (LEGACY — se cierra en paso B)
-                    && (!fijaAprobacionOC()
-                        || (apruebaOC()
-                            && (request.auth.uid != resource.data.get('creada_por', '')
-                                || request.resource.data.get('salvedad_aprobacion', '') != '')))
-                    // a 'aprobada' SOLO desde 'emitida' y siempre fijando aprobador
+                    // OC2 paso B: `aprobada` CERRADA a entradas — es el
+                    // estado LEGACY del régimen anterior; el gate vigente es
+                    // la revisión (vía de abajo). Editar/anular las que ya
+                    // están ahí lo gobierna el guard de inmutabilidad de
+                    // arriba (solo apruebaOC() las anula).
                     && (request.resource.data.get('estado', '') != 'aprobada'
-                        || resource.data.get('estado', '') == 'aprobada'
-                        || (resource.data.get('estado', '') == 'emitida'
-                            && request.resource.data.get('aprobada_por', '') != ''))
+                        || resource.data.get('estado', '') == 'aprobada')
                     ) || (
                     // ── Vía REVISIÓN (OC2): emitida → revisada|rechazada, con
                     // hasOnly. Validar exige el total LEÍDO de la cotización
@@ -651,33 +644,10 @@ service cloud.firestore {
                         .hasOnly(['valor_real', 'soporte_compra_url',
                                   'historial', 'fecha_actualizacion'])
                     && request.resource.data.get('valor_real', 0) > 0
-                    ) || (
-                    // ── Vía MARCELA (C3): aprobada → comprada, con valor real
-                    // pagado + soporte obligatorios. hasOnly: no puede tocar
-                    // NADA más (líneas, proveedor, aprobación intactos).
-                    gestionaCompras()
-                    && request.resource.data.diff(resource.data).affectedKeys()
-                        .hasOnly(['estado', 'valor_real', 'soporte_compra_url',
-                                  'comprada_por', 'fecha_compra', 'historial',
-                                  'fecha_actualizacion'])
-                    && resource.data.get('estado', '') == 'aprobada'
-                    && request.resource.data.get('estado', '') == 'comprada'
-                    && request.resource.data.get('valor_real', 0) > 0
-                    && request.resource.data.get('soporte_compra_url', '') != ''
-                    ) || (
-                    // ── Corrección de compra (addendum C3): el ESTADO es
-                    // terminal (no se "des-compra" — la reversa con
-                    // devolución es recepción/v2) pero el MONTO registrado
-                    // es corregible con traza — filosofía Hotfix B: corregir
-                    // no se bloquea, se traza. La CF recalcula sola.
-                    gestionaCompras()
-                    && resource.data.get('estado', '') == 'comprada'
-                    && request.resource.data.get('estado', '') == 'comprada'
-                    && request.resource.data.diff(resource.data).affectedKeys()
-                        .hasOnly(['valor_real', 'soporte_compra_url',
-                                  'historial', 'fecha_actualizacion'])
-                    && request.resource.data.get('valor_real', 0) > 0
                     );
+                    // (OC2 paso B: las vías de MARCELA del C3 — comprar y
+                    //  corregir — se retiraron: la compra es de Paula
+                    //  (marcaCompraOC, arriba). Quien valida no recibe.)
       // sin delete — 'anulada' es el terminal suave (restricción 5.1)
     }
 
