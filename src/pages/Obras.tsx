@@ -7,6 +7,11 @@ import { toast } from '../components/shared/Toast'
 export default function Obras() {
   const [obras, setObras] = useState<Obra[]>([])
   const [loading, setLoading] = useState(true)
+  // Paquete GI · C1 — respaldo del campo legacy `contratista_id`: id → nombre
+  // (el plural denormalizado `contratistas[]` trae el nombre consigo).
+  const [nombresContratistas, setNombresContratistas] = useState<Record<string, string>>({})
+  const [busqueda, setBusqueda] = useState('')
+  const [filtroCliente, setFiltroCliente] = useState('')
   const { getAllOrdered } = useFirestore()
 
   const load = useCallback(async () => {
@@ -14,6 +19,10 @@ export default function Obras() {
     try {
       const data = await getAllOrdered('obras', 'nombre_sitio', 'asc')
       setObras(data as Obra[])
+      try {
+        const cs = await getAllOrdered('contratistas', 'nombre', 'asc') as { id: string; nombre: string }[]
+        setNombresContratistas(Object.fromEntries(cs.map(c => [c.id, c.nombre])))
+      } catch { /* sin el mapa, el respaldo legacy muestra el id — no fatal */ }
     } catch {
       toast('Error al cargar obras', 'error')
     } finally {
@@ -27,6 +36,21 @@ export default function Obras() {
     const activas = obras.filter(o => o.estado === 'activa').length
     return { activas, inactivas: obras.length - activas, total: obras.length }
   }, [obras])
+
+  // C1 — filtro por cliente (derivado de lo visible, con conteo — patrón de
+  // Proyectos) + búsqueda por NOMBRE DE SITIO (no por código).
+  const clientesConConteo = useMemo(() => {
+    const conteo: Record<string, number> = {}
+    for (const o of obras) { const c = o.cliente || '—'; conteo[c] = (conteo[c] ?? 0) + 1 }
+    return Object.entries(conteo).sort((a, b) => a[0].localeCompare(b[0], 'es', { sensitivity: 'base' }))
+  }, [obras])
+
+  const visibles = useMemo(() => {
+    const q = busqueda.trim().toLowerCase()
+    return obras.filter(o =>
+      (!filtroCliente || (o.cliente || '—') === filtroCliente) &&
+      (!q || o.nombre_sitio.toLowerCase().includes(q)))
+  }, [obras, filtroCliente, busqueda])
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -83,15 +107,25 @@ export default function Obras() {
 
       {/* Tabla */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-4 flex-wrap">
           <h2 className="font-bold text-gray-800">
             Listado de sitios
             {!loading && (
-              <span className="ml-2 text-xs font-normal text-gray-400">({obras.length})</span>
+              <span className="ml-2 text-xs font-normal text-gray-400">({visibles.length})</span>
             )}
           </h2>
+          <div className="flex gap-2 flex-wrap">
+            <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+              placeholder="Buscar por nombre de sitio…"
+              className="w-56 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            <select value={filtroCliente} onChange={e => setFiltroCliente(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+              <option value="">Todos los clientes</option>
+              {clientesConConteo.map(([c, n]) => <option key={c} value={c}>{c} ({n})</option>)}
+            </select>
+          </div>
         </div>
-        <ObrasTable obras={obras} loading={loading} />
+        <ObrasTable obras={visibles} loading={loading} nombresContratistas={nombresContratistas} />
       </div>
     </div>
   )

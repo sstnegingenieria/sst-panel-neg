@@ -38,7 +38,8 @@ import type { AsignacionContratista } from '../../../types/sigp/asignacion'
 import { cargarAsignaciones, asegurarMigrado, crearAsignacion, escribirAsignacion } from '../../../utils/sigp/asignaciones'
 import { ID_TAREA_SENAL, patchCerrarTarea } from '../../../types/sigp/tarea'
 import type { Tarea } from '../../../types/sigp/tarea'
-import { MODALIDAD_CONTRATISTA_LABEL, MODALIDADES_CONTRATISTA, anticipoValorDe, sstGateAlDia, totalComprasReembolsos, claveItemAlcance } from '../../../types/sigp/proyecto'
+import { MODALIDAD_CONTRATISTA_LABEL, MODALIDADES_CONTRATISTA, anticipoValorDe, sstGateAlDia, totalComprasReembolsos, claveItemAlcance, idxRiel, ESTADOS_PROYECTO } from '../../../types/sigp/proyecto'
+import { sincronizarObraEspejo } from '../../../utils/sigp/obraEspejo'
 import { modoAgrupacionDe, actividadesDe, subtotalesPorGrupo, GRUPO_OTROS_ID } from '../../../types/sigp/cotizacion'
 import type { VersionCotizacion } from '../../../types/sigp/cotizacion'
 import type { Proyecto, ModalidadContratista, RetencionLiquidacion, CompraReembolso } from '../../../types/sigp/proyecto'
@@ -86,7 +87,15 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     ? detectarDesincronizacion(proyecto.resumen_asignaciones, subdocs, proyecto.snapshot)
     : []
 
-  const recargarTodo = async () => { await load(); await reload() }
+  const recargarTodo = async () => {
+    await load(); await reload()
+    // Paquete GI · C1 — la obra-espejo lleva contratistas[] en plural: tras
+    // cualquier mutación de asignaciones se refresca (fire-and-forget, solo
+    // cuando la obra puede existir; el sync es no-fatal por contrato).
+    if (ESTADOS_TRAMO_EJECUCION.has(proyecto.estado) || idxRiel(proyecto.estado) >= ESTADOS_PROYECTO.indexOf('facturado')) {
+      void sincronizarObraEspejo(proyecto)
+    }
+  }
 
   // Deep-link de la cola de señales (29-sep): `?senal=1` hace scroll a esta
   // sección y RESALTA las asignaciones señaladas (patrón ?oc=crear; el param

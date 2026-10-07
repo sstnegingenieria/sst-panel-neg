@@ -98,3 +98,25 @@ describe('estadoObraSegunProyecto — inactiva desde el handoff (decisión 22-ju
       expect(estadoObraSegunProyecto(e)).toBe('inactiva')
   })
 })
+
+// Paquete GI · C1 — contratista(s) EN PLURAL para la obra (reparto por item)
+import { contratistasDeAsignaciones } from '../obraEspejo'
+
+describe('contratistasDeAsignaciones — el plural denormalizado', () => {
+  const a = (id: string, nombre: string, estado = 'anticipo_girado') =>
+    ({ contratista_id: id, contratista_nombre: nombre, estado })
+
+  it('unicos, en orden de aparicion, sin canceladas', () => {
+    expect(contratistasDeAsignaciones([
+      a('c1', 'Jairo'), a('c2', 'Topografo Dos'), a('c1', 'Jairo'),
+      a('c3', 'Cancelado SAS', 'cancelada'),
+    ])).toEqual([{ id: 'c1', nombre: 'Jairo' }, { id: 'c2', nombre: 'Topografo Dos' }])
+  })
+  it('liquidadas SI cuentan (trabajaron la obra)', () => {
+    expect(contratistasDeAsignaciones([a('c1', 'Jairo', 'liquidada')]))
+      .toEqual([{ id: 'c1', nombre: 'Jairo' }])
+  })
+  it('vacio -> vacio', () => {
+    expect(contratistasDeAsignaciones([])).toEqual([])
+  })
+})
