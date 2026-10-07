@@ -11,7 +11,7 @@
 // Un solo escritor del estado: el PROYECTO (decisión 22-jul — SST no escribe
 // obras). 'activa' desde en_ejecucion; 'inactiva' desde enviado_a_facturacion.
 
-import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, setDoc, updateDoc, Timestamp } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import { ESTADOS_PROYECTO, idxRiel } from '../../types/sigp/proyecto'
 import type { Proyecto, EstadoProyecto } from '../../types/sigp/proyecto'
@@ -20,6 +20,25 @@ import type { CoordenadasSitio } from '../geo'
 
 /** Id determinístico de la obra-espejo (idempotencia del upsert). */
 export const idObraEspejo = (proyectoId: string) => `pry_${proyectoId}`
+
+/** Paquete GI · C1 — contratista(s) de la obra, EN PLURAL desde el diseño:
+ *  con el reparto por ítem una obra puede tener varios. Únicos, de las
+ *  asignaciones NO canceladas, en orden de aparición. Campo denormalizado
+ *  `obra.contratistas` (ADITIVO — verificado contra obra_model.dart el
+ *  07-oct-2026: la app NO lee contratista alguno de la obra; el
+ *  `contratista_id` viejo se CONSERVA para la CF asignarObraAlPrincipal). */
+export function contratistasDeAsignaciones(
+  asigs: { contratista_id: string; contratista_nombre: string; estado: string }[],
+): { id: string; nombre: string }[] {
+  const vistos = new Set<string>()
+  const res: { id: string; nombre: string }[] = []
+  for (const a of asigs) {
+    if (a.estado === 'cancelada' || vistos.has(a.contratista_id)) continue
+    vistos.add(a.contratista_id)
+    res.push({ id: a.contratista_id, nombre: a.contratista_nombre })
+  }
+  return res
+}
 
 /** "jul-2026" — distingue trabajos recurrentes del mismo sitio. */
 export const mesAnio = (d: Date) =>
@@ -146,10 +165,25 @@ export async function sincronizarObraEspejo(
     const ahora = Timestamp.now()
     const existente = await getDoc(refObra)
     if (cancelado && !existente.exists()) return true   // nada que apagar
+    // Paquete GI · C1 — contratistas[] denormalizado (best-effort: si la
+    // lectura falla, el sync sigue — este campo NO es identidad congelada:
+    // se refresca en CADA sync, porque el reparto por ítem cambia en vivo).
+    let contratistas: { id: string; nombre: string }[] | null = null
+    try {
+      const sub = await getDocs(collection(db, 'proyectos', p.id, 'asignaciones'))
+      contratistas = contratistasDeAsignaciones(sub.docs.map(d => d.data() as {
+        contratista_id: string; contratista_nombre: string; estado: string
+      }))
+      // Legacy pre-átomo sin subcolección: la asignación vive en el doc.
+      if (contratistas.length === 0 && p.asignacion?.contratista_id) {
+        contratistas = [{ id: p.asignacion.contratista_id, nombre: p.asignacion.contratista_nombre ?? '' }]
+      }
+    } catch { /* sin lectura de asignaciones el campo no se toca */ }
     if (!existente.exists()) {
       const sitio = await obtenerSitioProyecto(p)
       await setDoc(refObra, {
         ...construirObraEspejo(p, sitio, ahora.toDate()),
+        ...(contratistas ? { contratistas } : {}),
         estado,
         fecha_creacion: ahora,
         fecha_actualizacion: ahora,
@@ -159,6 +193,7 @@ export async function sincronizarObraEspejo(
       // EXCEPCIÓN completa-si-falta: si el snapshot trae coordenadas y la obra
       // aún no las tiene, se backfillean (jamás se reescriben las existentes).
       const patch: Record<string, unknown> = { estado, fecha_actualizacion: ahora }
+      if (contratistas) patch.contratistas = contratistas
       const obraActual = existente.data() as { coordenadas_sitio?: CoordenadasSitio }
       if (esCoordenadaValida(p.snapshot.coordenadas_sitio) && !esCoordenadaValida(obraActual.coordenadas_sitio)) {
         patch.coordenadas_sitio = p.snapshot.coordenadas_sitio
