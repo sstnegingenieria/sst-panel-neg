@@ -15,7 +15,7 @@
 //    ni fila de IVA — solo TOTAL, tal cual quedó aprobada.
 //  - El bloque RADICACIÓN sale de configuracion/empresa (editable en panel);
 //    sin config el bloque se omite y la UI lo advierte.
-import { PDFDocument, PDFFont, PDFPage, rgb } from 'pdf-lib'
+import { PDFDocument, PDFFont, PDFPage, degrees, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { partir, partirMax, cargarAssetsPdf } from './cotizacionPdf'
 import { ORDEN_COMPRA as ISO } from './isoControl'
@@ -71,6 +71,13 @@ export interface DatosPdfOrdenCompra {
   firmante: { nombre: string; cargo?: string; correo?: string; celular?: string }
   /** configuracion/empresa — null/undefined omite RADICACIÓN y usa pie estándar. */
   empresa?: ConfigEmpresa | null
+  /** OC2 — el compromiso con el proveedor no puede existir antes de la
+   *  revisión de Gestión Administrativa: en `emitida`/`rechazada` el
+   *  documento sale con la marca de agua diagonal en TODAS las páginas —
+   *  consultable e imprimible, pero no entregable. Es tinta, no un permiso
+   *  de UI. Validada (`revisada`) — y las `aprobada` del régimen anterior,
+   *  que pasaron su gate bajo la regla vigente en su momento — sale limpio. */
+  marcado?: boolean
 }
 
 export async function generarPdfOrdenCompra(
@@ -359,6 +366,21 @@ export async function generarPdfOrdenCompra(
         .filter(Boolean).join(' · ')
     : 'NEG Ingeniería S.A.S. BIC · www.negingenieria.com'
   paginas.forEach((p, idx) => {
+    // OC2 — marca de agua de pendiente de revisión (todas las páginas,
+    // diagonal, SOBRE el contenido: imposible de recortar).
+    if (datos.marcado) {
+      const { width: aw, height: ah } = p.getSize()
+      const t1 = 'PENDIENTE DE REVISIÓN'
+      const t2 = 'NO ENTREGABLE AL PROVEEDOR'
+      p.drawText(t1, {
+        x: aw * 0.14, y: ah * 0.28, size: 38, font: fB,
+        color: rgb(0.45, 0.45, 0.45), opacity: 0.18, rotate: degrees(45),
+      })
+      p.drawText(t2, {
+        x: aw * 0.30, y: ah * 0.22, size: 22, font: fB,
+        color: rgb(0.45, 0.45, 0.45), opacity: 0.18, rotate: degrees(45),
+      })
+    }
     const yPie = 64
     p.drawLine({ start: { x: MARGEN, y: yPie }, end: { x: ANCHO - MARGEN, y: yPie }, color: BORDE, thickness: 0.8 })
     if (paginas.length > 1) {

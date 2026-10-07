@@ -165,7 +165,19 @@ service cloud.firestore {
       ];
     }
     function apruebaOC() {
+      // LEGACY (régimen anterior a oct-2026): la aprobación previa se
+      // reemplazó por la revisión de administrativa (OC2). Se conserva
+      // SOLO para anular las OCs que siguen en `aprobada`.
       return isAuthed() && rolActual() in ['director_proyectos', 'gerencia_general', 'admin'];
+    }
+    // OC2 — el gate nuevo: REVISA gerencia_administrativa (titular) + GG y
+    // admin como respaldo (respaldo que revisa lo propio → salvedad).
+    function revisaOC() {
+      return isAuthed() && rolActual() in ['gerencia_administrativa', 'gerencia_general', 'admin'];
+    }
+    // OC2 — marcar la compra pasa de Marcela a Paula: quien valida no recibe.
+    function marcaCompraOC() {
+      return isAuthed() && rolActual() in ['auxiliar_proyectos', 'admin'];
     }
     function puedeVerOC() {
       return isAuthed() && rolActual() in [
@@ -546,8 +558,10 @@ service cloud.firestore {
       allow create: if puedeCrearOC()
                     && request.resource.data.get('estado', '') == 'borrador'
                     && request.resource.data.get('creada_por', '') == request.auth.uid;
-      // Dos vías (C3): la OPERATIVA de siempre (crear/emitir/aprobar/anular)
-      // y la de MARCELA (marcar comprada — SOLO eso, hasOnly) + su corrección.
+      // Vías (C3 + OC2): la OPERATIVA (crear/emitir/re-enviar/anular), la de
+      // REVISIÓN (OC2 — validar/devolver/anular revisadas), la de COMPRA
+      // (OC2 — Paula marca comprada + corrige) y la de MARCELA (C3 — queda
+      // viva durante el paso A del despliegue mixto; sale en el paso B).
       allow update: if (
                     // ── Vía OPERATIVA ──
                     puedeCrearOC()
@@ -559,11 +573,29 @@ service cloud.firestore {
                         || (apruebaOC() && request.resource.data.get('estado', '') == 'anulada'))
                     // anulada = terminal
                     && resource.data.get('estado', '') != 'anulada'
-                    // EMITIR exige la cotización del proveedor ya adjunta
+                    // OC2: el gate no se salta por la vía operativa — ENTRAR
+                    // a revisada/rechazada es solo de la vía de revisión
+                    // (editar una que YA está ahí no es entrar: patrón del
+                    // guard de aprobada; lo atrapó la batería)
+                    && (request.resource.data.get('estado', '') != 'revisada'
+                        || resource.data.get('estado', '') == 'revisada')
+                    && (request.resource.data.get('estado', '') != 'rechazada'
+                        || resource.data.get('estado', '') == 'rechazada')
+                    // OC2: revisada = inmutable por esta vía, salvo que su
+                    // CREADOR la anule
+                    && (resource.data.get('estado', '') != 'revisada'
+                        || (request.resource.data.get('estado', '') == 'anulada'
+                            && request.auth.uid == resource.data.get('creada_por', '')))
+                    // OC2: una DEVUELTA la toca solo quien la creó (o admin) —
+                    // editarla, re-enviarla (→ emitida) o anularla
+                    && (resource.data.get('estado', '') != 'rechazada'
+                        || request.auth.uid == resource.data.get('creada_por', '')
+                        || rolActual() == 'admin')
+                    // EMITIR (y RE-ENVIAR) exige la cotización del proveedor adjunta
                     && (request.resource.data.get('estado', '') != 'emitida'
                         || resource.data.get('estado', '') == 'emitida'
                         || request.resource.data.get('cotizacion_proveedor_url', '') != '')
-                    // APROBAR blindado por-campo
+                    // APROBAR blindado por-campo (LEGACY — se cierra en paso B)
                     && (!fijaAprobacionOC()
                         || (apruebaOC()
                             && (request.auth.uid != resource.data.get('creada_por', '')
@@ -573,6 +605,52 @@ service cloud.firestore {
                         || resource.data.get('estado', '') == 'aprobada'
                         || (resource.data.get('estado', '') == 'emitida'
                             && request.resource.data.get('aprobada_por', '') != ''))
+                    ) || (
+                    // ── Vía REVISIÓN (OC2): emitida → revisada|rechazada, con
+                    // hasOnly. Validar exige el total LEÍDO de la cotización
+                    // del proveedor (>0 — el acto de mirar); devolver exige
+                    // motivo; respaldo que valida lo propio → salvedad.
+                    revisaOC()
+                    && resource.data.get('estado', '') == 'emitida'
+                    && request.resource.data.get('estado', '') in ['revisada', 'rechazada']
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['estado', 'revision', 'rechazo', 'historial', 'fecha_actualizacion'])
+                    && (request.resource.data.get('estado', '') != 'revisada'
+                        || (request.resource.data.get('revision', {}).get('total_cotizacion_proveedor', 0) > 0
+                            && (request.auth.uid != resource.data.get('creada_por', '')
+                                || request.resource.data.get('revision', {}).get('salvedad', '') != '')))
+                    && (request.resource.data.get('estado', '') != 'rechazada'
+                        || request.resource.data.get('rechazo', {}).get('motivo', '') != '')
+                    ) || (
+                    // ── Vía REVISIÓN (OC2): anular una revisada (con motivo
+                    // en el historial — hasOnly acotado).
+                    revisaOC()
+                    && resource.data.get('estado', '') == 'revisada'
+                    && request.resource.data.get('estado', '') == 'anulada'
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['estado', 'historial', 'fecha_actualizacion'])
+                    ) || (
+                    // ── Vía COMPRA (OC2 — Paula): revisada (régimen nuevo) o
+                    // aprobada (legacy) → comprada, valor real + soporte
+                    // obligatorios; y la corrección comprada→comprada con
+                    // traza (calco de la vía de Marcela, que sale en paso B).
+                    marcaCompraOC()
+                    && resource.data.get('estado', '') in ['revisada', 'aprobada']
+                    && request.resource.data.get('estado', '') == 'comprada'
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['estado', 'valor_real', 'soporte_compra_url',
+                                  'comprada_por', 'fecha_compra', 'historial',
+                                  'fecha_actualizacion'])
+                    && request.resource.data.get('valor_real', 0) > 0
+                    && request.resource.data.get('soporte_compra_url', '') != ''
+                    ) || (
+                    marcaCompraOC()
+                    && resource.data.get('estado', '') == 'comprada'
+                    && request.resource.data.get('estado', '') == 'comprada'
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['valor_real', 'soporte_compra_url',
+                                  'historial', 'fecha_actualizacion'])
+                    && request.resource.data.get('valor_real', 0) > 0
                     ) || (
                     // ── Vía MARCELA (C3): aprobada → comprada, con valor real
                     // pagado + soporte obligatorios. hasOnly: no puede tocar

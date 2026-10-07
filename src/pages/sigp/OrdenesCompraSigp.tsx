@@ -1,11 +1,14 @@
-// Bandeja de Órdenes de compra (Compras · C2 + C3), sub-bloque 3 — UI.
+// Bandeja de Órdenes de compra (Compras · C2 + C3 + OC2) — UI.
 //
-// Solo lectura + navegación para el ciclo C2 (crear/editar/emitir/aprobar/
-// anular viven en la ficha del proyecto, OrdenesCompraProyecto — aquí se
-// SURFACEA, no se reinventa). La COMPRA (C3, Marcela) sí opera IN SITU en
-// esta bandeja: es su cola de trabajo, no la del proyecto. Protegida por
-// ROLES_VEN_OC en App.tsx; las acciones de compra además por
-// puedeGestionarComprasUI.
+// Solo lectura + navegación para el ciclo de creación (crear/editar/emitir/
+// re-enviar/anular viven en la ficha del proyecto, OrdenesCompraProyecto —
+// aquí se SURFACEA, no se reinventa). Lo que SÍ opera in situ es cada cola
+// de trabajo: la REVISIÓN de Gestión Administrativa (OC2 — el gate nuevo:
+// valida o devuelve con la cotización del proveedor AL LADO de las líneas,
+// para que la comparación sea obvia y el control siga vivo) y la COMPRA
+// (C3, que pasó de Marcela a Paula: quien valida no recibe). Protegida por
+// ROLES_VEN_OC en App.tsx; revisión por puedeRevisarOcUI y compra por
+// puedeMarcarCompraOcUI.
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { ChangeEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
@@ -17,8 +20,11 @@ import { toast } from '../../components/shared/Toast'
 import Modal from '../../components/shared/Modal'
 import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
 import { fmtMoney } from '../../utils/sigp/formato'
-import { puedeGestionarComprasUI, puedeCrearOcUI } from '../../types/sigp/permisos'
-import { ESTADO_OC_LABEL, ESTADO_OC_COLOR, validarOcParaComprar } from '../../types/sigp/ordenCompra'
+import { puedeMarcarCompraOcUI, puedeRevisarOcUI, puedeCrearOcUI } from '../../types/sigp/permisos'
+import {
+  ESTADO_OC_LABEL, ESTADO_OC_COLOR, validarOcParaComprar,
+  patchRevisarOc, patchRechazarOc, subtotalDe, ivaTotalDe,
+} from '../../types/sigp/ordenCompra'
 import type { OrdenCompra, EstadoOrdenCompra } from '../../types/sigp/ordenCompra'
 import { ESTADO_PRY_LABEL } from '../../types/sigp/proyecto'
 import type { Proyecto } from '../../types/sigp/proyecto'
@@ -43,10 +49,16 @@ function extensionDe(file: File): string {
 
 type Seccion = 'todas' | EstadoOrdenCompra
 
-const PILLS: { clave: Seccion; etiqueta: string }[] = [
+// OC2: 'emitida' es la cola de REVISIÓN; 'revisada' la de compra (Paula);
+// 'rechazada' las devueltas al creador. 'Aprobadas (anteriores)' = las del
+// régimen anterior — la pill solo se pinta mientras exista alguna: cuando
+// la última se compre o anule, desaparece sola (conviven, no se migran).
+const PILLS: { clave: Seccion; etiqueta: string; soloConDocs?: boolean }[] = [
   { clave: 'borrador', etiqueta: 'Borradores' },
-  { clave: 'emitida', etiqueta: 'Por aprobar' },
-  { clave: 'aprobada', etiqueta: 'Por comprar' },
+  { clave: 'emitida', etiqueta: 'Por revisar' },
+  { clave: 'rechazada', etiqueta: 'Devueltas' },
+  { clave: 'revisada', etiqueta: 'Por comprar' },
+  { clave: 'aprobada', etiqueta: 'Aprobadas (anteriores)', soloConDocs: true },
   { clave: 'comprada', etiqueta: 'Compradas' },
   { clave: 'anulada', etiqueta: 'Anuladas' },
   { clave: 'todas', etiqueta: 'Todas' },
@@ -55,13 +67,16 @@ const PILLS: { clave: Seccion; etiqueta: string }[] = [
 export default function OrdenesCompraSigp() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const puedeComprar = puedeGestionarComprasUI(user?.rol)
+  // OC2: la compra pasó a Paula (quien valida no recibe); la revisión es de
+  // gerencia_administrativa + respaldo GG/admin.
+  const puedeComprar = puedeMarcarCompraOcUI(user?.rol)
+  const puedeRevisar = puedeRevisarOcUI(user?.rol)
   const puedeCrear = puedeCrearOcUI(user?.rol)
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([])
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState('')
   const [aplicandoId, setAplicandoId] = useState<string | null>(null)
-  // Default: "Por aprobar" — es la cola de trabajo del aprobador.
+  // Default: "Por revisar" — es la cola de trabajo de quien revisa (OC2).
   const [seccion, setSeccion] = useState<Seccion>('emitida')
 
   const load = useCallback(async () => {
@@ -86,9 +101,73 @@ export default function OrdenesCompraSigp() {
   const [soporteCompra, setSoporteCompra] = useState<File | null>(null)
 
   const abrirComprar = (oc: OrdenCompra) => {
+    // OC2: se compra desde `revisada` (régimen nuevo) o `aprobada` (legacy).
     setComprarTarget(oc)
     setValorReal(oc.valor_total)
     setSoporteCompra(null)
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // OC2 — REVISIÓN (el gate nuevo): la cotización del proveedor AL LADO de
+  // las líneas — lo que se compara está en la misma pantalla, para que la
+  // revisión no se vuelva un clic sin mirar. El total TECLEADO de la
+  // cotización es parte del control; si difiere del de la orden se dice en
+  // pantalla (no bloquea — puede haber razón — pero no pasa desapercibido).
+  // ═══════════════════════════════════════════════════════════════════════
+  const [revisarTarget, setRevisarTarget] = useState<OrdenCompra | null>(null)
+  const [totalCotProveedor, setTotalCotProveedor] = useState<number | undefined>(undefined)
+  const [salvedadRevision, setSalvedadRevision] = useState('')
+  const [motivoDevolucion, setMotivoDevolucion] = useState('')
+
+  const abrirRevisar = (oc: OrdenCompra) => {
+    setRevisarTarget(oc)
+    // El total NO se prellena: teclearlo leyéndolo de la cotización es el
+    // acto de mirar (misma razón del no-prefill del catálogo, PR #73).
+    setTotalCotProveedor(undefined)
+    setSalvedadRevision('')
+    setMotivoDevolucion('')
+  }
+
+  const revisionRequiereSalvedad = revisarTarget !== null && revisarTarget.creada_por === user?.uid
+  const totalDifiere = revisarTarget !== null && totalCotProveedor !== undefined
+    && totalCotProveedor > 0 && totalCotProveedor !== revisarTarget.valor_total
+  // El MISMO builder valida el botón y ejecuta (null = deshabilitado).
+  const previaValidar = revisarTarget
+    ? patchRevisarOc(revisarTarget, user?.uid ?? '', totalCotProveedor ?? 0, Timestamp.now(),
+        salvedadRevision.trim() || undefined)
+    : null
+
+  const validarRevision = async () => {
+    const oc = revisarTarget
+    if (!oc) return
+    const patch = patchRevisarOc(oc, user?.uid ?? '', totalCotProveedor ?? 0, Timestamp.now(),
+      salvedadRevision.trim() || undefined)
+    if (!patch) return
+    setAplicandoId(oc.id)
+    try {
+      await updateDoc(doc(db, 'ordenes_compra', oc.id), { ...patch })
+      toast(`${oc.consecutivo} validada${totalDifiere ? ' — con diferencia de total registrada' : ''}`)
+      setRevisarTarget(null)
+      await load()
+    } catch {
+      toast('Error al validar la orden (verifica tu rol)', 'error')
+    } finally { setAplicandoId(null) }
+  }
+
+  const devolverOc = async () => {
+    const oc = revisarTarget
+    if (!oc) return
+    const patch = patchRechazarOc(oc, user?.uid ?? '', motivoDevolucion, Timestamp.now())
+    if (!patch) return
+    setAplicandoId(oc.id)
+    try {
+      await updateDoc(doc(db, 'ordenes_compra', oc.id), { ...patch })
+      toast(`${oc.consecutivo} devuelta al creador`)
+      setRevisarTarget(null)
+      await load()
+    } catch {
+      toast('Error al devolver la orden (verifica tu rol)', 'error')
+    } finally { setAplicandoId(null) }
   }
 
   const onArchivoSoporte = (e: ChangeEvent<HTMLInputElement>) => {
@@ -120,7 +199,8 @@ export default function OrdenesCompraSigp() {
         fecha_compra: ahora,
         fecha_actualizacion: ahora,
         historial: arrayUnion({
-          de: 'aprobada', a: 'comprada', por: user?.uid ?? '', fecha: ahora,
+          // OC2: la compra sale de `revisada` (régimen nuevo) o `aprobada` (legacy).
+          de: comprarTarget.estado, a: 'comprada', por: user?.uid ?? '', fecha: ahora,
           motivo: `Comprada — valor real ${fmtMoney(valorReal)}`,
         }),
       })
@@ -260,7 +340,7 @@ export default function OrdenesCompraSigp() {
       </div>
 
       <div className="flex items-center gap-1.5 flex-wrap">
-        {PILLS.map(p => (
+        {PILLS.filter(p => !p.soloConDocs || (conteo[p.clave] ?? 0) > 0 || seccion === p.clave).map(p => (
           <button key={p.clave} onClick={() => setSeccion(p.clave)}
             className={`px-3 py-1.5 rounded-full text-xs font-medium border ${
               seccion === p.clave ? 'bg-brand-700 border-brand-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
@@ -283,15 +363,15 @@ export default function OrdenesCompraSigp() {
               <th className="py-3 px-4 font-semibold text-right">Total</th>
               <th className="py-3 px-4 font-semibold">Estado</th>
               <th className="py-3 px-4 font-semibold">Fecha</th>
-              {puedeComprar && <th className="py-3 px-4 font-semibold">Acción</th>}
+              {(puedeComprar || puedeRevisar) && <th className="py-3 px-4 font-semibold">Acción</th>}
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={puedeComprar ? 7 : 6} className="py-10 text-center text-gray-400">Cargando…</td></tr>
+              <tr><td colSpan={(puedeComprar || puedeRevisar) ? 7 : 6} className="py-10 text-center text-gray-400">Cargando…</td></tr>
             )}
             {!loading && filtradas.length === 0 && (
-              <tr><td colSpan={puedeComprar ? 7 : 6} className="py-12 text-center text-gray-400">
+              <tr><td colSpan={(puedeComprar || puedeRevisar) ? 7 : 6} className="py-12 text-center text-gray-400">
                 No hay órdenes de compra{busqueda ? ' con esa búsqueda' : ' en esta sección'}.
               </td></tr>
             )}
@@ -331,15 +411,21 @@ export default function OrdenesCompraSigp() {
                   )}
                 </td>
                 <td className="py-3 px-4 text-gray-500">{fFecha(oc.fecha_creacion)}</td>
-                {puedeComprar && (
+                {(puedeComprar || puedeRevisar) && (
                   <td className="py-3 px-4">
-                    {oc.estado === 'aprobada' && (
+                    {oc.estado === 'emitida' && puedeRevisar && (
+                      <button onClick={() => abrirRevisar(oc)} disabled={aplicandoId === oc.id}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 whitespace-nowrap">
+                        🔍 Revisar
+                      </button>
+                    )}
+                    {(oc.estado === 'revisada' || oc.estado === 'aprobada') && puedeComprar && (
                       <button onClick={() => abrirComprar(oc)} disabled={aplicandoId === oc.id}
                         className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 disabled:opacity-50 whitespace-nowrap">
                         🛒 Comprar
                       </button>
                     )}
-                    {oc.estado === 'comprada' && (
+                    {oc.estado === 'comprada' && puedeComprar && (
                       <button onClick={() => abrirCorregir(oc)} disabled={aplicandoId === oc.id}
                         className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap">
                         ✎ Corregir compra
@@ -396,7 +482,125 @@ export default function OrdenesCompraSigp() {
         </div>
       </Modal>
 
-      {/* ── Modal: Comprar (C3) — aprobada → comprada ─────────────────── */}
+      {/* ── Modal OC2: Revisar — la cotización del proveedor AL LADO de las
+             líneas; validar exige el total LEÍDO de esa cotización ───────── */}
+      <Modal
+        isOpen={revisarTarget !== null}
+        title={`Revisar — ${revisarTarget?.consecutivo ?? ''} · ${revisarTarget?.proveedor_snapshot?.razon_social ?? ''}`}
+        onClose={() => setRevisarTarget(null)}
+        size="lg"
+        actions={[
+          { label: 'Volver', onClick: () => setRevisarTarget(null), variant: 'secondary' },
+          {
+            label: aplicandoId === revisarTarget?.id ? 'Devolviendo…' : 'Devolver al creador',
+            onClick: devolverOc, variant: 'danger',
+            loading: aplicandoId === revisarTarget?.id, disabled: !motivoDevolucion.trim(),
+          },
+          {
+            label: aplicandoId === revisarTarget?.id ? 'Validando…' : '✓ Validar',
+            onClick: validarRevision, variant: 'primary',
+            loading: aplicandoId === revisarTarget?.id, disabled: previaValidar === null,
+          },
+        ]}
+      >
+        {revisarTarget && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Las líneas de la ORDEN */}
+              <div>
+                <p className="text-xs font-bold text-brand-700 uppercase tracking-wide mb-1.5">Líneas de la orden</p>
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 text-left text-[10px] uppercase tracking-wide text-gray-500">
+                        <th className="py-1.5 px-2 font-semibold">Descripción</th>
+                        <th className="py-1.5 px-2 font-semibold text-right">Cant</th>
+                        <th className="py-1.5 px-2 font-semibold text-right">Vr. unit</th>
+                        <th className="py-1.5 px-2 font-semibold text-right">Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(revisarTarget.lineas ?? []).map((l, i) => (
+                        <tr key={i} className="border-t border-gray-100">
+                          <td className="py-1.5 px-2 text-gray-700">{l.descripcion}{l.unidad ? ` (${l.unidad})` : ''}</td>
+                          <td className="py-1.5 px-2 text-right font-mono text-gray-600">{l.cantidad}</td>
+                          <td className="py-1.5 px-2 text-right font-mono text-gray-600">{fmtMoney(l.valor_unitario)}</td>
+                          <td className="py-1.5 px-2 text-right font-mono text-gray-700">{fmtMoney(l.valor)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="border-t border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-right space-y-0.5">
+                    <p className="text-gray-500">Subtotal: <span className="font-mono">{fmtMoney(subtotalDe(revisarTarget.lineas ?? []))}</span>
+                      {' '}· IVA: <span className="font-mono">{fmtMoney(ivaTotalDe(revisarTarget.lineas ?? []))}</span></p>
+                    <p className="font-semibold text-gray-800">Total de la orden: <span className="font-mono">{fmtMoney(revisarTarget.valor_total)}</span></p>
+                  </div>
+                </div>
+              </div>
+              {/* La COTIZACIÓN del proveedor — lo que se compara, en la misma pantalla */}
+              <div>
+                <p className="text-xs font-bold text-brand-700 uppercase tracking-wide mb-1.5">
+                  Cotización del proveedor
+                  {revisarTarget.cotizacion_referencia ? ` · ${revisarTarget.cotizacion_referencia}` : ''}
+                </p>
+                {revisarTarget.cotizacion_proveedor_url ? (
+                  <>
+                    <iframe src={revisarTarget.cotizacion_proveedor_url} title="Cotización del proveedor"
+                      className="w-full h-[380px] border border-gray-200 rounded-lg bg-gray-50" />
+                    <a href={revisarTarget.cotizacion_proveedor_url} target="_blank" rel="noreferrer"
+                      className="mt-1 inline-block text-[11px] text-brand-700 underline underline-offset-2 font-medium">
+                      abrir en pestaña aparte ↗
+                    </a>
+                  </>
+                ) : (
+                  <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1.5">
+                    La orden no tiene cotización adjunta — no debería haber llegado a revisión; devuélvela con ese motivo.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">
+                Total según la cotización del proveedor <span className="text-red-500">*</span>
+              </span>
+              <span className="block text-[11px] text-gray-400">
+                Léelo del documento de la derecha y tecléalo — es la comparación que esta revisión protege.
+              </span>
+              <InputExpresion valor={totalCotProveedor} onValor={setTotalCotProveedor}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-right focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+            {totalDifiere && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded px-2.5 py-1.5">
+                ⚠ <b>El total de la orden ({fmtMoney(revisarTarget.valor_total)}) no coincide con el de la
+                cotización ({fmtMoney(totalCotProveedor ?? 0)})</b> — puede haber razón; si validas, la
+                diferencia queda registrada en el historial.
+              </p>
+            )}
+            {revisionRequiereSalvedad && (
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Salvedad <span className="text-red-500">*</span></span>
+                <span className="block text-[11px] text-gray-400">
+                  Creaste esta orden — validar lo propio exige salvedad con traza.
+                </span>
+                <textarea value={salvedadRevision} onChange={e => setSalvedadRevision(e.target.value)} rows={2}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+              </label>
+            )}
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Motivo de devolución</span>
+              <span className="block text-[11px] text-gray-400">
+                Solo si la devuelves — vuelve al creador, editable y re-enviable con el mismo consecutivo.
+              </span>
+              <textarea value={motivoDevolucion} onChange={e => setMotivoDevolucion(e.target.value)} rows={2}
+                placeholder="Qué debe corregirse…"
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Modal: Comprar (C3/OC2) — revisada (o aprobada legacy) → comprada ── */}
       <Modal
         isOpen={comprarTarget !== null}
         title={`Comprar — ${comprarTarget?.consecutivo ?? ''}`}
