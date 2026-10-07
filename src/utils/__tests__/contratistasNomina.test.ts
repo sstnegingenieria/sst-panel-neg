@@ -108,16 +108,16 @@ describe('clasificarFilas — contra la nómina propia y las de los demás', () 
 })
 
 describe('builders de writes — la UI no improvisa', () => {
-  it('patchCargarNomina: solo incluidas, nodo COMPLETO por dot-path (reincorporar pierde `retirado` por reemplazo)', () => {
+  it('patchCargarNomina: solo incluidas, POR CAMPO (C5a — reemplazar el nodo borraría la carpeta documental); reincorporar = deleteField de retirado', () => {
     const filas: FilaParseada[] = clasificarFilas(
       parsearPegado('Ana\t111111\nBeto\t222222'),
       nominaCon({ '222222': { retirado: true } }), {})
     const patch = patchCargarNomina(filas, { uid: 'gi-uid', nombre: 'Ingrid' }, ts)!
-    expect(Object.keys(patch).sort()).toEqual(['fecha_actualizacion', 'trabajadores.111111', 'trabajadores.222222'])
-    const beto = patch['trabajadores.222222'] as Record<string, unknown>
-    expect(beto.nombre).toBe('Beto')
-    expect(beto.cargado_por).toBe('gi-uid')
-    expect('retirado' in beto).toBe(false)
+    expect(patch['trabajadores.111111']).toBeUndefined()   // el nodo entero JAMÁS
+    expect(patch['trabajadores.111111.nombre']).toBe('Ana')
+    expect(patch['trabajadores.222222.nombre']).toBe('Beto')
+    expect(patch['trabajadores.222222.cargado_por']).toBe('gi-uid')
+    expect(patch['trabajadores.222222.retirado']).toEqual(deleteField())
   })
 
   it('sin filas incluidas → null (nada que escribir)', () => {

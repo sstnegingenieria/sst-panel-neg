@@ -18,6 +18,40 @@
 
 import { Timestamp, deleteField } from 'firebase/firestore'
 
+/** Paquete GI · C5a — documento con vencimiento de una persona de la nómina.
+ *  REUSO del sistema de Técnicos: la fecha es ISO (yyyy-mm-dd) y el estado
+ *  lo deriva getDocEstado() de utils/vencimiento.ts — un solo sistema de
+ *  vencimientos en la casa. El archivo vive en Storage bajo
+ *  contratistas/{id}/nomina/{cedula}/documentos/ (lectura interna SST/GI). */
+export interface DocumentoPersona {
+  vencimiento?: string
+  archivo_url?: string
+}
+
+/** Paquete GI · C5a — examen médico: SOLO EL HECHO DOCUMENTAL (que existe,
+ *  su fecha, su archivo). La línea de privacidad es dura y el TIPO la hace
+ *  cumplir: sin diagnóstico, sin restricciones, sin texto libre — esos
+ *  campos NO EXISTEN aquí y no deben agregarse. Si algún día hace falta el
+ *  concepto de aptitud, es un ENUM CERRADO que define SST (pendiente de que
+ *  entregue los valores), jamás una observación. El archivo vive en ruta
+ *  RESTRINGIDA de Storage (contratistas/{id}/nomina/{cedula}/examenes/ —
+ *  solo gestion_integral y admin: lectura amplia ahí es una falla). */
+export interface ExamenMedicoPersona {
+  fecha: string
+  archivo_url?: string
+}
+
+/** Campos documentales de la ficha. Los dos exámenes son MÉDICOS (ruta
+ *  restringida); el resto son documentales normales. */
+export const CAMPOS_DOC_PERSONA = ['eps', 'arl', 'pension', 'alturas', 'examen_ingreso', 'examen_egreso'] as const
+export type CampoDocPersona = (typeof CAMPOS_DOC_PERSONA)[number]
+export const ETIQUETA_DOC_PERSONA: Record<CampoDocPersona, string> = {
+  eps: 'EPS', arl: 'ARL', pension: 'Pensión', alturas: 'Certificado de alturas',
+  examen_ingreso: 'Examen médico de ingreso', examen_egreso: 'Examen médico de egreso',
+}
+export const ES_EXAMEN_MEDICO = (c: CampoDocPersona): boolean =>
+  c === 'examen_ingreso' || c === 'examen_egreso'
+
 export interface TrabajadorNomina {
   nombre: string
   /** Como vino en el archivo del contratista (fidelidad). */
@@ -27,6 +61,14 @@ export interface TrabajadorNomina {
   fecha_carga: Timestamp
   /** Fuera de la nómina SIN borrado físico. */
   retirado?: true
+  // ── C5a: ficha documental (todos opcionales — la ficha crece de a poco) ──
+  eps?: DocumentoPersona
+  arl?: DocumentoPersona
+  pension?: DocumentoPersona
+  /** Certificado de trabajo en alturas, con vigencia. */
+  alturas?: DocumentoPersona
+  examen_ingreso?: ExamenMedicoPersona
+  examen_egreso?: ExamenMedicoPersona
 }
 
 export interface NominaContratista {
@@ -163,10 +205,13 @@ export const ETIQUETA_FILA: Record<EstadoFila, string> = {
 
 // ── Builders de writes (la UI no improvisa) ─────────────────────────────────
 
-/** Patch por dot-paths para updateDoc: cada fila incluida escribe su nodo
- *  COMPLETO (reemplazo del nodo → un `retirado` previo desaparece solo, que
- *  es exactamente la reincorporación). Un pegado parcial JAMÁS toca a los
- *  demás trabajadores. */
+/** Patch por dot-paths para updateDoc, POR CAMPO (C5a): cada fila incluida
+ *  escribe identidad + carga y LIMPIA `retirado` (deleteField) — eso es la
+ *  reincorporación. ⚠ Ya NO se reemplaza el nodo completo: desde que la
+ *  ficha lleva documentos (eps/arl/…/exámenes), un re-pegado masivo que
+ *  reemplazara nodos BORRARÍA la carpeta documental de la persona — los
+ *  campos de la ficha se preservan por construcción. Un pegado parcial
+ *  JAMÁS toca a los demás trabajadores. */
 export function patchCargarNomina(
   filas: FilaParseada[],
   usuario: { uid: string; nombre?: string },
@@ -179,15 +224,65 @@ export function patchCargarNomina(
   if (incluidas.length === 0) return null
   const patch: Record<string, unknown> = { fecha_actualizacion: fecha }
   for (const f of incluidas) {
-    patch[`trabajadores.${f.cedula_norm}`] = {
-      nombre: f.nombre,
-      cedula_original: f.cedula_original,
-      cargado_por: usuario.uid,
-      cargado_por_nombre: usuario.nombre ?? '',
-      fecha_carga: fecha,
-    } satisfies TrabajadorNomina
+    const base = `trabajadores.${f.cedula_norm}`
+    patch[`${base}.nombre`] = f.nombre
+    patch[`${base}.cedula_original`] = f.cedula_original
+    patch[`${base}.cargado_por`] = usuario.uid
+    patch[`${base}.cargado_por_nombre`] = usuario.nombre ?? ''
+    patch[`${base}.fecha_carga`] = fecha
+    patch[`${base}.retirado`] = deleteField()
   }
   return patch
+}
+
+/** C5a — agregar UNA persona a mano (el camino de "llegaron dos nombres por
+ *  WhatsApp": nombre y cédula, guardar, listo — sin pegar nada). El pegado
+ *  masivo queda para las listas largas: dos caminos para dos situaciones. */
+export function patchAgregarPersona(
+  nomina: NominaContratista | null | undefined,
+  nombre: string,
+  cedulaOriginal: string,
+  nominasOtros: Record<string, Set<string>>,
+  usuario: { uid: string; nombre?: string },
+  fecha: Timestamp,
+): { ok: true; patch: Record<string, unknown>; tipo: 'nueva' | 'reincorporada' } | { ok: false; motivo: string } {
+  const nom = nombre.replace(/\s+/g, ' ').trim()
+  if (!nom) return { ok: false, motivo: 'El nombre es obligatorio' }
+  const norm = normalizarCedula(cedulaOriginal)
+  if (!norm) return { ok: false, motivo: 'La cédula no es legible (solo dígitos, 6–12; pasaporte/PPT pendiente de definición)' }
+  const otro = Object.keys(nominasOtros).find(id => nominasOtros[id].has(norm))
+  if (otro) return { ok: false, motivo: 'Esa cédula ya está en la nómina VIVA de otro contratista — retíralo allá primero' }
+  const existente = nomina?.trabajadores?.[norm]
+  if (existente && !existente.retirado) return { ok: false, motivo: `Ya está en esta nómina (${existente.nombre})` }
+  const base = `trabajadores.${norm}`
+  return {
+    ok: true,
+    tipo: existente ? 'reincorporada' : 'nueva',
+    patch: {
+      [`${base}.nombre`]: nom,
+      [`${base}.cedula_original`]: cedulaOriginal.trim(),
+      [`${base}.cargado_por`]: usuario.uid,
+      [`${base}.cargado_por_nombre`]: usuario.nombre ?? '',
+      [`${base}.fecha_carga`]: fecha,
+      [`${base}.retirado`]: deleteField(),
+      fecha_actualizacion: fecha,
+    },
+  }
+}
+
+/** C5a — guardar/actualizar UN documento de la ficha (dot-path al campo;
+ *  el resto de la persona intacto). `valor` ya viene armado por la UI
+ *  (fecha y/o archivo_url) — el tipo impide texto libre en exámenes. */
+export function patchDocumentoPersona(
+  cedulaNorm: string,
+  campo: CampoDocPersona,
+  valor: DocumentoPersona | ExamenMedicoPersona,
+  fecha: Timestamp,
+): Record<string, unknown> {
+  return {
+    [`trabajadores.${cedulaNorm}.${campo}`]: valor,
+    fecha_actualizacion: fecha,
+  }
 }
 
 /** Retirar / reincorporar UNA cédula (acción por fila de la tabla). */

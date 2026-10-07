@@ -134,6 +134,35 @@ service firebase.storage {
     // C2.1: documentos médicos → SOLO gerencia_administrativa + admin por
     // claim (espejo de gestionaHorario() de Firestore — quien sube y gestiona
     // ausentismos). El soporte_url con ?token= del doc no pasa por aquí.
+    // ── Paquete GI · C5a (oct-2026): documentos de la nómina del contratista ──
+    // Dos rutas con reglas DISTINTAS, deliberadamente:
+    //  · documentos/ — EPS, ARL, pensión, alturas: documentales normales,
+    //    lectura para los roles internos del frente SST/GI + gerencias.
+    //  · examenes/ — archivos MÉDICOS: LÍNEA DURA (patrón privado/detalle de
+    //    ausentismos) — SOLO gestion_integral y admin. Lectura amplia ahí es
+    //    una falla, no un detalle. El doc de Firestore solo lleva el HECHO
+    //    (fecha + url); el contenido clínico jamás entra al sistema.
+    // Escribe quien administra la nómina (GI + admin). Claims C2.1 (token.rol).
+    match /contratistas/{contratistaId}/nomina/{cedula}/documentos/{fileName} {
+      allow read: if esInterno()
+                  && request.auth.token.rol in
+                     ['admin', 'sst', 'gestion_integral', 'gerencia_general', 'gerencia_administrativa'];
+      allow write: if esInterno()
+                   && request.auth.token.rol in ['gestion_integral', 'admin']
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (request.resource.contentType == 'application/pdf'
+                       || request.resource.contentType.matches('image/.*'));
+    }
+    match /contratistas/{contratistaId}/nomina/{cedula}/examenes/{fileName} {
+      allow read: if esInterno()
+                  && request.auth.token.rol in ['gestion_integral', 'admin'];
+      allow write: if esInterno()
+                   && request.auth.token.rol in ['gestion_integral', 'admin']
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (request.resource.contentType == 'application/pdf'
+                       || request.resource.contentType.matches('image/.*'));
+    }
+
     match /ausentismos/{ausentismoId}/{tipoDoc}/{fileName} {
       allow read: if esGerenciaAdminPorClaim();
       allow write: if esGerenciaAdminPorClaim()
