@@ -192,12 +192,12 @@ describe('requiereSalvedadAprobacion — escape aprobador == creador', () => {
 })
 
 describe('TRANSICIONES_OC — máquina de estados', () => {
-  it('borrador → emitida|anulada; emitida → aprobada|anulada', () => {
+  it('borrador → emitida|anulada; emitida → revisada|rechazada|anulada (OC2: el gate es la revisión)', () => {
     expect(TRANSICIONES_OC.borrador).toEqual(['emitida', 'anulada'])
-    expect(TRANSICIONES_OC.emitida).toEqual(['aprobada', 'anulada'])
+    expect(TRANSICIONES_OC.emitida).toEqual(['revisada', 'rechazada', 'anulada'])
   })
-  it('aprobada → comprada (solo Marcela) o anulada; comprada y anulada terminales', () => {
-    // C3: 'comprada' se sumó a la máquina (antes aprobada solo se anulaba)
+  it('aprobada (LEGACY) → comprada o anulada; comprada y anulada terminales', () => {
+    // OC2: aprobada quedó cerrada a ENTRADAS; sus salidas siguen vivas.
     expect(TRANSICIONES_OC.aprobada).toEqual(['comprada', 'anulada'])
     expect(TRANSICIONES_OC.comprada).toEqual([])   // recepción = v2
     expect(TRANSICIONES_OC.anulada).toEqual([])

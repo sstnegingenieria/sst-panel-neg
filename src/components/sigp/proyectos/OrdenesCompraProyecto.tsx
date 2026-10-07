@@ -1,20 +1,25 @@
-// Módulo Compras · C2 — Órdenes de compra (sub-bloque 3, UI).
+// Módulo Compras · C2/OC2 — Órdenes de compra (UI de la ficha).
 //
 // Documento de EJECUCIÓN (costo operativo, jamás venta/utilidad). La crea un
-// operativo de proyectos con la cotización del proveedor adjunta; la aprueba
-// GP/GG/admin (aprobador ≠ creador, o salvedad obligatoria como escape). El
-// consecutivo OC-YYYY-NNN se asigna al EMITIR (contigüidad ISO — patrón
-// SOL/VIS/COT/PRY: preservado ante fallo, nunca se queman huecos).
+// operativo de proyectos con la cotización del proveedor adjunta. OC2
+// (oct-2026): la aprobación previa se reemplazó por la REVISIÓN de Gestión
+// Administrativa — emitir la manda DIRECTO a la cola de Marcela (bandeja de
+// Órdenes de compra, donde vive la pantalla de revisión); si la devuelve,
+// vuelve AQUÍ al creador con el motivo, editable y re-enviable sin quemar
+// consecutivo nuevo. El consecutivo OC-YYYY-NNN se asigna al EMITIR
+// (contigüidad ISO — patrón SOL/VIS/COT/PRY: preservado ante fallo).
 //
 // Roles (types/sigp/permisos.ts, alineados con firestore.rules):
-// - puedeCrearOcUI: crea/edita/emite/anula sus borradores y emitidas.
-// - apruebaOcUI: aprueba emitidas; anula aprobadas.
+// - puedeCrearOcUI: crea/edita/emite/anula sus borradores y emitidas; el
+//   CREADOR edita y re-envía sus devueltas.
+// - puedeRevisarOcUI: anula revisadas (la revisión misma vive en la bandeja).
+// - apruebaOcUI: LEGACY — solo anular las `aprobada` del régimen anterior.
 // - veOcUI: lectura (además gerencia_administrativa + gestion_integral).
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { ChangeEvent } from 'react'
 import {
-  collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, arrayUnion, Timestamp,
+  collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, arrayUnion, deleteField, Timestamp,
 } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
@@ -29,12 +34,12 @@ import { fmtMoney } from '../../../utils/sigp/formato'
 import {
   ESTADO_OC_LABEL, ESTADO_OC_COLOR,
   valorLineaDe, subtotalDe, ivaTotalDe, totalConIvaDe, validarOcParaEmitir,
-  requiereSalvedadAprobacion, construirSnapshotProveedor,
+  construirSnapshotProveedor, puedeEditarOc, pdfDescargable, pdfMarcado,
   IVA_PCT_OPCIONES, IVA_PCT_DEFAULT,
 } from '../../../types/sigp/ordenCompra'
 import { CONFIG_EMPRESA_DOC, faltantesConfigEmpresa } from '../../../types/sigp/configEmpresa'
 import type { ConfigEmpresa } from '../../../types/sigp/configEmpresa'
-import { puedeCrearOcUI, apruebaOcUI, veOcUI } from '../../../types/sigp/permisos'
+import { puedeCrearOcUI, apruebaOcUI, puedeRevisarOcUI, veOcUI } from '../../../types/sigp/permisos'
 import type { OrdenCompra, LineaOrdenCompra, DespachoOC, CondicionesOC } from '../../../types/sigp/ordenCompra'
 import type { Proveedor } from '../../../types/sigp/proveedor'
 import type { Proyecto } from '../../../types/sigp/proyecto'
@@ -101,7 +106,10 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
   // para que el atajo no lleve a otro callejón.
   const proyectoCerrado = proyecto.estado === 'cerrado' || proyecto.estado === 'cancelado'
   const puedeCrear = puedeCrearOcUI(user?.rol) && !proyectoCerrado
+  // LEGACY (régimen anterior): solo para ANULAR las OCs que siguen en `aprobada`.
   const puedeAprobar = apruebaOcUI(user?.rol)
+  const puedeRevisar = puedeRevisarOcUI(user?.rol)
+  const esAdminUi = user?.rol === 'admin'
   const { obtener } = useConsecutivo()
   // Patrón SOL/VIS/COT/PRY: el consecutivo, si ya se consumió al emitir y el
   // guardado posterior falló, se preserva por OC — el reintento lo reutiliza
@@ -210,7 +218,8 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
       const valorTotal = totalConIvaDe(lineas)
       const ahora = Timestamp.now()
       if (formTarget) {
-        // Editar (solo borrador — la regla también lo exige): líneas + total.
+        // Editar (borrador, o rechazada POR SU CREADOR — la regla también lo
+        // exige): líneas + total.
         await updateDoc(doc(db, 'ordenes_compra', formTarget.id), {
           lineas, valor_total: valorTotal, fecha_actualizacion: ahora,
         })
@@ -331,24 +340,29 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
     const condiciones = condicionesDeForm()
     const errores = validarOcParaEmitir({ ...oc, despacho, condiciones })
     if (Object.keys(errores).length) { toast(Object.values(errores)[0], 'error'); return }
+    // OC2 — RE-ENVÍO tras devolución: la vuelta conserva su consecutivo (la
+    // re-emisión es una vuelta del documento, no un documento nuevo) y
+    // limpia el rechazo vigente; el historial cuenta cada vuelta.
+    const esReenvio = oc.estado === 'rechazada'
     setAplicandoId(oc.id)
     try {
-      const consecutivo = await obtenerConsecutivoOC(oc.id)
+      const consecutivo = esReenvio ? oc.consecutivo : await obtenerConsecutivoOC(oc.id)
       const ahora = Timestamp.now()
       await updateDoc(doc(db, 'ordenes_compra', oc.id), {
         estado: 'emitida',
         consecutivo,
         despacho,
         condiciones,
+        ...(esReenvio ? { rechazo: deleteField() } : {}),
         ...(refCotizacion.trim() ? { cotizacion_referencia: refCotizacion.trim() } : {}),
         fecha_actualizacion: ahora,
         historial: arrayUnion({
-          de: 'borrador', a: 'emitida', por: user?.uid ?? '', fecha: ahora,
-          motivo: `Emitida — ${consecutivo} asignado`,
+          de: esReenvio ? 'rechazada' : 'borrador', a: 'emitida', por: user?.uid ?? '', fecha: ahora,
+          motivo: esReenvio ? 'Re-enviada a revisión tras la devolución' : `Emitida — ${consecutivo} asignado`,
         }),
       })
       delete pendientesRef.current[oc.id]
-      toast(`${consecutivo} emitida`)
+      toast(esReenvio ? `${consecutivo} re-enviada a revisión` : `${consecutivo} emitida`)
       setEmitirTarget(null)
       await load()
       await reload?.()
@@ -358,7 +372,9 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // Descargar PDF (DC-FT-OC-19) — on-demand, solo desde aprobada/comprada
+  // Descargar PDF (DC-FT-OC-19) — on-demand desde que existe con consecutivo.
+  // OC2: en emitida/rechazada sale con MARCA DE AGUA de pendiente de
+  // revisión (consultable, no entregable); revisada/aprobada/comprada limpio.
   // ═══════════════════════════════════════════════════════════════════════
   const [descargandoId, setDescargandoId] = useState<string | null>(null)
 
@@ -391,7 +407,7 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
       const pdf = await generarPdfOrdenCompra({
         consecutivo: oc.consecutivo,
         proyectoConsecutivo: oc.proyecto_consecutivo,
-        fecha: oc.fecha_aprobacion?.toDate?.() ?? oc.fecha_creacion?.toDate?.() ?? new Date(),
+        fecha: oc.revision?.fecha?.toDate?.() ?? oc.fecha_aprobacion?.toDate?.() ?? oc.fecha_creacion?.toDate?.() ?? new Date(),
         proveedor: {
           razonSocial: oc.proveedor_snapshot?.razon_social ?? '—',
           identificacion: oc.proveedor_snapshot?.identificacion ?? '—',
@@ -406,6 +422,8 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
         cotizacionReferencia: oc.cotizacion_referencia,
         firmante,
         empresa,
+        // OC2 — la tinta del régimen nuevo: pendiente de revisión = marcado.
+        marcado: pdfMarcado(oc.estado),
       }, await cargarAssetsPdf())
       const url = URL.createObjectURL(new Blob([pdf as BlobPart], { type: 'application/pdf' }))
       const a = document.createElement('a')
@@ -419,46 +437,9 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
     } finally { setDescargandoId(null) }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // Aprobar — salvedad obligatoria si aprobador == creador
-  // ═══════════════════════════════════════════════════════════════════════
-  const [salvedadTarget, setSalvedadTarget] = useState<OrdenCompra | null>(null)
-  const [salvedadTexto, setSalvedadTexto] = useState('')
-
-  const ejecutarAprobacion = async (oc: OrdenCompra, salvedad?: string) => {
-    setAplicandoId(oc.id)
-    try {
-      const ahora = Timestamp.now()
-      await updateDoc(doc(db, 'ordenes_compra', oc.id), {
-        estado: 'aprobada',
-        aprobada_por: user?.uid ?? '',
-        fecha_aprobacion: ahora,
-        fecha_actualizacion: ahora,
-        ...(salvedad ? { salvedad_aprobacion: salvedad } : {}),
-        historial: arrayUnion({
-          de: 'emitida', a: 'aprobada', por: user?.uid ?? '', fecha: ahora,
-          motivo: salvedad ? `Aprobada — SALVEDAD: ${salvedad}` : 'Aprobada',
-        }),
-      })
-      toast(`${oc.consecutivo} aprobada`)
-      setSalvedadTarget(null)
-      setSalvedadTexto('')
-      await load()
-      await reload?.()
-    } catch {
-      toast('Error al aprobar la orden de compra (verifica tu rol)', 'error')
-    } finally { setAplicandoId(null) }
-  }
-
-  const clicAprobar = (oc: OrdenCompra) => {
-    if (requiereSalvedadAprobacion(user?.uid ?? '', oc.creada_por)) {
-      setSalvedadTarget(oc)
-      setSalvedadTexto('')
-      return
-    }
-    if (!window.confirm(`¿Aprobar la orden ${oc.consecutivo}? Total ${fmtMoney(oc.valor_total)}.`)) return
-    ejecutarAprobacion(oc)
-  }
+  // (OC2: el flujo de APROBAR se retiró — el gate es la revisión de Gestión
+  //  Administrativa y vive en la bandeja de Órdenes de compra, su cola de
+  //  trabajo. `aprobada` quedó como estado legacy de solo-salida.)
 
   // ═══════════════════════════════════════════════════════════════════════
   // Anular — motivo obligatorio
@@ -544,10 +525,12 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold ${ESTADO_OC_COLOR[oc.estado]}`}>
                     {ESTADO_OC_LABEL[oc.estado]}
                   </span>
-                  {oc.salvedad_aprobacion && (
+                  {(oc.salvedad_aprobacion || oc.revision?.salvedad) && (
                     <span
                       className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800"
-                      title={`Aprobación con salvedad: ${oc.salvedad_aprobacion}`}>
+                      title={oc.salvedad_aprobacion
+                        ? `Aprobación con salvedad: ${oc.salvedad_aprobacion}`
+                        : `Revisión con salvedad: ${oc.revision?.salvedad}`}>
                       Salvedad
                     </span>
                   )}
@@ -563,6 +546,16 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
                   )}
                   {oc.estado === 'anulada' && motivoAnulacion(oc) && (
                     <span className="text-red-600">Motivo de anulación: {motivoAnulacion(oc)}</span>
+                  )}
+                  {oc.estado === 'emitida' && (
+                    <span>En cola de revisión de Gestión Administrativa — se valida o devuelve desde la bandeja de Órdenes de compra.</span>
+                  )}
+                  {oc.estado === 'revisada' && oc.revision && (
+                    <span className="text-emerald-700">
+                      Revisada el {fFecha(oc.revision.fecha)} contra la cotización del proveedor
+                      (total leído: {fmtMoney(oc.revision.total_cotizacion_proveedor)}
+                      {oc.revision.total_cotizacion_proveedor !== oc.valor_total ? ' — difiere de la orden' : ''})
+                    </span>
                   )}
                   {(oc.estado === 'aprobada' || oc.estado === 'comprada') && oc.fecha_aprobacion && (
                     <span>Aprobada el {fFecha(oc.fecha_aprobacion)}</span>
@@ -584,6 +577,13 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
                   <p className="text-[11px] text-gray-400">
                     La compra (valor real + soporte) se registra y corrige desde la bandeja de{' '}
                     <span className="font-medium text-gray-500">Órdenes de compra</span> — aquí solo se consulta.
+                  </p>
+                )}
+                {/* OC2 — devolución vigente: el motivo VISIBLE para el creador */}
+                {oc.estado === 'rechazada' && oc.rechazo && (
+                  <p className="text-xs text-orange-800 bg-orange-50 border border-orange-200 rounded px-2.5 py-1.5">
+                    <b>Devuelta por revisión</b> ({fFecha(oc.rechazo.fecha)}): {oc.rechazo.motivo}
+                    {' '}— corrige lo señalado y re-envíala (conserva su consecutivo).
                   </p>
                 )}
 
@@ -610,15 +610,35 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
                       </button>
                     </>
                   )}
-                  {oc.estado === 'emitida' && puedeAprobar && (
-                    <button onClick={() => clicAprobar(oc)} disabled={aplicando}
-                      title={requiereSalvedadAprobacion(user?.uid ?? '', oc.creada_por)
-                        ? 'Aprobador = creador: la salvedad es obligatoria' : undefined}
-                      className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
-                      ✓ Aprobar
+                  {oc.estado === 'emitida' && puedeCrear && (
+                    <button onClick={() => { setAnularTarget(oc); setAnularMotivo('') }} disabled={aplicando}
+                      className="text-xs px-3 py-1.5 rounded-lg font-medium border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">
+                      Anular
                     </button>
                   )}
-                  {oc.estado === 'emitida' && puedeCrear && (
+                  {/* OC2 — devuelta: el CREADOR la corrige y re-envía (mismo
+                      consecutivo); los demás solo la ven. */}
+                  {oc.estado === 'rechazada' && puedeEditarOc(oc, user?.uid ?? '', esAdminUi) && !proyectoCerrado && (
+                    <>
+                      <button onClick={() => abrirEditar(oc)} disabled={aplicando}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                        Editar
+                      </button>
+                      <button onClick={() => { setCotizacionTarget(oc); setCotizacionFile(null) }} disabled={aplicando}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                        📎 Cotización del proveedor
+                      </button>
+                      <button onClick={() => abrirEmitir(oc)} disabled={aplicando}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40">
+                        {aplicando ? 'Re-enviando…' : 'Re-enviar a revisión →'}
+                      </button>
+                      <button onClick={() => { setAnularTarget(oc); setAnularMotivo('') }} disabled={aplicando}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">
+                        Anular
+                      </button>
+                    </>
+                  )}
+                  {oc.estado === 'revisada' && (puedeRevisar || (puedeCrear && oc.creada_por === user?.uid)) && (
                     <button onClick={() => { setAnularTarget(oc); setAnularMotivo('') }} disabled={aplicando}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">
                       Anular
@@ -630,12 +650,17 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
                       Anular
                     </button>
                   )}
-                  {/* OC1: el documento sale SOLO desde aprobada (incl. comprada) —
-                      el gate al proveedor es este botón. */}
-                  {(oc.estado === 'aprobada' || oc.estado === 'comprada') && (
+                  {/* OC2: el documento se descarga desde que existe con
+                      consecutivo — en emitida/rechazada sale con la MARCA DE
+                      AGUA "pendiente de revisión" (no entregable); validada
+                      (o aprobada legacy, o comprada) sale limpio. */}
+                  {pdfDescargable(oc.estado) && (
                     <button onClick={() => descargarPdf(oc)} disabled={descargandoId === oc.id}
+                      title={pdfMarcado(oc.estado)
+                        ? 'Sale con marca de agua "PENDIENTE DE REVISIÓN — NO ENTREGABLE AL PROVEEDOR"' : undefined}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 disabled:opacity-50">
-                      {descargandoId === oc.id ? 'Generando…' : '📄 Descargar orden'}
+                      {descargandoId === oc.id ? 'Generando…'
+                        : pdfMarcado(oc.estado) ? '📄 Descargar (marca de revisión)' : '📄 Descargar orden'}
                     </button>
                   )}
                 </div>
@@ -820,34 +845,6 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
                 onChange={setRefCotizacion} placeholder="Opcional — ej: CO52090" />
             </div>
           </div>
-        </div>
-      </Modal>
-
-      {/* ── Modal: Aprobar con salvedad obligatoria (aprobador == creador) ── */}
-      <Modal
-        isOpen={salvedadTarget !== null}
-        title={`Aprobar con salvedad — ${salvedadTarget?.consecutivo ?? ''}`}
-        onClose={() => setSalvedadTarget(null)}
-        actions={[
-          { label: 'Cancelar', onClick: () => setSalvedadTarget(null), variant: 'secondary' },
-          {
-            label: aplicandoId === salvedadTarget?.id ? 'Aprobando…' : 'Aprobar con salvedad',
-            onClick: () => salvedadTarget && salvedadTexto.trim() && ejecutarAprobacion(salvedadTarget, salvedadTexto.trim()),
-            variant: 'primary', loading: aplicandoId === salvedadTarget?.id, disabled: !salvedadTexto.trim(),
-          },
-        ]}
-      >
-        <div className="space-y-3">
-          <p className="text-sm text-gray-600">
-            Creaste esta orden de compra — la aprobación exige salvedad (queda en la orden y en el
-            historial, con tu justificación de por qué apruebas tú mismo).
-          </p>
-          <label className="block text-sm">
-            <span className="font-medium text-gray-700">Salvedad <span className="text-red-500">*</span></span>
-            <textarea value={salvedadTexto} onChange={e => setSalvedadTexto(e.target.value)} rows={3} autoFocus
-              placeholder="Ej: no hay otro rol aprobador disponible en este momento…"
-              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
-          </label>
         </div>
       </Modal>
 

@@ -228,8 +228,20 @@ export const ROLES_CREA_OC: Rol[] = [
   'auxiliar_proyectos', 'director_proyectos', 'gerencia_general', 'admin',
 ]
 export const puedeCrearOcUI = (rol: string | undefined) => en(rol, ROLES_CREA_OC)
+// LEGACY (régimen anterior a oct-2026): la aprobación previa se reemplazó
+// por la revisión de administrativa (OC2). Se conserva SOLO para anular
+// las OCs que siguen en `aprobada` — espeja apruebaOC() de reglas.
 export const ROLES_APRUEBA_OC: Rol[] = ['director_proyectos', 'gerencia_general', 'admin']
 export const apruebaOcUI = (rol: string | undefined) => en(rol, ROLES_APRUEBA_OC)
+// OC2 — el gate nuevo: REVISA gerencia_administrativa (titular) + GG y
+// admin como respaldo (respaldo que revisa lo propio → salvedad, como en
+// preliquidación). Espeja revisaOC() de reglas.
+export const ROLES_REVISA_OC: Rol[] = ['gerencia_administrativa', 'gerencia_general', 'admin']
+export const puedeRevisarOcUI = (rol: string | undefined) => en(rol, ROLES_REVISA_OC)
+// OC2 — marcar la compra pasa de Marcela a Paula (quien valida no recibe).
+// Espeja marcaCompraOC() de reglas.
+export const ROLES_MARCA_COMPRA_OC: Rol[] = ['auxiliar_proyectos', 'admin']
+export const puedeMarcarCompraOcUI = (rol: string | undefined) => en(rol, ROLES_MARCA_COMPRA_OC)
 export const ROLES_VEN_OC: Rol[] = [
   'auxiliar_proyectos', 'director_proyectos', 'gerencia_general',
   'gerencia_administrativa', 'gestion_integral', 'admin',

@@ -10,7 +10,17 @@ import type { Timestamp } from 'firebase/firestore'
 
 // ── Enums de dominio ──────────────────────────────────────────────────────────
 
-export type EstadoOrdenCompra = 'borrador' | 'emitida' | 'aprobada' | 'comprada' | 'anulada'
+// OC2 (oct-2026) — cambio de régimen: la aprobación previa (GP/GG) se
+// reemplaza por la REVISIÓN de Gestión Administrativa. `emitida` pasa a ser
+// el estado de espera del gate nuevo; `revisada` es el gate pasado;
+// `rechazada` es la devolución NO terminal al creador (eso la distingue de
+// `anulada`). `aprobada` queda como estado LEGACY: el nombre dice bajo qué
+// régimen pasó su control (colapsarla en `revisada` mentiría) — SIN
+// transiciones de entrada nuevas, con sus salidas (→ comprada, → anulada)
+// intactas. No se migra ningún documento (restricción 5.1: los emitidos
+// bajo la regla vigente en su momento no se reescriben).
+export type EstadoOrdenCompra =
+  'borrador' | 'emitida' | 'revisada' | 'rechazada' | 'aprobada' | 'comprada' | 'anulada'
 
 // ── Sub-tipos embebidos ───────────────────────────────────────────────────────
 
@@ -50,6 +60,30 @@ export interface CondicionesOC {
   tiempo_entrega?: string
   /** Fecha límite de radicación de la factura (variable por orden). */
   fecha_limite_radicacion?: string
+}
+
+/** OC2 — la revisión de Gestión Administrativa (el gate nuevo). El total
+ *  tecleado de la cotización del proveedor es PARTE del control: obliga a
+ *  mirar el documento que se está comparando; si difiere del total de la
+ *  orden queda avisado en pantalla y trazado aquí — no bloquea (puede
+ *  haber razón), pero no pasa desapercibido. */
+export interface RevisionOC {
+  por: string                        // uid
+  fecha: Timestamp
+  /** Total leído por quien revisa EN la cotización adjunta del proveedor. */
+  total_cotizacion_proveedor: number
+  /** Escape respaldo-revisa-lo-propio (GG/admin crean Y validan): salvedad
+   *  obligatoria con traza — calco del control de aprobación del C2. */
+  salvedad?: string
+}
+
+/** OC2 — devolución vigente (NO terminal): la OC vuelve a quien la creó,
+ *  con el motivo visible; se limpia al re-enviar (las vueltas anteriores
+ *  quedan en historial — una OC rechazada dos veces lo cuenta sola). */
+export interface RechazoOC {
+  por: string
+  fecha: Timestamp
+  motivo: string
 }
 
 /** Entrada del historial de cambios de estado (evidencia ISO 8.2). */
@@ -121,6 +155,13 @@ export interface OrdenCompra {
   cotizacion_proveedor_url: string
   estado: EstadoOrdenCompra
   creada_por: string
+  /** OC2 — revisión vigente (estado `revisada` en adelante). */
+  revision?: RevisionOC
+  /** OC2 — devolución vigente (estado `rechazada`); null al re-enviar
+   *  (el historial conserva cada vuelta). */
+  rechazo?: RechazoOC | null
+  /** LEGACY (régimen anterior a oct-2026): la aprobación de GP/GG. Se
+   *  conserva en las OCs que la tienen; ninguna orden nueva la escribe. */
   aprobada_por?: string
   /** Escape del blindaje aprobador ≠ creador: si quien aprueba es quien
    *  creó (p. ej. GG crea y GG aprueba), la salvedad es OBLIGATORIA. */
@@ -140,12 +181,15 @@ export interface OrdenCompra {
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
-export const ESTADOS_OC = ['borrador', 'emitida', 'aprobada', 'comprada', 'anulada'] as const
+export const ESTADOS_OC =
+  ['borrador', 'emitida', 'revisada', 'rechazada', 'aprobada', 'comprada', 'anulada'] as const
 
 export const ESTADO_OC_LABEL: Record<EstadoOrdenCompra, string> = {
   borrador: 'Borrador',
-  emitida: 'Emitida',
-  aprobada: 'Aprobada',
+  emitida: 'Emitida · por revisar',
+  revisada: 'Revisada',
+  rechazada: 'Devuelta',
+  aprobada: 'Aprobada',              // LEGACY — régimen anterior a oct-2026
   comprada: 'Comprada',
   anulada: 'Anulada',
 }
@@ -153,20 +197,28 @@ export const ESTADO_OC_LABEL: Record<EstadoOrdenCompra, string> = {
 export const ESTADO_OC_COLOR: Record<EstadoOrdenCompra, string> = {
   borrador: 'bg-gray-100 text-gray-600',
   emitida:  'bg-amber-100 text-amber-800',
+  revisada: 'bg-emerald-100 text-emerald-800',
+  rechazada: 'bg-orange-100 text-orange-800',
   aprobada: 'bg-emerald-100 text-emerald-800',
   comprada: 'bg-brand-100 text-brand-800',
   anulada:  'bg-rose-100 text-rose-800',
 }
 
 /**
- * Máquina de estados. `aprobada` es INMUTABLE salvo anulación (y solo por
- * un rol aprobador — eso lo impone la regla, no esta tabla). `anulada` es
- * terminal (soft — sin delete, restricción 5.1).
+ * Máquina de estados OC2. `emitida` = esperando la REVISIÓN de Gestión
+ * Administrativa (el gate). `rechazada` = devuelta al creador, NO terminal:
+ * se edita y se re-envía (rechazada → emitida, con el MISMO consecutivo —
+ * la re-emisión es una vuelta del documento, no un documento nuevo).
+ * `aprobada` es LEGACY: sin entradas nuevas, salidas intactas. `revisada` y
+ * `aprobada` son inmutables salvo avanzar a comprada o anularse (reglas).
+ * `anulada` es terminal (soft — sin delete, restricción 5.1).
  */
 export const TRANSICIONES_OC: Record<EstadoOrdenCompra, EstadoOrdenCompra[]> = {
   borrador: ['emitida', 'anulada'],
-  emitida:  ['aprobada', 'anulada'],
-  aprobada: ['comprada', 'anulada'],  // comprada = SOLO gestionaCompras (vía Marcela, C3)
+  emitida:  ['revisada', 'rechazada', 'anulada'],
+  revisada: ['comprada', 'anulada'],  // comprada = marcaCompraOC (Paula, OC2)
+  rechazada: ['emitida', 'anulada'],  // re-envío por el CREADOR, sin quemar consecutivo
+  aprobada: ['comprada', 'anulada'],  // LEGACY: sus salidas siguen vivas
   comprada: [],                       // terminal en C3 (recepción = v2)
   anulada:  [],
 }
@@ -264,6 +316,99 @@ export function validarOcParaComprar(d: { valorReal?: number; tieneSoporte: bool
   if (!((d.valorReal ?? 0) > 0)) e.valor_real = 'El valor real pagado es obligatorio (> 0)'
   if (!d.tieneSoporte) e.soporte = 'El soporte de la compra es obligatorio'
   return e
+}
+
+// ── OC2 — revisión de Gestión Administrativa (patch builders puros) ──────────
+// La UI no improvisa writes: el MISMO builder valida el botón y ejecuta
+// (patrón tarea.ts / patchCancelarProyecto). Devuelven el patch exacto o null.
+
+/** ¿El PDF se puede descargar? Desde que existe con consecutivo (emitida) —
+ *  consultable e imprimible SIEMPRE; lo que cambia es la tinta (marca). */
+export const pdfDescargable = (estado: EstadoOrdenCompra): boolean =>
+  ['emitida', 'rechazada', 'revisada', 'aprobada', 'comprada'].includes(estado)
+
+/** ¿El PDF sale con la marca de agua "PENDIENTE DE REVISIÓN — NO ENTREGABLE
+ *  AL PROVEEDOR"? El compromiso con el proveedor no puede existir antes de
+ *  la revisión — y lo dice el documento mismo, no un permiso de UI.
+ *  `aprobada` (legacy) sale limpia: pasó su gate bajo la regla vigente en
+ *  su momento — marcarla retroactivamente reescribiría historia. */
+export const pdfMarcado = (estado: EstadoOrdenCompra): boolean =>
+  estado === 'emitida' || estado === 'rechazada'
+
+/** ¿Quién puede editar las líneas/datos? Borrador: cualquier operativo.
+ *  Rechazada: SOLO quien la creó (la devolución vuelve a su autor) — admin
+ *  como escotilla. Los demás estados no se editan. */
+export const puedeEditarOc = (
+  oc: Pick<OrdenCompra, 'estado' | 'creada_por'>, uid: string, esAdmin = false
+): boolean =>
+  oc.estado === 'borrador' || (oc.estado === 'rechazada' && (uid === oc.creada_por || esAdmin))
+
+/** VALIDAR (emitida → revisada). El total tecleado de la cotización del
+ *  proveedor es obligatorio (>0): es el acto de mirar el documento. Si
+ *  difiere del total de la orden NO bloquea — queda en la traza. Respaldo
+ *  que revisa lo que creó → salvedad obligatoria. */
+export function patchRevisarOc(
+  oc: Pick<OrdenCompra, 'estado' | 'creada_por' | 'historial' | 'valor_total'>,
+  uid: string,
+  totalCotizacionProveedor: number,
+  ahora: Timestamp,
+  salvedad?: string,
+): { estado: 'revisada'; revision: RevisionOC; historial: CambioEstadoOC[]; fecha_actualizacion: Timestamp } | null {
+  if (oc.estado !== 'emitida') return null
+  if (!(totalCotizacionProveedor > 0)) return null
+  if (uid === oc.creada_por && !salvedad?.trim()) return null
+  const difiere = totalCotizacionProveedor !== oc.valor_total
+  const revision: RevisionOC = {
+    por: uid, fecha: ahora, total_cotizacion_proveedor: totalCotizacionProveedor,
+    ...(salvedad?.trim() ? { salvedad: salvedad.trim() } : {}),
+  }
+  return {
+    estado: 'revisada',
+    revision,
+    historial: [...oc.historial, {
+      de: 'emitida', a: 'revisada', por: uid, fecha: ahora,
+      motivo: `Revisada contra la cotización del proveedor (total leído $${totalCotizacionProveedor.toLocaleString('es-CO')}${
+        difiere ? ` — DIFIERE del total de la orden $${oc.valor_total.toLocaleString('es-CO')}` : ' — coincide'})${
+        salvedad?.trim() ? ` — SALVEDAD: ${salvedad.trim()}` : ''}`,
+    }],
+    fecha_actualizacion: ahora,
+  }
+}
+
+/** DEVOLVER (emitida → rechazada). Motivo obligatorio; NO terminal. */
+export function patchRechazarOc(
+  oc: Pick<OrdenCompra, 'estado' | 'historial'>,
+  uid: string,
+  motivo: string,
+  ahora: Timestamp,
+): { estado: 'rechazada'; rechazo: RechazoOC; historial: CambioEstadoOC[]; fecha_actualizacion: Timestamp } | null {
+  if (oc.estado !== 'emitida' || !motivo.trim()) return null
+  return {
+    estado: 'rechazada',
+    rechazo: { por: uid, fecha: ahora, motivo: motivo.trim() },
+    historial: [...oc.historial, { de: 'emitida', a: 'rechazada', por: uid, fecha: ahora, motivo: `Devuelta al creador — ${motivo.trim()}` }],
+    fecha_actualizacion: ahora,
+  }
+}
+
+/** RE-ENVIAR (rechazada → emitida). Solo el creador (admin escotilla), con
+ *  las MISMAS validaciones de emitir; el consecutivo se conserva (la vuelta
+ *  no quema número) y el rechazo vigente se limpia — el historial lo cuenta. */
+export function patchReenviarOc(
+  oc: Pick<OrdenCompra, 'estado' | 'creada_por' | 'historial' | 'lineas' | 'valor_total' | 'cotizacion_proveedor_url' | 'despacho' | 'condiciones'>,
+  uid: string,
+  ahora: Timestamp,
+  esAdmin = false,
+): { estado: 'emitida'; rechazo: null; historial: CambioEstadoOC[]; fecha_actualizacion: Timestamp } | null {
+  if (oc.estado !== 'rechazada') return null
+  if (uid !== oc.creada_por && !esAdmin) return null
+  if (Object.keys(validarOcParaEmitir(oc)).length > 0) return null
+  return {
+    estado: 'emitida',
+    rechazo: null,
+    historial: [...oc.historial, { de: 'rechazada', a: 'emitida', por: uid, fecha: ahora, motivo: 'Re-enviada a revisión tras la devolución' }],
+    fecha_actualizacion: ahora,
+  }
 }
 
 /** C3 — compra menor registrada directo en el proyecto (sin OC; subcolección
