@@ -41,6 +41,10 @@ export default function Contratistas() {
   const puedeNomina = puedeGestionarNominaUI(user?.rol)
   const [nominaTarget, setNominaTarget] = useState<Contratista | null>(null)
   const [nominasOtros, setNominasOtros] = useState<Record<string, Set<string>>>({})
+  // C5a (OK 08-oct): el camino hacia la capacidad — contador VISIBLE de
+  // contratistas activos sin nómina cargada (null = aún sin medir). La
+  // lección de los módulos vacíos: un botón chiquito por fila no es un flujo.
+  const [conNomina, setConNomina] = useState<Set<string> | null>(null)
 
   const abrirNomina = async (c: Contratista) => {
     try {
@@ -76,6 +80,19 @@ export default function Contratistas() {
         .filter(t => t.estado !== 'pendiente')
         .map(({ id, nombre }) => ({ id, nombre }))
         .sort((a, b) => a.nombre.localeCompare(b.nombre)))
+      // C5a — contador de nóminas (solo quien gestiona nómina lee el privado).
+      if (puedeGestionarNominaUI(user?.rol)) {
+        try {
+          const lecturas = await Promise.all(data.map(c =>
+            getDoc(docRef(db, 'contratistas', c.id, 'privado', 'nomina')).catch(() => null)))
+          const ids = new Set<string>()
+          data.forEach((c, i) => {
+            const n = lecturas[i]?.exists() ? (lecturas[i]!.data() as NominaContratista) : null
+            if (Object.values(n?.trabajadores ?? {}).some(t => !t.retirado)) ids.add(c.id)
+          })
+          setConNomina(ids)
+        } catch { setConNomina(null) }
+      }
     } catch {
       toast('Error al cargar contratistas', 'error')
     } finally {
@@ -169,6 +186,21 @@ export default function Contratistas() {
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Contratistas</h1>
           <p className="text-sm text-gray-500 mt-0.5">Personas jurídicas y naturales</p>
+          {/* C5a — el camino hacia la nómina: el contador invita, el botón
+              👥 de cada fila ejecuta. */}
+          {puedeNomina && conNomina !== null && (() => {
+            const activos = contratistas.filter(c => c.estado === 'activo')
+            const sinNomina = activos.filter(c => !conNomina.has(c.id)).length
+            return sinNomina > 0 ? (
+              <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5">
+                👥 <b>{sinNomina} de {activos.length}</b> contratistas activos sin nómina cargada — se carga con el botón "👥 Nómina" de cada fila
+              </p>
+            ) : (
+              <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-0.5">
+                👥 Todos los contratistas activos tienen nómina cargada
+              </p>
+            )
+          })()}
         </div>
         {puedeInscribir && (
           <button
