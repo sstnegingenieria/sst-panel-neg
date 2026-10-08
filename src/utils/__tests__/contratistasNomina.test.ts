@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { Timestamp, deleteField } from 'firebase/firestore'
 import {
   normalizarCedula, parsearPegado, clasificarFilas,
-  patchCargarNomina, patchRetiro,
+  patchCargarNomina, patchRetiro, unirPersonasYCuentas,
 } from '../contratistasNomina'
-import type { FilaParseada, NominaContratista } from '../contratistasNomina'
+import type { FilaParseada, NominaContratista, CuentaApp } from '../contratistasNomina'
 
 const ts = Timestamp.fromMillis(1758585600000)
 
@@ -132,3 +132,52 @@ describe('builders de writes — la UI no improvisa', () => {
     expect(v['trabajadores.111111.retirado']).toEqual(deleteField())
   })
 })
+
+// ── C5a-2: una persona, una ficha — la cuenta de la app como estado ─────────
+
+describe('unirPersonasYCuentas — match por cédula normalizada (criterio de la CF)', () => {
+  const trab = (nombre: string) => ({
+    nombre, cedula_original: '', cargado_por: 'u', cargado_por_nombre: '', fecha_carga: ts,
+  })
+  const nomina: NominaContratista = {
+    trabajadores: {
+      '1020345678': trab('Juan Pérez'),
+      '52123456': { ...trab('Ana López'), retirado: true as const },
+    },
+  }
+  const cuenta = (over: Partial<CuentaApp>): CuentaApp => ({
+    id: 'u1', nombre: 'X', estado: 'activo', ...over,
+  })
+
+  it('empareja por cédula aunque venga con puntos/espacios; retirados también matchean (la ficha existe)', () => {
+    const r = unirPersonasYCuentas(nomina, [
+      cuenta({ id: 'a', cedula: '1.020.345.678' }),
+      cuenta({ id: 'b', cedula: ' 52 123 456 ' }),
+    ], 'c1')
+    expect(r.porCedula['1020345678']?.id).toBe('a')
+    expect(r.porCedula['52123456']?.id).toBe('b')
+    expect(r.fueraDeNomina).toHaveLength(0)
+  })
+
+  it('el match por cédula GANA sobre contratista_id discrepante (la discrepancia la pinta el chip, no se oculta)', () => {
+    const r = unirPersonasYCuentas(nomina, [cuenta({ cedula: '1020345678', contratista_id: 'OTRO' })], 'c1')
+    expect(r.porCedula['1020345678']).toBeDefined()
+    expect(r.fueraDeNomina).toHaveLength(0)
+  })
+
+  it('cuenta que declara ESTE contratista sin cédula en la nómina → fueraDeNomina; de otro contratista → fuera del resultado', () => {
+    const r = unirPersonasYCuentas(nomina, [
+      cuenta({ id: 'sin', cedula: '999999999', contratista_id: 'c1' }),
+      cuenta({ id: 'ilegible', cedula: 'AB123456', contratista_id: 'c1' }),   // pasaporte → no normaliza
+      cuenta({ id: 'ajena', cedula: '888888888', contratista_id: 'c2' }),
+    ], 'c1')
+    expect(r.fueraDeNomina.map(c => c.id)).toEqual(['sin', 'ilegible'])
+    expect(Object.keys(r.porCedula)).toHaveLength(0)
+  })
+
+  it('nómina vacía o null → todo lo declarado cae en fueraDeNomina', () => {
+    const r = unirPersonasYCuentas(null, [cuenta({ cedula: '1020345678', contratista_id: 'c1' })], 'c1')
+    expect(r.fueraDeNomina).toHaveLength(1)
+  })
+})
+

@@ -23,13 +23,29 @@ import { useAuth } from '../contexts/AuthContext'
 import { getDocEstado, estadoLabel, estadoClasses, formatFechaVenc } from '../utils/vencimiento'
 import {
   parsearPegado, clasificarFilas, patchCargarNomina, patchRetiro,
-  patchAgregarPersona, patchDocumentoPersona,
+  patchAgregarPersona, patchDocumentoPersona, unirPersonasYCuentas,
   CAMPOS_DOC_PERSONA, ETIQUETA_DOC_PERSONA, ES_EXAMEN_MEDICO,
   ETIQUETA_FILA,
 } from '../utils/contratistasNomina'
 import type {
   FilaParseada, NominaContratista, TrabajadorNomina, CampoDocPersona,
 } from '../utils/contratistasNomina'
+import { ChipVerificacionNomina } from './UsuariosPendientes'
+import type { Tecnico } from './UsuariosPendientes'
+
+/** C5a-2 — acciones sobre la CUENTA de la app desde la ficha de la persona.
+ *  Mismos writes que la pantalla de Usuarios (conviven hasta el C5b); si el
+ *  objeto no llega, el bloque de cuenta es solo lectura. */
+export interface AccionesCuenta {
+  puedeGestionarTecnicos: boolean
+  onAprobar: (t: Tecnico) => void
+  onRechazar: (t: Tecnico) => void
+  onRestaurar: (t: Tecnico) => void
+  onDesactivar: (t: Tecnico) => void
+  onActivar: (t: Tecnico) => void
+  onAsignarObras: (t: Tecnico) => void
+  onVerPerfil: (t: Tecnico) => void
+}
 
 interface NominaModalProps {
   isOpen: boolean
@@ -37,6 +53,11 @@ interface NominaModalProps {
   contratista: { id: string; nombre: string } | null
   /** Nóminas VIVAS de los demás contratistas (guard "en otra nómina"). */
   nominasOtros: Record<string, Set<string>>
+  /** C5a-2: cuentas de la app (users rol tecnico) para el bloque "Cuenta en
+   *  la app" de cada ficha. Ausente = el bloque no se pinta (p. ej. un rol
+   *  que gestiona nómina pero no cuentas). */
+  cuentas?: Tecnico[]
+  acciones?: AccionesCuenta
 }
 
 const CHIP_FILA: Record<string, string> = {
@@ -63,7 +84,7 @@ const extensionDe = (file: File): string => {
   return partes.length > 1 ? partes[partes.length - 1] : 'dat'
 }
 
-export default function NominaModal({ isOpen, onClose, contratista, nominasOtros }: NominaModalProps) {
+export default function NominaModal({ isOpen, onClose, contratista, nominasOtros, cuentas, acciones }: NominaModalProps) {
   const { user } = useAuth()
   const [nomina, setNomina] = useState<NominaContratista | null>(null)
   const [texto, setTexto] = useState('')
@@ -182,6 +203,11 @@ export default function NominaModal({ isOpen, onClose, contratista, nominasOtros
   const trabajadores = Object.entries(nomina?.trabajadores ?? {})
     .sort(([, a], [, b]) => a.nombre.localeCompare(b.nombre, 'es')) as [string, TrabajadorNomina][]
   const vivos = trabajadores.filter(([, t]) => !t.retirado).length
+  // C5a-2 — una persona, una ficha: la cuenta de la app emparejada por
+  // cédula normalizada (criterio de la CF). Sin `cuentas` el vínculo es vacío.
+  const vinculo = contratista
+    ? unirPersonasYCuentas(nomina, cuentas ?? [], contratista.id)
+    : { porCedula: {}, fueraDeNomina: [] }
 
   return (
     <Modal
@@ -297,20 +323,140 @@ export default function NominaModal({ isOpen, onClose, contratista, nominasOtros
                     onRetirar={retirar}
                     onGuardarDoc={guardarDoc}
                     subiendo={subiendo}
+                    cuenta={cuentas ? (vinculo.porCedula[ced] as Tecnico | undefined) ?? null : undefined}
+                    acciones={acciones}
                   />
                 ))}
               </tbody>
             </table>
           )}
         </div>
+
+        {/* ── C5a-2: cuentas que declaran ESTE contratista sin estar en la
+            nómina — se dicen, no se esconden; la salida corta es precargar
+            la persona con un clic (prellenando el form de arriba). ── */}
+        {cuentas && vinculo.fueraDeNomina.length > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-2">
+            <p className="text-xs font-semibold text-amber-800">
+              📱 Con cuenta en la app, pero FUERA de esta nómina ({vinculo.fueraDeNomina.length})
+            </p>
+            <p className="text-[11px] text-amber-700">
+              Estas cuentas declaran a {contratista?.nombre ?? 'este contratista'} como empleador y su cédula
+              no está en la nómina precargada (o no es legible). Si la persona sí trabaja acá, precárgala;
+              si no, revisa la cuenta.
+            </p>
+            {vinculo.fueraDeNomina.map(c => {
+              const t = c as Tecnico
+              return (
+                <div key={c.id} className="flex items-center gap-2 flex-wrap bg-white rounded border border-amber-100 px-2.5 py-1.5">
+                  <span className="text-xs font-medium text-gray-800">{c.nombre}</span>
+                  <span className="text-[11px] font-mono text-gray-500">{c.cedula || 'sin cédula'}</span>
+                  <EstadoCuentaChip estado={c.estado} />
+                  <span className="flex-1" />
+                  <button
+                    onClick={() => { setNuevoNombre(c.nombre); setNuevaCedula(c.cedula ?? '') }}
+                    className="text-[11px] px-2 py-0.5 rounded border border-brand-300 text-brand-700 hover:bg-brand-50"
+                    title="Prellena el formulario de arriba — revisa y guarda"
+                  >
+                    ＋ Precargar a la nómina
+                  </button>
+                  {acciones && <BotonesCuenta t={t} acciones={acciones} />}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </Modal>
   )
 }
 
+// ── C5a-2: la cuenta de la app como ESTADO dentro de la ficha ───────────────
+
+function EstadoCuentaChip({ estado }: { estado: Tecnico['estado'] }) {
+  const map: Record<string, { cls: string; label: string }> = {
+    pendiente: { cls: 'bg-amber-50 text-amber-700', label: '⏳ cuenta pendiente de aprobación' },
+    activo: { cls: 'bg-emerald-50 text-emerald-700', label: '✓ cuenta activa en la app' },
+    inactivo: { cls: 'bg-gray-100 text-gray-500', label: 'cuenta desactivada' },
+    rechazado: { cls: 'bg-red-50 text-red-700', label: '✗ registro rechazado' },
+  }
+  const m = map[estado] ?? map.inactivo
+  return <span className={`inline-flex px-1.5 py-px rounded text-[10px] font-semibold ${m.cls}`}>{m.label}</span>
+}
+
+function BotonesCuenta({ t, acciones }: { t: Tecnico; acciones: AccionesCuenta }) {
+  if (!acciones.puedeGestionarTecnicos) return null
+  const btn = 'text-[11px] px-2 py-0.5 rounded border'
+  return (
+    <span className="inline-flex items-center gap-1.5 flex-wrap">
+      <button onClick={() => acciones.onVerPerfil(t)} className={`${btn} border-gray-200 text-gray-600 hover:bg-gray-50`}>Ver perfil</button>
+      {t.estado === 'pendiente' && (
+        <>
+          <button onClick={() => acciones.onAprobar(t)} className={`${btn} border-emerald-300 text-emerald-700 hover:bg-emerald-50 font-semibold`}>Aprobar</button>
+          <button onClick={() => acciones.onRechazar(t)} className={`${btn} border-red-200 text-red-600 hover:bg-red-50`}>Rechazar</button>
+        </>
+      )}
+      {t.estado === 'activo' && (
+        <>
+          <button onClick={() => acciones.onAsignarObras(t)} className={`${btn} border-brand-300 text-brand-700 hover:bg-brand-50`}>Obras / empleador</button>
+          <button onClick={() => acciones.onDesactivar(t)} className={`${btn} border-red-200 text-red-600 hover:bg-red-50`}>Desactivar</button>
+        </>
+      )}
+      {t.estado === 'inactivo' && (
+        <button onClick={() => acciones.onActivar(t)} className={`${btn} border-emerald-300 text-emerald-700 hover:bg-emerald-50`}>Activar</button>
+      )}
+      {t.estado === 'rechazado' && (
+        <button onClick={() => acciones.onRestaurar(t)} className={`${btn} border-gray-300 text-gray-600 hover:bg-gray-50`}>Restaurar a pendiente</button>
+      )}
+    </span>
+  )
+}
+
+/** El bloque "Cuenta en la app" de la ficha. `cuenta === undefined` = el
+ *  caller no trajo cuentas (no se pinta nada); `null` = sin cuenta. */
+function CuentaEnApp({ cuenta, acciones }: { cuenta: Tecnico | null; acciones?: AccionesCuenta }) {
+  return (
+    <div className="rounded border border-gray-200 bg-white px-2.5 py-2 space-y-1.5">
+      <p className="text-[11px] font-semibold text-gray-700">📱 Cuenta en la app</p>
+      {cuenta == null ? (
+        <p className="text-[11px] text-gray-400">
+          Sin cuenta — la persona se registra desde la app y el sistema la empareja por cédula.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <EstadoCuentaChip estado={cuenta.estado} />
+            <ChipVerificacionNomina t={cuenta} />
+            {cuenta.estado === 'activo' && (
+              <span className="text-[10px] text-gray-500">
+                {(cuenta.obras_asignadas?.length ?? 0)} obra(s) asignada(s)
+              </span>
+            )}
+          </div>
+          {cuenta.estado === 'rechazado' && cuenta.rechazo && (
+            <p className="text-[10px] text-red-600">
+              Motivo: {cuenta.rechazo.motivo} · por {cuenta.rechazo.por_nombre}
+            </p>
+          )}
+          <p className="text-[10px] text-gray-400">{cuenta.email}</p>
+          {(cuenta.cedula_url || cuenta.seguridad_social_url || cuenta.curso_alturas_url) && (
+            <p className="text-[10px] text-gray-500">
+              Subidos desde la app:{' '}
+              {cuenta.cedula_url && <a className="text-brand-700 underline underline-offset-2 mr-2" href={cuenta.cedula_url} target="_blank" rel="noreferrer">cédula</a>}
+              {cuenta.seguridad_social_url && <a className="text-brand-700 underline underline-offset-2 mr-2" href={cuenta.seguridad_social_url} target="_blank" rel="noreferrer">seguridad social</a>}
+              {cuenta.curso_alturas_url && <a className="text-brand-700 underline underline-offset-2" href={cuenta.curso_alturas_url} target="_blank" rel="noreferrer">curso de alturas</a>}
+            </p>
+          )}
+          {acciones && <BotonesCuenta t={cuenta} acciones={acciones} />}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Fila de persona + su ficha documental expandible ────────────────────────
 
-function Fila({ ced, t, abierta, onToggle, onRetirar, onGuardarDoc, subiendo }: {
+function Fila({ ced, t, abierta, onToggle, onRetirar, onGuardarDoc, subiendo, cuenta, acciones }: {
   ced: string
   t: TrabajadorNomina
   abierta: boolean
@@ -318,6 +464,9 @@ function Fila({ ced, t, abierta, onToggle, onRetirar, onGuardarDoc, subiendo }: 
   onRetirar: (ced: string, retirar: boolean) => void
   onGuardarDoc: (ced: string, campo: CampoDocPersona, fecha?: string, archivo?: File) => Promise<void>
   subiendo: string | null
+  /** undefined = sin datos de cuentas (no pintar) · null = sin cuenta. */
+  cuenta?: Tecnico | null
+  acciones?: AccionesCuenta
 }) {
   // El peor estado de los 4 documentales con vencimiento (semáforo mínimo —
   // el semáforo completo y la completitud llegan con el resto del C3).
@@ -332,6 +481,12 @@ function Fila({ ced, t, abierta, onToggle, onRetirar, onGuardarDoc, subiendo }: 
           {t.nombre}
         </td>
         <td className="py-1.5 pr-2 font-mono text-gray-500">{t.cedula_original}</td>
+        <td className="py-1.5 pr-2">
+          {/* C5a-2 — el estado de la cuenta se ve desde la LISTA, sin abrir */}
+          {cuenta !== undefined && (cuenta == null
+            ? <span className="text-[10px] text-gray-300">sin cuenta</span>
+            : <EstadoCuentaChip estado={cuenta.estado} />)}
+        </td>
         <td className="py-1.5 pr-2">
           <span className={`inline-flex px-1.5 py-px rounded text-[10px] font-medium ${estadoClasses[peor]}`}
             title="Documentos con vencimiento (EPS/ARL/pensión/alturas) — el peor estado gana">
@@ -357,7 +512,13 @@ function Fila({ ced, t, abierta, onToggle, onRetirar, onGuardarDoc, subiendo }: 
       </tr>
       {abierta && (
         <tr className="border-b border-gray-100 bg-gray-50/60">
-          <td colSpan={5} className="px-6 py-3">
+          <td colSpan={6} className="px-6 py-3">
+            {/* C5a-2 — la cuenta de la app es un ESTADO de la ficha */}
+            {cuenta !== undefined && (
+              <div className="mb-3">
+                <CuentaEnApp cuenta={cuenta} acciones={acciones} />
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {CAMPOS_DOC_PERSONA.map(campo => (
                 <DocCampo key={campo} ced={ced} campo={campo}

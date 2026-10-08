@@ -292,3 +292,58 @@ export function patchRetiro(cedulaNorm: string, retirar: boolean, fecha: Timesta
     fecha_actualizacion: fecha,
   }
 }
+
+// ── C5a-2: una persona, UNA ficha — la cuenta de la app es un ESTADO ────────
+// La ficha de la persona vive en la nómina del contratista; si esa persona
+// además tiene cuenta en la app (`users`, rol tecnico), la cuenta se muestra
+// DENTRO de la ficha — no como registro paralelo en otra pantalla. El match
+// es por cédula NORMALIZADA: exactamente el criterio de la CF de nómina
+// (functions/nomina.js), un solo criterio en la casa.
+
+/** Lo mínimo que la ficha necesita de una cuenta de `users` (estructural —
+ *  el Tecnico de UsuariosPendientes.tsx lo cumple tal cual). */
+export interface CuentaApp {
+  id: string
+  nombre: string
+  email?: string
+  cedula?: string
+  estado: 'pendiente' | 'activo' | 'inactivo' | 'rechazado'
+  contratista_id?: string
+  contratista_nombre?: string
+  obras_asignadas?: string[]
+}
+
+export interface VinculoPersonasCuentas {
+  /** Cuenta emparejada por cédula normalizada (clave = cédula de la nómina). */
+  porCedula: Record<string, CuentaApp>
+  /** Cuentas que DECLARAN este contratista pero cuya cédula no está en la
+   *  nómina (o no es legible) — se muestran aparte, con salida honesta:
+   *  precargarlas a la nómina o revisar la cuenta. */
+  fueraDeNomina: CuentaApp[]
+}
+
+/** Empareja la nómina del contratista con las cuentas de la app.
+ *  - El match por cédula GANA siempre (criterio de la CF): una cuenta cuya
+ *    cédula está en esta nómina aparece en la ficha de esa persona aunque
+ *    su `contratista_id` diga otra cosa (la discrepancia la pinta el chip
+ *    de verificación — no se oculta).
+ *  - `fueraDeNomina` = cuentas con `contratista_id` de ESTE contratista sin
+ *    match por cédula en la nómina. */
+export function unirPersonasYCuentas(
+  nomina: NominaContratista | null | undefined,
+  cuentas: CuentaApp[],
+  contratistaId: string,
+): VinculoPersonasCuentas {
+  const trabajadores = nomina?.trabajadores ?? {}
+  const porCedula: Record<string, CuentaApp> = {}
+  const fueraDeNomina: CuentaApp[] = []
+  for (const c of cuentas) {
+    const ced = normalizarCedula(c.cedula)
+    if (ced && trabajadores[ced]) {
+      porCedula[ced] = c
+    } else if (c.contratista_id === contratistaId) {
+      fueraDeNomina.push(c)
+    }
+  }
+  return { porCedula, fueraDeNomina }
+}
