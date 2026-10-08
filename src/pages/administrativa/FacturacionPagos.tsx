@@ -28,7 +28,7 @@ import {
   asignacionesPorAprobar, asignacionesPorGirar, asignacionesPorLiquidar,
   MEDIOS_PAGO, MEDIO_PAGO_LABEL,
   patchAnularFactura, facturasPreviasDelSitio, numeroFacturaEnOtroProyecto,
-  diasEnPorFacturar, UMBRAL_POR_FACTURAR_DIAS,
+  diasEnPorFacturar, UMBRAL_POR_FACTURAR_DIAS, avisoFormatoCufe,
 } from '../../types/sigp/proyecto'
 import { puedeRegistrarFacturaUI, puedeLiquidarUI, puedeCerrarProyectoUI, puedeAprobarPreliquidacionUI, puedeAsignarTareasUI } from '../../types/sigp/permisos'
 import { separarSenales, diasSenal, UMBRAL_SENAL_ALCANCE_DIAS } from '../../types/sigp/asignacion'
@@ -803,6 +803,14 @@ export default function FacturacionPagos() {
             <input value={cufe} onChange={e => setCufe(e.target.value)} placeholder="Código único de factura electrónica"
               className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
           </label>
+          {/* 08-oct — formato del CUFE: el registro es el ÚNICO punto donde un
+              error de este campo es detectable (después no se edita jamás).
+              Advertencia, no bloqueo — por si hay variantes. */}
+          {avisoFormatoCufe(cufe) && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+              ⚠ {avisoFormatoCufe(cufe)}
+            </p>
+          )}
           <label className="block text-xs text-gray-500">
             PDF de la factura (opcional)
             <input type="file" accept="application/pdf" onChange={e => setAdjunto(e.target.files?.[0] ?? null)}

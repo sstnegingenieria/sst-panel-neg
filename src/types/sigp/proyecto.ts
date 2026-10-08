@@ -554,6 +554,25 @@ export function numeroFacturaEnOtroProyecto(
     .map(p => p.consecutivo)
 }
 
+/** Validación de FORMATO del CUFE (08-oct, mismo caso FV 1807-1809): el
+ *  registro es el ÚNICO punto donde un error de ese campo es detectable —
+ *  después queda enterrado para siempre (no se edita en ningún camino).
+ *  El CUFE de la DIAN (UBL 2.1, vigente desde 2019) es un SHA-384 en
+ *  hexadecimal: 96 caracteres [0-9a-f]. ADVERTENCIA, NUNCA BLOQUEO — puede
+ *  haber variantes que no conocemos (CUDE, documentos equivalentes), y una
+ *  advertencia ignorada a sabiendas es mejor que un registro imposible.
+ *  Devuelve el texto del aviso, o null si el formato es el esperado (o el
+ *  campo viene vacío — el CUFE es opcional). */
+export function avisoFormatoCufe(cufe: string): string | null {
+  const c = cufe.trim()
+  if (!c) return null
+  if (/^[0-9a-fA-F]{96}$/.test(c)) return null
+  if (/[^0-9a-fA-F]/.test(c)) {
+    return `El CUFE de la DIAN es hexadecimal (solo 0-9 y a-f) y lo pegado trae otros caracteres — verifica que sea el CUFE y no otro código de la factura.`
+  }
+  return `El CUFE de la DIAN tiene 96 caracteres y lo pegado trae ${c.length} — ¿se copió incompleto? Verifica contra la factura electrónica antes de registrar.`
+}
+
 /** Antigüedad en "Por facturar" (agregado 08-oct — la capa 1 del caso: un
  *  proyecto de julio esperando factura en octubre no es un pendiente, es
  *  una SEÑAL; el panel sirvió la trampa ofreciéndolos durante meses).

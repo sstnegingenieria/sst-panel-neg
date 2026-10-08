@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
 import {
   patchAnularFactura, facturasPreviasDelSitio, numeroFacturaEnOtroProyecto,
-  diasEnPorFacturar, UMBRAL_POR_FACTURAR_DIAS,
+  diasEnPorFacturar, UMBRAL_POR_FACTURAR_DIAS, avisoFormatoCufe,
 } from '../proyecto'
 import type { FacturacionProyecto, Proyecto } from '../proyecto'
 
@@ -80,6 +80,26 @@ describe('la GUARDA — ver antes de facturar (no bloquea: agrupadas legítimas)
     expect(numeroFacturaEnOtroProyecto(todos, 'b', 'fv1807')).toEqual(['PRY-1', 'PRY-3', 'PRY-4'])
     expect(numeroFacturaEnOtroProyecto(todos, 'a', 'FV 1807')).toEqual(['PRY-3', 'PRY-4'])
     expect(numeroFacturaEnOtroProyecto(todos, 'b', '')).toEqual([])
+  })
+})
+
+describe('avisoFormatoCufe — advertir en el único punto detectable, sin bloquear', () => {
+  const CUFE_OK = 'a'.repeat(40) + '0123456789abcdef' + 'f'.repeat(40)   // 96 hex
+  it('96 hex (minúsculas o mayúsculas) y vacío → sin aviso', () => {
+    expect(CUFE_OK).toHaveLength(96)
+    expect(avisoFormatoCufe(CUFE_OK)).toBeNull()
+    expect(avisoFormatoCufe(CUFE_OK.toUpperCase())).toBeNull()
+    expect(avisoFormatoCufe('')).toBeNull()
+    expect(avisoFormatoCufe('   ')).toBeNull()
+    expect(avisoFormatoCufe(`  ${CUFE_OK}  `)).toBeNull()               // pegado con espacios alrededor
+  })
+  it('longitud distinta de 96 → aviso que dice cuántos llegaron', () => {
+    expect(avisoFormatoCufe(CUFE_OK.slice(0, 60))).toContain('trae 60')
+    expect(avisoFormatoCufe(CUFE_OK + 'ab')).toContain('trae 98')
+  })
+  it('caracteres no hexadecimales → aviso de que no parece un CUFE', () => {
+    expect(avisoFormatoCufe('FV-1807')).toContain('hexadecimal')
+    expect(avisoFormatoCufe(CUFE_OK.slice(0, 95) + 'z')).toContain('hexadecimal')
   })
 })
 
