@@ -829,10 +829,14 @@ service cloud.firestore {
       // (patrón hasOnly, como contratistas.estado). No crea ni elimina.
       // P2-2 (SB4): + 'resumen_asignaciones' — aprobar/girar POR ASIGNACIÓN
       // escribe el sub-doc y recalcula el resumen del padre en el MISMO batch.
+      // 08-oct: + 'facturas_anuladas' — anular y reemplazar, NUNCA editar:
+      // la factura anulada queda congelada (número y CUFE intactos, nota
+      // crédito obligatoria en el builder) y el estado revierte facturado →
+      // enviado_a_facturacion para registrar la correcta como factura NUEVA.
       allow update: if isAuthed()
                     && rolActual() == 'gerencia_administrativa'
                     && request.resource.data.diff(resource.data)
-                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'pago_cliente', 'liquidacion', 'compras_reembolsos', 'cierre', 'estado', 'historial', 'fecha_actualizacion', 'resumen_asignaciones'])
+                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'facturas_anuladas', 'pago_cliente', 'liquidacion', 'compras_reembolsos', 'cierre', 'estado', 'historial', 'fecha_actualizacion', 'resumen_asignaciones'])
                     // Bloque final: cerrado inmutable + solo desde liquidado
                     // CON el pago del cliente registrado (no se cierra con
                     // cuenta por cobrar abierta — anticipada, 23-jul)
