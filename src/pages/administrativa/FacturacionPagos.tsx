@@ -9,7 +9,7 @@
 // (lectura). Los gestores de proyectos no entran aquí (segregación).
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { collection, getDocs, getDoc, setDoc, doc, updateDoc, arrayUnion, query, where, Timestamp } from 'firebase/firestore'
+import { collection, getDocs, getDoc, setDoc, doc, updateDoc, arrayUnion, deleteField, query, where, Timestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../firebase/config'
 import { useAuth } from '../../contexts/AuthContext'
@@ -27,6 +27,8 @@ import {
   completitudCierre, pagoClientePendiente, puedeCerrarseProyecto,
   asignacionesPorAprobar, asignacionesPorGirar, asignacionesPorLiquidar,
   MEDIOS_PAGO, MEDIO_PAGO_LABEL,
+  patchAnularFactura, facturasPreviasDelSitio, numeroFacturaEnOtroProyecto,
+  diasEnPorFacturar, UMBRAL_POR_FACTURAR_DIAS, avisoFormatoCufe,
 } from '../../types/sigp/proyecto'
 import { puedeRegistrarFacturaUI, puedeLiquidarUI, puedeCerrarProyectoUI, puedeAprobarPreliquidacionUI, puedeAsignarTareasUI } from '../../types/sigp/permisos'
 import { separarSenales, diasSenal, UMBRAL_SENAL_ALCANCE_DIAS } from '../../types/sigp/asignacion'
@@ -61,6 +63,10 @@ export default function FacturacionPagos() {
   const [cufe, setCufe] = useState('')
   const [adjunto, setAdjunto] = useState<File | null>(null)
   const [aplicando, setAplicando] = useState(false)
+  // 08-oct — anular y reemplazar, nunca editar (número y CUFE no se tocan)
+  const [anularTarget, setAnularTarget] = useState<Proyecto | null>(null)
+  const [anularMotivo, setAnularMotivo] = useState('')
+  const [notaCredito, setNotaCredito] = useState('')
   // B2 — registro del pago del cliente
   const [pagoTarget, setPagoTarget] = useState<Proyecto | null>(null)
   const [pagoFecha, setPagoFecha] = useState('')
@@ -281,6 +287,16 @@ export default function FacturacionPagos() {
     setAdjunto(null)
   }
 
+  // 08-oct — la GUARDA: facturas previas del mismo sitio+cliente, a la vista
+  // ANTES de registrar (vigentes y anuladas; no bloquea — parciales y
+  // agrupadas son legítimas, pero nadie factura dos veces sin ver la primera).
+  const previasDelSitio = useMemo(() => target
+    ? facturasPreviasDelSitio(proyectos, target.id, target.snapshot.nombre_sitio, target.snapshot.cliente)
+    : [], [target, proyectos])
+  const numeroAgrupada = useMemo(() => target
+    ? numeroFacturaEnOtroProyecto(proyectos, target.id, numero)
+    : [], [target, proyectos, numero])
+
   const registrar = async () => {
     if (!target || !numero.trim() || !fecha || valor === undefined || valor <= 0) return
     setAplicando(true)
@@ -306,7 +322,8 @@ export default function FacturacionPagos() {
         fecha_actualizacion: ahora,
         historial: arrayUnion({
           de: 'enviado_a_facturacion', a: 'facturado', por: user?.uid ?? '', fecha: ahora,
-          motivo: `Factura registrada — N° ${numero.trim()} por ${fmtMoney(valor)}`,
+          motivo: `Factura registrada — N° ${numero.trim()} por ${fmtMoney(valor)}`
+            + (previasDelSitio.length ? ` — registrada CON la advertencia de sitio ya facturado a la vista (${previasDelSitio.map(f => f.numero).join(', ')})` : ''),
         }),
       })
       toast(`Factura ${numero.trim()} registrada — proyecto facturado`)
@@ -314,6 +331,27 @@ export default function FacturacionPagos() {
       await load()
     } catch {
       toast('Error al registrar la factura (verifica tu rol)', 'error')
+    } finally { setAplicando(false) }
+  }
+
+  // ── 08-oct — ANULAR la factura vigente (nunca editar número ni CUFE) ──
+  const anularFactura = async () => {
+    if (!anularTarget) return
+    const patch = patchAnularFactura(anularTarget, anularMotivo, notaCredito, user?.uid ?? '', Timestamp.now())
+    if (!patch) return
+    setAplicando(true)
+    try {
+      await updateDoc(doc(db, 'proyectos', anularTarget.id), {
+        ...patch,
+        facturacion: deleteField(),   // el builder marca null; el write lo retira
+      })
+      toast(`Factura ${anularTarget.facturacion?.numero} anulada — el proyecto vuelve a Por facturar; registra la correcta como factura nueva`)
+      setAnularTarget(null)
+      setAnularMotivo('')
+      setNotaCredito('')
+      await load()
+    } catch {
+      toast('Error al anular la factura (verifica tu rol)', 'error')
     } finally { setAplicando(false) }
   }
 
@@ -529,6 +567,28 @@ export default function FacturacionPagos() {
                       leído de la proyección verificaciones_sst (el gate lo marca
                       SST en /verificacion-contratistas); sin 'al_dia' la
                       liquidación queda bloqueada (Bloque 3b). */}
+                  {/* 08-oct — ANTIGÜEDAD en Por facturar: un proyecto de julio
+                      esperando factura en octubre no es un pendiente, es una
+                      SEÑAL (la capa 1 del caso FV 1807-1809: el panel sirvió
+                      la trampa ofreciéndolos meses como pendientes). */}
+                  {p.estado === 'enviado_a_facturacion' && (() => {
+                    const d = diasEnPorFacturar(p)
+                    return d != null && d >= 1 && (
+                      <span className={`block w-fit mt-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                        d > UMBRAL_POR_FACTURAR_DIAS ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-600'}`}
+                        title={d > UMBRAL_POR_FACTURAR_DIAS
+                          ? `Lleva ${d} días esperando factura — más de un ciclo de facturación: puede estar facturado POR FUERA del panel (verifica antes de facturar)`
+                          : 'Días desde el handoff a facturación'}>
+                        en Por facturar hace {d} día{d === 1 ? '' : 's'}
+                      </span>
+                    )
+                  })()}
+                  {(p.facturas_anuladas?.length ?? 0) > 0 && (
+                    <span className="block w-fit mt-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-700"
+                      title={p.facturas_anuladas!.map(f => `${f.numero} (NC ${f.nota_credito})`).join(' · ')}>
+                      🧾 {p.facturas_anuladas!.length} factura(s) anulada(s)
+                    </span>
+                  )}
                   {enColaVerificacionSst(p.estado) && (
                     <span
                       className={`block w-fit mt-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${SST_GATE_COLOR[estadoSstGate(gates[p.id] ?? {})]}`}
@@ -566,6 +626,15 @@ export default function FacturacionPagos() {
                         className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
                         💰 Registrar pago del cliente
                       </button>
+                      {/* 08-oct — anular y reemplazar, nunca editar: número y
+                          CUFE no se tocan; con pago encima se bloquea. */}
+                      {!p.pago_cliente && (
+                        <button onClick={() => { setAnularTarget(p); setAnularMotivo(''); setNotaCredito('') }}
+                          title="Anula el registro con motivo y nota crédito; la factura queda congelada (CUFE intacto) y la correcta se registra como factura nueva"
+                          className="text-xs px-3 py-1.5 rounded-lg font-medium border border-rose-300 text-rose-700 hover:bg-rose-50">
+                          Anular factura
+                        </button>
+                      )}
                       {/* Anticipada (23-jul): pagar al contratista ANTES de
                           cobrar, por acuerdo — gate SST innegociable.
                           17-sep: en migrados la liquidación vive POR ASIGNACIÓN
@@ -682,6 +751,31 @@ export default function FacturacionPagos() {
             {target?.snapshot.nombre_sitio || target?.snapshot.asunto} · {target?.snapshot.cliente} ·
             pactado <span className="font-mono">{fmtMoney(target?.snapshot.valor_venta ?? 0)}</span>
           </p>
+          {/* 08-oct — LA GUARDA: nadie factura dos veces sin haber visto la
+              primera. No bloquea (parciales/agrupadas son legítimas), pero
+              queda a la vista y en el historial. */}
+          {previasDelSitio.length > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-1">
+              <p className="font-semibold">⚠ Este sitio YA tiene factura registrada:</p>
+              {previasDelSitio.map((f, i) => (
+                <p key={i} className="font-mono">
+                  {f.numero} · {fFecha(f.fecha)} · {fmtMoney(f.valor)} · {f.consecutivo}
+                  {f.vigente ? '' : ' · ANULADA'}
+                </p>
+              ))}
+              <p className="text-[11px] font-normal">
+                Puede ser facturación parcial legítima — pero si es el mismo trabajo, NO registres otra:
+                verifica primero contra el sistema contable. Si registras, el historial dejará constancia
+                de que lo hiciste con esta advertencia a la vista.
+              </p>
+            </div>
+          )}
+          {numeroAgrupada.length > 0 && (
+            <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded px-2 py-1.5">
+              ℹ El número <span className="font-mono">{numero.trim()}</span> ya está registrado en{' '}
+              {numeroAgrupada.join(', ')} — ¿factura AGRUPADA que cubre varios proyectos? Confirma que es la misma.
+            </p>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="text-xs text-gray-500">
               Número de factura <span className="text-red-500">*</span>
@@ -709,12 +803,63 @@ export default function FacturacionPagos() {
             <input value={cufe} onChange={e => setCufe(e.target.value)} placeholder="Código único de factura electrónica"
               className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
           </label>
+          {/* 08-oct — formato del CUFE: el registro es el ÚNICO punto donde un
+              error de este campo es detectable (después no se edita jamás).
+              Advertencia, no bloqueo — por si hay variantes. */}
+          {avisoFormatoCufe(cufe) && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+              ⚠ {avisoFormatoCufe(cufe)}
+            </p>
+          )}
           <label className="block text-xs text-gray-500">
             PDF de la factura (opcional)
             <input type="file" accept="application/pdf" onChange={e => setAdjunto(e.target.files?.[0] ?? null)}
               className="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
           </label>
         </div>
+      </Modal>
+
+      {/* ── 08-oct — Modal de ANULACIÓN: anular y reemplazar, nunca editar ── */}
+      <Modal
+        isOpen={anularTarget !== null}
+        title={`Anular factura — ${anularTarget?.facturacion?.numero ?? ''} · ${anularTarget?.consecutivo ?? ''}`}
+        onClose={() => setAnularTarget(null)}
+        actions={[
+          { label: 'Volver', onClick: () => setAnularTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Anulando…' : 'Anular la factura',
+            onClick: anularFactura, variant: 'danger', loading: aplicando,
+            disabled: !anularTarget
+              || patchAnularFactura(anularTarget, anularMotivo, notaCredito, user?.uid ?? '', Timestamp.now()) === null,
+          },
+        ]}
+      >
+        {anularTarget?.facturacion && (
+          <div className="space-y-3">
+            {/* La factura A LA VISTA — es lo que se está anulando */}
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 space-y-0.5">
+              <p><b>N° {anularTarget.facturacion.numero}</b> · {fFecha(anularTarget.facturacion.fecha)} · <span className="font-mono">{fmtMoney(anularTarget.facturacion.valor)}</span></p>
+              {anularTarget.facturacion.cufe && <p className="font-mono text-[10px] break-all text-gray-500">CUFE {anularTarget.facturacion.cufe}</p>}
+            </div>
+            <p className="text-xs text-gray-600">
+              El registro NO desaparece: queda congelado en <b>facturas anuladas</b> con su número y su
+              CUFE intactos — es un hecho fiscal que ocurrió. El proyecto vuelve a <b>Por facturar</b> y
+              la factura correcta se registra como <b>registro nuevo</b>. El número y el CUFE no se
+              editan en ningún camino: un documento fiscal no se corrige, se reemplaza.
+            </p>
+            <label className="block text-xs text-gray-500">
+              N° de la nota crédito (DIAN) <span className="text-red-500">*</span>
+              <input value={notaCredito} onChange={e => setNotaCredito(e.target.value)} placeholder="Ej: NC-204"
+                className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-rose-300" />
+            </label>
+            <label className="block text-xs text-gray-500">
+              Motivo <span className="text-red-500">*</span>
+              <textarea value={anularMotivo} onChange={e => setAnularMotivo(e.target.value)} rows={2} autoFocus
+                placeholder="Por qué se anula esta factura…"
+                className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-300" />
+            </label>
+          </div>
+        )}
       </Modal>
 
       {/* B2 — Modal de pago del cliente (se REGISTRA; el dinero se mueve en bancos) */}

@@ -374,6 +374,31 @@ export default function ProyectoDetalleSigp() {
         </div>
       )}
 
+      {/* 08-oct — facturas ANULADAS: visibles para siempre, número y CUFE
+          intactos (hechos fiscales que ocurrieron; el reemplazo es registro
+          nuevo — nunca edición). */}
+      {(proyecto.facturas_anuladas?.length ?? 0) > 0 && (
+        <div className="bg-white rounded-xl border border-rose-200 p-4 space-y-2">
+          <p className="text-xs font-semibold text-rose-600 uppercase tracking-wide">
+            Facturas anuladas ({proyecto.facturas_anuladas!.length})
+          </p>
+          {proyecto.facturas_anuladas!.map((f, i) => (
+            <div key={i} className="text-xs text-gray-600 border-b border-gray-100 last:border-0 pb-1.5 last:pb-0">
+              <p>
+                <span className="font-mono font-semibold line-through decoration-rose-400">{f.numero}</span>
+                <span className="text-gray-500"> · {fFecha(f.fecha)} · </span>
+                <span className="font-mono">{fmtMoney(f.valor)}</span>
+                <span className="ml-1.5 inline-flex px-1.5 py-px rounded text-[10px] font-semibold bg-rose-50 text-rose-700">
+                  ANULADA · NC {f.nota_credito}
+                </span>
+              </p>
+              {f.cufe && <p className="text-[10px] text-gray-400 font-mono break-all">CUFE: {f.cufe}</p>}
+              <p className="text-[11px] text-gray-500">{f.motivo_anulacion} · {fFecha(f.fecha_anulacion)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Administrativa B2 — pago del cliente (lectura) */}
       {proyecto.pago_cliente && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-1.5">

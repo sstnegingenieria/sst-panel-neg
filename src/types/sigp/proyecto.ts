@@ -306,7 +306,15 @@ export interface PreliquidacionProyecto {
 // electrónica (eso vive en los sistemas externos del área). La factura se
 // registra como evidencia y dispara enviado_a_facturacion → facturado.
 
-/** Registro de la factura emitida (en el sistema contable externo). */
+/** Registro de la factura emitida (en el sistema contable externo).
+ *
+ *  ⚠ NÚMERO Y CUFE NO SE EDITAN EN NINGÚN CAMINO (decisión 08-oct, caso
+ *  FV 1807-1809): el CUFE es la huella de la DIAN sobre un documento que ya
+ *  existe en el mundo — reescribirlo haría que el panel contradiga a la
+ *  DIAN. Un documento fiscal no se corrige: SE REEMPLAZA. El camino es
+ *  patchAnularFactura (la anulada queda congelada en facturas_anuladas con
+ *  su CUFE intacto, referenciando la nota crédito) + registrar la correcta
+ *  como registro NUEVO. No agregar jamás una vía de edición. */
 export interface FacturacionProyecto {
   numero: string               // número de la factura (del sistema externo)
   fecha: Timestamp             // fecha de emisión
@@ -316,6 +324,17 @@ export interface FacturacionProyecto {
   adjunto_nombre?: string
   registrado_por: string
   fecha_registro: Timestamp
+}
+
+/** Factura ANULADA (08-oct): el registro completo CONGELADO tal cual era —
+ *  número y CUFE intactos, porque es un hecho fiscal que ocurrió — más el
+ *  acto de anulación con su nota crédito (la referencia fiscal del reverso,
+ *  OBLIGATORIA). Append-only en `facturas_anuladas`: visible para siempre. */
+export interface FacturaAnulada extends FacturacionProyecto {
+  motivo_anulacion: string
+  nota_credito: string
+  anulada_por: string
+  fecha_anulacion: Timestamp
 }
 
 // Administrativa · Bloque 2 (22-jul-2026) — pago del cliente.
@@ -450,6 +469,128 @@ export const pagoClientePendiente = (
 export const puedeCerrarseProyecto = (
   p: Pick<Proyecto, 'estado' | 'pago_cliente'>,
 ): boolean => p.estado === 'liquidado_contratista' && !!p.pago_cliente
+
+// ── Facturas: anular y reemplazar, nunca editar (08-oct) ────────────────────
+
+/** ANULAR la factura vigente (facturado → enviado_a_facturacion): la
+ *  congela íntegra en facturas_anuladas (CUFE intacto) con motivo + nota
+ *  crédito OBLIGATORIOS, retira la vigente y revierte el estado con traza.
+ *  null si no hay factura vigente, falta motivo/nota, o hay PAGO registrado
+ *  encima (anular una factura cobrada es otro acto — borde declarado). El
+ *  mismo builder valida el botón y ejecuta. El caller mapea `facturacion:
+ *  null` a deleteField(). */
+export function patchAnularFactura(
+  p: Pick<Proyecto, 'estado' | 'facturacion' | 'facturas_anuladas' | 'pago_cliente' | 'historial'>,
+  motivo: string,
+  notaCredito: string,
+  uid: string,
+  ahora: Timestamp,
+): {
+  estado: 'enviado_a_facturacion'
+  facturacion: null
+  facturas_anuladas: FacturaAnulada[]
+  historial: EntradaHistorialProyecto[]
+  fecha_actualizacion: Timestamp
+} | null {
+  if (p.estado !== 'facturado' || !p.facturacion) return null
+  if (!motivo.trim() || !notaCredito.trim()) return null
+  if (p.pago_cliente) return null
+  const anulada: FacturaAnulada = {
+    ...p.facturacion,
+    motivo_anulacion: motivo.trim(),
+    nota_credito: notaCredito.trim(),
+    anulada_por: uid,
+    fecha_anulacion: ahora,
+  }
+  return {
+    estado: 'enviado_a_facturacion',
+    facturacion: null,
+    facturas_anuladas: [...(p.facturas_anuladas ?? []), anulada],
+    historial: [...p.historial, {
+      de: 'facturado', a: 'enviado_a_facturacion', por: uid, fecha: ahora,
+      motivo: `Factura ${p.facturacion.numero} ANULADA (nota crédito ${notaCredito.trim()}): ${motivo.trim()} — el registro queda congelado en facturas anuladas; la correcta se registra como factura nueva`,
+    }],
+    fecha_actualizacion: ahora,
+  }
+}
+
+/** La GUARDA del registro: facturas previas del MISMO sitio+cliente en
+ *  cualquier proyecto (vigentes Y anuladas) — para verlas ANTES de facturar.
+ *  No bloquea: parciales y agrupadas son legítimas (FV-1795 y FV1800 cubren
+ *  varios proyectos cada una); pero nadie factura dos veces sin haber visto
+ *  la primera. */
+export function facturasPreviasDelSitio(
+  proyectos: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot' | 'facturacion' | 'facturas_anuladas'>[],
+  proyectoId: string,
+  sitio: string | undefined,
+  cliente: string | undefined,
+): { consecutivo: string; numero: string; fecha?: Timestamp; valor: number; vigente: boolean }[] {
+  const s = (sitio ?? '').trim().toLowerCase()
+  const c = (cliente ?? '').trim().toLowerCase()
+  if (!s) return []
+  const res: { consecutivo: string; numero: string; fecha?: Timestamp; valor: number; vigente: boolean }[] = []
+  for (const p of proyectos) {
+    if (p.id === proyectoId) continue
+    if ((p.snapshot?.nombre_sitio ?? '').trim().toLowerCase() !== s) continue
+    if ((p.snapshot?.cliente ?? '').trim().toLowerCase() !== c) continue
+    if (p.facturacion) res.push({ consecutivo: p.consecutivo, numero: p.facturacion.numero, fecha: p.facturacion.fecha, valor: p.facturacion.valor, vigente: true })
+    for (const a of p.facturas_anuladas ?? [])
+      res.push({ consecutivo: p.consecutivo, numero: a.numero, fecha: a.fecha, valor: a.valor, vigente: false })
+  }
+  return res
+}
+
+/** ¿Este número de factura ya está registrado en OTRO proyecto? (aviso
+ *  informativo de factura AGRUPADA — jamás bloquea). */
+export function numeroFacturaEnOtroProyecto(
+  proyectos: Pick<Proyecto, 'id' | 'consecutivo' | 'facturacion'>[],
+  proyectoId: string,
+  numero: string,
+): string[] {
+  const n = numero.trim().toLowerCase().replace(/\s+/g, '')
+  if (!n) return []
+  return proyectos
+    .filter(p => p.id !== proyectoId && (p.facturacion?.numero ?? '').trim().toLowerCase().replace(/\s+/g, '') === n)
+    .map(p => p.consecutivo)
+}
+
+/** Validación de FORMATO del CUFE (08-oct, mismo caso FV 1807-1809): el
+ *  registro es el ÚNICO punto donde un error de ese campo es detectable —
+ *  después queda enterrado para siempre (no se edita en ningún camino).
+ *  El CUFE de la DIAN (UBL 2.1, vigente desde 2019) es un SHA-384 en
+ *  hexadecimal: 96 caracteres [0-9a-f]. ADVERTENCIA, NUNCA BLOQUEO — puede
+ *  haber variantes que no conocemos (CUDE, documentos equivalentes), y una
+ *  advertencia ignorada a sabiendas es mejor que un registro imposible.
+ *  Devuelve el texto del aviso, o null si el formato es el esperado (o el
+ *  campo viene vacío — el CUFE es opcional). */
+export function avisoFormatoCufe(cufe: string): string | null {
+  const c = cufe.trim()
+  if (!c) return null
+  if (/^[0-9a-fA-F]{96}$/.test(c)) return null
+  if (/[^0-9a-fA-F]/.test(c)) {
+    return `El CUFE de la DIAN es hexadecimal (solo 0-9 y a-f) y lo pegado trae otros caracteres — verifica que sea el CUFE y no otro código de la factura.`
+  }
+  return `El CUFE de la DIAN tiene 96 caracteres y lo pegado trae ${c.length} — ¿se copió incompleto? Verifica contra la factura electrónica antes de registrar.`
+}
+
+/** Antigüedad en "Por facturar" (agregado 08-oct — la capa 1 del caso: un
+ *  proyecto de julio esperando factura en octubre no es un pendiente, es
+ *  una SEÑAL; el panel sirvió la trampa ofreciéndolos durante meses).
+ *  Cuenta desde el handoff (la entrada del historial a
+ *  enviado_a_facturacion); fallback defensivo a fecha_actualizacion.
+ *  UMBRAL = 30 días: un ciclo de facturación mensual — SUPUESTO NOMBRADO,
+ *  se ajusta con el uso (patrón pendientes del acta). */
+export const UMBRAL_POR_FACTURAR_DIAS = 30
+
+export function diasEnPorFacturar(
+  p: Pick<Proyecto, 'estado' | 'historial' | 'fecha_actualizacion'>,
+): number | null {
+  if (p.estado !== 'enviado_a_facturacion') return null
+  const entrada = [...p.historial].reverse().find(h => h.a === 'enviado_a_facturacion')
+  const desde = entrada?.fecha?.toMillis?.() ?? p.fecha_actualizacion?.toMillis?.()
+  if (!desde) return null
+  return Math.floor((Date.now() - desde) / 86_400_000)
+}
 
 /** Entradas del historial que son ajustes de ejecución pendientes de
  *  reconocer (Hotfix 23-jul los marca con este texto en el motivo). */
@@ -1157,7 +1298,8 @@ export interface Proyecto {
   ejecucion?: EjecucionProyecto        // F2.1.d — inicio + ejecutado con evidencia
   entrega?: EntregaProyecto            // F2.1.d — entrega al cliente
   soporte_cliente?: SoporteCliente     // F2.1.d — soporte emitido por el cliente
-  facturacion?: FacturacionProyecto    // Administrativa B1 — factura registrada
+  facturacion?: FacturacionProyecto    // Administrativa B1 — factura registrada (VIGENTE)
+  facturas_anuladas?: FacturaAnulada[] // 08-oct — anular y reemplazar, nunca editar
   pago_cliente?: PagoClienteProyecto   // Administrativa B2 — pago del cliente
   compras_reembolsos?: CompraReembolso[] // Administrativa B3b — línea propia, separada de la mano de obra
   liquidacion?: LiquidacionProyecto    // Administrativa B3b — cierre con el contratista
