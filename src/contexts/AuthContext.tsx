@@ -3,50 +3,13 @@ import { User, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'f
 import { doc, getDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { auth, db, functions } from '../firebase/config'
-import { claveIngresoLS, evaluarMarcaIngreso, esClaveIngresoObsoleta } from '../types/sigp/horario'
 import { accesoResidente, type Rol } from '../types/sigp/roles'
 
-/** Validador de horario (#3): marca de ingreso/salida vía CF — el servidor
- *  pone IP, dispositivo y timestamp; el cliente solo dice el tipo. LANZA en
- *  fallo: cada sitio de llamada decide cómo degradar (siempre no-fatal). */
-async function invocarMarcaHorario(tipo: 'ingreso' | 'salida'): Promise<void> {
-  await httpsCallable(functions, 'registrarEventoHorario')({ tipo })
-}
-
-/** Fix 10-ago (Opción B): el login EXPLÍCITO marca siempre. La banderita se
- *  levanta ANTES del signIn (el onAuthStateChanged puede disparar antes de
- *  que login() retome) y la consume el callback exactamente una vez. */
-let loginExplicito = false
-
-/** Marca de INGRESO — vive en onAuthStateChanged para capturar también las
- *  SESIONES PERSISTIDAS (antes solo login() marcaba y quien nunca re-loguea
- *  jamás generaba marcas). Guard una-vez-por-día por uid en localStorage con
- *  centinela anti-carrera; la clave queda 'ok' SOLO tras el éxito de la CF
- *  (fallo → se borra → el próximo arranque reintenta). No-fatal por contrato. */
-async function marcarIngresoSiCorresponde(uid: string): Promise<void> {
-  const esExplicito = loginExplicito
-  loginExplicito = false
-  try {
-    const ahora = new Date()
-    const clave = claveIngresoLS(uid, ahora)
-    if (!esExplicito && !evaluarMarcaIngreso(localStorage.getItem(clave), ahora)) return
-    localStorage.setItem(clave, `pendiente:${ahora.getTime()}`)
-    // Poda de claves de otros días del mismo uid (higiene de localStorage)
-    for (const k of Object.keys(localStorage)) {
-      if (esClaveIngresoObsoleta(k, uid, clave)) localStorage.removeItem(k)
-    }
-    try {
-      await invocarMarcaHorario('ingreso')
-      localStorage.setItem(clave, 'ok')
-    } catch (e) {
-      localStorage.removeItem(clave)
-      console.warn('Validador de horario: no se pudo registrar la marca de ingreso', e)
-    }
-  } catch (e) {
-    // localStorage inaccesible (modo privado estricto, etc.) — jamás bloquea la sesión
-    console.warn('Validador de horario: guard de ingreso no disponible', e)
-  }
-}
+// Jornada por PRESENCIA (rebuild oct-2026): la marca de INGRESO-al-arranque
+// del módulo #3 SE RETIRÓ de aquí — su información vive en el primer latido
+// del día (hooks/usePresencia.ts, montado en el Layout) y la colección vieja
+// `registros_horario` queda congelada como histórico. El cierre de sesión
+// invoca el cierre MANUAL de la jornada (CF latidoJornada, accion 'salir').
 
 interface UserProfile {
   uid: string
@@ -87,7 +50,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           // Bloquear acceso si el usuario está inactivo
           if (data.estado === 'inactivo') {
-            loginExplicito = false   // un login rechazado no deja banderita viva
             await signOut(auth)
             setUser(null)
             setAccessDenied(true)
@@ -111,14 +73,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             rol: '',
           })
         }
-        // Usuario VÁLIDO en sesión (explícita o persistida) → marca de ingreso
-        // con guard una-vez-por-día. No se espera: jamás retrasa el arranque.
-        // C2.1 paso 6: los residentes de cliente NO marcan asistencia — el
-        // reloj es del personal interno (el rol externo nace sin efectos
-        // colaterales; sus logins no ensucian registros_horario).
-        if (!accesoResidente((docSnap.exists() ? (docSnap.data().rol ?? '') : '') as Rol)) {
-          void marcarIngresoSiCorresponde(firebaseUser.uid)
-        }
+        // (Rebuild presencia oct-2026: aquí vivía la marca de ingreso por
+        // ARRANQUE — retirada; el primer latido del día la reemplaza.)
       } else {
         setUser(null)
       }
@@ -129,16 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     setAccessDenied(false)
-    // ANTES del signIn: el onAuthStateChanged puede correr antes de que este
-    // await retome; el callback consume la banderita (Opción B: explícito
-    // marca SIEMPRE, aunque la clave del día ya esté en 'ok').
-    loginExplicito = true
-    try {
-      await signInWithEmailAndPassword(auth, email, password)
-    } catch (e) {
-      loginExplicito = false
-      throw e
-    }
+    await signInWithEmailAndPassword(auth, email, password)
   }
 
   const logout = (): Promise<void> => {
@@ -150,12 +97,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logoutEnCurso.current = (async () => {
       try {
         // ANTES del signOut — después ya no hay token para invocar la CF.
-        // C2.1 paso 6: el residente de cliente no marca (espejo del ingreso).
-        if (!accesoResidente((user?.rol ?? '') as Rol)) {
-          await invocarMarcaHorario('salida')
+        // Cierre MANUAL de la jornada de presencia (queda distinguible del
+        // cierre automático derivado). Residentes y técnicos no marcan.
+        if (!accesoResidente((user?.rol ?? '') as Rol) && user?.rol !== 'tecnico') {
+          await httpsCallable(functions, 'latidoJornada')({ accion: 'salir' })
         }
       } catch (e) {
-        console.warn('Validador de horario: no se pudo registrar la marca de salida', e)
+        console.warn('Presencia: no se pudo registrar el cierre manual', e)
       } finally {
         try {
           await signOut(auth)

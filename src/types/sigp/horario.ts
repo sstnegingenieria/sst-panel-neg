@@ -65,34 +65,12 @@ export function claveDia(fecha: Date): string {
   return `${fecha.getFullYear()}-${p(fecha.getMonth() + 1)}-${p(fecha.getDate())}`
 }
 
-// ── Marca de ingreso una-vez-por-día (fix 10-ago: sesiones persistidas) ──────
-// La marca vive en onAuthStateChanged con guard en localStorage; el login
-// EXPLÍCITO marca siempre (Opción B). Claves por uid+día local; el valor es
-// 'ok' (marcada), 'pendiente:{ts}' (CF en vuelo — centinela anti-carrera
-// multi-pestaña) o ausente (marcar). Solo-tras-éxito: el fallo de la CF
-// borra la clave y el próximo arranque reintenta.
-
-export const PREFIJO_INGRESO_LS = 'sigp.horario.ingreso.'
-export const PENDIENTE_INGRESO_TTL_MS = 2 * 60_000
-
-export const claveIngresoLS = (uid: string, fecha: Date): string =>
-  `${PREFIJO_INGRESO_LS}${uid}.${claveDia(fecha)}`
-
-/** ¿Corresponde marcar ingreso según el valor guardado para HOY?
- *  null/ausente → sí · 'ok' → no · 'pendiente:{ts}' fresco (< TTL) → no
- *  (otra pestaña la tiene en vuelo) · pendiente viejo o valor corrupto → sí
- *  (mejor un posible doble —el apareo lo tolera— que un día sin marca). */
-export function evaluarMarcaIngreso(valor: string | null, ahora: Date): boolean {
-  if (!valor) return true
-  if (valor === 'ok') return false
-  const m = /^pendiente:(\d+)$/.exec(valor)
-  if (m) return ahora.getTime() - Number(m[1]) > PENDIENTE_INGRESO_TTL_MS
-  return true
-}
-
-/** Clave de ingreso de ESTE uid pero de otro día → podable (higiene de LS). */
-export const esClaveIngresoObsoleta = (clave: string, uid: string, claveHoy: string): boolean =>
-  clave.startsWith(`${PREFIJO_INGRESO_LS}${uid}.`) && clave !== claveHoy
+// ── (Retirado oct-2026) Marca de ingreso una-vez-por-día ─────────────────────
+// El guard de localStorage del fix 10-ago (claveIngresoLS/evaluarMarcaIngreso/
+// esClaveIngresoObsoleta) se RETIRÓ con el rebuild de jornada por PRESENCIA:
+// la marca de arranque ya no existe — el primer latido del día la reemplaza
+// (types/sigp/jornada.ts + hooks/usePresencia.ts). `registros_horario` queda
+// congelado como histórico, inmutable como siempre.
 
 /**
  * Aparea eventos planos en jornadas por persona + día local.
@@ -220,6 +198,13 @@ export interface ConfigHorario {
   ips_oficina?: string[]
   /** 'HH:mm' — dispara el recordatorio de cierre de sesión (hora local). */
   hora_fin_jornada?: string
+  // Rebuild presencia (oct-2026) — supuestos nombrados, ajustables sin deploy:
+  /** Ventana del latido en minutos (default 10). */
+  latido_min?: number
+  /** Gracia del cierre automático derivado en minutos (default 30). */
+  gracia_cierre_min?: number
+  /** Ventana de "Presente ahora" en minutos (default 15). */
+  ventana_presente_min?: number
 }
 
 /** ¿'HH:mm' válida? (para la edición inline). */

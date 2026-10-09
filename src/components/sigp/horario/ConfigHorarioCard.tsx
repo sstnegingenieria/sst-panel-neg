@@ -22,6 +22,10 @@ export default function ConfigHorarioCard() {
   const [abierto, setAbierto] = useState(false)
   const [ipsTexto, setIpsTexto] = useState('')
   const [horaFin, setHoraFin] = useState('')
+  // Rebuild presencia: supuestos nombrados, ajustables sin deploy.
+  const [latidoMin, setLatidoMin] = useState('')
+  const [graciaMin, setGraciaMin] = useState('')
+  const [ventanaMin, setVentanaMin] = useState('')
   const [guardando, setGuardando] = useState(false)
 
   useEffect(() => {
@@ -32,6 +36,9 @@ export default function ConfigHorarioCard() {
         const data = snap.exists() ? (snap.data() as ConfigHorario) : {}
         setIpsTexto((data.ips_oficina ?? []).join('\n'))
         setHoraFin(data.hora_fin_jornada ?? '')
+        setLatidoMin(data.latido_min != null ? String(data.latido_min) : '')
+        setGraciaMin(data.gracia_cierre_min != null ? String(data.gracia_cierre_min) : '')
+        setVentanaMin(data.ventana_presente_min != null ? String(data.ventana_presente_min) : '')
         setVisible(true)
       })
       .catch(() => { if (activo) setVisible(false) })
@@ -48,9 +55,19 @@ export default function ConfigHorarioCard() {
     setGuardando(true)
     try {
       const ips = ipsTexto.split('\n').map(s => s.trim()).filter(Boolean)
+      const num = (s: string, min: number, max: number) => {
+        const n = Number(s.trim())
+        return s.trim() !== '' && Number.isFinite(n) && n >= min && n <= max ? n : null
+      }
+      const lat = num(latidoMin, 1, 120)
+      const gra = num(graciaMin, 5, 480)
+      const ven = num(ventanaMin, 1, 120)
       await setDoc(doc(db, 'configuracion', 'horario'), {
         ips_oficina: ips,
         ...(horaFin.trim() ? { hora_fin_jornada: horaFin.trim() } : {}),
+        ...(lat != null ? { latido_min: lat } : {}),
+        ...(gra != null ? { gracia_cierre_min: gra } : {}),
+        ...(ven != null ? { ventana_presente_min: ven } : {}),
         actualizado_por: user?.uid ?? '',
         fecha_actualizacion: Timestamp.now(),
       }, { merge: true })
@@ -84,6 +101,23 @@ export default function ConfigHorarioCard() {
                     horaInvalida ? 'border-red-400 focus:ring-red-300' : 'border-gray-300 focus:ring-brand-300'}`} />
                 {horaInvalida && <span className="block text-red-600 mt-1">Formato inválido — usa HH:mm (ej: 17:30)</span>}
               </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl">
+                <label className="block text-xs text-gray-500">
+                  Latido (min) — default 10
+                  <input value={latidoMin} onChange={e => setLatidoMin(e.target.value)} placeholder="10" inputMode="numeric"
+                    className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                </label>
+                <label className="block text-xs text-gray-500">
+                  Gracia cierre automático (min) — default 30
+                  <input value={graciaMin} onChange={e => setGraciaMin(e.target.value)} placeholder="30" inputMode="numeric"
+                    className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                </label>
+                <label className="block text-xs text-gray-500">
+                  Ventana "Presente ahora" (min) — default 15
+                  <input value={ventanaMin} onChange={e => setVentanaMin(e.target.value)} placeholder="15" inputMode="numeric"
+                    className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                </label>
+              </div>
               <div className="flex justify-end">
                 <button onClick={guardar} disabled={guardando || horaInvalida}
                   className="px-4 py-2 rounded-lg text-sm font-medium bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50">
