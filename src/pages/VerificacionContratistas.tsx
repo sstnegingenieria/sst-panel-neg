@@ -39,6 +39,12 @@ export default function VerificacionContratistas() {
   // novedad (observación obligatoria)
   const [novedadTarget, setNovedadTarget] = useState<VerificacionSst | null>(null)
   const [observacion, setObservacion] = useState('')
+  // Filtro por cliente (lista desplegable con conteo — patrón del filtro de
+  // Obras) + búsqueda por sitio. Docs proyectados antes de que el snapshot
+  // tuviera cliente/sitio traen el campo vacío → "—" (se re-llenan solos con
+  // el próximo write del proyecto; acá NO se rellena ni se adivina).
+  const [filtroCliente, setFiltroCliente] = useState('')
+  const [busqueda, setBusqueda] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -53,12 +59,28 @@ export default function VerificacionContratistas() {
 
   useEffect(() => { load() }, [load])
 
-  // Pendientes primero, luego con novedad, al día al final
+  // Clientes DERIVADOS de la cola visible (jamás de la colección `clientes`,
+  // que SST no lee), con conteo; vacíos agrupados bajo "—".
+  const clientes = useMemo(() => {
+    const conteo = new Map<string, number>()
+    for (const v of verificaciones) {
+      const c = (v.cliente_nombre ?? '').trim() || '—'
+      conteo.set(c, (conteo.get(c) ?? 0) + 1)
+    }
+    return [...conteo.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'))
+  }, [verificaciones])
+
+  // Pendientes primero, luego con novedad, al día al final — y encima el
+  // filtro de cliente (AND) + la búsqueda por sitio/consecutivo/contratista.
   const orden: Record<string, number> = { pendiente: 0, con_novedad: 1, al_dia: 2 }
-  const ordenadas = useMemo(
-    () => [...verificaciones].sort((a, b) => orden[estadoSstGate(a)] - orden[estadoSstGate(b)]),
-    [verificaciones],  // eslint-disable-line react-hooks/exhaustive-deps
-  )
+  const ordenadas = useMemo(() => {
+    const q = busqueda.trim().toLowerCase()
+    return verificaciones
+      .filter(v => !filtroCliente || ((v.cliente_nombre ?? '').trim() || '—') === filtroCliente)
+      .filter(v => !q || [v.nombre_sitio, v.codigo_sitio_cliente, v.consecutivo, v.contratista_nombre, v.cliente_nombre]
+        .some(campo => (campo ?? '').toLowerCase().includes(q)))
+      .sort((a, b) => orden[estadoSstGate(a)] - orden[estadoSstGate(b)])
+  }, [verificaciones, filtroCliente, busqueda])  // eslint-disable-line react-hooks/exhaustive-deps
   const pendientes = verificaciones.filter(v => estadoSstGate(v) !== 'al_dia').length
 
   const marcar = async (v: VerificacionSst, estado: EstadoSstGate, obs?: string) => {
@@ -99,15 +121,29 @@ export default function VerificacionContratistas() {
         </p>
       </div>
 
-      <p className="text-xs text-gray-500">
-        <span className="font-semibold text-amber-700">{pendientes}</span> por verificar · {verificaciones.length} en la cola
-      </p>
+      <div className="flex items-center gap-3 flex-wrap">
+        <p className="text-xs text-gray-500">
+          <span className="font-semibold text-amber-700">{pendientes}</span> por verificar · {verificaciones.length} en la cola
+        </p>
+        <span className="flex-1" />
+        <select value={filtroCliente} onChange={e => setFiltroCliente(e.target.value)}
+          className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+          <option value="">Todos los clientes ({verificaciones.length})</option>
+          {clientes.map(([nombre, n]) => (
+            <option key={nombre} value={nombre}>{nombre} ({n})</option>
+          ))}
+        </select>
+        <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+          placeholder="Buscar por sitio, PRY, contratista…"
+          className="w-full sm:w-64 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+      </div>
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
               <th className="py-3 px-4 font-semibold">Proyecto</th>
+              <th className="py-3 px-4 font-semibold">Cliente</th>
               <th className="py-3 px-4 font-semibold">Sitio</th>
               <th className="py-3 px-4 font-semibold">Contratista</th>
               <th className="py-3 px-4 font-semibold">Estado del proyecto</th>
@@ -117,11 +153,13 @@ export default function VerificacionContratistas() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={6} className="py-10 text-center text-gray-400">Cargando…</td></tr>
+              <tr><td colSpan={7} className="py-10 text-center text-gray-400">Cargando…</td></tr>
             )}
             {!loading && ordenadas.length === 0 && (
-              <tr><td colSpan={6} className="py-12 text-center text-gray-400">
-                No hay proyectos en el tramo de verificación (facturado / pagado por el cliente).
+              <tr><td colSpan={7} className="py-12 text-center text-gray-400">
+                {verificaciones.length > 0
+                  ? 'Nada con ese filtro o búsqueda.'
+                  : 'No hay proyectos en el tramo de verificación (facturado / pagado por el cliente).'}
               </td></tr>
             )}
             {!loading && ordenadas.map(v => {
@@ -132,6 +170,7 @@ export default function VerificacionContratistas() {
                     {/* Sin enlace a la ficha del proyecto: SST no accede a `proyectos` */}
                     <span className="font-mono text-gray-800 font-semibold">{v.consecutivo}</span>
                   </td>
+                  <td className="py-3 px-4 text-gray-700">{(v.cliente_nombre ?? '').trim() || '—'}</td>
                   <td className="py-3 px-4">
                     <span className="font-medium text-gray-800">{v.nombre_sitio || '—'}</span>
                     <Link to={`/registros/${v.obra_id}`}
