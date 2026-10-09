@@ -5,9 +5,13 @@ import Header from './Header'
 import RecordatorioCierreSesion from './sigp/horario/RecordatorioCierreSesion'
 import RecordatorioTareas from './sigp/tareas/RecordatorioTareas'
 import { useMediaQuery } from '../hooks/useMediaQuery'
+import { usePresencia } from '../hooks/usePresencia'
 
 export default function Layout() {
   const esEscritorio = useMediaQuery('(min-width: 1024px)')
+  // Jornada por PRESENCIA: late mientras el panel está en uso (el hook
+  // decide por rol; privacidad por construcción — ver usePresencia.ts).
+  usePresencia()
   const [collapsed, setCollapsed] = useState(false)   // rail (escritorio)
   const [mobileOpen, setMobileOpen] = useState(false) // cajón (móvil)
 

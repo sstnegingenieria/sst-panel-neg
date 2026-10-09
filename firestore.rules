@@ -1138,6 +1138,18 @@ service cloud.firestore {
       allow create, update, delete: if false;   // solo la CF (Admin SDK)
     }
 
+    // Jornadas por PRESENCIA (rebuild 09-oct-2026): un doc por persona por
+    // día local de Bogotá (`{uid}_{YYYY-MM-DD}`), mantenido SOLO por la CF
+    // latidoJornada (Admin SDK) — timestamp/IP/día son server-side y el
+    // payload del cliente es {accion} a secas: el modelo no PUEDE guardar
+    // páginas, clics ni tiempo por pantalla (línea dura de privacidad).
+    // `registros_horario` (arriba) queda congelado como histórico. El cierre
+    // automático es DERIVADO en lectura — no existe escritor para él.
+    match /jornadas/{jornadaId} {
+      allow read: if veHorario();
+      allow create, update, delete: if false;   // solo la CF (Admin SDK)
+    }
+
     // Ausentismos (incapacidad / permiso / justificación / vacaciones):
     // los gestiona gerencia_administrativa (+admin); las gerencias los
     // leen para reportes. Soporte OBLIGATORIO al crear (patrón rut_url
