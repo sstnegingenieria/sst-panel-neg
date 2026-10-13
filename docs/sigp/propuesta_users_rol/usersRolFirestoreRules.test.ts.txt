@@ -1,0 +1,141 @@
+// @vitest-environment node
+//
+// Batería de la regla `users` — cierre de la escalada de privilegios por
+// `puedeAdministrarSST()` (sst / gestion_integral escribiendo `users.rol`).
+//
+// FORMA FINAL (con la regla propuesta ya aplicada en firestore.rules): los casos
+// [VULN] se RECHAZAN y los [FLUJO]/[ADMIN] siguen pasando. Para MOVER a
+// src/hooks/sigp/__tests__/usersRolFirestoreRules.test.ts (excluida del `npm test`;
+// se corre con el emulador, ver el encabezado de avalFisicoFirestoreRules.test.ts).
+// Contra las reglas ACTUALES (sin la propuesta) los [VULN] PASAN: así se verificó el hueco.
+//
+// Actor de mínimo privilegio por vía: sst y gestion_integral (SÍ pueden aprobar
+// técnicos hoy y deben seguir pudiendo); admin como control positivo.
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, it, beforeAll, afterAll, beforeEach } from 'vitest'
+import { initializeTestEnvironment, assertSucceeds, assertFails, type RulesTestEnvironment } from '@firebase/rules-unit-testing'
+import { doc, setDoc, updateDoc, deleteDoc, deleteField, Timestamp } from 'firebase/firestore'
+
+const TIMEOUT = 30_000
+const PROPUESTA = true   // regla propuesta aplicada
+const PORT = 8080
+
+const ROLES = {
+  sofia: 'sst', ingrid: 'gestion_integral', root: 'admin', diego: 'director_proyectos',
+  tec1: 'tecnico', legacy: undefined as unknown as string,
+} as const
+type Actor = keyof typeof ROLES
+
+let env: RulesTestEnvironment
+const db = (a: Actor) => env.authenticatedContext(a, { email: `${a}@test.dev` }).firestore()
+const U = (id: string) => `users/${id}`
+
+beforeAll(async () => {
+  env = await initializeTestEnvironment({
+    projectId: 'demo-neg',
+    firestore: { rules: readFileSync(resolve(__dirname, '../../../../firestore.rules'), 'utf8'), host: '127.0.0.1', port: PORT },
+  })
+}, TIMEOUT)
+afterAll(async () => { await env.cleanup() })
+
+beforeEach(async () => {
+  await env.clearFirestore()
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const d = ctx.firestore()
+    await setDoc(doc(d, U('sofia')), { nombre: 'Sofía', rol: 'sst', estado: 'activo' })
+    await setDoc(doc(d, U('ingrid')), { nombre: 'Ingrid', rol: 'gestion_integral', estado: 'activo' })
+    await setDoc(doc(d, U('root')), { nombre: 'Root', rol: 'admin', estado: 'activo' })
+    await setDoc(doc(d, U('diego')), { nombre: 'Diego', rol: 'director_proyectos', estado: 'activo' })
+    await setDoc(doc(d, U('tec1')), { nombre: 'Técnico', rol: 'tecnico', estado: 'pendiente', obras_asignadas: [] })
+    // técnico legado: solo `role` (la rama de compatibilidad de rolActual())
+    await setDoc(doc(d, U('legacy')), { nombre: 'Legado', role: 'tecnico', estado: 'pendiente' })
+  })
+}, TIMEOUT)
+
+// Resultado esperado de los casos [VULN]: hoy PASAN (hueco); con la propuesta se RECHAZAN.
+const vuln = (ok: () => Promise<unknown>) => PROPUESTA ? assertFails(ok()) : assertSucceeds(ok())
+
+describe(`users.rol — ${PROPUESTA ? 'PROPUESTA' : 'reglas ACTUALES'}`, () => {
+  for (const a of ['sofia', 'ingrid'] as const) {
+    it(`[VULN] ${a} se cambia el rol a admin a sí mismo`, async () => {
+      await vuln(() => updateDoc(doc(db(a), U(a)), { rol: 'admin' }))
+    }, TIMEOUT)
+    it(`[VULN] ${a} promueve a un técnico a gestion_integral / admin`, async () => {
+      await vuln(() => updateDoc(doc(db(a), U('tec1')), { rol: 'admin' }))
+    }, TIMEOUT)
+    it(`[VULN] ${a} promueve vía el campo legado role`, async () => {
+      await vuln(() => updateDoc(doc(db(a), U('tec1')), { role: 'admin' }))
+    }, TIMEOUT)
+    it(`[VULN] ${a} crea una cuenta nueva con rol admin`, async () => {
+      await vuln(() => setDoc(doc(db(a), U('nuevo')), { nombre: 'X', rol: 'admin', estado: 'activo' }))
+    }, TIMEOUT)
+    it(`[VULN] ${a} edita/desactiva a una persona del PERSONAL (no técnico)`, async () => {
+      await vuln(() => updateDoc(doc(db(a), U('diego')), { estado: 'inactivo' }))
+    }, TIMEOUT)
+    it(`[VULN] ${a} borra un usuario`, async () => {
+      await vuln(() => deleteDoc(doc(db(a), U('tec1'))))
+    }, TIMEOUT)
+  }
+
+  // ── flujos legítimos (Usuarios.tsx / Contratistas.tsx): deben seguir pasando ──
+  for (const a of ['sofia', 'ingrid'] as const) {
+    it(`[FLUJO] ${a} aprueba un técnico (estado activo + fecha_aprobacion)`, async () => {
+      await assertSucceeds(updateDoc(doc(db(a), U('tec1')), { estado: 'activo', fecha_aprobacion: Timestamp.now() }))
+    }, TIMEOUT)
+    it(`[FLUJO] ${a} rechaza (con traza) y restaura (dot-path) un técnico`, async () => {
+      await assertSucceeds(updateDoc(doc(db(a), U('tec1')), { estado: 'rechazado', rechazo: { motivo: 'x', por: a, fecha: Timestamp.now() } }))
+      await assertSucceeds(updateDoc(doc(db(a), U('tec1')), { estado: 'pendiente', 'rechazo.restaurado': { por: a, fecha: Timestamp.now() } }))
+    }, TIMEOUT)
+    it(`[FLUJO] ${a} desactiva / activa un técnico`, async () => {
+      await assertSucceeds(updateDoc(doc(db(a), U('tec1')), { estado: 'inactivo' }))
+      await assertSucceeds(updateDoc(doc(db(a), U('tec1')), { estado: 'activo' }))
+    }, TIMEOUT)
+    it(`[FLUJO] ${a} asigna obras y empleador a un técnico (incl. deleteField)`, async () => {
+      await assertSucceeds(updateDoc(doc(db(a), U('tec1')), { obras_asignadas: ['o1'], contratista_id: 'c1', contratista_nombre: 'C' }))
+      await assertSucceeds(updateDoc(doc(db(a), U('tec1')), { contratista_id: deleteField(), contratista_nombre: deleteField() }))
+    }, TIMEOUT)
+    it(`[FLUJO] ${a} edita los documentos de un técnico`, async () => {
+      await assertSucceeds(updateDoc(doc(db(a), U('tec1')), { documentos: { eps: { vence: Timestamp.now() } } }))
+    }, TIMEOUT)
+    it(`[FLUJO] ${a} aprueba un técnico LEGADO (solo campo role: 'tecnico')`, async () => {
+      await assertSucceeds(updateDoc(doc(db(a), U('legacy')), { estado: 'activo' }))
+    }, TIMEOUT)
+    it(`[FLUJO] ${a} puede escribir rol:'tecnico' sobre un técnico (no cambia nada)`, async () => {
+      await assertSucceeds(updateDoc(doc(db(a), U('tec1')), { rol: 'tecnico', estado: 'activo' }))
+    }, TIMEOUT)
+  }
+
+  // ── admin conserva todo (invitar, ⇄ Rol, ✎ Firma, activar/desactivar personal) ──
+  it('[ADMIN] invita un usuario nuevo con cualquier rol', async () => {
+    await assertSucceeds(setDoc(doc(db('root'), U('nuevo')), { nombre: 'N', rol: 'gerencia_general', estado: 'activo', obras_asignadas: [] }))
+  }, TIMEOUT)
+  it('[ADMIN] cambia el rol de alguien (⇄ Rol)', async () => {
+    await assertSucceeds(updateDoc(doc(db('root'), U('sofia')), { rol: 'admin' }))
+  }, TIMEOUT)
+  it('[ADMIN] edita la firma (cargo/celular) y activa/desactiva al personal', async () => {
+    await assertSucceeds(updateDoc(doc(db('root'), U('diego')), { cargo: 'Director', celular: '300' }))
+    await assertSucceeds(updateDoc(doc(db('root'), U('diego')), { estado: 'inactivo' }))
+  }, TIMEOUT)
+
+  // ── lo que no cambia ──
+  it('[SIN CAMBIO] director_proyectos no escribe users', async () => {
+    await assertFails(updateDoc(doc(db('diego'), U('tec1')), { estado: 'activo' }))
+    await assertFails(updateDoc(doc(db('diego'), U('diego')), { rol: 'admin' }))
+  }, TIMEOUT)
+  it('[SIN CAMBIO] el propio usuario no puede cambiarse el rol (denylist de auto-edición)', async () => {
+    await assertFails(updateDoc(doc(db('tec1'), U('tec1')), { rol: 'admin' }))
+    await assertFails(updateDoc(doc(db('diego'), U('diego')), { rol: 'admin' }))
+  }, TIMEOUT)
+  it('[SIN CAMBIO] el técnico edita sus documentos (auto-edición permitida)', async () => {
+    await assertSucceeds(updateDoc(doc(db('tec1'), U('tec1')), { documentos: { arl: {} } }))
+  }, TIMEOUT)
+  it('[SIN CAMBIO] el registro propio en la app sigue (create self: tecnico/pendiente)', async () => {
+    const reg = env.authenticatedContext('reg1', { email: 'reg1@test.dev' }).firestore()
+    await assertSucceeds(setDoc(doc(reg, U('reg1')), { nombre: 'T', rol: 'tecnico', estado: 'pendiente', aprobado: false, obras_asignadas: [] }))
+  }, TIMEOUT)
+  it('[SIN CAMBIO] el registro propio NO permite otro rol', async () => {
+    const reg2 = env.authenticatedContext('reg2', { email: 'reg2@test.dev' }).firestore()
+    await assertFails(setDoc(doc(reg2, U('reg2')), { nombre: 'D', rol: 'admin', estado: 'pendiente', aprobado: false, obras_asignadas: [] }))
+  }, TIMEOUT)
+})
