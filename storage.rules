@@ -20,6 +20,15 @@ service firebase.storage {
       return esInterno()
              && request.auth.token.rol in ['gerencia_administrativa', 'admin'];
     }
+    // Ausentismos (13-oct, OK de Giovanny): el SOPORTE lo sube y consulta
+    // también gestion_integral — Ingrid registra AT/EL y el registro exige
+    // soporte. Espejo de registraAusentismo() de Firestore. Helper PROPIO:
+    // esGerenciaAdminPorClaim() sigue gobernando certificacion_bancaria,
+    // que NO se abre.
+    function registraAusentismoPorClaim() {
+      return esInterno()
+             && request.auth.token.rol in ['gerencia_administrativa', 'gestion_integral', 'admin'];
+    }
     // Licitaciones 1.2b (21-ago-2026): espejo EXACTO de veEconomiaLicitacion()
     // de firestore.rules sobre los claims de C2.1. Existe porque
     // esGerenciaAdminPorClaim() es más estrecho (solo gerencia_administrativa
@@ -163,9 +172,12 @@ service firebase.storage {
                        || request.resource.contentType.matches('image/.*'));
     }
 
+    // 13-oct: read/write del soporte ampliados a gestion_integral (helper
+    // registraAusentismoPorClaim) — quien registra sube el soporte y puede
+    // volver a verlo. El dato clínico no vive aquí (sub-doc de Firestore).
     match /ausentismos/{ausentismoId}/{tipoDoc}/{fileName} {
-      allow read: if esGerenciaAdminPorClaim();
-      allow write: if esGerenciaAdminPorClaim()
+      allow read: if registraAusentismoPorClaim();
+      allow write: if registraAusentismoPorClaim()
                    && tipoDoc in ['soporte']
                    && request.resource.size < 10 * 1024 * 1024
                    && (request.resource.contentType == 'application/pdf'

@@ -6,9 +6,12 @@
 // El empleado se elige del maestro `empleados_directos` (24-sep, integración
 // Ausentismo) — ya no es texto libre. "Un hecho, un lugar": el indicador
 // SG-SST de Ausentismo (SST-IND-26) se auto-alimenta desde esta colección vía
-// CF, y necesita una identidad estable, no un nombre tecleado. `gestionaHorario()`
-// (gerencia_administrativa+admin) ya es subconjunto de los roles que leen
-// `empleados_directos` — sin cambio de reglas.
+// CF, y necesita una identidad estable, no un nombre tecleado. Quien registra
+// (registraAusentismo(): gerencia_administrativa + gestion_integral + admin,
+// ampliado 13-oct) es subconjunto de los roles que leen `empleados_directos`
+// (gestionaEmpleados() ya incluye a los tres) — sin cambio de reglas ahí.
+// La prop `puedeGestionar` gatea SOLO la sección de detalle médico (GA+admin):
+// para GI los campos clínicos ni se pintan y el sub-doc jamás se escribe.
 import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { Timestamp, collection, doc, setDoc } from 'firebase/firestore'

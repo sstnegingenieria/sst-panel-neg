@@ -121,6 +121,14 @@ service cloud.firestore {
     function gestionaHorario() {
       return isAuthed() && rolActual() in ['gerencia_administrativa', 'admin'];
     }
+    // Registrar/anular AUSENTISMOS (13-oct, OK de Giovanny): se amplía a
+    // gestion_integral — Ingrid registra AT/EL (tipo incapacidad + origen,
+    // dato administrativo). Helper PROPIO en vez de ampliar gestionaHorario():
+    // ese gobierna también el sub-doc médico privado/detalle y los horarios
+    // personales, que NO se abren. Espejo: puedeRegistrarAusentismoUI.
+    function registraAusentismo() {
+      return isAuthed() && rolActual() in ['gerencia_administrativa', 'gestion_integral', 'admin'];
+    }
 
     // 10. Mantenimiento de precios del catálogo NEG (#2b, 09-ago): quién
     //     CORRIGE o AJUSTA MASIVAMENTE precios ya existentes. El ALTA desde
@@ -1170,9 +1178,12 @@ service cloud.firestore {
     // de proveedores). Sin delete: anulación SOFT (estado + motivo, 5.1).
     match /ausentismos/{ausentismoId} {
       allow read: if veHorario();
-      allow create: if gestionaHorario()
+      // create/update ampliados a gestion_integral (13-oct): el ACTO de
+      // registrar un AT/EL es separable del dato clínico por construcción
+      // (el sub-doc privado es opcional y queda abajo con gestionaHorario()).
+      allow create: if registraAusentismo()
                     && request.resource.data.get('soporte_url', '') != '';
-      allow update: if gestionaHorario();
+      allow update: if registraAusentismo();
 
       // Detalle médico (diagnóstico/observaciones) = dato de SALUD —
       // LÍNEA DURA (decisión Giovanny 07-ago): solo gerencia_administrativa
