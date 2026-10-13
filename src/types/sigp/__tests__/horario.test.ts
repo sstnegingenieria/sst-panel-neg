@@ -9,6 +9,7 @@ import {
 } from '../horario'
 import {
   ROLES_VE_HORARIO, veHorarioUI, puedeGestionarHorarioUI,
+  ROLES_REGISTRA_AUSENTISMOS, puedeRegistrarAusentismoUI,
 } from '../permisos'
 
 vi.mock('firebase-functions/v2/https', () => ({
@@ -138,12 +139,26 @@ describe('permisos UI del módulo horario — espejo de reglas', () => {
     expect(veHorarioUI('auxiliar_proyectos')).toBe(false)
     expect(veHorarioUI(undefined)).toBe(false)
   })
-  it('operan SOLO gerencia_administrativa + admin (GG lee, no opera)', () => {
+  it('el detalle MÉDICO y los horarios siguen SOLO con gerencia_administrativa + admin', () => {
     expect(puedeGestionarHorarioUI('gerencia_administrativa')).toBe(true)
     expect(puedeGestionarHorarioUI('admin')).toBe(true)
     expect(puedeGestionarHorarioUI('gerencia_general')).toBe(false)
     expect(puedeGestionarHorarioUI('gestion_integral')).toBe(false)
     expect(puedeGestionarHorarioUI('director_proyectos')).toBe(false)
+  })
+  it('registrar/anular AUSENTISMOS: GA + gestion_integral + admin (13-oct) — y NADIE más', () => {
+    expect([...ROLES_REGISTRA_AUSENTISMOS].sort()).toEqual([
+      'admin', 'gerencia_administrativa', 'gestion_integral',
+    ])
+    expect(puedeRegistrarAusentismoUI('gestion_integral')).toBe(true)
+    expect(puedeRegistrarAusentismoUI('gerencia_general')).toBe(false)   // lee, no registra
+    expect(puedeRegistrarAusentismoUI('director_proyectos')).toBe(false)
+    expect(puedeRegistrarAusentismoUI('sst')).toBe(false)
+    expect(puedeRegistrarAusentismoUI(undefined)).toBe(false)
+  })
+  it('la línea dura queda demostrable: GI registra pero NO gestiona el detalle médico', () => {
+    expect(puedeRegistrarAusentismoUI('gestion_integral')).toBe(true)
+    expect(puedeGestionarHorarioUI('gestion_integral')).toBe(false)
   })
 })
 

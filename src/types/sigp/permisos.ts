@@ -307,6 +307,17 @@ export const veHorarioUI = (rol: string | undefined) => en(rol, ROLES_VE_HORARIO
 export const ROLES_GESTIONA_HORARIO: Rol[] = ['gerencia_administrativa', 'admin']
 export const puedeGestionarHorarioUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_HORARIO)
 
+// Registrar / anular AUSENTISMOS (13-oct, OK de Giovanny — tercera vez que a
+// GI le faltaba un permiso para su trabajo): se amplía a gestion_integral,
+// que registra AT/EL (tipo incapacidad + origen, dato administrativo) SIN
+// tocar jamás el dato clínico. Espejo EXACTO de registraAusentismo() en
+// firestore.rules y de registraAusentismoPorClaim() en storage.rules.
+// El detalle médico (sub-doc privado/detalle y su panel) SIGUE gateado por
+// puedeGestionarHorarioUI (gerencia_administrativa + admin) — línea dura
+// Ley 1581 intacta: GI no ve ni escribe diagnóstico.
+export const ROLES_REGISTRA_AUSENTISMOS: Rol[] = ['gerencia_administrativa', 'gestion_integral', 'admin']
+export const puedeRegistrarAusentismoUI = (rol: string | undefined) => en(rol, ROLES_REGISTRA_AUSENTISMOS)
+
 // ── Mantenimiento de precios del catálogo NEG (#2b, 09-ago) ──
 // Espejo EXACTO de puedeMantenerCatalogo() de firestore.rules: corrigen y
 // ajustan precios SOLO GG + director de proyectos + admin. El ALTA desde el
