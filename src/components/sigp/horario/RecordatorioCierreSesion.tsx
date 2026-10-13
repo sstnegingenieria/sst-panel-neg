@@ -19,12 +19,13 @@ import { useEffect, useRef, useState } from 'react'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
-import { claveDia, esHoraValida } from '../../../types/sigp/horario'
-import type { ConfigHorario } from '../../../types/sigp/horario'
+import { claveDia, horaFinDe } from '../../../types/sigp/horario'
+import type { ConfigHorario, HorariosPersonales } from '../../../types/sigp/horario'
 import {
-  CLAVE_MARCA_LS, parseMarcaLocal,
+  CLAVE_MARCA_LS, parseMarcaLocal, debeCerrarAlVencer,
   AVISO_CIERRE_MIN_DEFAULT, POSPONER_MIN_DEFAULT, GRACIA_CIERRE_MIN_DEFAULT,
 } from '../../../types/sigp/jornada'
+import { getUltimaInteraccionMs } from '../../../hooks/usePresencia'
 import { accesoResidente, type Rol } from '../../../types/sigp/roles'
 
 const CHEQUEO_MS = 30_000
@@ -42,22 +43,28 @@ export default function RecordatorioCierreSesion() {
   const marca = !!user && !accesoResidente((user.rol ?? '') as Rol) && user.rol !== 'tecnico'
 
   useEffect(() => {
-    if (!marca) return
-    getDoc(doc(db, 'configuracion', 'horario'))
-      .then(s => {
+    if (!marca || !user) return
+    // Config general + horarios por persona: la hora de cierre EFECTIVA es
+    // la personal si existe (horaFinDe) — el punto del rebuild por persona.
+    Promise.all([
+      getDoc(doc(db, 'configuracion', 'horario')),
+      getDoc(doc(db, 'configuracion', 'horarios_personales')).catch(() => null),
+    ])
+      .then(([s, sp]) => {
         const d = s.exists() ? (s.data() as ConfigHorario) : {}
-        const h = d.hora_fin_jornada
-        if (!h || !esHoraValida(h)) { setCfg(null); return }
+        const personales = sp?.exists() ? (sp.data() as HorariosPersonales).horarios : undefined
+        const h = horaFinDe(user.uid, personales, d.hora_fin_jornada)
+        if (!h) { setCfg(null); return }
         const num = (v: unknown, def: number, min: number, max: number) =>
           typeof v === 'number' && v >= min && v <= max ? v : def
         setCfg({
-          horaFin: h.trim(),
+          horaFin: h,
           aviso: num(d.aviso_cierre_min, AVISO_CIERRE_MIN_DEFAULT, 1, 60),
           posponer: num(d.posponer_min, POSPONER_MIN_DEFAULT, 5, 480),
         })
       })
       .catch(() => setCfg(null))
-  }, [marca, user?.uid])
+  }, [marca, user?.uid])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Disparador: pasada la hora de fin (y cualquier posposición), decide —
   // presente → countdown visible · ausente → cierre directo.
@@ -89,14 +96,22 @@ export default function RecordatorioCierreSesion() {
     return () => clearInterval(t)
   }, [marca, cfg, user, venceMs, cerrandoSesion, logout])
 
-  // Countdown del banner (solo pinta — el cierre lo dispara al llegar a 0).
+  // Countdown del banner. Al llegar a 0 decide (ajuste SGI/SST 13-oct):
+  // interacción DESPUÉS de aparecer el aviso = la persona sigue trabajando →
+  // NO se cierra; se pospone sola y se vuelve a avisar. El cierre automático
+  // es para quien ya no está — nadie pierde un formulario a medio escribir.
   useEffect(() => {
-    if (venceMs === null) return
+    if (venceMs === null || !cfg) return
+    const inicioAviso = venceMs - cfg.aviso * 60_000
     const tick = () => {
       const falta = venceMs - Date.now()
       if (falta <= 0) {
         setVenceMs(null)
-        if (!cerrando.current) { cerrando.current = true; void logout(true) }
+        if (debeCerrarAlVencer(getUltimaInteraccionMs(), inicioAviso)) {
+          if (!cerrando.current) { cerrando.current = true; void logout(true) }
+        } else {
+          pospuestoHasta.current = Date.now() + cfg.posponer * 60_000
+        }
         return
       }
       const min = Math.floor(falta / 60_000)
@@ -106,7 +121,7 @@ export default function RecordatorioCierreSesion() {
     tick()
     const t = setInterval(tick, 1000)
     return () => clearInterval(t)
-  }, [venceMs, logout])
+  }, [venceMs, cfg, logout])
 
   if (!marca || venceMs === null) return null
 

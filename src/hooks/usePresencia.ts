@@ -38,6 +38,13 @@ export function guardarMarcaLocal(uid: string, ahora: Date): void {
 
 const EVENTOS_INTERACCION = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const
 
+// Última interacción REAL (en memoria, jamás persistida — privacidad igual):
+// la consume el banner de cierre para distinguir "sigue trabajando" de "ya no
+// está" al vencer el countdown (debeCerrarAlVencer). No distingue clic de
+// tecla ni dónde ocurrió — solo un instante.
+let ultimaInteraccionMs = 0
+export const getUltimaInteraccionMs = (): number => ultimaInteraccionMs
+
 export function usePresencia(): void {
   const { user } = useAuth()
   const uid = user?.uid
@@ -62,6 +69,7 @@ export function usePresencia(): void {
 
     const onInteraccion = () => {
       const ahora = Date.now()
+      ultimaInteraccionMs = ahora
       const hoy = claveDia(new Date(ahora))
       // Cambio de día local con la pestaña viva → como primera interacción.
       const previo = ultimoLatido.current && ultimoLatido.current.dia === hoy
