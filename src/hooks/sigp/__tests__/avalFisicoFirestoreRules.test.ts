@@ -98,12 +98,14 @@ function avalFisico(uid: string, m: Mutadores = {}) {
     estado: 'al_dia', verificado_por: uid, fecha: serverTimestamp(), origen: 'fisico', fisico,
   }
   m.gate?.(gate)
+  const tsEntrada = Timestamp.now()
   const entrada: Record<string, any> = {
-    de: 'pendiente', a: 'al_dia', por: uid, fecha: Timestamp.now(),
+    de: 'pendiente', a: 'al_dia', por: uid, fecha: tsEntrada,
     motivo: 'Gate SST: AL DÍA por FORMATOS FÍSICOS',
     // copia COMPLETA del registro del gate (un serverTimestamp no puede ir en
-    // un array: la fecha del registro lleva un Timestamp real)
-    fisico: { ...fisico, fecha_registro: Timestamp.now() },
+    // un array: la fecha del registro lleva un Timestamp real — el MISMO de la
+    // entrada, como hace el builder real)
+    fisico: { ...fisico, fecha_registro: tsEntrada },
   }
   m.ent?.(entrada)
   const payload: Record<string, any> = { sst_gate: gate, fecha_actualizacion: serverTimestamp() }
@@ -485,9 +487,18 @@ describe('rama APP — la atribución y la forma del gate no se falsifican', () 
     await assertFails(upd('ingrid', { 'sst_gate.fisico.declaracion': false }))
   }, TIMEOUT)
 
-  it('100. BORRAR sst_gate (deleteField) sigue permitido como siempre — y deja el gate en pendiente (cierra el pago)', async () => {
+  it('100. BORRAR sst_gate (deleteField) sigue permitido — CON traza — y deja el gate en pendiente (cierra el pago)', async () => {
     await assertSucceeds(upd('ingrid', avalFisico('ingrid')))
-    await assertSucceeds(upd('sofia', { sst_gate: deleteField(), fecha_actualizacion: Timestamp.now() }))
+    await assertSucceeds(upd('sofia', {
+      sst_gate: deleteField(), fecha_actualizacion: Timestamp.now(),
+      historial: arrayUnion({ de: 'al_dia', a: 'pendiente', por: 'sofia', fecha: Timestamp.now(), motivo: 'gate retirado' }),
+    }))
+  }, TIMEOUT)
+
+  it('100b. RECHAZO: BORRAR sst_gate SIN dejar traza de quién lo hizo (la cadena de la habilitación no se pierde)', async () => {
+    await assertSucceeds(upd('ingrid', avalFisico('ingrid')))
+    await assertFails(upd('sofia', { sst_gate: deleteField(), fecha_actualizacion: Timestamp.now() }))
+    await assertFails(upd('ingrid', { sst_gate: deleteField(), fecha_actualizacion: Timestamp.now() }))
   }, TIMEOUT)
 })
 
@@ -552,11 +563,11 @@ describe('`historial` es append-only para los 3 roles — también en writes que
     await assertFails(upd('sofia', { historial: deleteField() }))
   }, TIMEOUT)
 
-  it('109. RECHAZO: la entrada nueva no es un mapa / trae claves extra / motivo de 5.001 / fecha o "a" inválidos', async () => {
+  it('109. RECHAZO: la entrada nueva no es un mapa / trae claves extra / motivo de 2.501 / fecha o "a" inválidos', async () => {
     await conPrevio()
     await assertFails(upd('sofia', { historial: arrayUnion('texto suelto') }))
     await assertFails(upd('sofia', { historial: arrayUnion(entrada({ colado: true })) }))
-    await assertFails(upd('sofia', { historial: arrayUnion(entrada({ motivo: 'x'.repeat(5001) })) }))
+    await assertFails(upd('sofia', { historial: arrayUnion(entrada({ motivo: 'x'.repeat(2501) })) }))
     await assertFails(upd('sofia', { historial: arrayUnion(entrada({ fecha: 'hoy' })) }))
     await assertFails(upd('sofia', { historial: arrayUnion(entrada({ a: 'aprobado_por_telefono' })) }))
   }, TIMEOUT)
@@ -631,7 +642,10 @@ describe('integración — el aval físico libera la liquidación (y sin aval no
   it('118. tras un aval físico, borrar sst_gate y luego intentar liquidar → denegado', async () => {
     await sembrarProyecto()
     await assertSucceeds(upd('ingrid', avalFisico('ingrid')))
-    await assertSucceeds(upd('sofia', { sst_gate: deleteField(), fecha_actualizacion: Timestamp.now() }))
+    await assertSucceeds(upd('sofia', {
+      sst_gate: deleteField(), fecha_actualizacion: Timestamp.now(),
+      historial: arrayUnion({ de: 'al_dia', a: 'pendiente', por: 'sofia', fecha: Timestamp.now(), motivo: 'gate retirado' }),
+    }))
     await assertFails(liquidar())
   }, TIMEOUT)
 })
@@ -906,5 +920,85 @@ describe('declaracion_version y declaracion_email — validados en la regla (act
     const copia = d.historial.find((h: any) => h.fisico).fisico
     if (d.sst_gate.fisico.declaracion_email !== 'ingrid@test.dev' || copia.declaracion_email !== 'ingrid@test.dev') throw new Error('correo no registrado')
     if (d.sst_gate.fisico.declaracion_version !== 'SST-FIS-v1' || copia.declaracion_version !== 'SST-FIS-v1') throw new Error('versión no registrada')
+  }, TIMEOUT)
+})
+
+// ═════════════ TERCERA PASADA OPUS (final) ═════════════
+
+describe('endurecimientos finales — fecha de la copia, tope del motivo, borrado con traza, correo', () => {
+  const e = (extra: Record<string, any> = {}) =>
+    ({ de: 'pendiente', a: 'al_dia', por: 'sofia', fecha: Timestamp.now(), motivo: 'm', ...extra })
+  const conCambio = (entrada: Record<string, any>) => ({
+    sst_gate: { estado: 'al_dia', verificado_por: 'sofia', fecha: Timestamp.now() },
+    fecha_actualizacion: Timestamp.now(),
+    historial: arrayUnion(entrada),
+  })
+
+  it('162. RECHAZO: la copia con fecha_registro ABSURDA (2020) distinta de la fecha de la entrada', async () => {
+    await assertFails(upd('ingrid', avalFisico('ingrid', {
+      ent: x => { x.fisico.fecha_registro = Timestamp.fromMillis(Date.parse('2020-01-01')) },
+    })))
+  }, TIMEOUT)
+
+  it('163. RECHAZO: la copia con fecha_registro != fecha de la entrada (aunque ambas sean recientes)', async () => {
+    await assertFails(upd('ingrid', avalFisico('ingrid', {
+      ent: x => { x.fisico.fecha_registro = Timestamp.fromMillis(x.fecha.toMillis() + 60_000) },
+    })))
+  }, TIMEOUT)
+
+  it('164. el motivo de la entrada: 2500 caracteres pasa, 2501 no (tope anti-inflado)', async () => {
+    await assertSucceeds(upd('sofia', conCambio(e({ motivo: 'x'.repeat(2500) }))))
+    // mismo actor y mismo payload válido: la ÚNICA diferencia es 1 carácter de motivo
+    await env.withSecurityRulesDisabled(async (ctx) => { await updateDoc(doc(ctx.firestore(), REF), { sst_gate: deleteField(), historial: deleteField() }) })
+    await assertFails(upd('sofia', conCambio(e({ motivo: 'x'.repeat(2501) }))))
+  }, TIMEOUT)
+
+  it('165. RECHAZO: token SIN correo con declaracion_email vacío (no se cuela si alguien "arregla" token.email)', async () => {
+    const sinEmail = env.authenticatedContext('ingrid').firestore()
+    await assertFails(updateDoc(doc(sinEmail, REF), avalFisico('ingrid', { fis: f => { f.declaracion_email = '' } })))
+  }, TIMEOUT)
+
+  it('166. RECHAZO: declaracion_email de menos de 3 caracteres', async () => {
+    const corto = env.authenticatedContext('ingrid', { email: 'a@' }).firestore()
+    await assertFails(updateDoc(doc(corto, REF), avalFisico('ingrid', { fis: f => { f.declaracion_email = 'a@' } })))
+  }, TIMEOUT)
+
+  it('167. DECISIÓN DOCUMENTADA: email_verified=false NO bloquea el aval físico (las cuentas del panel nacen sin verificar)', async () => {
+    const noVerificado = env.authenticatedContext('ingrid', { email: emailDe('ingrid'), email_verified: false }).firestore()
+    await assertSucceeds(updateDoc(doc(noVerificado, REF), avalFisico('ingrid')))
+  }, TIMEOUT)
+
+  it('168. el aval físico con el payload REAL del builder sigue pasando (fecha de la copia == fecha de la entrada)', async () => {
+    const ayer = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+    const p = patchAvalFisico(
+      { responsable_archivo: 'Marcela Torres', ubicacion: 'Archivador 3, carpeta Claro 2026', fecha_formatos: ayer,
+        tipos_formato: ['ats'], motivo: 'Exigencia del cliente en sitio', declaracion: true },
+      'ingrid', emailDe('ingrid'), 'pendiente', serverTimestamp(), Timestamp.now(), Timestamp.fromMillis(fechaFormatosATimestampMs(ayer)),
+    )!
+    await assertSucceeds(upd('ingrid', { sst_gate: p.sst_gate, fecha_actualizacion: serverTimestamp(), historial: arrayUnion(p.entradaHistorial) }))
+  }, TIMEOUT)
+})
+
+describe('REGRESIÓN — configuracion/horarios_personales (PR #155) sigue viva con estas reglas', () => {
+  // La 3.ª revisión atrapó que una rama atrasada habría BORRADO este match al desplegar.
+  const HP = 'configuracion/horarios_personales'
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), HP), { horarios: { sofia: '16:00' } })
+    })
+  }, TIMEOUT)
+
+  it('169. sst y residente_sst LEEN su hora de cierre (la regla genérica de configuracion NO se lo permitiría)', async () => {
+    await assertSucceeds(getDoc(doc(db('sofia'), HP)))
+    await assertSucceeds(getDoc(doc(db('ramiro'), HP)))
+  }, TIMEOUT)
+
+  it('170. gerencia_administrativa ESCRIBE los horarios (la genérica solo dejaría a GG y admin)', async () => {
+    await assertSucceeds(updateDoc(doc(db('marcela'), HP), { 'horarios.cesar': '15:30' }))
+  }, TIMEOUT)
+
+  it('171. sst NO escribe los horarios; anónimo no lee', async () => {
+    await assertFails(updateDoc(doc(db('sofia'), HP), { 'horarios.sofia': '23:00' }))
+    await assertFails(getDoc(doc(dbAnon(), HP)))
   }, TIMEOUT)
 })

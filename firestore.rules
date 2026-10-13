@@ -1070,7 +1070,8 @@ service cloud.firestore {
           // versión nueva) y quien declara queda identificado por el correo
           // AUTÉNTICO de su sesión, no tecleado: sobrevive aunque cambie el uid.
           && f.declaracion_version in ['SST-FIS-v1']
-          && f.declaracion_email is string && f.declaracion_email == request.auth.token.email
+          && f.declaracion_email is string && f.declaracion_email.size() >= 3
+          && f.declaracion_email == request.auth.token.email
           && f.registrado_por == request.auth.uid
           && f.fecha_registro == request.time;
     }
@@ -1089,6 +1090,7 @@ service cloud.firestore {
           && nuevo[previo.size()].get('por', '') == request.auth.uid
           && nuevo[previo.size()].get('de', '') == resource.data.get('sst_gate', {}).get('estado', 'pendiente')
           && nuevo[previo.size()].get('fisico', {}).get('fecha_registro', null) is timestamp
+          && nuevo[previo.size()].get('fisico', {}).get('fecha_registro', null) == nuevo[previo.size()].get('fecha', null)
           && nuevo[previo.size()].get('fisico', {}).diff(g.fisico).affectedKeys().hasOnly(['fecha_registro']);
     }
 
@@ -1113,7 +1115,7 @@ service cloud.firestore {
           && e.get('fecha', null) is timestamp
           && e.fecha > request.time - duration.value(1, 'd')
           && e.fecha < request.time + duration.value(1, 'd')
-          && e.get('motivo', '') is string && e.get('motivo', '').size() <= 5000
+          && e.get('motivo', '') is string && e.get('motivo', '').size() <= 2500
           // la traza SOLO crece junto con un cambio del gate y cuenta lo que
           // quedó: no se agregan entradas sueltas (ni fechadas a gusto) que
           // cuenten una historia que el gate no tiene.
@@ -1139,11 +1141,13 @@ service cloud.firestore {
                   && entradaHistorialValida(nuevo[previo.size()])));
     }
 
-    // Solo se valida el gate cuando `sst_gate` CAMBIA; borrarlo se conserva
-    // como siempre (falla cerrado para el pago: la liquidación lo lee).
+    // Solo se valida el gate cuando `sst_gate` CAMBIA. Borrarlo sigue permitido
+    // (falla cerrado para el pago: la liquidación lo lee) PERO deja traza de quién
+    // lo hizo: una entrada nueva (a == 'pendiente'), como cualquier cambio del gate.
     function contenidoGateValido() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['sst_gate'])
-          || !('sst_gate' in request.resource.data)
+          || (!('sst_gate' in request.resource.data)
+              && request.resource.data.get('historial', []).size() == resource.data.get('historial', []).size() + 1)
           || avalAppValido(request.resource.data.sst_gate)
           || avalFisicoValido(request.resource.data.sst_gate);
     }

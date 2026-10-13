@@ -5,6 +5,8 @@
 // formato propio del cliente; el registro se copia al historial. NO hay
 // escaneo: los formatos no se suben.
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { Timestamp } from 'firebase/firestore'
 import {
   AYUDA_UBICACION, COLUMNAS_AVALES_FISICOS, TEXTOS_DECLARACION, VERSION_DECLARACION_VIGENTE, VERSIONES_DECLARACION, textoDeclaracionDe, LEYENDA_AVAL_FISICO, MAX_TEXTO_AVAL, MAX_TIPOS_FORMATO, MIN_MOTIVO_FISICO,
@@ -393,5 +395,26 @@ describe('declaración versionada + correo auténtico de quien declara', () => {
     expect(textoDeclaracionDe('SST-FIS-v1')).toBe(TEXTO_DECLARACION)
     expect(textoDeclaracionDe('SST-FIS-v9')).toContain('SST-FIS-v9')
     expect(textoDeclaracionDe(undefined)).toContain('desconocida')
+  })
+})
+
+
+describe('ESPEJO regla ⟷ cliente: las versiones de declaración y los textos', () => {
+  const reglas = readFileSync(resolve(__dirname, '../../../../firestore.rules'), 'utf8')
+
+  it("la lista `declaracion_version in [...]` de firestore.rules es EXACTAMENTE VERSIONES_DECLARACION", () => {
+    const m = reglas.match(/declaracion_version in \[([^\]]*)\]/)
+    expect(m, 'no se encontró la cláusula de versiones en firestore.rules').not.toBeNull()
+    const enRegla = [...m![1].matchAll(/'([^']+)'/g)].map(x => x[1]).sort()
+    expect(enRegla).toEqual([...VERSIONES_DECLARACION].sort())
+  })
+
+  it('los mínimos y topes del cliente coinciden con los de la regla (ubicación 10, motivo 10, tope 2000)', () => {
+    expect(reglas).toContain('textoValido(f.ubicacion, 10)')
+    expect(reglas).toContain('textoValido(f.motivo, 10)')
+    expect(reglas).toContain('t.size() <= 2000')
+    expect(MIN_UBICACION).toBe(10)
+    expect(MIN_MOTIVO_FISICO).toBe(10)
+    expect(MAX_TEXTO_AVAL).toBe(2000)
   })
 })
