@@ -22,11 +22,28 @@ import { httpsCallable } from 'firebase/functions'
 import { doc, getDoc } from 'firebase/firestore'
 import { db, functions } from '../firebase/config'
 import { useAuth } from '../contexts/AuthContext'
-import { debeLatir, LATIDO_MIN_DEFAULT } from '../types/sigp/jornada'
+import { debeLatir, LATIDO_MIN_DEFAULT, CLAVE_MARCA_LS } from '../types/sigp/jornada'
 import { claveDia } from '../types/sigp/horario'
 import { accesoResidente, type Rol } from '../types/sigp/roles'
 
+/** Marca local del último latido/entrada — la consume el guard de arranque
+ *  del AuthContext (día nuevo exige login) sin leer Firestore (el personal
+ *  no puede leer `jornadas`; su propia marca vive en SU navegador, que es
+ *  exactamente el ámbito correcto para "esta pestaña estaba trabajando"). */
+export function guardarMarcaLocal(uid: string, ahora: Date): void {
+  try {
+    localStorage.setItem(CLAVE_MARCA_LS(uid), JSON.stringify({ dia: claveDia(ahora), ts: ahora.getTime() }))
+  } catch { /* LS inaccesible — el guard degradará a pedir login */ }
+}
+
 const EVENTOS_INTERACCION = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const
+
+// Última interacción REAL (en memoria, jamás persistida — privacidad igual):
+// la consume el banner de cierre para distinguir "sigue trabajando" de "ya no
+// está" al vencer el countdown (debeCerrarAlVencer). No distingue clic de
+// tecla ni dónde ocurrió — solo un instante.
+let ultimaInteraccionMs = 0
+export const getUltimaInteraccionMs = (): number => ultimaInteraccionMs
 
 export function usePresencia(): void {
   const { user } = useAuth()
@@ -52,6 +69,7 @@ export function usePresencia(): void {
 
     const onInteraccion = () => {
       const ahora = Date.now()
+      ultimaInteraccionMs = ahora
       const hoy = claveDia(new Date(ahora))
       // Cambio de día local con la pestaña viva → como primera interacción.
       const previo = ultimoLatido.current && ultimoLatido.current.dia === hoy
@@ -60,7 +78,10 @@ export function usePresencia(): void {
       if (enVuelo.current || !debeLatir(previo, ahora, latidoMin.current)) return
       enVuelo.current = true
       httpsCallable(functions, 'latidoJornada')({ accion: 'latido' })
-        .then(() => { ultimoLatido.current = { ms: ahora, dia: hoy } })
+        .then(() => {
+          ultimoLatido.current = { ms: ahora, dia: hoy }
+          if (uid) guardarMarcaLocal(uid, new Date(ahora))
+        })
         .catch(e => console.warn('Presencia: latido no registrado', e))
         .finally(() => { enVuelo.current = false })
     }

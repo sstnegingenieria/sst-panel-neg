@@ -3,9 +3,11 @@ import { describe, it, expect, vi } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
 import {
   debeLatir, cierreEfectivo, presenteAhora, normalizarJornada,
-  ROLES_OPERAN_EN_APP, operaEnApp,
+  ROLES_OPERAN_EN_APP, operaEnApp, parseMarcaLocal, debeForzarLogin,
+  debeCerrarAlVencer,
   LATIDO_MIN_DEFAULT, GRACIA_CIERRE_MIN_DEFAULT, VENTANA_PRESENTE_MIN_DEFAULT,
 } from '../jornada'
+import { horaFinDe } from '../horario'
 
 // La CF (solo su helper puro diaBogota) — deps de firebase mockeadas,
 // patrón horario.test.ts.
@@ -62,6 +64,76 @@ describe('presenteAhora — ventana de 15 min, salida manual apaga', () => {
     expect(presenteAhora({ ultimo_latido: ts(base) }, base + 14 * MIN, VENTANA_PRESENTE_MIN_DEFAULT)).toBe(true)
     expect(presenteAhora({ ultimo_latido: ts(base) }, base + 16 * MIN, 15)).toBe(false)
     expect(presenteAhora({ ultimo_latido: ts(base), cierre: { fecha: ts(base), tipo: 'manual' } }, base, 15)).toBe(false)
+  })
+})
+
+describe('salida AUTOMÁTICA persistida (marcación 13-oct) — distinguible', () => {
+  it("cierre tipo 'automatica' escrito → cierreEfectivo lo reporta como automatico con SU fecha", () => {
+    const r = cierreEfectivo({ ultimo_latido: ts(base), cierre: { fecha: ts(base + 5 * MIN), tipo: 'automatica' } }, base + 60 * MIN, 30)
+    expect(r.estado).toBe('automatico')
+    expect(r.estado === 'automatico' && r.fecha.toMillis()).toBe(base + 5 * MIN)
+  })
+  it('normalizarJornada acepta entrada y cierre automatica; rechaza tipos desconocidos', () => {
+    const j = normalizarJornada('x', {
+      uid: 'u', dia: '2026-10-13', inicio: ts(base), ultimo_latido: ts(base),
+      entrada: { fecha: ts(base) }, cierre: { fecha: ts(base), tipo: 'automatica' },
+    })!
+    expect(j.entrada?.fecha.toMillis()).toBe(base)
+    expect(j.cierre?.tipo).toBe('automatica')
+    const malo = normalizarJornada('x', {
+      uid: 'u', dia: '2026-10-13', inicio: ts(base), ultimo_latido: ts(base),
+      cierre: { fecha: ts(base), tipo: 'inventado' },
+    })!
+    expect(malo.cierre).toBeUndefined()
+  })
+})
+
+describe('debeForzarLogin — día nuevo exige login, sin expulsar al nocturno', () => {
+  const hoy = '2026-10-13'
+  it('sin marca local (navegador nuevo/LS limpio) → forzar login', () => {
+    expect(debeForzarLogin(null, hoy, base, GRACIA_CIERRE_MIN_DEFAULT)).toBe(true)
+  })
+  it('marca de HOY → jamás fuerza (recarga intradía de alguien activo)', () => {
+    expect(debeForzarLogin({ dia: hoy, ts: base - 300 * MIN }, hoy, base, 30)).toBe(false)
+  })
+  it('CRUCE DE MEDIANOCHE (precisión 1): marca de AYER pero FRESCA → continuación, no fuerza', () => {
+    expect(debeForzarLogin({ dia: '2026-10-12', ts: base - 5 * MIN }, hoy, base, 30)).toBe(false)
+  })
+  it('marca de ayer y VIEJA (llegó a la mañana siguiente) → forzar login', () => {
+    expect(debeForzarLogin({ dia: '2026-10-12', ts: base - 6 * 60 * MIN }, hoy, base, 30)).toBe(true)
+  })
+  it('parseMarcaLocal tolera basura', () => {
+    expect(parseMarcaLocal(null)).toBeNull()
+    expect(parseMarcaLocal('no-json')).toBeNull()
+    expect(parseMarcaLocal('{"dia":1}')).toBeNull()
+    expect(parseMarcaLocal(JSON.stringify({ dia: hoy, ts: base }))).toEqual({ dia: hoy, ts: base })
+  })
+})
+
+describe('debeCerrarAlVencer — el cierre automático es para quien ya no está (ajuste SGI/SST)', () => {
+  const inicioAviso = base
+  it('interacción DESPUÉS de aparecer el aviso → NO cerrar (se pospone solo)', () => {
+    expect(debeCerrarAlVencer(inicioAviso + 3 * MIN, inicioAviso)).toBe(false)
+  })
+  it('sin interacción durante todo el aviso → cerrar (salida automática)', () => {
+    expect(debeCerrarAlVencer(inicioAviso - 20 * MIN, inicioAviso)).toBe(true)
+    expect(debeCerrarAlVencer(0, inicioAviso)).toBe(true)
+  })
+})
+
+describe('horaFinDe — hora de cierre por persona con fallback a la general', () => {
+  it('la personal válida gana; sin personal → general; sin nada → null', () => {
+    expect(horaFinDe('u1', { u1: '15:00' }, '17:00')).toBe('15:00')
+    expect(horaFinDe('u2', { u1: '15:00' }, '17:00')).toBe('17:00')
+    expect(horaFinDe('u2', undefined, '17:00')).toBe('17:00')
+    expect(horaFinDe('u2', undefined, undefined)).toBeNull()
+  })
+  it('personal INVÁLIDA cae a la general — nadie queda sin hora de cierre por un typo', () => {
+    expect(horaFinDe('u1', { u1: '25:99' }, '17:00')).toBe('17:00')
+    expect(horaFinDe('u1', { u1: '' }, '17:00')).toBe('17:00')
+  })
+  it('general inválida tampoco se usa', () => {
+    expect(horaFinDe('u1', {}, 'basura')).toBeNull()
   })
 })
 

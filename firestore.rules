@@ -1269,6 +1269,20 @@ service cloud.firestore {
       allow read: if isAuthed();
     }
 
+    // Horario POR PERSONA (13-oct): hora de CIERRE individual, fallback a la
+    // general de `configuracion/horario`. La administra gerencia_administrativa
+    // (+admin) — gestionaHorario(), el mismo dueño de ausentismos — y la LEE
+    // cualquier autenticado del panel (cada cliente necesita SU hora para
+    // ejecutar su propio cierre; una hora de salida no es dato sensible —
+    // mismo razonamiento ratificado del match `configuracion/horario`).
+    // El doc guarda SOLO horas de cierre (líneas duras en types/sigp/horario.ts:
+    // sin variación por día, sin control de puntualidad — ambos = rediseño).
+    // Sin delete. El match genérico de configuracion (GG+admin) se UNE.
+    match /configuracion/horarios_personales {
+      allow read: if isAuthed();
+      allow create, update: if gestionaHorario();
+    }
+
     // Licitaciones 1.2 — REGISTRO DEL CRITERIO del semáforo.
     // Doc: configuracion/semaforo_versiones { versiones: {...}, version_actual }.
     // LECTURA: la da el match genérico de arriba (`accesoSIGP()`), que ya

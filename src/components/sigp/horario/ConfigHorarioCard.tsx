@@ -26,6 +26,9 @@ export default function ConfigHorarioCard() {
   const [latidoMin, setLatidoMin] = useState('')
   const [graciaMin, setGraciaMin] = useState('')
   const [ventanaMin, setVentanaMin] = useState('')
+  // Rebuild marcación: aviso del cierre automático + posposición.
+  const [avisoMin, setAvisoMin] = useState('')
+  const [posponerMin, setPosponerMin] = useState('')
   const [guardando, setGuardando] = useState(false)
 
   useEffect(() => {
@@ -39,6 +42,8 @@ export default function ConfigHorarioCard() {
         setLatidoMin(data.latido_min != null ? String(data.latido_min) : '')
         setGraciaMin(data.gracia_cierre_min != null ? String(data.gracia_cierre_min) : '')
         setVentanaMin(data.ventana_presente_min != null ? String(data.ventana_presente_min) : '')
+        setAvisoMin(data.aviso_cierre_min != null ? String(data.aviso_cierre_min) : '')
+        setPosponerMin(data.posponer_min != null ? String(data.posponer_min) : '')
         setVisible(true)
       })
       .catch(() => { if (activo) setVisible(false) })
@@ -62,12 +67,16 @@ export default function ConfigHorarioCard() {
       const lat = num(latidoMin, 1, 120)
       const gra = num(graciaMin, 5, 480)
       const ven = num(ventanaMin, 1, 120)
+      const avi = num(avisoMin, 1, 60)
+      const pos = num(posponerMin, 5, 480)
       await setDoc(doc(db, 'configuracion', 'horario'), {
         ips_oficina: ips,
         ...(horaFin.trim() ? { hora_fin_jornada: horaFin.trim() } : {}),
         ...(lat != null ? { latido_min: lat } : {}),
         ...(gra != null ? { gracia_cierre_min: gra } : {}),
         ...(ven != null ? { ventana_presente_min: ven } : {}),
+        ...(avi != null ? { aviso_cierre_min: avi } : {}),
+        ...(pos != null ? { posponer_min: pos } : {}),
         actualizado_por: user?.uid ?? '',
         fecha_actualizacion: Timestamp.now(),
       }, { merge: true })
@@ -113,11 +122,25 @@ export default function ConfigHorarioCard() {
                     className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
                 </label>
                 <label className="block text-xs text-gray-500">
-                  Ventana "Presente ahora" (min) — default 15
+                  Ventana "En jornada ahora" (min) — default 15
                   <input value={ventanaMin} onChange={e => setVentanaMin(e.target.value)} placeholder="15" inputMode="numeric"
                     className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
                 </label>
+                <label className="block text-xs text-gray-500">
+                  Aviso antes del cierre (min) — default 10
+                  <input value={avisoMin} onChange={e => setAvisoMin(e.target.value)} placeholder="10" inputMode="numeric"
+                    className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                </label>
+                <label className="block text-xs text-gray-500">
+                  "Seguir trabajando" pospone (min) — default 60
+                  <input value={posponerMin} onChange={e => setPosponerMin(e.target.value)} placeholder="60" inputMode="numeric"
+                    className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                </label>
               </div>
+              <p className="text-[11px] text-amber-700">
+                ⚠ La hora de fin es UNA para todo el equipo — supuesto vigente (8 personas, mismo
+                horario); si algún día alguien tiene jornada distinta, esto se rediseña.
+              </p>
               <div className="flex justify-end">
                 <button onClick={guardar} disabled={guardando || horaInvalida}
                   className="px-4 py-2 rounded-lg text-sm font-medium bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50">

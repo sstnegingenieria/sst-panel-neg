@@ -12,8 +12,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Timestamp, collection, getDoc, getDocs, doc, orderBy, query, where } from 'firebase/firestore'
 import { db } from '../../../firebase/config'
 import { toast } from '../../shared/Toast'
-import { aparearJornadas, claveDia, fmtDuracion } from '../../../types/sigp/horario'
-import type { ConfigHorario, DispositivoHorario, RegistroHorario } from '../../../types/sigp/horario'
+import { aparearJornadas, claveDia, fmtDuracion, esHoraValida } from '../../../types/sigp/horario'
+import type { ConfigHorario, DispositivoHorario, HorariosPersonales, RegistroHorario } from '../../../types/sigp/horario'
+import HorariosPersonalesCard from './HorariosPersonalesCard'
 import {
   normalizarJornada, cierreEfectivo, presenteAhora, operaEnApp,
   GRACIA_CIERRE_MIN_DEFAULT, VENTANA_PRESENTE_MIN_DEFAULT,
@@ -82,6 +83,10 @@ export default function RegistrosTab() {
   const [cfg, setCfg] = useState<{ gracia: number; ventana: number }>({
     gracia: GRACIA_CIERRE_MIN_DEFAULT, ventana: VENTANA_PRESENTE_MIN_DEFAULT,
   })
+  // Horario por persona (13-oct): hora general + mapa individual, para que
+  // nadie tenga que adivinar por qué a uno le cerró a las 3 y a otro a las 5.
+  const [horaGeneral, setHoraGeneral] = useState<string | null>(null)
+  const [horasPersonales, setHorasPersonales] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [sinAcceso, setSinAcceso] = useState(false)
   const [busqueda, setBusqueda] = useState('')
@@ -110,8 +115,12 @@ export default function RegistrosTab() {
           gracia: typeof d.gracia_cierre_min === 'number' && d.gracia_cierre_min >= 5 ? d.gracia_cierre_min : GRACIA_CIERRE_MIN_DEFAULT,
           ventana: typeof d.ventana_presente_min === 'number' && d.ventana_presente_min >= 1 ? d.ventana_presente_min : VENTANA_PRESENTE_MIN_DEFAULT,
         })
+        setHoraGeneral(d.hora_fin_jornada && esHoraValida(d.hora_fin_jornada) ? d.hora_fin_jornada.trim() : null)
       })
       .catch(() => { /* defaults */ })
+    getDoc(doc(db, 'configuracion', 'horarios_personales'))
+      .then(s => setHorasPersonales(s.exists() ? ((s.data() as HorariosPersonales).horarios ?? {}) : {}))
+      .catch(() => setHorasPersonales({}))
     getDocs(collection(db, 'users'))
       .then(snap => {
         const items: UsuarioApp[] = []
@@ -197,8 +206,8 @@ export default function RegistrosTab() {
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-xs text-gray-500" title={`Latido hace menos de ${cfg.ventana} min y sin salida manual`}>
-            Presentes ahora
+          <p className="text-xs text-gray-500" title={`Actividad hace menos de ${cfg.ventana} min y sin salida`}>
+            En jornada ahora
           </p>
           <p className="text-2xl font-bold text-gray-800 mt-1">{presentes.length}</p>
           {presentes.length > 0 && (
@@ -208,7 +217,7 @@ export default function RegistrosTab() {
           )}
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-xs text-gray-500">Con presencia hoy</p>
+          <p className="text-xs text-gray-500" title="Entrada = inicio de sesión del día">Marcaciones de hoy</p>
           <p className="text-2xl font-bold text-gray-800 mt-1">{conPresenciaHoy}</p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -240,9 +249,10 @@ export default function RegistrosTab() {
       <div>
         <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
           <h3 className="text-sm font-semibold text-gray-700">
-            Presencia
+            Marcación de entrada y salida
             <span className="ml-2 text-xs font-normal text-gray-400">
-              panel en uso — el latido corre con la interacción, no con la pestaña abierta
+              la entrada es el inicio de sesión; la salida, el cierre — manual o automático
+              {horaGeneral && <> · hora de cierre general: <b>{horaGeneral}</b></>}
             </span>
           </h3>
           <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
@@ -255,9 +265,9 @@ export default function RegistrosTab() {
               <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="py-3 px-4 font-semibold">Persona</th>
                 <th className="py-3 px-4 font-semibold">Día</th>
-                <th className="py-3 px-4 font-semibold">Primera presencia</th>
-                <th className="py-3 px-4 font-semibold">Última presencia</th>
-                <th className="py-3 px-4 font-semibold">Cierre</th>
+                <th className="py-3 px-4 font-semibold">Entrada</th>
+                <th className="py-3 px-4 font-semibold">Última actividad</th>
+                <th className="py-3 px-4 font-semibold">Salida</th>
                 <th className="py-3 px-4 font-semibold">Ubicación</th>
                 <th className="py-3 px-4 font-semibold text-center">Dispositivo</th>
               </tr>
@@ -281,14 +291,23 @@ export default function RegistrosTab() {
                     <td className="py-3 px-4">
                       <span className="font-medium text-gray-800">{j.nombre}</span>
                       <span className="block text-xs text-gray-400">{j.rol}</span>
+                      {horasPersonales[j.uid] && esHoraValida(horasPersonales[j.uid]) && (
+                        <span className="inline-flex mt-0.5 px-1.5 py-px rounded text-[10px] font-medium bg-brand-50 text-brand-700"
+                          title={`Horario propio — su sesión avisa y cierra a las ${horasPersonales[j.uid]} (la general es ${horaGeneral ?? '—'})`}>
+                          cierre {horasPersonales[j.uid]}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-gray-700">{fFechaDia(j.dia)}</td>
-                    <td className="py-3 px-4 font-mono text-gray-700">{fHora(j.inicio)}</td>
-                    <td className="py-3 px-4 font-mono text-gray-700">{fHora(j.ultimo_latido)}</td>
+                    <td className="py-3 px-4 font-mono text-gray-700"
+                      title={j.entrada ? 'Inicio de sesión del día' : 'Sin login registrado — sesión persistida (transición del arranque); la primera actividad fue ' + fHora(j.inicio)}>
+                      {j.entrada ? fHora(j.entrada.fecha) : '—'}
+                    </td>
+                    <td className="py-3 px-4 font-mono text-gray-700" title="Último uso del panel (latido)">{fHora(j.ultimo_latido)}</td>
                     <td className="py-3 px-4">
                       {cierre.estado === 'presente' && (
                         <span className="text-xs px-2 py-0.5 rounded border border-dashed border-emerald-300 text-emerald-700">
-                          Presente ahora
+                          En jornada
                         </span>
                       )}
                       {cierre.estado === 'manual' && (
@@ -298,12 +317,12 @@ export default function RegistrosTab() {
                       )}
                       {cierre.estado === 'automatico' && (
                         <span className="text-xs text-gray-500"
-                          title={`Sin latido hace más de ${cfg.gracia} min — cierre derivado en la última presencia (caso normal: nadie tiene que acordarse de salir)`}>
-                          automático <span className="font-mono">{fHora(cierre.fecha)}</span>
+                          title="Salida automática: el cierre de jornada venció sin respuesta, o la sesión quedó sin cerrar y se toma la última actividad">
+                          automática <span className="font-mono">{fHora(cierre.fecha)}</span>
                         </span>
                       )}
-                      <span className="block text-[10px] text-gray-400 mt-0.5" title="Primera a última presencia del día — no mide horas netas de trabajo">
-                        presencia: {fmtDuracion(j.ultimo_latido.toMillis() - j.inicio.toMillis())}
+                      <span className="block text-[10px] text-gray-400 mt-0.5" title="De la entrada (o primera actividad) a la última actividad — no mide horas netas">
+                        jornada: {fmtDuracion(j.ultimo_latido.toMillis() - (j.entrada?.fecha ?? j.inicio).toMillis())}
                       </span>
                     </td>
                     <td className="py-3 px-4"><ChipUbicacion enOficina={j.en_oficina_ultimo} inicio={j.en_oficina_inicio} /></td>
@@ -378,6 +397,9 @@ export default function RegistrosTab() {
           )
         )}
       </div>
+
+      {/* Horarios por persona (gerencia_administrativa + admin) */}
+      <HorariosPersonalesCard horaGeneral={horaGeneral} />
 
       {/* Configuración inline — footer de la pestaña */}
       <ConfigHorarioCard />

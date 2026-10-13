@@ -196,7 +196,12 @@ export const TIPO_AUSENTISMO_COLOR: Record<TipoAusentismo, string> = {
 export interface ConfigHorario {
   /** IPs exactas o CIDRs IPv4 de la oficina (una entrada por línea en la UI). */
   ips_oficina?: string[]
-  /** 'HH:mm' — dispara el recordatorio de cierre de sesión (hora local). */
+  /** 'HH:mm' — hora de fin de jornada (hora local): dispara el aviso y el
+   *  cierre AUTOMÁTICO de sesión del rebuild de marcación (13-oct).
+   *  ⚠ SUPUESTO NOMBRADO, no verdad permanente (precisión 2 de Giovanny):
+   *  es UNA SOLA hora para todo el equipo — hoy son 8 personas con el mismo
+   *  horario y está bien; el día que alguien tenga jornada distinta, esto
+   *  se revisa (horario por persona es otro diseño, no un parche aquí). */
   hora_fin_jornada?: string
   // Rebuild presencia (oct-2026) — supuestos nombrados, ajustables sin deploy:
   /** Ventana del latido en minutos (default 10). */
@@ -205,9 +210,56 @@ export interface ConfigHorario {
   gracia_cierre_min?: number
   /** Ventana de "Presente ahora" en minutos (default 15). */
   ventana_presente_min?: number
+  // Rebuild marcación (13-oct):
+  /** Countdown del aviso antes del cierre automático de sesión (default 10). */
+  aviso_cierre_min?: number
+  /** Cuánto pospone "Seguir trabajando" (default 60). */
+  posponer_min?: number
 }
 
 /** ¿'HH:mm' válida? (para la edición inline). */
 export function esHoraValida(v: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(v.trim())
+}
+
+// ── Horario POR PERSONA (rebuild 13-oct — doc configuracion/horarios_personales) ──
+//
+// Hora de CIERRE de jornada individual, administrada por gerencia_administrativa
+// (+admin, helper de reglas gestionaHorario()). Quien no tenga hora propia usa
+// la GENERAL de configuracion/horario — nadie queda sin hora de cierre. Vive en
+// `configuracion/` (es configuración del módulo de horario, hermana de la hora
+// general) y NO en `users` (colección compartida con la app, con denylist de
+// self-update que no se engorda por un dato operativo) ni en
+// `empleados_directos` (maestro del frente SGI/SST — no escribimos ahí).
+//
+// ⚠ LÍNEA DURA 1 — el horario personal es FIJO, IGUAL TODOS LOS DÍAS. No hay
+// variación por día de la semana y NO debe agregarse un array/mapa por día
+// aquí: si algún día la hay, es un REDISEÑO con su propio diseño aprobado,
+// no un campo nuevo.
+//
+// ⚠ LÍNEA DURA 2 — este doc guarda SOLO la hora de CIERRE. No agregar hora de
+// entrada esperada, marca de llegada tarde ni cálculo de cumplimiento:
+// convertir esto en un control de puntualidad es una decisión de Giovanny
+// sobre su gente, que se diseña aparte y con los ojos abiertos — jamás como
+// efecto secundario de un campo nuevo.
+
+export interface HorariosPersonales {
+  /** uid → 'HH:mm' (hora de cierre). Clave ausente = usa la hora general. */
+  horarios?: Record<string, string>
+  actualizado_por?: string
+  fecha_actualizacion?: Timestamp
+}
+
+/** Hora de cierre EFECTIVA de una persona: la personal si existe y es válida,
+ *  si no la general; null = sin hora de cierre configurada (sin banner, como
+ *  cuando la general no existe). */
+export function horaFinDe(
+  uid: string,
+  personales: Record<string, string> | undefined,
+  general: string | undefined,
+): string | null {
+  const propia = personales?.[uid]
+  if (propia && esHoraValida(propia)) return propia.trim()
+  if (general && esHoraValida(general)) return general.trim()
+  return null
 }
