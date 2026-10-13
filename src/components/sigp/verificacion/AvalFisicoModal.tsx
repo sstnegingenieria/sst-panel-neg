@@ -10,14 +10,14 @@
 // y la regla de Firestore lo exige igual (la obligatoriedad no vive solo aquí).
 import { useEffect, useMemo, useState } from 'react'
 import { Timestamp, arrayUnion, doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore'
-import { db } from '../../../firebase/config'
+import { auth, db } from '../../../firebase/config'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import { estadoSstGate } from '../../../types/sigp/proyecto'
 import type { SstGateProyecto } from '../../../types/sigp/proyecto'
 import {
   AYUDA_UBICACION, MAX_TEXTO_AVAL, MIN_MOTIVO_FISICO, MIN_UBICACION, OPCIONES_TIPO_FORMATO,
-  PLACEHOLDER_UBICACION, TEXTO_DECLARACION, TIPO_FORMATO_OTRO, esAvalFisico,
+  PLACEHOLDER_UBICACION, TEXTO_DECLARACION, TIPO_FORMATO_OTRO, VERSION_DECLARACION_VIGENTE, esAvalFisico,
   fechaFormatosATimestampMs, patchAvalFisico, validarAvalFisico,
 } from '../../../types/sigp/avalFisico'
 import type { EntradaAvalFisico } from '../../../types/sigp/avalFisico'
@@ -74,11 +74,13 @@ export default function AvalFisicoModal({ verificacion, uid, onClose, onSaved }:
       // datos viejos habría fallado con un error engañoso).
       const fresco = await getDoc(doc(db, 'verificaciones_sst', verificacion.proyecto_id))
       const estadoActual = estadoSstGate({ sst_gate: fresco.data()?.sst_gate as SstGateProyecto | undefined })
+      // Correo AUTÉNTICO de la sesión (la regla lo compara con el del token).
+      const email = auth.currentUser?.email ?? ''
       const p = patchAvalFisico(
-        entrada, uid, estadoActual,
+        entrada, uid, email, estadoActual,
         serverTimestamp(), Timestamp.now(), Timestamp.fromMillis(fechaFormatosATimestampMs(fecha)),
       )
-      if (!p) return
+      if (!p) { toast('No se pudo identificar tu correo de sesión — vuelve a iniciar sesión', 'error'); return }
       await updateDoc(doc(db, 'verificaciones_sst', verificacion.proyecto_id), {
         sst_gate: p.sst_gate,
         fecha_actualizacion: serverTimestamp(),
@@ -171,7 +173,7 @@ export default function AvalFisicoModal({ verificacion, uid, onClose, onSaved }:
         <label className="flex items-start gap-2 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5">
           <input type="checkbox" checked={declaracion} onChange={e => setDeclaracion(e.target.checked)}
             className="mt-0.5 rounded border-gray-300 text-brand-600 focus:ring-brand-300" />
-          <span><strong>Declaración.</strong> {TEXTO_DECLARACION}</span>
+          <span><strong>Declaración.</strong> {TEXTO_DECLARACION} <span className="text-[11px] text-gray-400">({VERSION_DECLARACION_VIGENTE} · se registra con tu correo de sesión)</span></span>
         </label>
 
         {faltantes.length > 0 && (

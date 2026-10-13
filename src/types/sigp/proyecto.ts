@@ -773,6 +773,8 @@ export interface AvalFisicoSst {
   formato_otro?: string             // obligatorio si tipos_formato incluye 'otro'
   motivo: string                    // por qué fue físico (ej. exigencia del cliente)
   declaracion: true                 // "originales archivados y disponibles para auditoría" — la regla exige true
+  declaracion_version: string       // versión del texto aceptado (ej. 'SST-FIS-v1') — ver avalFisico.ts
+  declaracion_email: string         // correo de quien declara — la regla exige == request.auth.token.email (autenticado, no tecleado)
   registrado_por: string            // uid — la regla exige == request.auth.uid
   fecha_registro: Timestamp         // la regla exige == request.time
 }

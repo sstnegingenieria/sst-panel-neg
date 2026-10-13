@@ -57,7 +57,9 @@ const ID = 'pry_001'
 const REF = `verificaciones_sst/${ID}`
 
 let env: RulesTestEnvironment
-const db = (a: Actor) => env.authenticatedContext(a).firestore()
+/** Correo del token de cada actor (lo que la regla compara con declaracion_email). */
+const emailDe = (a: string) => `${a}@test.dev`
+const db = (a: Actor) => env.authenticatedContext(a, { email: emailDe(a) }).firestore()
 const dbAnon = () => env.unauthenticatedContext().firestore()
 
 /** Proyección de un proyecto en la cola, SIN historial (el caso del primer
@@ -86,6 +88,8 @@ function avalFisico(uid: string, m: Mutadores = {}) {
     tipos_formato: ['ats', 'permiso_alturas'],
     motivo: 'El cliente exige los formatos SST impresos y firmados',
     declaracion: true,
+    declaracion_version: 'SST-FIS-v1',
+    declaracion_email: emailDe(uid),
     registrado_por: uid,
     fecha_registro: serverTimestamp(),
   }
@@ -699,7 +703,7 @@ describe('declaración inmutable — corregir es un aval físico NUEVO; el anter
       de: 'al_dia', a: 'al_dia', por: 'ingrid', fecha: Timestamp.now(), motivo: 'corrección',
       fisico: { responsable_archivo: 'Nuevo Custodio', ubicacion: 'Archivador 7, carpeta Claro 2027',
         fecha_formatos: dias(1), tipos_formato: ['ats'], motivo: 'Corrección de custodia por traslado',
-        declaracion: true, registrado_por: 'ingrid', fecha_registro: Timestamp.now() },
+        declaracion: true, declaracion_version: 'SST-FIS-v1', declaracion_email: emailDe('ingrid'), registrado_por: 'ingrid', fecha_registro: Timestamp.now() },
     }
     await assertFails(upd('ingrid', avalFisico('ingrid', {
       fis: f => { f.responsable_archivo = 'Nuevo Custodio' },
@@ -841,7 +845,7 @@ describe('el payload REAL del builder pasa — incluido el peor caso de tamaño'
         responsable_archivo: 'r'.repeat(2000), ubicacion: 'u'.repeat(2000), fecha_formatos: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
         tipos_formato: ['ats', 'otro'], formato_otro: 'o'.repeat(2000), motivo: 'm'.repeat(2000), declaracion: true,
       },
-      'ingrid', 'pendiente', serverTimestamp(), ahora, Timestamp.fromMillis(fechaFormatosATimestampMs(new Date(Date.now() - 86_400_000).toISOString().slice(0, 10))),
+      'ingrid', emailDe('ingrid'), 'pendiente', serverTimestamp(), ahora, Timestamp.fromMillis(fechaFormatosATimestampMs(new Date(Date.now() - 86_400_000).toISOString().slice(0, 10))),
     )
     if (!p) throw new Error('el builder no debería rechazar una entrada válida')
     await assertSucceeds(upd('ingrid', {
@@ -854,8 +858,53 @@ describe('el payload REAL del builder pasa — incluido el peor caso de tamaño'
     const p = patchAvalFisico(
       { responsable_archivo: 'Marcela Torres', ubicacion: 'Archivador 3, carpeta Claro 2026', fecha_formatos: ayer,
         tipos_formato: ['ats'], motivo: 'Exigencia del cliente en sitio', declaracion: true },
-      'ingrid', 'pendiente', serverTimestamp(), Timestamp.now(), Timestamp.fromMillis(fechaFormatosATimestampMs(ayer)),
+      'ingrid', emailDe('ingrid'), 'pendiente', serverTimestamp(), Timestamp.now(), Timestamp.fromMillis(fechaFormatosATimestampMs(ayer)),
     )!
     await assertSucceeds(upd('ingrid', { sst_gate: p.sst_gate, fecha_actualizacion: serverTimestamp(), historial: arrayUnion(p.entradaHistorial) }))
+  }, TIMEOUT)
+})
+
+// ═════════════ DECISIÓN SIGP: declaración versionada + correo auténtico ═════════════
+
+describe('declaracion_version y declaracion_email — validados en la regla (actor ingrid, un elemento roto a la vez)', () => {
+  const caso = (n: number, titulo: string, m: Mutadores) =>
+    it(`${n}. RECHAZO: ${titulo}`, async () => {
+      await assertFails(upd('ingrid', avalFisico('ingrid', m)))
+    }, TIMEOUT)
+
+  it('146. CONTROL: versión SST-FIS-v1 + correo igual al del token → permitido', async () => {
+    await assertSucceeds(upd('ingrid', avalFisico('ingrid')))
+  }, TIMEOUT)
+
+  caso(147, 'sin declaracion_version', { fis: f => { delete f.declaracion_version } })
+  caso(148, "declaracion_version desconocida ('SST-FIS-v9')", { fis: f => { f.declaracion_version = 'SST-FIS-v9' } })
+  caso(149, "declaracion_version vacía / otro tipo", { fis: f => { f.declaracion_version = '' } })
+  caso(150, 'declaracion_version numérica', { fis: f => { f.declaracion_version = 1 } })
+  caso(151, 'sin declaracion_email', { fis: f => { delete f.declaracion_email } })
+  caso(152, 'declaracion_email TECLEADO de otra persona (no es el del token)', { fis: f => { f.declaracion_email = emailDe('sofia') } })
+  caso(153, 'declaracion_email con otra capitalización (no coincide con el token)', { fis: f => { f.declaracion_email = 'INGRID@test.dev' } })
+  caso(154, 'declaracion_email vacío', { fis: f => { f.declaracion_email = '' } })
+  caso(155, 'declaracion_email no es string', { fis: f => { f.declaracion_email = 123 } })
+  caso(156, 'la copia del historial dice otro correo', { ent: e => { e.fisico = { ...e.fisico, declaracion_email: emailDe('sofia') } } })
+  caso(157, 'la copia del historial dice otra versión', { ent: e => { e.fisico = { ...e.fisico, declaracion_version: 'SST-FIS-v9' } } })
+  caso(158, 'la copia del historial SIN correo ni versión', { ent: e => { delete e.fisico.declaracion_email; delete e.fisico.declaracion_version } })
+
+  it('159. un token SIN correo (cuenta sin email) no puede avalar físico → denegado', async () => {
+    const sinEmail = env.authenticatedContext('ingrid').firestore()
+    await assertFails(updateDoc(doc(sinEmail, REF), avalFisico('ingrid')))
+  }, TIMEOUT)
+
+  it('160. quien tiene OTRO correo en su token no puede reutilizar el de ingrid (suplantación de identidad legible)', async () => {
+    const otroCorreo = env.authenticatedContext('ingrid', { email: 'otra@test.dev' }).firestore()
+    await assertFails(updateDoc(doc(otroCorreo, REF), avalFisico('ingrid')))    // el payload dice ingrid@test.dev
+  }, TIMEOUT)
+
+  it('161. el correo y la versión quedan en el gate y en la copia del historial', async () => {
+    await assertSucceeds(upd('ingrid', avalFisico('ingrid')))
+    let d: any
+    await env.withSecurityRulesDisabled(async (ctx) => { d = (await getDoc(doc(ctx.firestore(), REF))).data() })
+    const copia = d.historial.find((h: any) => h.fisico).fisico
+    if (d.sst_gate.fisico.declaracion_email !== 'ingrid@test.dev' || copia.declaracion_email !== 'ingrid@test.dev') throw new Error('correo no registrado')
+    if (d.sst_gate.fisico.declaracion_version !== 'SST-FIS-v1' || copia.declaracion_version !== 'SST-FIS-v1') throw new Error('versión no registrada')
   }, TIMEOUT)
 })

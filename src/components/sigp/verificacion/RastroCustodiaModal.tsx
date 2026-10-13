@@ -9,7 +9,7 @@ import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../../../firebase/config'
 import Modal from '../../shared/Modal'
 import {
-  LEYENDA_AVAL_FISICO, TEXTO_DECLARACION, etiquetasFormatosAval, rastroCustodia,
+  LEYENDA_AVAL_FISICO, etiquetasFormatosAval, rastroCustodia, textoDeclaracionDe,
 } from '../../../types/sigp/avalFisico'
 import type { VerificacionSst } from '../../../types/sigp/verificacionSst'
 
@@ -74,7 +74,10 @@ export default function RastroCustodiaModal({ verificacion, onClose }: Props) {
             <p><span className="text-gray-500">Formatos:</span> {etiquetasFormatosAval(r.fisico).join(', ')}
               <span className="text-gray-400"> · fecha de los formatos: {fDia(r.fisico.fecha_formatos)}</span></p>
             <p><span className="text-gray-500">Motivo:</span> {r.fisico.motivo}</p>
-            <p className="text-xs text-gray-500 italic">Declaración: {TEXTO_DECLARACION}</p>
+            <p className="text-xs text-gray-500 italic">
+              Declaración ({r.fisico.declaracion_version ?? '—'}): {textoDeclaracionDe(r.fisico.declaracion_version)}
+            </p>
+            <p className="text-[11px] text-gray-400">Declarado por: {r.fisico.declaracion_email ?? '—'}</p>
           </div>
         ))}
       </div>

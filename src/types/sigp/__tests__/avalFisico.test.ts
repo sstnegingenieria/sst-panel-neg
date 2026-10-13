@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
 import {
-  AYUDA_UBICACION, COLUMNAS_AVALES_FISICOS, LEYENDA_AVAL_FISICO, MAX_TEXTO_AVAL, MAX_TIPOS_FORMATO, MIN_MOTIVO_FISICO,
+  AYUDA_UBICACION, COLUMNAS_AVALES_FISICOS, TEXTOS_DECLARACION, VERSION_DECLARACION_VIGENTE, VERSIONES_DECLARACION, textoDeclaracionDe, LEYENDA_AVAL_FISICO, MAX_TEXTO_AVAL, MAX_TIPOS_FORMATO, MIN_MOTIVO_FISICO,
   MIN_UBICACION, OPCIONES_TIPO_FORMATO, PLACEHOLDER_UBICACION, estaAvaladoEnFisico, filaAvalFisico, filasAvalesFisicos, rastroCustodia,
   TEXTO_DECLARACION, TIPO_FORMATO_OTRO,
   avalFisicoValido, esAvalFisico, etiquetasFormatosAval,
@@ -119,13 +119,13 @@ describe('patchAvalFisico — el write exacto', () => {
   const fechaF = Timestamp.fromMillis(fechaFormatosATimestampMs('2026-10-10'))
 
   it('null si la entrada no valida, sin declaración, o no hay uid', () => {
-    expect(patchAvalFisico(completa({ ubicacion: '' }), 'ingrid', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)).toBeNull()
-    expect(patchAvalFisico(completa({ declaracion: false }), 'ingrid', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)).toBeNull()
-    expect(patchAvalFisico(completa(), '', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)).toBeNull()
+    expect(patchAvalFisico(completa({ ubicacion: '' }), 'ingrid', 'ingrid@test.dev', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)).toBeNull()
+    expect(patchAvalFisico(completa({ declaracion: false }), 'ingrid', 'ingrid@test.dev', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)).toBeNull()
+    expect(patchAvalFisico(completa(), '', 'ingrid@test.dev', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)).toBeNull()
   })
 
   it('arma sst_gate físico: al_dia + origen + custodia + declaración, fecha del SERVIDOR', () => {
-    const p = patchAvalFisico(completa(), 'ingrid', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)!
+    const p = patchAvalFisico(completa(), 'ingrid', 'ingrid@test.dev', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)!
     const g = p.sst_gate as Record<string, any>
     expect(g.estado).toBe('al_dia')
     expect(g.origen).toBe('fisico')
@@ -145,7 +145,7 @@ describe('patchAvalFisico — el write exacto', () => {
   })
 
   it('la entrada del historial COPIA el registro (con Timestamp real, apta para arrayUnion)', () => {
-    const p = patchAvalFisico(completa(), 'ingrid', 'con_novedad', ahoraSrv, ahoraCli, fechaF, HOY)!
+    const p = patchAvalFisico(completa(), 'ingrid', 'ingrid@test.dev', 'con_novedad', ahoraSrv, ahoraCli, fechaF, HOY)!
     expect(p.entradaHistorial.de).toBe('con_novedad')
     expect(p.entradaHistorial.a).toBe('al_dia')
     expect(p.entradaHistorial.por).toBe('ingrid')
@@ -159,7 +159,7 @@ describe('patchAvalFisico — el write exacto', () => {
   })
 
   it("la copia del historial es IDÉNTICA al gate salvo fecha_registro (lo que exige la regla)", () => {
-    const p = patchAvalFisico(completa({ tipos_formato: ['otro'], formato_otro: 'X formato' }), 'ingrid', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)!
+    const p = patchAvalFisico(completa({ tipos_formato: ['otro'], formato_otro: 'X formato' }), 'ingrid', 'ingrid@test.dev', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)!
     const { fecha_registro: _a, ...gate } = (p.sst_gate as any).fisico
     const { fecha_registro: _b, ...copia } = p.entradaHistorial.fisico as any
     expect(copia).toEqual(gate)
@@ -168,7 +168,7 @@ describe('patchAvalFisico — el write exacto', () => {
   it("'otro' viaja con su texto libre", () => {
     const p = patchAvalFisico(
       completa({ tipos_formato: [TIPO_FORMATO_OTRO], formato_otro: ' Formato Claro ' }),
-      'ingrid', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)!
+      'ingrid', 'ingrid@test.dev', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY)!
     expect((p.sst_gate as any).fisico.formato_otro).toBe('Formato Claro')
   })
 })
@@ -226,7 +226,7 @@ const fisicoBase = (extra: Record<string, unknown> = {}) => ({
   responsable_archivo: 'Marcela Torres', ubicacion: 'Archivador 3, carpeta Claro 2026',
   fecha_formatos: ts('2026-10-10T05:00:00Z'), tipos_formato: ['ats', 'otro'], formato_otro: 'Permiso Claro',
   motivo: 'El cliente exige los formatos impresos', declaracion: true as const,
-  registrado_por: 'ingrid', fecha_registro: ts('2026-10-13T15:00:00Z'), ...extra,
+  declaracion_version: 'SST-FIS-v1', declaracion_email: 'ingrid@test.dev', registrado_por: 'ingrid', fecha_registro: ts('2026-10-13T15:00:00Z'), ...extra,
 })
 const ver = (id: string, extra: Partial<VerificacionSst> = {}): VerificacionSst => ({
   proyecto_id: id, consecutivo: `PRY-2026-${id}`, nombre_sitio: `Sitio ${id}`, codigo_sitio_cliente: 'C',
@@ -354,5 +354,44 @@ describe('la leyenda del historial se recorta (la regla limita el motivo de la e
   it('un texto corto no se altera', () => {
     expect(motivoHistorialFisico({ responsable_archivo: 'Ana', ubicacion: 'Archivador 3', motivo: 'Exigencia del cliente' }))
       .toContain('Ana (Archivador 3); motivo: Exigencia del cliente')
+  })
+})
+
+
+describe('declaración versionada + correo auténtico de quien declara', () => {
+  const ahoraSrv = Symbol('serverTimestamp')
+  const ahoraCli = Timestamp.fromMillis(1760000000000)
+  const fechaF = Timestamp.fromMillis(fechaFormatosATimestampMs('2026-10-10'))
+  const HOY2 = new Date('2026-10-13T15:00:00')
+
+  it('el builder liga la versión vigente y el correo (recortado) en el gate Y en la copia del historial', () => {
+    const p = patchAvalFisico(completa(), 'ingrid', '  ingrid@neg.com  ', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY2)!
+    expect((p.sst_gate as any).fisico.declaracion_version).toBe(VERSION_DECLARACION_VIGENTE)
+    expect((p.sst_gate as any).fisico.declaracion_email).toBe('ingrid@neg.com')
+    expect(p.entradaHistorial.fisico?.declaracion_version).toBe('SST-FIS-v1')
+    expect(p.entradaHistorial.fisico?.declaracion_email).toBe('ingrid@neg.com')
+  })
+
+  it('sin correo de sesión NO hay aval (la regla lo exige igual)', () => {
+    expect(patchAvalFisico(completa(), 'ingrid', '', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY2)).toBeNull()
+    expect(patchAvalFisico(completa(), 'ingrid', '   ', 'pendiente', ahoraSrv, ahoraCli, fechaF, HOY2)).toBeNull()
+  })
+
+  it('el texto de SST-FIS-v1 está FIJADO: cambiar una palabra exige una versión NUEVA, no editar esta', () => {
+    expect(VERSION_DECLARACION_VIGENTE).toBe('SST-FIS-v1')
+    expect(TEXTOS_DECLARACION['SST-FIS-v1']).toBe(
+      'Declaro que los formatos SST originales están archivados en la ubicación indicada y disponibles para auditoría.')
+    expect(TEXTO_DECLARACION).toBe(TEXTOS_DECLARACION[VERSION_DECLARACION_VIGENTE])
+  })
+
+  it('la versión vigente es una de las publicadas; las versiones conocidas son las que la regla acepta', () => {
+    expect(VERSIONES_DECLARACION).toContain(VERSION_DECLARACION_VIGENTE)
+    expect(VERSIONES_DECLARACION).toEqual(['SST-FIS-v1'])   // si agregas una, súmala TAMBIÉN a `declaracion_version in [...]` de firestore.rules
+  })
+
+  it('el rastro resuelve el texto por versión y no inventa uno para una versión desconocida', () => {
+    expect(textoDeclaracionDe('SST-FIS-v1')).toBe(TEXTO_DECLARACION)
+    expect(textoDeclaracionDe('SST-FIS-v9')).toContain('SST-FIS-v9')
+    expect(textoDeclaracionDe(undefined)).toContain('desconocida')
   })
 })

@@ -1049,9 +1049,11 @@ service cloud.firestore {
     function fisicoCompleto(f) {
       return f.keys().hasAll(['responsable_archivo', 'ubicacion', 'fecha_formatos',
                               'tipos_formato', 'motivo', 'declaracion',
+                              'declaracion_version', 'declaracion_email',
                               'registrado_por', 'fecha_registro'])
           && f.keys().hasOnly(['responsable_archivo', 'ubicacion', 'fecha_formatos',
                                'tipos_formato', 'formato_otro', 'motivo', 'declaracion',
+                               'declaracion_version', 'declaracion_email',
                                'registrado_por', 'fecha_registro'])
           && textoValido(f.responsable_archivo, 3)
           && textoValido(f.ubicacion, 10)
@@ -1064,6 +1066,11 @@ service cloud.firestore {
           && (('otro' in f.tipos_formato) ? textoValido(f.get('formato_otro', ''), 3) : !('formato_otro' in f))
           && textoValido(f.motivo, 10)
           && f.declaracion is bool && f.declaracion == true
+          // el texto aceptado va LIGADO a su versión (cambiar una palabra =
+          // versión nueva) y quien declara queda identificado por el correo
+          // AUTÉNTICO de su sesión, no tecleado: sobrevive aunque cambie el uid.
+          && f.declaracion_version in ['SST-FIS-v1']
+          && f.declaracion_email is string && f.declaracion_email == request.auth.token.email
           && f.registrado_por == request.auth.uid
           && f.fecha_registro == request.time;
     }

@@ -55,9 +55,25 @@ export const MAX_DIAS_ANTIGUEDAD_FORMATOS = 730
 /** Máximo de formatos distintos que cubre un aval — espejo de la regla. */
 export const MAX_TIPOS_FORMATO = 20
 
-/** Texto de la declaración que firma (marca) quien avala. */
-export const TEXTO_DECLARACION =
-  'Declaro que los formatos SST originales están archivados en la ubicación indicada y disponibles para auditoría.'
+/**
+ * Declaración que firma (marca) quien avala — VERSIONADA. El texto queda ligado
+ * a su versión: cambiar una sola palabra de un texto ya publicado obliga a
+ * agregar una versión NUEVA (y no tocar la anterior), porque los avales ya
+ * registrados guardan la `declaracion_version` que aceptaron. Un test fija el
+ * texto de cada versión publicada. La regla de Firestore valida que la versión
+ * sea una de las conocidas (`f.declaracion_version in [...]`).
+ */
+export const VERSION_DECLARACION_VIGENTE = 'SST-FIS-v1'
+export const TEXTOS_DECLARACION: Record<string, string> = {
+  'SST-FIS-v1':
+    'Declaro que los formatos SST originales están archivados en la ubicación indicada y disponibles para auditoría.',
+}
+export const VERSIONES_DECLARACION = Object.keys(TEXTOS_DECLARACION)
+/** Texto de la versión vigente (el que ve quien avala hoy). */
+export const TEXTO_DECLARACION = TEXTOS_DECLARACION[VERSION_DECLARACION_VIGENTE]
+/** Texto de una versión ya registrada (para el rastro de auditoría). */
+export const textoDeclaracionDe = (version: string | undefined): string =>
+  (version && TEXTOS_DECLARACION[version]) || `(texto de la versión ${version ?? 'desconocida'} no disponible en esta app)`
 
 /** Leyenda del badge: lo que el aval físico afirma. */
 export const LEYENDA_AVAL_FISICO = 'originales en archivo, disponibles para auditoría'
@@ -144,6 +160,10 @@ export function motivoHistorialFisico(
  * que habilita el botón). No toca Firestore: devuelve el `sst_gate` y la
  * entrada de historial; el caller arma el updateDoc.
  *
+ * Registra QUIÉN declara de forma legible y auténtica: `declaracion_email` es el
+ * correo del token de la sesión (no tecleado) y `declaracion_version` liga el
+ * texto aceptado.
+ *
  * `ahoraServidor` (serverTimestamp()) va a `sst_gate.fecha` y a
  * `fisico.fecha_registro`: la regla exige igualdad con `request.time`, así la
  * fecha del aval no se falsea desde el navegador. La copia del historial va
@@ -153,13 +173,15 @@ export function motivoHistorialFisico(
 export function patchAvalFisico<TS>(
   entrada: EntradaAvalFisico,
   uid: string,
+  /** Correo de la sesión (`auth.currentUser.email`): la regla exige que sea el del token. */
+  email: string,
   estadoAnterior: string,
   ahoraServidor: TS,
   ahoraCliente: Timestamp,
   fechaFormatos: Timestamp,
   hoy?: Date,
 ): { sst_gate: Record<string, unknown>; entradaHistorial: EntradaHistorialGate } | null {
-  if (!uid || !avalFisicoValido(entrada, hoy)) return null
+  if (!uid || !email.trim() || !avalFisicoValido(entrada, hoy)) return null
   const base = {
     responsable_archivo: entrada.responsable_archivo.trim(),
     ubicacion: entrada.ubicacion.trim(),
@@ -169,6 +191,8 @@ export function patchAvalFisico<TS>(
       ? { formato_otro: entrada.formato_otro.trim() } : {}),
     motivo: entrada.motivo.trim(),
     declaracion: true as const,
+    declaracion_version: VERSION_DECLARACION_VIGENTE,
+    declaracion_email: email.trim(),
     registrado_por: uid,
   }
   return {
