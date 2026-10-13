@@ -1,14 +1,17 @@
 // Pestaña "Ausentismos" de Horario y asistencia — gestión con soporte
 // obligatorio y detalle médico confidencial en sub-doc privado/detalle.
-// Solo gestiona (registrar/anular/ver detalle) puedeGestionarHorarioUI
-// (gerencia_administrativa + admin); los demás roles ven la tabla en lectura.
+// Registrar/anular: puedeRegistrarAusentismoUI (gerencia_administrativa +
+// gestion_integral + admin — ampliado 13-oct con OK de Giovanny: Ingrid
+// registra AT/EL). Ver detalle MÉDICO: puedeGestionarHorarioUI
+// (gerencia_administrativa + admin) — GI no lo ve ni lo escribe, línea dura.
+// Los demás roles ven la tabla en lectura.
 import { useCallback, useEffect, useState } from 'react'
 import { Timestamp, collection, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore'
 import { db } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
-import { puedeGestionarHorarioUI } from '../../../types/sigp/permisos'
+import { puedeGestionarHorarioUI, puedeRegistrarAusentismoUI } from '../../../types/sigp/permisos'
 import { TIPO_AUSENTISMO_COLOR, TIPO_AUSENTISMO_LABEL } from '../../../types/sigp/horario'
 import type { Ausentismo, AusentismoDetallePrivado } from '../../../types/sigp/horario'
 import AusentismoFormModal from './AusentismoFormModal'
@@ -18,7 +21,8 @@ const fFecha = (t?: Timestamp) =>
 
 export default function AusentismosTab() {
   const { user } = useAuth()
-  const puedeGestionar = puedeGestionarHorarioUI(user?.rol)
+  const puedeGestionar = puedeGestionarHorarioUI(user?.rol)       // detalle médico (GA+admin)
+  const puedeRegistrar = puedeRegistrarAusentismoUI(user?.rol)    // registrar/anular (GA+GI+admin)
 
   const [ausentismos, setAusentismos] = useState<Ausentismo[]>([])
   const [loading, setLoading] = useState(true)
@@ -81,7 +85,7 @@ export default function AusentismosTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-end">
-        {puedeGestionar && (
+        {puedeRegistrar && (
           <button onClick={() => setCrearOpen(true)}
             className="flex items-center gap-2 bg-brand-700 hover:bg-brand-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
             + Registrar ausentismo
@@ -100,15 +104,15 @@ export default function AusentismosTab() {
               <th className="py-3 px-4 font-semibold">Descripción</th>
               <th className="py-3 px-4 font-semibold">Soporte</th>
               <th className="py-3 px-4 font-semibold">Estado</th>
-              {puedeGestionar && <th className="py-3 px-4 font-semibold text-right">Acciones</th>}
+              {puedeRegistrar && <th className="py-3 px-4 font-semibold text-right">Acciones</th>}
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={puedeGestionar ? 8 : 7} className="py-10 text-center text-gray-400">Cargando…</td></tr>
+              <tr><td colSpan={puedeRegistrar ? 8 : 7} className="py-10 text-center text-gray-400">Cargando…</td></tr>
             )}
             {!loading && ausentismos.length === 0 && (
-              <tr><td colSpan={puedeGestionar ? 8 : 7} className="py-12 text-center text-gray-400">No hay ausentismos registrados.</td></tr>
+              <tr><td colSpan={puedeRegistrar ? 8 : 7} className="py-12 text-center text-gray-400">No hay ausentismos registrados.</td></tr>
             )}
             {!loading && ausentismos.map(a => (
               <tr key={a.id} className="border-b border-gray-100 hover:bg-gray-50">
@@ -141,13 +145,15 @@ export default function AusentismosTab() {
                     </span>
                   )}
                 </td>
-                {puedeGestionar && (
+                {puedeRegistrar && (
                   <td className="py-3 px-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => abrirDetalle(a)} title="Ver detalle médico"
-                        className="text-xs px-2.5 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-600 hover:bg-gray-50">
-                        🔒 Detalle
-                      </button>
+                      {puedeGestionar && (
+                        <button onClick={() => abrirDetalle(a)} title="Ver detalle médico"
+                          className="text-xs px-2.5 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-600 hover:bg-gray-50">
+                          🔒 Detalle
+                        </button>
+                      )}
                       {a.estado === 'activo' && (
                         <button onClick={() => abrirAnular(a)}
                           className="text-xs px-3 py-1.5 rounded-lg font-medium border border-red-300 text-red-700 hover:bg-red-50">
