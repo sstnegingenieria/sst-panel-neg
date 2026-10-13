@@ -53,7 +53,7 @@ export default function Header({ onToggleSidebar }: HeaderProps) {
 
         {/* Logout */}
         <button
-          onClick={logout}
+          onClick={() => logout()}
           disabled={cerrandoSesion}
           className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-red-600 transition px-2 py-1.5 rounded-lg hover:bg-red-50 disabled:opacity-60 disabled:cursor-wait disabled:hover:text-gray-500 disabled:hover:bg-transparent"
         >
