@@ -113,6 +113,16 @@ export function debeLatir(msUltimoLatido: number | null, ahoraMs: number, latido
   return ahoraMs - msUltimoLatido >= latidoMin * 60_000
 }
 
+/** Al VENCER el countdown del aviso de cierre (ajuste 13-oct, levantado por
+ *  el frente SGI/SST): el cierre automático es para quien YA NO ESTÁ, no para
+ *  quien sigue trabajando e ignoró un banner — alguien a mitad de un
+ *  formulario no debe perder lo que escribe. Si hubo interacción DESPUÉS de
+ *  que el aviso apareció, la sesión NO se cierra: se pospone sola y se vuelve
+ *  a avisar más tarde. Diez minutos de aviso sin un solo input = ausente. */
+export function debeCerrarAlVencer(ultimaInteraccionMs: number, inicioAvisoMs: number): boolean {
+  return ultimaInteraccionMs <= inicioAvisoMs
+}
+
 // ── Guard de arranque: día nuevo exige LOGIN (la marcación de entrada) ───────
 // La sesión persistida que despierta en un día nuevo recibe signOut → login →
 // entrada. La decisión usa la MARCA LOCAL del último latido/entrada (clave
