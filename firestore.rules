@@ -1005,17 +1005,26 @@ service cloud.firestore {
     //    novedad con observación. Cierra el colado de un "físico" sin
     //    evidencia por la rama que no la exige.
     //  · FÍSICO (formatos en papel — el cliente los exige y no hay formularios
-    //    en la app): SOLO gestion_integral y con la EVIDENCIA completa en la
-    //    regla, no solo en la UI: escaneo (URL anclada al host/bucket de
-    //    Storage y a la ruta de ESTE proyecto), quién tiene el original, fecha
-    //    de los formatos (no futura), formatos que cubre (lista no vacía;
-    //    'otro' exige nombrarlo), motivo, y registrado_por/fecha del servidor
-    //    (no falsificables). Más la copia COMPLETA de la evidencia en
-    //    `historial` (append de UNA entrada, lo anterior intacto — traza que
-    //    sobrevive si otro avalista sobrescribe el gate después).
-    // Sin archivo no hay aval. Residual conocido y aceptado: Firestore no puede
-    // comprobar que el objeto de Storage EXISTA — la regla ata la forma de la
-    // URL, no su existencia.
+    //    en la app; NO se escanean, pueden ser 100+ hojas): SOLO
+    //    gestion_integral y con el REGISTRO DE CUSTODIA completo en la regla,
+    //    no solo en la UI: responsable del archivo, ubicación, fecha de los
+    //    formatos (no futura, ≤ 2 años), formatos que cubre (lista no vacía;
+    //    'otro' exige nombrarlo), motivo, la DECLARACIÓN expresa (== true:
+    //    originales archivados y disponibles para auditoría), y
+    //    registrado_por/fecha del servidor (no falsificables). Más la copia
+    //    COMPLETA del registro en `historial` (append de UNA entrada, lo
+    //    anterior intacto — traza que sobrevive si otro avalista sobrescribe
+    //    el gate después).
+    //    La declaración es INMUTABLE: no se edita en sitio. Una corrección es
+    //    un aval físico NUEVO — `fecha_registro == request.time` obliga a una
+    //    fecha nueva y la copia obliga a una entrada nueva del historial (que
+    //    es append-only: la declaración anterior permanece). La ubicación pide
+    //    mínimo 10 caracteres para desalentar lo genérico (guía + longitud: la
+    //    regla no puede exigir que sea "específica").
+    // Residual conocido y aceptado: la regla garantiza que el registro de
+    // custodia y la declaración EXISTAN y estén firmados por GI — no puede
+    // comprobar que el archivo físico exista; esa responsabilidad es de quien
+    // declara (y queda auditable: quién, cuándo, dónde).
     function textoValido(t, minimo) {
       return t is string && t.trim().size() >= minimo && t.size() <= 2000;
     }
@@ -1027,6 +1036,8 @@ service cloud.firestore {
           && g.get('estado', '') in ['al_dia', 'con_novedad', 'pendiente']
           && g.get('verificado_por', '') == request.auth.uid
           && g.get('fecha', null) is timestamp
+          && g.fecha > request.time - duration.value(1, 'd')
+          && g.fecha < request.time + duration.value(1, 'd')
           && (g.get('estado', '') != 'con_novedad' || textoValido(g.get('observacion', ''), 1))
           // el cambio del gate deja TRAZA: una entrada nueva cuyo `a` es el
           // estado que quedó (la UI ya la escribe; así la cadena de quién
@@ -1035,30 +1046,24 @@ service cloud.firestore {
           && request.resource.data.historial[n].get('a', '') == g.get('estado', '');
     }
 
-    function fisicoCompleto(f, proyectoId) {
-      // proyectoId se concatena a la regex de abajo: debe ser un id "plano"
-      // (un id con '|' o '.*' partiría la regex y abriría el host).
-      return proyectoId.matches('[A-Za-z0-9_-]{1,128}')
-          && f.keys().hasAll(['soporte_url', 'quien_tiene_original', 'fecha_formatos',
-                              'tipos_formato', 'motivo', 'registrado_por', 'fecha_registro'])
-          && f.keys().hasOnly(['soporte_url', 'quien_tiene_original', 'cargo', 'fecha_formatos',
-                               'tipos_formato', 'formato_otro', 'motivo', 'registrado_por',
-                               'fecha_registro'])
-          && f.soporte_url is string
-          && f.soporte_url.matches(
-               '^(https://firebasestorage[.]googleapis[.]com/v0/b/neg-sst-app[.](firebasestorage[.]app|appspot[.]com)'
-               + '|http://127[.]0[.]0[.]1:9199/v0/b/neg-sst-app[.](firebasestorage[.]app|appspot[.]com))'
-               + '/o/verificacion_sst%2F' + proyectoId + '%2Ffisico%2F'
-               + '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[.][a-z0-9]{1,5}'
-               + '[?]alt=media&token=[0-9a-f-]{36}$')
-          && textoValido(f.quien_tiene_original, 3)
-          && (!('cargo' in f) || textoValido(f.cargo, 1))
+    function fisicoCompleto(f) {
+      return f.keys().hasAll(['responsable_archivo', 'ubicacion', 'fecha_formatos',
+                              'tipos_formato', 'motivo', 'declaracion',
+                              'registrado_por', 'fecha_registro'])
+          && f.keys().hasOnly(['responsable_archivo', 'ubicacion', 'fecha_formatos',
+                               'tipos_formato', 'formato_otro', 'motivo', 'declaracion',
+                               'registrado_por', 'fecha_registro'])
+          && textoValido(f.responsable_archivo, 3)
+          && textoValido(f.ubicacion, 10)
           && f.fecha_formatos is timestamp && f.fecha_formatos <= request.time
           && f.fecha_formatos > request.time - duration.value(730, 'd')
           && f.tipos_formato is list && f.tipos_formato.size() > 0 && f.tipos_formato.size() <= 20
           && !('' in f.tipos_formato)
+          && f.tipos_formato.toSet().size() == f.tipos_formato.size()
+          && f.tipos_formato.join('|').size() <= 1000
           && (('otro' in f.tipos_formato) ? textoValido(f.get('formato_otro', ''), 3) : !('formato_otro' in f))
           && textoValido(f.motivo, 10)
+          && f.declaracion is bool && f.declaracion == true
           && f.registrado_por == request.auth.uid
           && f.fecha_registro == request.time;
     }
@@ -1076,10 +1081,11 @@ service cloud.firestore {
           && nuevo[previo.size()].get('a', '') == 'al_dia'
           && nuevo[previo.size()].get('por', '') == request.auth.uid
           && nuevo[previo.size()].get('de', '') == resource.data.get('sst_gate', {}).get('estado', 'pendiente')
+          && nuevo[previo.size()].get('fisico', {}).get('fecha_registro', null) is timestamp
           && nuevo[previo.size()].get('fisico', {}).diff(g.fisico).affectedKeys().hasOnly(['fecha_registro']);
     }
 
-    function avalFisicoValido(g, proyectoId) {
+    function avalFisicoValido(g) {
       return rolActual() == 'gestion_integral'
           && g.keys().hasOnly(['estado', 'verificado_por', 'fecha', 'origen', 'fisico'])
           && g.get('origen', '') == 'fisico'
@@ -1087,7 +1093,7 @@ service cloud.firestore {
           && g.get('verificado_por', '') == request.auth.uid
           && g.get('fecha', null) == request.time
           && g.get('fisico', null) is map
-          && fisicoCompleto(g.fisico, proyectoId)
+          && fisicoCompleto(g.fisico)
           && historialConCopiaFisica(g);
     }
 
@@ -1096,13 +1102,19 @@ service cloud.firestore {
           && e.keys().hasOnly(['de', 'a', 'por', 'fecha', 'motivo', 'fisico'])
           && e.get('por', '') == request.auth.uid
           && e.get('a', '') in ['al_dia', 'con_novedad', 'pendiente']
+          && e.get('de', '') in ['al_dia', 'con_novedad', 'pendiente']
           && e.get('fecha', null) is timestamp
+          && e.fecha > request.time - duration.value(1, 'd')
+          && e.fecha < request.time + duration.value(1, 'd')
           && e.get('motivo', '') is string && e.get('motivo', '').size() <= 5000
-          // un bloque `fisico` en la traza solo entra junto con un gate FÍSICO
-          // que cambia en el mismo write (no se inventa evidencia en la traza).
+          // la traza SOLO crece junto con un cambio del gate y cuenta lo que
+          // quedó: no se agregan entradas sueltas (ni fechadas a gusto) que
+          // cuenten una historia que el gate no tiene.
+          && request.resource.data.diff(resource.data).affectedKeys().hasAny(['sst_gate'])
+          && e.get('a', '') == request.resource.data.get('sst_gate', {}).get('estado', 'pendiente')
+          // un bloque `fisico` en la traza solo entra junto con un gate FÍSICO.
           && (!('fisico' in e)
-              || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['sst_gate'])
-                  && request.resource.data.get('sst_gate', {}).get('origen', '') == 'fisico'));
+              || request.resource.data.get('sst_gate', {}).get('origen', '') == 'fisico');
     }
 
     // `historial` es traza append-only: ningún write de estos roles lo
@@ -1113,6 +1125,7 @@ service cloud.firestore {
       let nuevo = request.resource.data.get('historial', []);
       let previo = resource.data.get('historial', []);
       return nuevo is list
+          && nuevo.size() <= 300
           && (nuevo == previo
               || (nuevo.size() == previo.size() + 1
                   && (previo.size() == 0 || nuevo[0:previo.size()] == previo)
@@ -1121,11 +1134,11 @@ service cloud.firestore {
 
     // Solo se valida el gate cuando `sst_gate` CAMBIA; borrarlo se conserva
     // como siempre (falla cerrado para el pago: la liquidación lo lee).
-    function contenidoGateValido(proyectoId) {
+    function contenidoGateValido() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['sst_gate'])
           || !('sst_gate' in request.resource.data)
           || avalAppValido(request.resource.data.sst_gate)
-          || avalFisicoValido(request.resource.data.sst_gate, proyectoId);
+          || avalFisicoValido(request.resource.data.sst_gate);
     }
 
     match /verificaciones_sst/{proyectoId} {
@@ -1147,7 +1160,7 @@ service cloud.firestore {
                     && request.resource.data.diff(resource.data)
                         .affectedKeys().hasOnly(['sst_gate', 'historial', 'fecha_actualizacion'])
                     && historialSoloAgrega()
-                    && contenidoGateValido(proyectoId);
+                    && contenidoGateValido();
     }
 
     // ────────────────────────────────────────────────────────────────

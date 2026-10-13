@@ -1,28 +1,27 @@
 // Modal "Registrar formatos físicos y avalar" — Gate SST por formatos en papel.
 //
 // Cuando el cliente exige los formatos SST en FÍSICO no hay formularios en la
-// app y la cola queda sin evidencia. Gestión Integral da el aval cargando el
-// ESCANEO: sin archivo el botón no se habilita (y la regla de Firestore lo
-// rechaza igual — la obligatoriedad no vive solo aquí). El escaneo se sube al
-// elegirlo (Storage verificacion_sst/{proyectoId}/fisico/{uuid}) para que el
-// botón de avalar dependa de "ya está cargado", no de "hay un archivo local".
+// app y la cola queda sin evidencia. Gestión Integral da el aval dejando un
+// REGISTRO DE CUSTODIA (quién guarda el archivo, dónde, qué formatos cubre, de
+// qué fecha, por qué fue físico) y DECLARANDO que los originales están
+// archivados y disponibles para auditoría. Los formatos NO se escanean (pueden
+// ser 100+ hojas): el panel guarda la constancia de custodia, no una copia.
+// "Registrar y avalar" se habilita con todo completo Y la declaración marcada —
+// y la regla de Firestore lo exige igual (la obligatoriedad no vive solo aquí).
 import { useEffect, useMemo, useState } from 'react'
-import type { ChangeEvent } from 'react'
 import { Timestamp, arrayUnion, doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore'
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
-import { db, storage } from '../../../firebase/config'
+import { db } from '../../../firebase/config'
 import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import { estadoSstGate } from '../../../types/sigp/proyecto'
 import type { SstGateProyecto } from '../../../types/sigp/proyecto'
 import {
-  MAX_TEXTO_AVAL, MIN_MOTIVO_FISICO, OPCIONES_TIPO_FORMATO, TIPO_FORMATO_OTRO,
-  extensionDeEscaneo, fechaFormatosATimestampMs, patchAvalFisico, validarAvalFisico,
+  AYUDA_UBICACION, MAX_TEXTO_AVAL, MIN_MOTIVO_FISICO, MIN_UBICACION, OPCIONES_TIPO_FORMATO,
+  PLACEHOLDER_UBICACION, TEXTO_DECLARACION, TIPO_FORMATO_OTRO, esAvalFisico,
+  fechaFormatosATimestampMs, patchAvalFisico, validarAvalFisico,
 } from '../../../types/sigp/avalFisico'
 import type { EntradaAvalFisico } from '../../../types/sigp/avalFisico'
 import type { VerificacionSst } from '../../../types/sigp/verificacionSst'
-
-const MAX_BYTES = 10 * 1024 * 1024  // espejo de storage.rules
 
 interface Props {
   verificacion: VerificacionSst | null
@@ -39,49 +38,29 @@ const hoyLocal = () => {
 
 export default function AvalFisicoModal({ verificacion, uid, onClose, onSaved }: Props) {
   const abierto = verificacion !== null
-  const [soporteUrl, setSoporteUrl] = useState('')
-  const [nombreArchivo, setNombreArchivo] = useState('')
-  const [subiendo, setSubiendo] = useState(false)
-  const [quien, setQuien] = useState('')
-  const [cargo, setCargo] = useState('')
+  // La declaración NUNCA se edita en sitio: corregir = un aval físico NUEVO.
+  const esCorreccion = esAvalFisico(verificacion?.sst_gate)
+  const [responsable, setResponsable] = useState('')
+  const [ubicacion, setUbicacion] = useState('')
   const [fecha, setFecha] = useState('')
   const [tipos, setTipos] = useState<string[]>([])
   const [otro, setOtro] = useState('')
   const [motivo, setMotivo] = useState('')
+  const [declaracion, setDeclaracion] = useState(false)
   const [guardando, setGuardando] = useState(false)
 
   useEffect(() => {
     if (!abierto) return
-    setSoporteUrl(''); setNombreArchivo(''); setSubiendo(false)
-    setQuien(''); setCargo(''); setFecha(''); setTipos([]); setOtro(''); setMotivo('')
-    setGuardando(false)
+    setResponsable(''); setUbicacion(''); setFecha(''); setTipos([]); setOtro(''); setMotivo('')
+    setDeclaracion(false); setGuardando(false)
   }, [abierto, verificacion?.proyecto_id])
 
   const entrada: EntradaAvalFisico = useMemo(() => ({
-    soporte_url: soporteUrl, quien_tiene_original: quien, cargo,
-    fecha_formatos: fecha, tipos_formato: tipos, formato_otro: otro, motivo,
-  }), [soporteUrl, quien, cargo, fecha, tipos, otro, motivo])
-  const errores = validarAvalFisico(entrada)
-  const listo = Object.keys(errores).length === 0 && !subiendo && !!uid
-  const faltantes = Object.values(errores)
-
-  const onArchivo = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    setSoporteUrl(''); setNombreArchivo('')
-    if (!file || !verificacion) return
-    if (file.size >= MAX_BYTES) { toast('El archivo debe pesar menos de 10 MB', 'error'); return }
-    const ext = extensionDeEscaneo(file.type)
-    if (!ext) { toast('El escaneo debe ser PDF o imagen (PNG, JPG, WEBP, HEIC)', 'error'); return }
-    setSubiendo(true)
-    try {
-      const r = ref(storage, `verificacion_sst/${verificacion.proyecto_id}/fisico/${crypto.randomUUID()}.${ext}`)
-      await uploadBytes(r, file, { contentType: file.type })
-      setSoporteUrl(await getDownloadURL(r))
-      setNombreArchivo(file.name)
-    } catch {
-      toast('No se pudo subir el escaneo (¿permisos o conexión?)', 'error')
-    } finally { setSubiendo(false) }
-  }
+    responsable_archivo: responsable, ubicacion, fecha_formatos: fecha,
+    tipos_formato: tipos, formato_otro: otro, motivo, declaracion,
+  }), [responsable, ubicacion, fecha, tipos, otro, motivo, declaracion])
+  const faltantes = Object.values(validarAvalFisico(entrada))
+  const listo = faltantes.length === 0 && !!uid
 
   const alternarTipo = (valor: string) =>
     setTipos(t => t.includes(valor) ? t.filter(x => x !== valor) : [...t, valor])
@@ -118,7 +97,7 @@ export default function AvalFisicoModal({ verificacion, uid, onClose, onSaved }:
   return (
     <Modal
       isOpen={abierto}
-      title={`Formatos físicos — ${verificacion?.consecutivo ?? ''}`}
+      title={`${esCorreccion ? 'Corregir custodia' : 'Formatos físicos'} — ${verificacion?.consecutivo ?? ''}`}
       onClose={onClose}
       size="lg"
       actions={[
@@ -127,29 +106,32 @@ export default function AvalFisicoModal({ verificacion, uid, onClose, onSaved }:
       ]}
     >
       <div className="space-y-4">
+        {esCorreccion && (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            La declaración vigente <strong>no se edita</strong>: esto registra un aval físico NUEVO
+            (con su propia fecha) y la declaración anterior queda en el rastro de custodia.
+          </p>
+        )}
         <p className="text-sm text-gray-600">
           Avala a <strong>{verificacion?.contratista_nombre || '—'}</strong> con los formatos SST en
-          papel. Queda registrado como aval <strong>físico</strong> (distinguible del aval por app) y
-          habilita la liquidación. <strong>Sin el escaneo no hay aval.</strong>
+          papel. No se escanean: queda el <strong>registro de custodia</strong> del archivo y tu
+          declaración. Se marca como aval <strong>físico</strong> (distinguible del aval por app) y
+          habilita la liquidación.
         </p>
-
-        <label className="block text-sm">
-          <span className="font-medium text-gray-700">Escaneo de los formatos (PDF o imagen) <span className="text-red-500">*</span></span>
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.heif,application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif" onChange={onArchivo} disabled={subiendo}
-            className="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
-          <span className="block text-[11px] text-gray-400 mt-1">Si son varios formatos, únelos en un solo PDF. Máx. 10 MB.</span>
-          {subiendo && <span className="block text-xs text-gray-500 mt-1">Subiendo escaneo…</span>}
-          {soporteUrl && <span className="block text-xs text-emerald-700 mt-1">✔ Escaneo cargado: {nombreArchivo}</span>}
-        </label>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="text-xs text-gray-500">
-            ¿Quién tiene el original? <span className="text-red-500">*</span>
-            <input value={quien} maxLength={MAX_TEXTO_AVAL} onChange={e => setQuien(e.target.value)} className={input} placeholder="Nombre" />
+            Responsable del archivo <span className="text-red-500">*</span>
+            <input value={responsable} maxLength={MAX_TEXTO_AVAL} onChange={e => setResponsable(e.target.value)}
+              className={input} placeholder="Quién custodia los originales" />
           </label>
           <label className="text-xs text-gray-500">
-            Cargo (opcional)
-            <input value={cargo} maxLength={MAX_TEXTO_AVAL} onChange={e => setCargo(e.target.value)} className={input} placeholder="Ej: Supervisor del cliente" />
+            Ubicación del archivo <span className="text-red-500">*</span>
+            <input value={ubicacion} maxLength={MAX_TEXTO_AVAL} onChange={e => setUbicacion(e.target.value)}
+              className={input} placeholder={PLACEHOLDER_UBICACION} />
+            <span className="block text-[11px] text-gray-400 mt-1">
+              {AYUDA_UBICACION} Mínimo {MIN_UBICACION} caracteres.
+            </span>
           </label>
         </div>
 
@@ -174,7 +156,8 @@ export default function AvalFisicoModal({ verificacion, uid, onClose, onSaved }:
         {tipos.includes(TIPO_FORMATO_OTRO) && (
           <label className="block text-xs text-gray-500">
             ¿Cuál formato? (el propio del cliente) <span className="text-red-500">*</span>
-            <input value={otro} maxLength={MAX_TEXTO_AVAL} onChange={e => setOtro(e.target.value)} className={input} placeholder="Nombre del formato" />
+            <input value={otro} maxLength={MAX_TEXTO_AVAL} onChange={e => setOtro(e.target.value)}
+              className={input} placeholder="Nombre del formato" />
           </label>
         )}
 
@@ -183,6 +166,12 @@ export default function AvalFisicoModal({ verificacion, uid, onClose, onSaved }:
           <textarea value={motivo} maxLength={MAX_TEXTO_AVAL} onChange={e => setMotivo(e.target.value)} rows={2} className={input}
             placeholder="Ej: el cliente exige los formatos SST impresos y firmados en sitio" />
           <span className="block text-[11px] text-gray-400 mt-1">Mínimo {MIN_MOTIVO_FISICO} caracteres.</span>
+        </label>
+
+        <label className="flex items-start gap-2 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5">
+          <input type="checkbox" checked={declaracion} onChange={e => setDeclaracion(e.target.checked)}
+            className="mt-0.5 rounded border-gray-300 text-brand-600 focus:ring-brand-300" />
+          <span><strong>Declaración.</strong> {TEXTO_DECLARACION}</span>
         </label>
 
         {faltantes.length > 0 && (

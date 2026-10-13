@@ -34,18 +34,6 @@ service firebase.storage {
                'director_proyectos', 'admin'
              ];
     }
-    // Aval SST por formatos físicos: quién revisa el aval (lee el escaneo) y
-    // quién lo da (sube). Espejo, sobre claims, de las reglas de Firestore de
-    // `verificaciones_sst` (read: sst/residente_sst/gestion_integral/admin;
-    // aval físico: SOLO gestion_integral). Helpers NUEVOS — ningún helper
-    // existente cambia de semántica.
-    function esRevisorSstPorClaim() {
-      return esInterno()
-             && request.auth.token.rol in ['sst', 'residente_sst', 'gestion_integral', 'admin'];
-    }
-    function esGestionIntegralPorClaim() {
-      return esInterno() && request.auth.token.rol == 'gestion_integral';
-    }
     // F1.2 (18-ago-2026): espejo del esResidenteDe de Firestore sobre los
     // claims de C2.1 — el residente_obra accede SOLO a las rutas de SU
     // cliente (el clienteId viaja en el path para autorizar sin lookups).
@@ -182,29 +170,6 @@ service firebase.storage {
                    && request.resource.size < 10 * 1024 * 1024
                    && (request.resource.contentType == 'application/pdf'
                        || request.resource.contentType.matches('image/.*'));
-    }
-
-    // ── Gate SST: escaneo de los formatos FÍSICOS (aval de gestion_integral) ──
-    // Ruta: verificacion_sst/{proyectoId}/fisico/{fileName} (fileName = UUID).
-    // Son formatos SST (no dato de salud): leen quienes revisan el aval
-    // (sst, residente_sst, gestion_integral) + admin (auditoría). Sube SOLO
-    // gestion_integral, PDF o imagen raster (sin SVG: puede llevar script), entre
-    // 1 byte y 10 MB. `create` y no `write`, y con
-    // `resource == null` EXPLÍCITO (el emulador evalúa un overwrite como `create`:
-    // no se confía solo en el verbo): la evidencia es INMUTABLE — no se puede
-    // sobrescribir ni borrar un escaneo ya subido (ni siquiera quien lo subió).
-    // La autorización de FONDO es la regla de Firestore del gate (que ata la
-    // URL a esta ruta); aquí el rol viaja por claim (H-008: Storage no lee
-    // Firestore).
-    match /verificacion_sst/{proyectoId}/fisico/{fileName} {
-      allow read: if esRevisorSstPorClaim();
-      allow create: if esGestionIntegralPorClaim()
-                    && resource == null
-                    && fileName.matches('[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[.][a-z0-9]{1,5}')
-                    && request.resource.size > 0
-                    && request.resource.size < 10 * 1024 * 1024
-                    && (request.resource.contentType == 'application/pdf'
-                        || request.resource.contentType.matches('image/(png|jpe?g|webp|heic|heif)'));
     }
 
     // ── Tareas (14-ago): evidencia de cierre ─────────────────────────────────

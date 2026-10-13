@@ -757,22 +757,22 @@ export const SST_GATE_COLOR: Record<EstadoSstGate, string> = {
 
 /** Origen del aval del gate: 'app' = SST revisó los formularios en la app
  *  (flujo de siempre; ausente se lee como 'app'); 'fisico' = el cliente exigió
- *  los formatos en papel y Gestión Integral registra el escaneo como evidencia
- *  (ver `avalFisico.ts`). */
+ *  los formatos en papel y Gestión Integral registra la CUSTODIA del archivo
+ *  físico + su declaración (ver `avalFisico.ts`). Los formatos NO se escanean. */
 export type OrigenAvalSst = 'app' | 'fisico'
 
-/** Evidencia del aval FÍSICO (sst_gate.fisico). Solo la escribe
+/** Registro de custodia del aval FÍSICO (sst_gate.fisico). Solo lo escribe
  *  gestion_integral y la regla de Firestore exige todo lo obligatorio — sin
- *  escaneo no hay aval. Se COPIA a la entrada de `historial` (traza que
- *  sobrevive si otro avalista sobrescribe el gate después). */
+ *  custodia y declaración no hay aval. Se COPIA a la entrada de `historial`
+ *  (traza que sobrevive si otro avalista sobrescribe el gate después). */
 export interface AvalFisicoSst {
-  soporte_url: string               // escaneo de los formatos (Storage verificacion_sst/{id}/fisico/)
-  quien_tiene_original: string
-  cargo?: string
+  responsable_archivo: string       // quién custodia el archivo físico
+  ubicacion: string                 // dónde está archivado
   fecha_formatos: Timestamp         // fecha de los formatos físicos
   tipos_formato: string[]           // claves de TIPO_LABELS y/o 'otro'
   formato_otro?: string             // obligatorio si tipos_formato incluye 'otro'
   motivo: string                    // por qué fue físico (ej. exigencia del cliente)
+  declaracion: true                 // "originales archivados y disponibles para auditoría" — la regla exige true
   registrado_por: string            // uid — la regla exige == request.auth.uid
   fecha_registro: Timestamp         // la regla exige == request.time
 }

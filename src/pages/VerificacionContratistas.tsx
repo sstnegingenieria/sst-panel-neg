@@ -14,12 +14,15 @@
 // esquivable: sin 'al_dia' las reglas impiden liquidar (Bloque 3b).
 //
 // AVAL FÍSICO: cuando el cliente exige los formatos en papel no hay
-// formularios en la app; gestion_integral (SOLO ella) avala cargando el
-// escaneo + quién tiene el original + fecha + formatos + motivo. Queda con
-// badge "físico". Empujón de UI (no es regla): si la obra no tiene
-// formularios en la app, a gestion_integral se le oculta "Al día" y se le
-// ofrece la vía física — el aval por app de sst/residente_sst con cola vacía
-// queda como residual conocido (endurecimiento futuro).
+// formularios en la app; gestion_integral (SOLO ella) avala dejando un
+// registro de CUSTODIA (responsable del archivo, ubicación localizable, formatos,
+// fecha, motivo) + su declaración — los formatos NO se escanean. Queda con
+// badge "físico"; la declaración NO se edita (corregir = aval nuevo, la anterior
+// queda en el rastro). Vista "Avalados en físico" = la lista que pide el
+// auditor, exportable a Excel. Empujón de UI (no es regla): si la obra no tiene
+// formularios en la app, a gestion_integral se le oculta "Al día" y se le ofrece
+// la vía física — el aval por app de sst/residente_sst con cola vacía queda como
+// residual conocido (endurecimiento futuro).
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { collection, getDocs, getCountFromServer, query, where, doc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
@@ -32,8 +35,10 @@ import {
   estadoSstGate, SST_GATE_LABEL, SST_GATE_COLOR,
 } from '../types/sigp/proyecto'
 import { puedeMarcarSstGateUI, puedeAvalarFisicoUI } from '../types/sigp/permisos'
-import { MAX_TEXTO_AVAL, esAvalFisico, esUrlEscaneoSegura, etiquetasFormatosAval } from '../types/sigp/avalFisico'
+import { LEYENDA_AVAL_FISICO, MAX_TEXTO_AVAL, esAvalFisico, filasAvalesFisicos, resumenCustodiaFisica } from '../types/sigp/avalFisico'
+import { exportarAvalesFisicos } from '../utils/sigp/avalesFisicosExcel'
 import AvalFisicoModal from '../components/sigp/verificacion/AvalFisicoModal'
+import RastroCustodiaModal from '../components/sigp/verificacion/RastroCustodiaModal'
 import type { EstadoSstGate } from '../types/sigp/proyecto'
 import type { VerificacionSst } from '../types/sigp/verificacionSst'
 
@@ -44,7 +49,12 @@ export default function VerificacionContratistas() {
   const { user } = useAuth()
   const puedeMarcar = puedeMarcarSstGateUI(user?.rol)
   const puedeFisico = puedeAvalarFisicoUI(user?.rol)
+  // `todas` = toda la proyección (incluye proyectos que ya salieron de la cola
+  // y siguen avalados en físico — el auditor los pide); `verificaciones` = la cola.
+  const [todas, setTodas] = useState<VerificacionSst[]>([])
   const [verificaciones, setVerificaciones] = useState<VerificacionSst[]>([])
+  const [vista, setVista] = useState<'cola' | 'fisico'>('cola')
+  const [rastroTarget, setRastroTarget] = useState<VerificacionSst | null>(null)
   const [loading, setLoading] = useState(true)
   const [aplicando, setAplicando] = useState(false)
   // novedad (observación obligatoria)
@@ -66,8 +76,9 @@ export default function VerificacionContratistas() {
     setLoading(true)
     try {
       const snap = await getDocs(collection(db, 'verificaciones_sst'))
-      const todas = snap.docs.map(d => ({ proyecto_id: d.id, ...d.data() }) as VerificacionSst)
-      setVerificaciones(todas.filter(v => enColaVerificacionSst(v.estado)))
+      const docs = snap.docs.map(d => ({ proyecto_id: d.id, ...d.data() }) as VerificacionSst)
+      setTodas(docs)
+      setVerificaciones(docs.filter(v => enColaVerificacionSst(v.estado)))
     } catch {
       toast('Error al cargar la cola de verificación', 'error')
     } finally { setLoading(false) }
@@ -91,28 +102,33 @@ export default function VerificacionContratistas() {
     return () => { cancelado = true }
   }, [verificaciones, puedeFisico])
 
+  // Lista base según la vista: la cola, o TODOS los avalados en físico vigentes
+  // (incluso los que ya salieron de la cola).
+  const fisicos = useMemo(() => todas.filter(v => esAvalFisico(v.sst_gate)), [todas])
+  const base = vista === 'fisico' ? fisicos : verificaciones
+
   // Clientes DERIVADOS de la cola visible (jamás de la colección `clientes`,
   // que SST no lee), con conteo; vacíos agrupados bajo "—".
   const clientes = useMemo(() => {
     const conteo = new Map<string, number>()
-    for (const v of verificaciones) {
+    for (const v of base) {
       const c = (v.cliente_nombre ?? '').trim() || '—'
       conteo.set(c, (conteo.get(c) ?? 0) + 1)
     }
     return [...conteo.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'))
-  }, [verificaciones])
+  }, [base])
 
   // Pendientes primero, luego con novedad, al día al final — y encima el
   // filtro de cliente (AND) + la búsqueda por sitio/consecutivo/contratista.
   const orden: Record<string, number> = { pendiente: 0, con_novedad: 1, al_dia: 2 }
   const ordenadas = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
-    return verificaciones
+    return base
       .filter(v => !filtroCliente || ((v.cliente_nombre ?? '').trim() || '—') === filtroCliente)
       .filter(v => !q || [v.nombre_sitio, v.codigo_sitio_cliente, v.consecutivo, v.contratista_nombre, v.cliente_nombre]
         .some(campo => (campo ?? '').toLowerCase().includes(q)))
       .sort((a, b) => orden[estadoSstGate(a)] - orden[estadoSstGate(b)])
-  }, [verificaciones, filtroCliente, busqueda])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [base, filtroCliente, busqueda])  // eslint-disable-line react-hooks/exhaustive-deps
   const pendientes = verificaciones.filter(v => estadoSstGate(v) !== 'al_dia').length
 
   const marcar = async (v: VerificacionSst, estado: EstadoSstGate, obs?: string) => {
@@ -154,13 +170,36 @@ export default function VerificacionContratistas() {
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <p className="text-xs text-gray-500">
-          <span className="font-semibold text-amber-700">{pendientes}</span> por verificar · {verificaciones.length} en la cola
-        </p>
+        <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs font-medium">
+          <button onClick={() => { setVista('cola'); setFiltroCliente('') }}
+            className={`px-3 py-1.5 ${vista === 'cola' ? 'bg-brand-700 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
+            En cola ({verificaciones.length})
+          </button>
+          <button onClick={() => { setVista('fisico'); setFiltroCliente('') }}
+            className={`px-3 py-1.5 border-l border-gray-300 ${vista === 'fisico' ? 'bg-brand-700 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
+            📄 Avalados en físico ({fisicos.length})
+          </button>
+        </div>
+        {vista === 'cola' ? (
+          <p className="text-xs text-gray-500">
+            <span className="font-semibold text-amber-700">{pendientes}</span> por verificar · {verificaciones.length} en la cola
+          </p>
+        ) : (
+          <p className="text-xs text-gray-500">Avales con formatos en papel vigentes — {LEYENDA_AVAL_FISICO}.</p>
+        )}
         <span className="flex-1" />
+        {vista === 'fisico' && (
+          <button
+            onClick={() => exportarAvalesFisicos(filasAvalesFisicos(ordenadas), 'avales-sst-en-fisico')}
+            disabled={ordenadas.length === 0}
+            title="Exporta a Excel la lista que se ve (respeta el cliente y la búsqueda)"
+            className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-600 text-brand-800 bg-brand-50 hover:bg-brand-100 disabled:opacity-50">
+            ⬇ Exportar Excel ({ordenadas.length})
+          </button>
+        )}
         <select value={filtroCliente} onChange={e => setFiltroCliente(e.target.value)}
           className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
-          <option value="">Todos los clientes ({verificaciones.length})</option>
+          <option value="">Todos los clientes ({base.length})</option>
           {clientes.map(([nombre, n]) => (
             <option key={nombre} value={nombre}>{nombre} ({n})</option>
           ))}
@@ -189,9 +228,11 @@ export default function VerificacionContratistas() {
             )}
             {!loading && ordenadas.length === 0 && (
               <tr><td colSpan={7} className="py-12 text-center text-gray-400">
-                {verificaciones.length > 0
+                {base.length > 0
                   ? 'Nada con ese filtro o búsqueda.'
-                  : 'No hay proyectos en el tramo de verificación (facturado / pagado por el cliente).'}
+                  : vista === 'fisico'
+                    ? 'Ningún proyecto está avalado en físico.'
+                    : 'No hay proyectos en el tramo de verificación (facturado / pagado por el cliente).'}
               </td></tr>
             )}
             {!loading && ordenadas.map(v => {
@@ -223,29 +264,23 @@ export default function VerificacionContratistas() {
                       {SST_GATE_LABEL[gate]}
                     </span>
                     {esAvalFisico(v.sst_gate) && v.sst_gate?.fisico && (
-                      <span className="inline-flex ml-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300"
-                        title={`Aval FÍSICO — original en poder de ${v.sst_gate.fisico.quien_tiene_original} · formatos: ${etiquetasFormatosAval(v.sst_gate.fisico).join(', ')} · motivo: ${v.sst_gate.fisico.motivo}`}>
+                      <button onClick={() => setRastroTarget(v)}
+                        className="inline-flex ml-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200"
+                        title={`Aval FÍSICO — ${LEYENDA_AVAL_FISICO}. ${resumenCustodiaFisica(v.sst_gate.fisico)} — clic para ver el rastro de custodia`}>
                         📄 físico
-                      </span>
+                      </button>
                     )}
-                    {esAvalFisico(v.sst_gate) && esUrlEscaneoSegura(v.sst_gate?.fisico?.soporte_url) && (
-                      <a href={v.sst_gate?.fisico?.soporte_url} target="_blank" rel="noopener noreferrer"
-                        className="block text-[11px] text-brand-700 hover:underline mt-0.5">
-                        Ver escaneo →
-                      </a>
-                    )}
-                    {esAvalFisico(v.sst_gate) && !esUrlEscaneoSegura(v.sst_gate?.fisico?.soporte_url) && (
-                      <span className="block text-[11px] text-amber-700 mt-0.5"
-                        title="El enlace del escaneo no apunta a Firebase Storage por https — revisa el registro">
-                        ⚠ escaneo no verificable
-                      </span>
+                    {esAvalFisico(v.sst_gate) && (
+                      <span className="block text-[11px] text-gray-500 mt-0.5">{LEYENDA_AVAL_FISICO}</span>
                     )}
                     {v.sst_gate && (
                       <span className="block text-[11px] text-gray-400 mt-0.5">{fFecha(v.sst_gate.fecha)}</span>
                     )}
                   </td>
                   <td className="py-3 px-4 text-right">
-                    {puedeMarcar ? (
+                    {!enColaVerificacionSst(v.estado) ? (
+                      <span className="text-gray-300 text-xs">fuera de la cola</span>
+                    ) : puedeMarcar ? (
                       <div className="flex items-center justify-end gap-2">
                         {gate !== 'al_dia' && !(puedeFisico && formsPorObra[v.obra_id] === 0) && (
                           <button onClick={() => marcar(v, 'al_dia')} disabled={aplicando}
@@ -257,12 +292,19 @@ export default function VerificacionContratistas() {
                           <button onClick={() => setFisicoTarget(v)} disabled={aplicando}
                             title={formsPorObra[v.obra_id] === 0
                               ? 'Esta obra no tiene formularios en la app — avala con los formatos físicos'
-                              : 'Registrar los formatos SST en papel (escaneo obligatorio) y avalar'}
+                              : 'Registrar la custodia de los formatos SST en papel (con tu declaración) y avalar'}
                             className={`text-xs px-3 py-1.5 rounded-lg font-medium border disabled:opacity-50 ${
                               formsPorObra[v.obra_id] === 0
                                 ? 'border-brand-600 bg-brand-50 text-brand-800 hover:bg-brand-100'
                                 : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
                             📄 Registrar formatos físicos y avalar
+                          </button>
+                        )}
+                        {puedeFisico && esAvalFisico(v.sst_gate) && (
+                          <button onClick={() => setFisicoTarget(v)} disabled={aplicando}
+                            title="La declaración no se edita: registra un aval físico NUEVO; el anterior queda en el rastro"
+                            className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                            ✎ Corregir custodia
                           </button>
                         )}
                         {gate !== 'con_novedad' && (
@@ -283,13 +325,16 @@ export default function VerificacionContratistas() {
         </table>
       </div>
 
-      {/* Aval físico — escaneo OBLIGATORIO (solo gestion_integral) */}
+      {/* Aval físico — registro de custodia + declaración (solo gestion_integral) */}
       <AvalFisicoModal
         verificacion={fisicoTarget}
         uid={user?.uid}
         onClose={() => setFisicoTarget(null)}
         onSaved={load}
       />
+
+      {/* Rastro de custodia: declaración vigente + anteriores */}
+      <RastroCustodiaModal verificacion={rastroTarget} onClose={() => setRastroTarget(null)} />
 
       {/* Novedad — observación OBLIGATORIA */}
       <Modal
