@@ -12,9 +12,17 @@
 //
 // Roles: sst y residente_sst OPERAN; admin ve (infra). El gate es NO
 // esquivable: sin 'al_dia' las reglas impiden liquidar (Bloque 3b).
+//
+// AVAL FÍSICO: cuando el cliente exige los formatos en papel no hay
+// formularios en la app; gestion_integral (SOLO ella) avala cargando el
+// escaneo + quién tiene el original + fecha + formatos + motivo. Queda con
+// badge "físico". Empujón de UI (no es regla): si la obra no tiene
+// formularios en la app, a gestion_integral se le oculta "Al día" y se le
+// ofrece la vía física — el aval por app de sst/residente_sst con cola vacía
+// queda como residual conocido (endurecimiento futuro).
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { collection, getDocs, doc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
+import { collection, getDocs, getCountFromServer, query, where, doc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useAuth } from '../contexts/AuthContext'
 import { toast } from '../components/shared/Toast'
@@ -23,7 +31,9 @@ import {
   ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, enColaVerificacionSst,
   estadoSstGate, SST_GATE_LABEL, SST_GATE_COLOR,
 } from '../types/sigp/proyecto'
-import { puedeMarcarSstGateUI } from '../types/sigp/permisos'
+import { puedeMarcarSstGateUI, puedeAvalarFisicoUI } from '../types/sigp/permisos'
+import { MAX_TEXTO_AVAL, esAvalFisico, esUrlEscaneoSegura, etiquetasFormatosAval } from '../types/sigp/avalFisico'
+import AvalFisicoModal from '../components/sigp/verificacion/AvalFisicoModal'
 import type { EstadoSstGate } from '../types/sigp/proyecto'
 import type { VerificacionSst } from '../types/sigp/verificacionSst'
 
@@ -33,12 +43,18 @@ const fFecha = (t?: { toDate?: () => Date }) =>
 export default function VerificacionContratistas() {
   const { user } = useAuth()
   const puedeMarcar = puedeMarcarSstGateUI(user?.rol)
+  const puedeFisico = puedeAvalarFisicoUI(user?.rol)
   const [verificaciones, setVerificaciones] = useState<VerificacionSst[]>([])
   const [loading, setLoading] = useState(true)
   const [aplicando, setAplicando] = useState(false)
   // novedad (observación obligatoria)
   const [novedadTarget, setNovedadTarget] = useState<VerificacionSst | null>(null)
   const [observacion, setObservacion] = useState('')
+  // Aval físico (solo gestion_integral)
+  const [fisicoTarget, setFisicoTarget] = useState<VerificacionSst | null>(null)
+  // Nº de formularios de la obra-espejo en la app (solo se consulta para quien
+  // puede avalar físico). null/ausente = desconocido → se muestran ambas vías.
+  const [formsPorObra, setFormsPorObra] = useState<Record<string, number | null>>({})
   // Filtro por cliente (lista desplegable con conteo — patrón del filtro de
   // Obras) + búsqueda por sitio. Docs proyectados antes de que el snapshot
   // tuviera cliente/sitio traen el campo vacío → "—" (se re-llenan solos con
@@ -58,6 +74,22 @@ export default function VerificacionContratistas() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Empujón de UI: ¿la obra tiene formularios en la app? Falla abierta — si el
+  // conteo no se puede leer, se muestran las dos vías (jamás se esconde "Al día"
+  // por un error de lectura).
+  useEffect(() => {
+    if (!puedeFisico) return
+    const pendientesObra = verificaciones.filter(v => estadoSstGate(v) !== 'al_dia' && v.obra_id)
+    let cancelado = false
+    Promise.all(pendientesObra.map(async v => {
+      try {
+        const c = await getCountFromServer(query(collection(db, 'formularios'), where('obra_id', '==', v.obra_id)))
+        return [v.obra_id, c.data().count] as const
+      } catch { return [v.obra_id, null] as const }
+    })).then(pares => { if (!cancelado) setFormsPorObra(Object.fromEntries(pares)) })
+    return () => { cancelado = true }
+  }, [verificaciones, puedeFisico])
 
   // Clientes DERIVADOS de la cola visible (jamás de la colección `clientes`,
   // que SST no lee), con conteo; vacíos agrupados bajo "—".
@@ -190,6 +222,24 @@ export default function VerificacionContratistas() {
                       title={v.sst_gate?.observacion ? `Observación: ${v.sst_gate.observacion}` : undefined}>
                       {SST_GATE_LABEL[gate]}
                     </span>
+                    {esAvalFisico(v.sst_gate) && v.sst_gate?.fisico && (
+                      <span className="inline-flex ml-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300"
+                        title={`Aval FÍSICO — original en poder de ${v.sst_gate.fisico.quien_tiene_original} · formatos: ${etiquetasFormatosAval(v.sst_gate.fisico).join(', ')} · motivo: ${v.sst_gate.fisico.motivo}`}>
+                        📄 físico
+                      </span>
+                    )}
+                    {esAvalFisico(v.sst_gate) && esUrlEscaneoSegura(v.sst_gate?.fisico?.soporte_url) && (
+                      <a href={v.sst_gate?.fisico?.soporte_url} target="_blank" rel="noopener noreferrer"
+                        className="block text-[11px] text-brand-700 hover:underline mt-0.5">
+                        Ver escaneo →
+                      </a>
+                    )}
+                    {esAvalFisico(v.sst_gate) && !esUrlEscaneoSegura(v.sst_gate?.fisico?.soporte_url) && (
+                      <span className="block text-[11px] text-amber-700 mt-0.5"
+                        title="El enlace del escaneo no apunta a Firebase Storage por https — revisa el registro">
+                        ⚠ escaneo no verificable
+                      </span>
+                    )}
                     {v.sst_gate && (
                       <span className="block text-[11px] text-gray-400 mt-0.5">{fFecha(v.sst_gate.fecha)}</span>
                     )}
@@ -197,10 +247,22 @@ export default function VerificacionContratistas() {
                   <td className="py-3 px-4 text-right">
                     {puedeMarcar ? (
                       <div className="flex items-center justify-end gap-2">
-                        {gate !== 'al_dia' && (
+                        {gate !== 'al_dia' && !(puedeFisico && formsPorObra[v.obra_id] === 0) && (
                           <button onClick={() => marcar(v, 'al_dia')} disabled={aplicando}
                             className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
                             ✔ Al día
+                          </button>
+                        )}
+                        {puedeFisico && gate !== 'al_dia' && (
+                          <button onClick={() => setFisicoTarget(v)} disabled={aplicando}
+                            title={formsPorObra[v.obra_id] === 0
+                              ? 'Esta obra no tiene formularios en la app — avala con los formatos físicos'
+                              : 'Registrar los formatos SST en papel (escaneo obligatorio) y avalar'}
+                            className={`text-xs px-3 py-1.5 rounded-lg font-medium border disabled:opacity-50 ${
+                              formsPorObra[v.obra_id] === 0
+                                ? 'border-brand-600 bg-brand-50 text-brand-800 hover:bg-brand-100'
+                                : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
+                            📄 Registrar formatos físicos y avalar
                           </button>
                         )}
                         {gate !== 'con_novedad' && (
@@ -220,6 +282,14 @@ export default function VerificacionContratistas() {
           </tbody>
         </table>
       </div>
+
+      {/* Aval físico — escaneo OBLIGATORIO (solo gestion_integral) */}
+      <AvalFisicoModal
+        verificacion={fisicoTarget}
+        uid={user?.uid}
+        onClose={() => setFisicoTarget(null)}
+        onSaved={load}
+      />
 
       {/* Novedad — observación OBLIGATORIA */}
       <Modal
@@ -243,7 +313,7 @@ export default function VerificacionContratistas() {
           <label className="text-sm font-medium text-gray-700">
             Observación <span className="text-red-500">*</span>
           </label>
-          <textarea value={observacion} onChange={e => setObservacion(e.target.value)} rows={3}
+          <textarea value={observacion} maxLength={MAX_TEXTO_AVAL} onChange={e => setObservacion(e.target.value)} rows={3}
             placeholder="Ej: faltan permisos de trabajo en alturas de la semana del 15…"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
           {!observacion.trim() && <p className="text-xs text-red-600">La observación es obligatoria.</p>}
