@@ -4,7 +4,7 @@ import { auth } from '../firebase/config'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Login() {
-  const { login, accessDenied } = useAuth()
+  const { login, accessDenied, sesionCerradaPorJornada } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -167,6 +167,13 @@ export default function Login() {
               <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
                 <p className="font-semibold">Acceso denegado</p>
                 <p className="mt-0.5 text-red-600">Tu cuenta ha sido desactivada. Contacta al administrador.</p>
+              </div>
+            )}
+
+            {sesionCerradaPorJornada && !accessDenied && !error && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3 rounded-lg">
+                <p className="font-semibold">Nuevo día de trabajo</p>
+                <p className="mt-0.5">Inicia sesión para marcar tu <b>entrada</b> — el inicio de sesión es la marcación de la jornada.</p>
               </div>
             )}
 

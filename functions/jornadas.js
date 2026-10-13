@@ -39,7 +39,18 @@ const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
 const { ipEnLista, dispositivoDe } = require('./horario');
 
-const ACCIONES_VALIDAS = ['latido', 'salir'];
+// Marcación por login/logout (rebuild 13-oct, regla de negocio de Giovanny:
+// "todos se loguean al llegar — el login es la marcación de entrada; al
+// terminar cierran sesión y eso marca la salida"):
+//  - 'entrada'    → la escribe el LOGIN explícito (primera del día gana;
+//                   una re-entrada tras salida del mismo día RETIRA la
+//                   salida — la salida real será la última del día).
+//  - 'latido'     → presencia de apoyo (alimenta el aviso de cierre y la
+//                   salida derivada de pestañas muertas).
+//  - 'salir'      → salida MANUAL (botón Salir).
+//  - 'salir_auto' → salida AUTOMÁTICA (el cierre de jornada venció sin
+//                   respuesta) — distinguible de la manual.
+const ACCIONES_VALIDAS = ['entrada', 'latido', 'salir', 'salir_auto'];
 const ROLES_SIN_RELOJ = ['tecnico', 'residente_obra', 'residente_cliente', 'cliente_final'];
 
 /** Día local de Bogotá (UTC-5 fijo) para un epoch ms. */
@@ -85,25 +96,51 @@ const latidoJornada = onCall(
       const enOficina = ipsOficina.length > 0 && ip ? ipEnLista(ip, ipsOficina) : null;
       const dispositivo = dispositivoDe(String(request.rawRequest?.headers?.['user-agent'] ?? '').slice(0, 200));
       const dia = diaBogota(Date.now());
-      const ref = db.doc(`jornadas/${uid}_${dia}`);
+      const esSalida = accion === 'salir' || accion === 'salir_auto';
+      const cierreDe = () => ({
+        fecha: FieldValue.serverTimestamp(),
+        tipo: accion === 'salir' ? 'manual' : 'automatica',
+      });
 
+      let diaEscrito = dia;
       await db.runTransaction(async (tx) => {
-        const snap = await tx.get(ref);
+        let ref = db.doc(`jornadas/${uid}_${dia}`);
+        let snap = await tx.get(ref);
+
+        // ANCLAJE NOCTURNO (precisión 1 de Giovanny): un latido o una salida
+        // pasada la medianoche, cuando el doc de HOY no existe pero el de
+        // AYER sigue ABIERTO (sin salida), continúa la jornada de AYER — el
+        // trabajo que cruza la medianoche queda EN EL DÍA DE LA ENTRADA, con
+        // su salida a la 1 am y duración honesta. Una 'entrada' (login)
+        // SIEMPRE abre el día actual: un login nuevo es un día nuevo.
+        if (!snap.exists && accion !== 'entrada') {
+          const ayer = diaBogota(Date.now() - 86_400_000);
+          const refAyer = db.doc(`jornadas/${uid}_${ayer}`);
+          const snapAyer = await tx.get(refAyer);
+          if (snapAyer.exists && !snapAyer.data().cierre) {
+            ref = refAyer;
+            snap = snapAyer;
+            diaEscrito = ayer;
+          }
+        }
+
         if (!snap.exists) {
           tx.set(ref, {
             uid,
             nombre: user.nombre ?? '',
             rol: user.rol ?? '',
-            dia,
+            dia: diaEscrito,
+            // 'entrada' (login) la fija; un latido/salida sin entrada previa
+            // deja el campo AUSENTE — sesión persistida del arranque, el
+            // tablero lo muestra honesto ("—"), jamás se inventa.
+            ...(accion === 'entrada' ? { entrada: { fecha: FieldValue.serverTimestamp() } } : {}),
             inicio: FieldValue.serverTimestamp(),
             ultimo_latido: FieldValue.serverTimestamp(),
             latidos: 1,
             en_oficina_inicio: enOficina,
             en_oficina_ultimo: enOficina,
             dispositivo,
-            ...(accion === 'salir'
-              ? { cierre: { fecha: FieldValue.serverTimestamp(), tipo: 'manual' } }
-              : {}),
+            ...(esSalida ? { cierre: cierreDe() } : {}),
           });
           return;
         }
@@ -111,14 +148,19 @@ const latidoJornada = onCall(
           ultimo_latido: FieldValue.serverTimestamp(),
           latidos: FieldValue.increment(1),
           en_oficina_ultimo: enOficina,
-          ...(accion === 'salir'
-            ? { cierre: { fecha: FieldValue.serverTimestamp(), tipo: 'manual' } }
-            // volvió después de salir: la presencia real retira el cierre
+          // la PRIMERA entrada del día gana (un re-login no la pisa)
+          ...(accion === 'entrada' && !snap.data().entrada
+            ? { entrada: { fecha: FieldValue.serverTimestamp() } }
+            : {}),
+          ...(esSalida
+            ? { cierre: cierreDe() }
+            // volvió después de salir (re-login o presencia): la salida
+            // previa se retira — la salida real será la última del día
             : snap.data().cierre ? { cierre: FieldValue.delete() } : {}),
         });
       });
 
-      return { ok: true, dia };
+      return { ok: true, dia: diaEscrito };
     } catch (err) {
       console.error(`latidoJornada: fallo en ${accion} de ${uid}:`, err);
       throw new HttpsError('internal', 'No se pudo registrar la presencia.');

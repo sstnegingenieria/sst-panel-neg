@@ -34,10 +34,23 @@ import type { DispositivoHorario } from './horario'
  *  (cierreEfectivo) — cero schedulers, y el almuerzo largo se resuelve solo
  *  (si la persona vuelve, el latido corre el cierre derivado; un cierre
  *  escrito habría sido falso). Un latido posterior a un cierre manual del
- *  mismo día lo RETIRA (la presencia real gana — la CF borra el campo). */
+ *  mismo día lo RETIRA (la presencia real gana — la CF borra el campo).
+ *
+ *  Rebuild MARCACIÓN (13-oct): 'automatica' se suma como salida PERSISTIDA
+ *  — el cierre de jornada que venció sin respuesta ejecuta el logout y la
+ *  escribe (distinguible de la manual). La pestaña CERRADA sin logout sigue
+ *  sin escribir nada: su salida queda derivada en lectura, rotulada igual. */
 export interface CierreJornada {
   fecha: Timestamp
-  tipo: 'manual'
+  tipo: 'manual' | 'automatica'
+}
+
+/** ENTRADA = login explícito (regla de negocio 13-oct: "todos se loguean al
+ *  llegar — el login es la marcación de entrada"). La primera del día gana;
+ *  AUSENTE = el doc nació de un latido con sesión persistida (transición del
+ *  arranque) — el tablero muestra "—", jamás se inventa. */
+export interface EntradaJornada {
+  fecha: Timestamp
 }
 
 export interface Jornada {
@@ -57,6 +70,7 @@ export interface Jornada {
   en_oficina_inicio: boolean | null
   en_oficina_ultimo: boolean | null
   dispositivo: DispositivoHorario
+  entrada?: EntradaJornada
   cierre?: CierreJornada
 }
 
@@ -70,6 +84,10 @@ export const LATIDO_MIN_DEFAULT = 10
 export const GRACIA_CIERRE_MIN_DEFAULT = 30
 /** "Presente ahora" = latido hace menos de esto. */
 export const VENTANA_PRESENTE_MIN_DEFAULT = 15
+/** Countdown del aviso de cierre de jornada antes del logout automático. */
+export const AVISO_CIERRE_MIN_DEFAULT = 10
+/** Cuánto pospone "Seguir trabajando" el cierre de jornada. */
+export const POSPONER_MIN_DEFAULT = 60
 
 /** Roles cuya operación vive en la APP MÓVIL / en obra, no en el panel
  *  (agregado 1 de Giovanny — el hueco de Juan Carlos): este módulo mide
@@ -95,19 +113,53 @@ export function debeLatir(msUltimoLatido: number | null, ahoraMs: number, latido
   return ahoraMs - msUltimoLatido >= latidoMin * 60_000
 }
 
+// ── Guard de arranque: día nuevo exige LOGIN (la marcación de entrada) ───────
+// La sesión persistida que despierta en un día nuevo recibe signOut → login →
+// entrada. La decisión usa la MARCA LOCAL del último latido/entrada (clave
+// por uid en localStorage, {dia, ts}) para NO expulsar a quien cruza la
+// medianoche trabajando (precisión 1): una recarga a las 00:30 con marca de
+// las 00:25 es continuación, no un día nuevo de verdad.
+
+export const CLAVE_MARCA_LS = (uid: string) => `sigp.jornada.marca.${uid}`
+
+export interface MarcaLocal { dia: string; ts: number }
+
+export function parseMarcaLocal(valor: string | null): MarcaLocal | null {
+  if (!valor) return null
+  try {
+    const m = JSON.parse(valor) as MarcaLocal
+    return typeof m?.dia === 'string' && typeof m?.ts === 'number' ? m : null
+  } catch { return null }
+}
+
+/** ¿Forzar logout al restaurar la sesión? true cuando la marca local es de
+ *  OTRO día y además VIEJA (más que la gracia — una marca de hace minutos
+ *  cruzando medianoche es trabajo en curso). Sin marca local (navegador
+ *  nuevo, LS limpio) → forzar: mejor pedir un login de más que perder una
+ *  entrada. El login explícito nunca pasa por aquí. */
+export function debeForzarLogin(
+  marca: MarcaLocal | null, diaHoy: string, ahoraMs: number, graciaMin: number,
+): boolean {
+  if (!marca) return true
+  if (marca.dia === diaHoy) return false
+  return ahoraMs - marca.ts > graciaMin * 60_000
+}
+
 // ── Cierre efectivo (derivado en lectura) ────────────────────────────────────
 
 export type CierreEfectivo =
-  | { estado: 'presente' }                                  // latido fresco, sin cierre
-  | { estado: 'manual'; fecha: Timestamp }                  // la persona salió
-  | { estado: 'automatico'; fecha: Timestamp }              // el latido se detuvo
+  | { estado: 'presente' }                                  // latido fresco, sin salida
+  | { estado: 'manual'; fecha: Timestamp }                  // la persona cerró sesión
+  | { estado: 'automatico'; fecha: Timestamp }              // vencido o pestaña muerta
 
-/** Interpreta la jornada SIN escribir nada: cierre manual persiste y gana;
- *  sin cierre, latido más viejo que la gracia = cierre AUTOMÁTICO en el
- *  último latido (derivado — distinguible del manual en todo rótulo);
- *  latido dentro de la gracia = sigue presente. */
+/** Interpreta la jornada SIN escribir nada: la salida persistida gana
+ *  (manual o automática); sin salida, latido más viejo que la gracia =
+ *  salida AUTOMÁTICA derivada en el último latido (pestaña cerrada sin
+ *  logout); latido dentro de la gracia = sigue en jornada. */
 export function cierreEfectivo(j: Pick<Jornada, 'ultimo_latido' | 'cierre'>, ahoraMs: number, graciaMin: number): CierreEfectivo {
-  if (j.cierre) return { estado: 'manual', fecha: j.cierre.fecha }
+  if (j.cierre) {
+    return { estado: j.cierre.tipo === 'manual' ? 'manual' : 'automatico', fecha: j.cierre.fecha }
+  }
   const msDesde = ahoraMs - j.ultimo_latido.toMillis()
   if (msDesde > graciaMin * 60_000) return { estado: 'automatico', fecha: j.ultimo_latido }
   return { estado: 'presente' }
@@ -126,6 +178,7 @@ export function normalizarJornada(id: string, data: Record<string, unknown>): Jo
   const ultimo = data.ultimo_latido as Timestamp | undefined
   if (typeof data.uid !== 'string' || typeof data.dia !== 'string' || !inicio?.toDate || !ultimo?.toDate) return null
   const cierreRaw = data.cierre as { fecha?: Timestamp; tipo?: string } | undefined
+  const entradaRaw = data.entrada as { fecha?: Timestamp } | undefined
   return {
     id,
     uid: data.uid,
@@ -138,8 +191,9 @@ export function normalizarJornada(id: string, data: Record<string, unknown>): Jo
     en_oficina_inicio: typeof data.en_oficina_inicio === 'boolean' ? data.en_oficina_inicio : null,
     en_oficina_ultimo: typeof data.en_oficina_ultimo === 'boolean' ? data.en_oficina_ultimo : null,
     dispositivo: data.dispositivo === 'escritorio' || data.dispositivo === 'movil' ? data.dispositivo : 'desconocido',
-    ...(cierreRaw?.fecha?.toDate && cierreRaw.tipo === 'manual'
-      ? { cierre: { fecha: cierreRaw.fecha, tipo: 'manual' as const } }
+    ...(entradaRaw?.fecha?.toDate ? { entrada: { fecha: entradaRaw.fecha } } : {}),
+    ...(cierreRaw?.fecha?.toDate && (cierreRaw.tipo === 'manual' || cierreRaw.tipo === 'automatica')
+      ? { cierre: { fecha: cierreRaw.fecha, tipo: cierreRaw.tipo as 'manual' | 'automatica' } }
       : {}),
   }
 }

@@ -20,8 +20,9 @@ export default function HorarioAsistencia() {
       <div>
         <h1 className="text-2xl font-bold text-gray-800">Horario y asistencia</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Presencia en el panel — mide que el panel está <b>en uso</b>, no qué se hace en él.
-          Los roles que operan en la app móvil o en obra no se miden aquí: su cero no es ausencia.
+          Marcación de jornada: la <b>entrada</b> es el inicio de sesión y la <b>salida</b> el cierre —
+          manual o automático a la hora de fin. No mide qué se hace en el panel. Los roles que operan
+          en la app móvil o en obra no se miden aquí: su cero no es ausencia.
         </p>
       </div>
 
@@ -29,7 +30,7 @@ export default function HorarioAsistencia() {
         <button onClick={() => setTab('registros')}
           className={`px-3 py-1.5 rounded-full text-xs font-medium border ${
             tab === 'registros' ? 'bg-brand-700 border-brand-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
-          Presencia
+          Marcación
         </button>
         <button onClick={() => setTab('ausentismos')}
           className={`px-3 py-1.5 rounded-full text-xs font-medium border ${
