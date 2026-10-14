@@ -156,8 +156,16 @@ export interface Ausentismo {
   empleado_uid?: string
   empleado_nombre: string
   tipo: TipoAusentismo
-  /** Obligatorio (UI + regla) cuando tipo==='incapacidad'; ausente en los
-   *  demás tipos, donde no aplica. */
+  /** Obligatorio cuando tipo==='incapacidad' — exigido por la UI (el form no
+   *  guarda una incapacidad sin origen) y, desde el 14-oct-2026, por REGLA
+   *  (origenAtelValido() en firestore.rules: el create lo exige y el update
+   *  que toque tipo/origen re-valida — un doc 'incapacidad' sin origen válido
+   *  no puede existir ni entrar a ese estado por ninguna vía). Los HISTÓRICOS
+   *  pre-24-sep-2026 pueden no traerlo y siguen anulables/editables mientras
+   *  no toquen tipo/origen. Ausente en los demás tipos, donde no aplica.
+   *  (Antes este comentario decía "UI + regla" cuando la regla NO lo exigía —
+   *  corregido 14-oct: un comentario que afirma un control inexistente es
+   *  peor que no tener comentario.) */
   origen?: OrigenIncapacidad
   fecha_inicio: Timestamp
   fecha_fin: Timestamp
