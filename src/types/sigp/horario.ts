@@ -145,13 +145,27 @@ export interface Ausentismo {
    *  de Ausentismo (SST-IND-26, auto-alimentado por CF). Los registros nuevos
    *  siempre lo traen; los históricos pre-maestro no. */
   empleado_id?: string
-  /** Legacy: apuntaba a `users` (la cuenta del panel), NO al maestro. Se
-   *  conserva por compatibilidad con registros anteriores a `empleado_id`. */
+  /** Cuenta del panel (`users/{uid}`) de la persona. Historia doble: en los
+   *  registros pre-maestro era el identificador principal (legacy); desde
+   *  13-oct el form lo DENORMALIZA de nuevo al crear (del `user_uid` del
+   *  maestro) porque es la llave del CRUCE con `jornadas` (salida anticipada
+   *  con respaldo) — GG y director_proyectos ven ese cruce pero no leen
+   *  `empleados_directos`, así que el uid tiene que viajar en este doc.
+   *  Campo ADITIVO que la CF del frente SGI/SST no lee (filtra solo por
+   *  `tipo`); avisado por cortesía. Ausente si la persona no tiene cuenta. */
   empleado_uid?: string
   empleado_nombre: string
   tipo: TipoAusentismo
-  /** Obligatorio (UI + regla) cuando tipo==='incapacidad'; ausente en los
-   *  demás tipos, donde no aplica. */
+  /** Obligatorio cuando tipo==='incapacidad' — exigido por la UI (el form no
+   *  guarda una incapacidad sin origen) y, desde el 14-oct-2026, por REGLA
+   *  (origenAtelValido() en firestore.rules: el create lo exige y el update
+   *  que toque tipo/origen re-valida — un doc 'incapacidad' sin origen válido
+   *  no puede existir ni entrar a ese estado por ninguna vía). Los HISTÓRICOS
+   *  pre-24-sep-2026 pueden no traerlo y siguen anulables/editables mientras
+   *  no toquen tipo/origen. Ausente en los demás tipos, donde no aplica.
+   *  (Antes este comentario decía "UI + regla" cuando la regla NO lo exigía —
+   *  corregido 14-oct: un comentario que afirma un control inexistente es
+   *  peor que no tener comentario.) */
   origen?: OrigenIncapacidad
   fecha_inicio: Timestamp
   fecha_fin: Timestamp
@@ -174,6 +188,45 @@ export interface AusentismoDetallePrivado {
 export const TIPOS_AUSENTISMO: TipoAusentismo[] = [
   'incapacidad', 'permiso', 'justificacion', 'vacaciones', 'otro',
 ]
+
+// ── Salida anticipada con respaldo (13-oct, diseño aprobado) ─────────────────
+// La persona declara la salida (cierre manual antes de SU hora — lo marca la
+// CF en cierre.anticipada); la autoridad la respalda (el permiso que registra
+// gerencia en Ausentismos). Nadie justifica su propia ausencia: no hay campo
+// de motivo en el logout — el motivo es un hecho que ya vive donde corresponde.
+//
+// 🔒 PRIVACIDAD DEL RÓTULO: en la fila de marcación el respaldo se muestra
+// SIEMPRE GENÉRICO ("permiso registrado"), sin el tipo — nombrar los tipos
+// "seguros" (vacaciones) y callar los demás volvería revelador al genérico
+// por eliminación. Un solo rótulo para todos, sin excepciones (decisión de
+// Giovanny). Quien necesita el tipo lo tiene en la pestaña Ausentismos, con
+// los mismos permisos de siempre.
+
+/** ¿El ausentismo (ACTIVO) cubre este día local 'YYYY-MM-DD'? */
+export function ausentismoCubreDia(a: Pick<Ausentismo, 'estado' | 'fecha_inicio' | 'fecha_fin'>, dia: string): boolean {
+  if (a.estado !== 'activo') return false
+  if (!a.fecha_inicio?.toDate || !a.fecha_fin?.toDate) return false
+  return claveDia(a.fecha_inicio.toDate()) <= dia && dia <= claveDia(a.fecha_fin.toDate())
+}
+
+/** ¿Hay respaldo (permiso registrado) para la salida anticipada de `uid` el
+ *  día `dia`? Cruce por `empleado_uid` del ausentismo — el único identificador
+ *  que TODOS los lectores de esta pantalla pueden ver (GG/GP no leen el
+ *  maestro). Un ausentismo sin `empleado_uid` (persona sin cuenta, o registro
+ *  viejo sin denormalizar) no respalda a nadie aquí: ausencia honesta. */
+export function tieneRespaldo(uid: string, dia: string, ausentismos: Pick<Ausentismo, 'estado' | 'fecha_inicio' | 'fecha_fin' | 'empleado_uid'>[]): boolean {
+  return ausentismos.some(a => a.empleado_uid === uid && ausentismoCubreDia(a, dia))
+}
+
+/** Umbral de la cola "salidas anticipadas sin respaldo" — supuesto NOMBRADO
+ *  sin calibrar (una semana: normalmente es que gerencia aún no registró el
+ *  permiso, no que alguien se fue sin él; el encuadre es pendiente de
+ *  registro, no infracción). Se ajusta con el uso real. */
+export const UMBRAL_SALIDA_SIN_RESPALDO_DIAS = 7
+
+/** Días del rango que mira la cola de salidas sin respaldo (consulta
+ *  dedicada, independiente del rango visible del tablero). */
+export const RANGO_COLA_SIN_RESPALDO_DIAS = 45
 
 export const TIPO_AUSENTISMO_LABEL: Record<TipoAusentismo, string> = {
   incapacidad: 'Incapacidad médica',

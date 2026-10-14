@@ -7,7 +7,7 @@ import {
   debeCerrarAlVencer,
   LATIDO_MIN_DEFAULT, GRACIA_CIERRE_MIN_DEFAULT, VENTANA_PRESENTE_MIN_DEFAULT,
 } from '../jornada'
-import { horaFinDe } from '../horario'
+import { horaFinDe, tieneRespaldo } from '../horario'
 
 // La CF (solo su helper puro diaBogota) — deps de firebase mockeadas,
 // patrón horario.test.ts.
@@ -19,7 +19,7 @@ vi.mock('firebase-admin', () => ({ default: {}, firestore: () => ({}) }))
 vi.mock('firebase-admin/firestore', () => ({ FieldValue: { serverTimestamp: () => 0, increment: () => 0, delete: () => 0 } }))
 import { createRequire } from 'node:module'
 const require2 = createRequire(import.meta.url)
-const { diaBogota } = require2('../../../../functions/jornadas.js')
+const { diaBogota, horaBogota, horaFinDeJs, esSalidaAnticipada } = require2('../../../../functions/jornadas.js')
 
 const MIN = 60_000
 const ts = (ms: number) => Timestamp.fromMillis(ms)
@@ -162,6 +162,61 @@ describe('🔒 privacidad por construcción — el tipo es CERRADO', () => {
   })
   it('doc malformado → null (no tumba la bandeja)', () => {
     expect(normalizarJornada('x', { uid: 'u' })).toBeNull()
+  })
+})
+
+describe('salida ANTICIPADA (13-oct) — congelada por la CF, normalizada cerrada', () => {
+  it('normalizarJornada conserva anticipada SOLO en cierre manual con true literal', () => {
+    const base_ = { uid: 'u', dia: '2026-10-13', inicio: ts(base), ultimo_latido: ts(base) }
+    const manual = normalizarJornada('x', { ...base_, cierre: { fecha: ts(base), tipo: 'manual', anticipada: true } })!
+    expect(manual.cierre?.anticipada).toBe(true)
+    // en automática jamás (la CF no la escribe ahí; si apareciera, se descarta)
+    const auto = normalizarJornada('x', { ...base_, cierre: { fecha: ts(base), tipo: 'automatica', anticipada: true } })!
+    expect(auto.cierre?.anticipada).toBeUndefined()
+    // valores no-true (contrabando) se descartan
+    const truthy = normalizarJornada('x', { ...base_, cierre: { fecha: ts(base), tipo: 'manual', anticipada: 'si' } })!
+    expect(truthy.cierre?.anticipada).toBeUndefined()
+  })
+  it('PARIDAD TS↔JS: horaFinDeJs de la CF replica horaFinDe (mismos casos)', () => {
+    for (const [uid, personales, general] of [
+      ['u1', { u1: '15:00' }, '17:00'],
+      ['u2', { u1: '15:00' }, '17:00'],
+      ['u2', undefined, '17:00'],
+      ['u2', undefined, undefined],
+      ['u1', { u1: '25:99' }, '17:00'],
+      ['u1', { u1: '' }, '17:00'],
+      ['u1', {}, 'basura'],
+    ] as const) {
+      expect(horaFinDeJs(uid, personales, general)).toBe(horaFinDe(uid, personales as Record<string, string> | undefined, general))
+    }
+  })
+  it('esSalidaAnticipada compara la hora LOCAL de Bogotá contra la hora de cierre', () => {
+    // 2026-10-13 21:00Z = 16:00 Bogotá
+    const ms = Date.parse('2026-10-13T21:00:00Z')
+    expect(horaBogota(ms)).toBe('16:00')
+    expect(esSalidaAnticipada(ms, '17:00')).toBe(true)    // salió a las 16 con cierre 17
+    expect(esSalidaAnticipada(ms, '16:00')).toBe(false)   // justo a la hora NO es anticipada
+    expect(esSalidaAnticipada(ms, '15:00')).toBe(false)   // después de la hora
+    expect(esSalidaAnticipada(ms, null)).toBe(false)      // sin hora resoluble → no se marca
+    expect(esSalidaAnticipada(ms, 'basura')).toBe(false)
+  })
+})
+
+describe('tieneRespaldo — el permiso de Ausentismos cubre el día (cruce en lectura)', () => {
+  const aus = (uid: string | undefined, ini: string, fin: string, estado: 'activo' | 'anulado' = 'activo') => ({
+    estado, empleado_uid: uid,
+    fecha_inicio: Timestamp.fromDate(new Date(ini + 'T12:00:00')),
+    fecha_fin: Timestamp.fromDate(new Date(fin + 'T12:00:00')),
+  })
+  it('activo que cubre el día → respalda; fuera de rango o anulado → no', () => {
+    expect(tieneRespaldo('u1', '2026-10-13', [aus('u1', '2026-10-13', '2026-10-13')])).toBe(true)
+    expect(tieneRespaldo('u1', '2026-10-13', [aus('u1', '2026-10-10', '2026-10-15')])).toBe(true)
+    expect(tieneRespaldo('u1', '2026-10-13', [aus('u1', '2026-10-14', '2026-10-15')])).toBe(false)
+    expect(tieneRespaldo('u1', '2026-10-13', [aus('u1', '2026-10-13', '2026-10-13', 'anulado')])).toBe(false)
+  })
+  it('el ausentismo de OTRA persona o sin empleado_uid no respalda a nadie (ausencia honesta)', () => {
+    expect(tieneRespaldo('u1', '2026-10-13', [aus('u2', '2026-10-13', '2026-10-13')])).toBe(false)
+    expect(tieneRespaldo('u1', '2026-10-13', [aus(undefined, '2026-10-13', '2026-10-13')])).toBe(false)
   })
 })
 

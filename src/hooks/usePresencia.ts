@@ -46,7 +46,7 @@ let ultimaInteraccionMs = 0
 export const getUltimaInteraccionMs = (): number => ultimaInteraccionMs
 
 export function usePresencia(): void {
-  const { user } = useAuth()
+  const { user, cerrandoSesion } = useAuth()
   const uid = user?.uid
   // El rol decide si este usuario late (espejo del guard de la CF).
   const late = !!uid && !!user?.rol && user.rol !== 'tecnico' && !accesoResidente(user.rol as Rol)
@@ -54,6 +54,15 @@ export function usePresencia(): void {
   const ultimoLatido = useRef<{ ms: number; dia: string } | null>(null)
   const enVuelo = useRef(false)
   const latidoMin = useRef(LATIDO_MIN_DEFAULT)
+  // ⚠ CARRERA CERRADA (13-oct, destapada por el E2E de salida anticipada):
+  // el PROPIO clic en "Salir" genera pointerdown → un latido lanzado en
+  // paralelo con la CF 'salir' puede llegar DESPUÉS del cierre manual y
+  // RETIRARLO (la vía "la persona volvió" — correcta para presencia real,
+  // espuria para el clic que se está yendo). Durante el cierre de sesión
+  // NO se late; la variable de interacción sí se actualiza (el banner la
+  // necesita hasta el final).
+  const cerrandoRef = useRef(false)
+  useEffect(() => { cerrandoRef.current = cerrandoSesion }, [cerrandoSesion])
 
   useEffect(() => {
     if (!late) return
@@ -75,7 +84,7 @@ export function usePresencia(): void {
       const previo = ultimoLatido.current && ultimoLatido.current.dia === hoy
         ? ultimoLatido.current.ms
         : null
-      if (enVuelo.current || !debeLatir(previo, ahora, latidoMin.current)) return
+      if (cerrandoRef.current || enVuelo.current || !debeLatir(previo, ahora, latidoMin.current)) return
       enVuelo.current = true
       httpsCallable(functions, 'latidoJornada')({ accion: 'latido' })
         .then(() => {

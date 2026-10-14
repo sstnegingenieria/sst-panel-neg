@@ -82,6 +82,18 @@ export const ROLES_APROBAR_REGISTROS: Rol[] = ['admin', 'sst', 'gestion_integral
 // reglas a propósito — defensa en profundidad).
 export const ROLES_GESTIONA_CONTRATISTAS: Rol[] = ['admin']
 
+// Editar la IDENTIDAD del contratista (14-oct, OK de Giovanny — cuarto
+// permiso que le faltaba a GI, hallado por el barrido): quien inscribe
+// corrige — Ingrid inscribía y avalaba pero un nombre o NIT mal tecleado
+// exigía pedirle la corrección a alguien más. Verificado antes de construir:
+// el NIT solo vive en el doc del contratista; aguas abajo hay COPIAS
+// CONGELADAS deliberadas (asignacion.contratista_documento se fija al
+// asignar — evidencia del momento) que no deben seguirlo. Cada corrección
+// deja traza en historial[] (entradaCorreccionIdentidad). Espejo de la vía
+// nueva de update en firestore.rules. ELIMINAR sigue admin-only.
+export const ROLES_EDITA_CONTRATISTAS: Rol[] = ['admin', 'gestion_integral']
+export const puedeEditarContratistasUI = (rol: string | undefined) => en(rol, ROLES_EDITA_CONTRATISTAS)
+
 // Inscribir (crear) contratistas (22-sep, modelo del aval de Giovanny):
 // admin + gestion_integral — Ingrid también inscribe, no solo avala.
 // En reglas la vía de create es más amplia (gestores + GI); la UI sigue
