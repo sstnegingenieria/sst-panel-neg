@@ -365,7 +365,16 @@ service cloud.firestore {
       // exclusivamente el aval (titular/respaldo, abajo), patrón del BONUS
       // del aprobador de respaldo de preliquidaciones (PR #45). Editar sin
       // cambiar el estado pasa igual (affectedKeys = solo lo que CAMBIA).
-      allow update: if puedeGestionarProyectos()
+      // 14-oct (OK de Giovanny, hallazgo del barrido de GI): quien INSCRIBE
+      // corrige — gestion_integral edita la identidad con el MISMO guard de
+      // campos vedados (la cédula no vuelve al doc público; el estado sigue
+      // siendo exclusivamente el aval). La traza de quién corrigió qué la
+      // escribe la UI en historial[] (entradaCorreccionIdentidad). Verificado
+      // antes de abrir: el NIT solo vive aquí — aguas abajo hay copias
+      // CONGELADAS deliberadas (asignacion.contratista_documento) que no
+      // deben seguirlo. DELETE no se amplía.
+      allow update: if (puedeGestionarProyectos()
+                        || (isAuthed() && rolActual() == 'gestion_integral'))
                     && !request.resource.data.diff(resource.data)
                         .affectedKeys().hasAny(['cedula', 'telefono', 'direccion', 'estado']);
       allow delete: if puedeGestionarProyectos();

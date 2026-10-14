@@ -10,9 +10,9 @@ import { toast } from '../components/shared/Toast'
 import { arrayUnion, Timestamp } from 'firebase/firestore'
 import { useAuth } from '../contexts/AuthContext'
 import {
-  puedeGestionarContratistasUI, puedeHabilitarContratistas,
+  puedeHabilitarContratistas,
   puedeInscribirContratistas, esTitularHabilitacion, puedeGestionarNominaUI,
-  puedeGestionarTecnicosUI, puedeGestionarEmpleadosUI,
+  puedeGestionarTecnicosUI, puedeGestionarEmpleadosUI, puedeEditarContratistasUI,
 } from '../types/sigp/permisos'
 import Modal from '../components/shared/Modal'
 import NominaModal from '../components/NominaModal'
@@ -20,7 +20,7 @@ import { getDoc, doc as docRef } from 'firebase/firestore'
 import type { NominaContratista } from '../utils/contratistasNomina'
 import { normalizarCedula } from '../utils/contratistasNomina'
 import { resolverCedula, leerPrivado, guardarCedulaPrivada } from '../utils/contratistasPrivado'
-import { entradaCambioEstado } from '../utils/contratistasTraza'
+import { entradaCambioEstado, entradaCorreccionIdentidad } from '../utils/contratistasTraza'
 // C5a-2 — una persona, una ficha: la cuenta de la app se gestiona DESDE la
 // ficha del contratista; reuso de los modales reales de Usuarios (misma
 // mecánica, mismos writes — las pantallas conviven hasta el C5b).
@@ -41,7 +41,11 @@ export default function Contratistas() {
   const modal = useModal()
   const { add, update, getAllOrdered } = useFirestore()
   const { user } = useAuth()
-  const puedeGestionar = puedeGestionarContratistasUI(user?.rol)
+  // 14-oct (OK de Giovanny): EDITAR la identidad también GI — quien inscribe
+  // corrige, con traza (entradaCorreccionIdentidad). El botón ✎ de la tabla
+  // era el único consumidor del gate admin-only en esta página; eliminar
+  // sigue admin (ROLES_GESTIONA_CONTRATISTAS, sin superficie aquí).
+  const puedeEditar = puedeEditarContratistasUI(user?.rol)
   const puedeInscribir = puedeInscribirContratistas(user?.rol)
   const puedeHabilitar = puedeHabilitarContratistas(user?.rol)
   // Modelo del aval (22-sep): titular (GI) habilita sin salvedad; respaldo
@@ -150,7 +154,22 @@ export default function Contratistas() {
       // (registro mercantil público; la app lo lee).
       const { cedula, ...padre } = data
       if (editTarget) {
-        await update('contratistas', editTarget.id, padre)
+        // Traza de la corrección (14-oct): quién corrigió qué, en el mismo
+        // historial append-only del aval. La cédula se menciona SIN valores
+        // (vive en el sub-doc privado; el historial es del doc público).
+        const traza = entradaCorreccionIdentidad(
+          {
+            nombre: editTarget.nombre, tipo: editTarget.tipo, nit: editTarget.nit,
+            cedula: editTarget.cedula, usuario_tecnico_id: editTarget.usuario_tecnico_id,
+          },
+          data,
+          { uid: user?.uid ?? '', nombre: user?.nombre, rol: user?.rol },
+          Timestamp.now(),
+        )
+        await update('contratistas', editTarget.id, {
+          ...padre,
+          ...(traza ? { historial: arrayUnion(traza) } : {}),
+        })
         await guardarCedulaPrivada(editTarget.id, cedula)
         toast('Contratista actualizado')
       } else {
@@ -474,7 +493,7 @@ export default function Contratistas() {
           onEdit={openEdit}
           onToggleEstado={handleToggle}
           onNomina={abrirNomina}
-          puedeGestionar={puedeGestionar}
+          puedeGestionar={puedeEditar}
           puedeHabilitar={puedeHabilitar}
           puedeNomina={puedeNomina}
         />
