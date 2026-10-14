@@ -5,8 +5,8 @@ import TextField from './shared/TextField'
 import ChecklistCriterios from './patrones/ChecklistCriterios'
 import PlanActividades from './patrones/PlanActividades'
 import BitacoraAusentismo from './patrones/BitacoraAusentismo'
-import BitacoraRatio from './patrones/BitacoraRatio'
 import { useIndicadorRegistros } from '../hooks/useIndicadorRegistros'
+import { useSugerenciaDenominador } from '../hooks/useSugerenciaDenominador'
 import type { Indicador, IndicadorMedicion, IndicadorRegistro } from '../types/indicador'
 import { TIPO_INDICADOR_LABELS } from '../types/indicador'
 import {
@@ -18,6 +18,7 @@ import {
   SEMAFORO_LABEL,
 } from '../utils/indicadoresCalc'
 import { derivarNumDen } from '../utils/indicadoresRegistros'
+import { esPatronConocido, resolverDenominador, SUGERENCIA_DENOMINADOR } from '../utils/indicadorSugerencias'
 
 interface IndicadorDetalleModalProps {
   isOpen: boolean
@@ -48,10 +49,14 @@ export default function IndicadorDetalleModal({
 }: IndicadorDetalleModalProps) {
   const { cargarRegistros } = useIndicadorRegistros()
   const medicionActual = historico.find(m => m.periodo === periodoActual)
-  const esPatronado = !!indicador.patron
+  // Un patrón desconocido (p. ej. 'ratio', ya retirado) cae al formulario manual.
+  const esPatronado = esPatronConocido(indicador.patron)
+  // Solo conteo agregado del maestro (SST-IND-06); null si no aplica o no hay acceso.
+  const sugerido = useSugerenciaDenominador(indicador.codigo, isOpen && !esPatronado)
+  const denInicial = resolverDenominador(medicionActual?.denominador, sugerido)
 
   const [numerador, setNumerador] = useState(String(medicionActual?.numerador ?? ''))
-  const [denominador, setDenominador] = useState(String(medicionActual?.denominador ?? ''))
+  const [denominador, setDenominador] = useState(denInicial.inicial)
   const [metaPct, setMetaPct] = useState(medicionActual ? String(medicionActual.meta * 100) : '')
   const [interpretacion, setInterpretacion] = useState(medicionActual?.interpretacion ?? '')
   const [registros, setRegistros] = useState<IndicadorRegistro[]>([])
@@ -59,11 +64,17 @@ export default function IndicadorDetalleModal({
   // Reabrir con otro indicador (o cambiar de periodo) resetea el formulario.
   useEffect(() => {
     setNumerador(String(medicionActual?.numerador ?? ''))
-    setDenominador(String(medicionActual?.denominador ?? ''))
+    setDenominador(resolverDenominador(medicionActual?.denominador, sugerido).inicial)
     setMetaPct(medicionActual ? String(medicionActual.meta * 100) : '')
     setInterpretacion(medicionActual?.interpretacion ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [indicador.id, periodoActual])
+
+  // El conteo llega async: si aún no hay medición ni nada tecleado, pre-llena.
+  useEffect(() => {
+    if (sugerido != null && !medicionActual && denominador === '') setDenominador(String(sugerido))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sugerido])
 
   useEffect(() => {
     if (esPatronado) {
@@ -121,8 +132,6 @@ export default function IndicadorDetalleModal({
         return <PlanActividades {...props} esAdmin={esAdmin} />
       case 'registro':
         return <BitacoraAusentismo {...props} esAdmin={esAdmin} />
-      case 'ratio':
-        return <BitacoraRatio {...props} esAdmin={esAdmin} />
       default:
         return null
     }
@@ -206,10 +215,27 @@ export default function IndicadorDetalleModal({
               {esPatronado ? (
                 renderPatron()
               ) : (
+                <>
                 <div className="grid grid-cols-2 gap-3">
                   <TextField label="Numerador" value={numerador} onChange={setNumerador} hint={indicador.label_numerador} />
-                  <TextField label="Denominador" value={denominador} onChange={setDenominador} hint={indicador.label_denominador} />
+                  <div className="flex flex-col gap-1">
+                    <TextField label="Denominador" value={denominador} onChange={setDenominador} hint={indicador.label_denominador} />
+                    {sugerido != null && (
+                      <p className="text-xs text-gray-500">
+                        {denominador === String(sugerido)
+                          ? `Sugerido por el maestro de empleados: ${sugerido} activos hoy. Puedes editarlo.`
+                          : <>El maestro de empleados dice {sugerido} activos hoy.{' '}
+                            <button type="button" className="text-brand-700 font-medium underline" onClick={() => setDenominador(String(sugerido))}>Usar</button></>}
+                      </p>
+                    )}
+                  </div>
                 </div>
+                {indicador.codigo in SUGERENCIA_DENOMINADOR && (
+                  <p className="text-xs text-gray-500 -mt-1">
+                    Solo conteos: número de trabajadores con examen médico vigente (y total). No registres nombres, resultados ni diagnósticos.
+                  </p>
+                )}
+                </>
               )}
               <TextField label="Meta (%)" value={metaPct} onChange={setMetaPct} hint="Ej. 90 para 90%" />
               <div className="flex flex-col gap-1">
