@@ -129,6 +129,18 @@ service cloud.firestore {
     function registraAusentismo() {
       return isAuthed() && rolActual() in ['gerencia_administrativa', 'gestion_integral', 'admin'];
     }
+    // Regla DURA del origen ATEL (14-oct, pedido de Giovanny tras el reporte
+    // del frente): para el reporte legal de ATEL, "en la práctica no hay otra
+    // vía" no es una garantía — es una suposición sobre el futuro. Un doc con
+    // tipo 'incapacidad' no puede EXISTIR sin origen válido: ni al nacer
+    // (create) ni ENTRANDO a ese estado por update (cambiar tipo u origen
+    // re-valida el invariante). Los HISTÓRICOS pre-24-sep sin origen siguen
+    // anulables/editables mientras no toquen tipo/origen — la regla cierra la
+    // puerta hacia el estado inválido, no castiga lo que ya existía.
+    function origenAtelValido() {
+      return request.resource.data.get('tipo', '') != 'incapacidad'
+             || request.resource.data.get('origen', '') in ['laboral', 'comun'];
+    }
 
     // 10. Mantenimiento de precios del catálogo NEG (#2b, 09-ago): quién
     //     CORRIGE o AJUSTA MASIVAMENTE precios ya existentes. El ALTA desde
@@ -1191,8 +1203,12 @@ service cloud.firestore {
       // registrar un AT/EL es separable del dato clínico por construcción
       // (el sub-doc privado es opcional y queda abajo con gestionaHorario()).
       allow create: if registraAusentismo()
-                    && request.resource.data.get('soporte_url', '') != '';
-      allow update: if registraAusentismo();
+                    && request.resource.data.get('soporte_url', '') != ''
+                    && origenAtelValido();
+      allow update: if registraAusentismo()
+                    && (!request.resource.data.diff(resource.data)
+                          .affectedKeys().hasAny(['tipo', 'origen'])
+                        || origenAtelValido());
 
       // Detalle médico (diagnóstico/observaciones) = dato de SALUD —
       // LÍNEA DURA (decisión Giovanny 07-ago): solo gerencia_administrativa
