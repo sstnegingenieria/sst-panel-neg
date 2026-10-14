@@ -53,9 +53,52 @@ const { ipEnLista, dispositivoDe } = require('./horario');
 const ACCIONES_VALIDAS = ['entrada', 'latido', 'salir', 'salir_auto'];
 const ROLES_SIN_RELOJ = ['tecnico', 'residente_obra', 'residente_cliente', 'cliente_final'];
 
+// Un LATIDO retira un cierre existente solo si el cierre tiene más de esto
+// (13-oct, carrera destapada por el E2E de salida anticipada): el clic de
+// "Salir" también es interacción, y con el cold start de la CF un latido
+// lanzado en ese mismo gesto puede ATERRIZAR después del cierre manual y
+// borrarlo. Un latido a segundos del cierre es ruido del gesto de salida;
+// "la persona volvió" de verdad tarda más que esto. La 'entrada' (login,
+// acto deliberado) retira SIEMPRE, sin umbral.
+const RETIRO_CIERRE_UMBRAL_MS = 60_000;
+
 /** Día local de Bogotá (UTC-5 fijo) para un epoch ms. */
 function diaBogota(epochMs) {
   return new Date(epochMs - 5 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/** Hora local de Bogotá 'HH:mm' para un epoch ms. */
+function horaBogota(epochMs) {
+  return new Date(epochMs - 5 * 3_600_000).toISOString().slice(11, 16);
+}
+
+// ── Salida anticipada (13-oct, diseño aprobado) ──────────────────────────────
+// La hora de cierre EFECTIVA de la persona se resuelve SERVER-SIDE (réplica
+// exacta de horaFinDe de types/sigp/horario.ts — paridad fijada por test) y
+// la marca `cierre.anticipada` se CONGELA con el hecho: si se derivara en
+// lectura contra el horario vigente, bajarle la hora de cierre a alguien
+// re-escribiría su pasado (mismo criterio por el que no se editan facturas
+// ni se corrige el reloj). El payload del cliente sigue siendo {accion} —
+// nada de esto confía en el navegador.
+const RE_HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
+function esHoraValidaJs(h) {
+  return typeof h === 'string' && RE_HORA.test(h);
+}
+/** Réplica de horaFinDe(uid, personales, general): personal válida gana,
+ *  fallback a la general válida, si no hay nada → null. */
+function horaFinDeJs(uid, personales, general) {
+  const p = personales && typeof personales === 'object' ? personales[uid] : undefined;
+  if (esHoraValidaJs(p)) return p;
+  if (esHoraValidaJs(general)) return general;
+  return null;
+}
+/** Salida manual ANTES de la hora de cierre de la persona (mismo día local).
+ *  Supuesto nombrado: la hora de cierre pertenece al día que termina — una
+ *  hora de cierre de madrugada (p. ej. 00:30 del día siguiente) queda fuera
+ *  de este modelo, igual que la hora única del rebuild original. */
+function esSalidaAnticipada(epochMs, horaFin) {
+  if (!esHoraValidaJs(horaFin)) return false;
+  return horaBogota(epochMs) < horaFin;
 }
 
 /** IP real del cliente (mismo criterio que registrarEventoHorario). */
@@ -80,9 +123,14 @@ const latidoJornada = onCall(
     const uid = request.auth.uid;
 
     try {
-      const [userSnap, cfgSnap] = await Promise.all([
+      const [userSnap, cfgSnap, horariosSnap] = await Promise.all([
         db.doc(`users/${uid}`).get().catch(() => null),
         db.doc('configuracion/horario').get().catch(() => null),
+        // Solo la salida MANUAL necesita la hora de cierre de la persona
+        // (marca de anticipada); las demás acciones no pagan la lectura.
+        accion === 'salir'
+          ? db.doc('configuracion/horarios_personales').get().catch(() => null)
+          : Promise.resolve(null),
       ]);
       const user = userSnap?.exists ? userSnap.data() : {};
       if (ROLES_SIN_RELOJ.includes(user.rol ?? '')) {
@@ -97,9 +145,23 @@ const latidoJornada = onCall(
       const dispositivo = dispositivoDe(String(request.rawRequest?.headers?.['user-agent'] ?? '').slice(0, 200));
       const dia = diaBogota(Date.now());
       const esSalida = accion === 'salir' || accion === 'salir_auto';
-      const cierreDe = () => ({
+      // Salida anticipada: SOLO la manual ('salir') puede serlo — la
+      // automática ocurre a/tras la hora por construcción. Resuelta aquí,
+      // congelada en el doc.
+      const horaFin = accion === 'salir'
+        ? horaFinDeJs(
+            uid,
+            horariosSnap?.exists ? horariosSnap.data().horarios : undefined,
+            cfgSnap?.exists ? cfgSnap.data().hora_fin_jornada : undefined,
+          )
+        : null;
+      const anticipadaHoy = accion === 'salir' && esSalidaAnticipada(Date.now(), horaFin);
+      const cierreDe = (enDiaDeHoy) => ({
         fecha: FieldValue.serverTimestamp(),
         tipo: accion === 'salir' ? 'manual' : 'automatica',
+        // Anclaje nocturno: una salida de madrugada que cierra la jornada de
+        // AYER es trabajo que PASÓ la hora de cierre, no salida anticipada.
+        ...(anticipadaHoy && enDiaDeHoy ? { anticipada: true } : {}),
       });
 
       let diaEscrito = dia;
@@ -140,7 +202,7 @@ const latidoJornada = onCall(
             en_oficina_inicio: enOficina,
             en_oficina_ultimo: enOficina,
             dispositivo,
-            ...(esSalida ? { cierre: cierreDe() } : {}),
+            ...(esSalida ? { cierre: cierreDe(diaEscrito === dia) } : {}),
           });
           return;
         }
@@ -153,10 +215,17 @@ const latidoJornada = onCall(
             ? { entrada: { fecha: FieldValue.serverTimestamp() } }
             : {}),
           ...(esSalida
-            ? { cierre: cierreDe() }
+            ? { cierre: cierreDe(diaEscrito === dia) }
             // volvió después de salir (re-login o presencia): la salida
-            // previa se retira — la salida real será la última del día
-            : snap.data().cierre ? { cierre: FieldValue.delete() } : {}),
+            // previa se retira — la salida real será la última del día.
+            // Latido: solo si el cierre no es de hace segundos (umbral — el
+            // clic de salir no se borra a sí mismo). Entrada: siempre.
+            : snap.data().cierre
+                && (accion === 'entrada'
+                    || !snap.data().cierre.fecha
+                    || Date.now() - snap.data().cierre.fecha.toMillis() > RETIRO_CIERRE_UMBRAL_MS)
+              ? { cierre: FieldValue.delete() }
+              : {}),
         });
       });
 
@@ -168,4 +237,4 @@ const latidoJornada = onCall(
   },
 );
 
-module.exports = { latidoJornada, diaBogota };
+module.exports = { latidoJornada, diaBogota, horaBogota, horaFinDeJs, esSalidaAnticipada };

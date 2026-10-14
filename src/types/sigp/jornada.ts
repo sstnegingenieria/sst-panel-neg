@@ -43,6 +43,17 @@ import type { DispositivoHorario } from './horario'
 export interface CierreJornada {
   fecha: Timestamp
   tipo: 'manual' | 'automatica'
+  /** Salida ANTICIPADA (13-oct): salida MANUAL antes de la hora de cierre de
+   *  esa persona (la suya, no la general), resuelta SERVER-SIDE por la CF y
+   *  CONGELADA con el hecho — si se derivara en lectura contra el horario
+   *  vigente, cambiarle la hora a alguien reescribiría su pasado (mismo
+   *  criterio por el que no se editan facturas ni se corrige el reloj).
+   *  Jamás en 'automatica' (ocurre a/tras la hora) ni en la salida de
+   *  madrugada anclada al día anterior (trabajo que PASÓ la hora). El
+   *  respaldo (permiso en Ausentismos) se CRUZA en lectura — la persona
+   *  declara la salida, la autoridad la respalda; nadie justifica su propia
+   *  ausencia y por eso NO hay campo de motivo aquí. */
+  anticipada?: true
 }
 
 /** ENTRADA = login explícito (regla de negocio 13-oct: "todos se loguean al
@@ -187,7 +198,7 @@ export function normalizarJornada(id: string, data: Record<string, unknown>): Jo
   const inicio = data.inicio as Timestamp | undefined
   const ultimo = data.ultimo_latido as Timestamp | undefined
   if (typeof data.uid !== 'string' || typeof data.dia !== 'string' || !inicio?.toDate || !ultimo?.toDate) return null
-  const cierreRaw = data.cierre as { fecha?: Timestamp; tipo?: string } | undefined
+  const cierreRaw = data.cierre as { fecha?: Timestamp; tipo?: string; anticipada?: unknown } | undefined
   const entradaRaw = data.entrada as { fecha?: Timestamp } | undefined
   return {
     id,
@@ -203,7 +214,14 @@ export function normalizarJornada(id: string, data: Record<string, unknown>): Jo
     dispositivo: data.dispositivo === 'escritorio' || data.dispositivo === 'movil' ? data.dispositivo : 'desconocido',
     ...(entradaRaw?.fecha?.toDate ? { entrada: { fecha: entradaRaw.fecha } } : {}),
     ...(cierreRaw?.fecha?.toDate && (cierreRaw.tipo === 'manual' || cierreRaw.tipo === 'automatica')
-      ? { cierre: { fecha: cierreRaw.fecha, tipo: cierreRaw.tipo as 'manual' | 'automatica' } }
+      ? {
+          cierre: {
+            fecha: cierreRaw.fecha,
+            tipo: cierreRaw.tipo as 'manual' | 'automatica',
+            // anticipada solo vale escrita por la CF como true Y en cierre manual
+            ...(cierreRaw.anticipada === true && cierreRaw.tipo === 'manual' ? { anticipada: true as const } : {}),
+          },
+        }
       : {}),
   }
 }

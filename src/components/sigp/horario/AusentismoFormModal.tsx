@@ -33,6 +33,10 @@ interface Props {
   onSaved: () => void
   puedeGestionar: boolean
   userUid: string | undefined
+  /** Prefill del CTA de la cola de salidas anticipadas sin respaldo (13-oct):
+   *  empleado por su cuenta del panel + día 'YYYY-MM-DD'. Si el uid no está
+   *  en el maestro, el prefill degrada en silencio (se elige a mano). */
+  inicial?: { empleadoUid?: string; fecha?: string }
 }
 
 function extensionDe(file: File): string {
@@ -40,7 +44,7 @@ function extensionDe(file: File): string {
   return partes.length > 1 ? partes[partes.length - 1] : 'dat'
 }
 
-export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGestionar, userUid }: Props) {
+export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGestionar, userUid, inicial }: Props) {
   const { cargar: cargarEmpleados } = useEmpleadosDirectos()
   const [empleados, setEmpleados] = useState<EmpleadoDirecto[]>([])
   const [cargandoEmpleados, setCargandoEmpleados] = useState(false)
@@ -61,12 +65,20 @@ export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGes
     setEmpleadoId(''); setTipo('permiso'); setOrigen(''); setFechaInicio(''); setFechaFin('')
     setDescripcion(''); setArchivo(null); setDetalleAbierto(false)
     setDiagnostico(''); setObservaciones('')
+    if (inicial?.fecha) { setFechaInicio(inicial.fecha); setFechaFin(inicial.fecha) }
     setCargandoEmpleados(true)
     cargarEmpleados()
-      .then(lista => setEmpleados(lista.filter(e => e.activo)))
+      .then(lista => {
+        const activos = lista.filter(e => e.activo)
+        setEmpleados(activos)
+        if (inicial?.empleadoUid) {
+          const match = activos.find(e => e.user_uid === inicial.empleadoUid)
+          if (match) setEmpleadoId(match.id)
+        }
+      })
       .catch(() => toast('No se pudo cargar el listado de empleados', 'error'))
       .finally(() => setCargandoEmpleados(false))
-  }, [isOpen, cargarEmpleados])
+  }, [isOpen, cargarEmpleados, inicial])
 
   const empleadoSeleccionado = useMemo(
     () => empleados.find(e => e.id === empleadoId) ?? null,
@@ -99,6 +111,9 @@ export default function AusentismoFormModal({ isOpen, onClose, onSaved, puedeGes
       await setDoc(doc(db, 'ausentismos', id), {
         empleado_id: empleadoSeleccionado.id,
         empleado_nombre: empleadoSeleccionado.nombre,
+        // Cuenta del panel denormalizada (13-oct): llave del cruce de salida
+        // anticipada con respaldo — ver el comentario del tipo Ausentismo.
+        ...(empleadoSeleccionado.user_uid ? { empleado_uid: empleadoSeleccionado.user_uid } : {}),
         tipo,
         ...(esIncapacidad ? { origen } : {}),
         fecha_inicio: Timestamp.fromDate(new Date(fechaInicio + 'T12:00:00')),

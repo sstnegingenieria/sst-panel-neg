@@ -11,10 +11,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Timestamp, collection, getDoc, getDocs, doc, orderBy, query, where } from 'firebase/firestore'
 import { db } from '../../../firebase/config'
+import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
-import { aparearJornadas, claveDia, fmtDuracion, esHoraValida } from '../../../types/sigp/horario'
-import type { ConfigHorario, DispositivoHorario, HorariosPersonales, RegistroHorario } from '../../../types/sigp/horario'
+import {
+  aparearJornadas, claveDia, fmtDuracion, esHoraValida, tieneRespaldo,
+  UMBRAL_SALIDA_SIN_RESPALDO_DIAS, RANGO_COLA_SIN_RESPALDO_DIAS,
+} from '../../../types/sigp/horario'
+import type { Ausentismo, ConfigHorario, DispositivoHorario, HorariosPersonales, RegistroHorario } from '../../../types/sigp/horario'
+import { puedeRegistrarAusentismoUI, puedeGestionarHorarioUI } from '../../../types/sigp/permisos'
 import HorariosPersonalesCard from './HorariosPersonalesCard'
+import AusentismoFormModal from './AusentismoFormModal'
 import {
   normalizarJornada, cierreEfectivo, presenteAhora, operaEnApp,
   GRACIA_CIERRE_MIN_DEFAULT, VENTANA_PRESENTE_MIN_DEFAULT,
@@ -75,6 +81,7 @@ const pill = (activo: boolean) =>
 interface UsuarioApp { uid: string; nombre: string; rol: string }
 
 export default function RegistrosTab() {
+  const { user } = useAuth()
   const hoyDate = new Date()
   const [desdeStr, setDesdeStr] = useState(() => toDateStr(new Date()))
   const [hastaStr, setHastaStr] = useState(() => toDateStr(new Date()))
@@ -96,6 +103,15 @@ export default function RegistrosTab() {
   // Histórico del sistema anterior (marcas ingreso/salida) — lazy al abrir.
   const [verHistorico, setVerHistorico] = useState(false)
   const [historico, setHistorico] = useState<RegistroHorario[] | null>(null)
+  // ── Salida anticipada con respaldo (13-oct) ──
+  // Ausentismos para el CRUCE (mismos lectores que esta pantalla: veHorario)
+  // y la COLA de anticipadas sin respaldo (consulta dedicada por
+  // cierre.anticipada — campo único, sin índice compuesto — independiente
+  // del rango visible: una salida sin respaldo de hace tres semanas no puede
+  // depender de qué fechas esté mirando alguien).
+  const [ausentismos, setAusentismos] = useState<Ausentismo[]>([])
+  const [anticipadas, setAnticipadas] = useState<Jornada[]>([])
+  const [registrarPara, setRegistrarPara] = useState<{ empleadoUid: string; fecha: string } | null>(null)
 
   const rangoHoy = () => { const s = toDateStr(hoyDate); setDesdeStr(s); setHastaStr(s) }
   const rangoSemana = () => { setDesdeStr(toDateStr(lunesDeSemana(hoyDate))); setHastaStr(toDateStr(hoyDate)) }
@@ -134,6 +150,27 @@ export default function RegistrosTab() {
       })
       .catch(() => setUsuariosApp([]))
   }, [])
+
+  const cargarCruce = useCallback(async () => {
+    // Best-effort: si una de las dos lecturas falla, el cruce degrada a
+    // "sin respaldo visible" en la cola y los chips — jamás tumba la pestaña.
+    try {
+      const snap = await getDocs(collection(db, 'ausentismos'))
+      setAusentismos(snap.docs.map(d2 => ({ id: d2.id, ...d2.data() }) as Ausentismo))
+    } catch { setAusentismos([]) }
+    try {
+      const corte = claveDia(new Date(Date.now() - RANGO_COLA_SIN_RESPALDO_DIAS * 86_400_000))
+      const snap = await getDocs(query(collection(db, 'jornadas'), where('cierre.anticipada', '==', true)))
+      const items: Jornada[] = []
+      snap.docs.forEach(d2 => {
+        const j = normalizarJornada(d2.id, d2.data() as Record<string, unknown>)
+        if (j && j.dia >= corte) items.push(j)
+      })
+      setAnticipadas(items.sort((a, b) => a.dia.localeCompare(b.dia)))
+    } catch { setAnticipadas([]) }
+  }, [])
+
+  useEffect(() => { cargarCruce() }, [cargarCruce])
 
   const load = useCallback(async () => {
     if (!desdeStr || !hastaStr) return
@@ -202,6 +239,18 @@ export default function RegistrosTab() {
 
   const jornadasHistorico = useMemo(() => aparearJornadas(historico ?? []), [historico])
 
+  // Cola: anticipadas SIN permiso registrado, con antigüedad (como las otras
+  // colas de la casa — lo que no puede quedar invisible es la de hace tres
+  // semanas). Encuadre: pendiente de registro, no castigo.
+  const sinRespaldo = useMemo(() =>
+    anticipadas
+      .filter(j => !tieneRespaldo(j.uid, j.dia, ausentismos))
+      .map(j => ({ j, dias: Math.floor((Date.now() - parseDateStr(j.dia).getTime()) / 86_400_000) })),
+  [anticipadas, ausentismos])
+
+  const puedeRegistrar = puedeRegistrarAusentismoUI(user?.rol)
+  const respaldoDe = (j: Jornada): boolean => tieneRespaldo(j.uid, j.dia, ausentismos)
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -245,6 +294,44 @@ export default function RegistrosTab() {
           ↻ Actualizar
         </button>
       </div>
+
+      {/* ── Salidas anticipadas sin respaldo — cola para quien registra
+          permisos, no un castigo: normalmente es que el permiso todavía no
+          se registró. El rótulo JAMÁS dice el tipo (privacidad: genérico
+          uniforme, sin excepciones). ── */}
+      {sinRespaldo.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-xs font-semibold text-amber-800">
+            ⏱ Salidas anticipadas sin permiso registrado ({sinRespaldo.length})
+          </p>
+          <p className="text-[11px] text-amber-700 mt-0.5 mb-1.5">
+            Salida manual antes de la hora de cierre de esa persona, sin ausentismo que cubra el día.
+            Normalmente falta registrar el permiso — el panel registra, no autoriza.
+          </p>
+          <div className="space-y-1">
+            {sinRespaldo.map(({ j, dias }) => (
+              <div key={j.id} className="flex items-center gap-3 text-xs">
+                <span className="text-gray-800 font-medium">{j.nombre}</span>
+                <span className="text-gray-500">{fFechaDia(j.dia)}</span>
+                <span className={dias > UMBRAL_SALIDA_SIN_RESPALDO_DIAS
+                  ? 'text-red-600 font-semibold'
+                  : 'text-gray-400'}
+                  title={dias > UMBRAL_SALIDA_SIN_RESPALDO_DIAS
+                    ? `Lleva más de ${UMBRAL_SALIDA_SIN_RESPALDO_DIAS} días sin respaldo registrado`
+                    : undefined}>
+                  hace {dias} día{dias === 1 ? '' : 's'}
+                </span>
+                {puedeRegistrar && (
+                  <button onClick={() => setRegistrarPara({ empleadoUid: j.uid, fecha: j.dia })}
+                    className="ml-auto text-[11px] px-2 py-0.5 rounded border border-amber-300 text-amber-800 hover:bg-amber-100 font-medium">
+                    Registrar ausentismo
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div>
         <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
@@ -314,6 +401,21 @@ export default function RegistrosTab() {
                         <span className="text-xs text-gray-700" title="La persona cerró sesión">
                           salió <span className="font-mono">{fHora(cierre.fecha)}</span>
                         </span>
+                      )}
+                      {/* Salida anticipada: tres estados legibles. El rótulo del
+                          respaldo es GENÉRICO siempre — jamás el tipo. */}
+                      {j.cierre?.anticipada && (
+                        respaldoDe(j) ? (
+                          <span className="block text-[11px] text-gray-500 mt-0.5"
+                            title="Salida manual antes de su hora de cierre, con ausentismo registrado que cubre el día">
+                            ⏱ salida anticipada · permiso registrado ✓
+                          </span>
+                        ) : (
+                          <span className="block text-[11px] text-amber-700 mt-0.5"
+                            title="Salida manual antes de su hora de cierre, sin ausentismo que cubra el día — normalmente falta registrarlo">
+                            ⏱ salida anticipada · sin permiso registrado
+                          </span>
+                        )
                       )}
                       {cierre.estado === 'automatico' && (
                         <span className="text-xs text-gray-500"
@@ -397,6 +499,17 @@ export default function RegistrosTab() {
           )
         )}
       </div>
+
+      {/* CTA de la cola: registrar el ausentismo prellenado (persona + día).
+          El detalle médico dentro del modal sigue gateado aparte (GA+admin). */}
+      <AusentismoFormModal
+        isOpen={registrarPara !== null}
+        onClose={() => setRegistrarPara(null)}
+        onSaved={() => { setRegistrarPara(null); void cargarCruce() }}
+        puedeGestionar={puedeGestionarHorarioUI(user?.rol)}
+        userUid={user?.uid}
+        inicial={registrarPara ?? undefined}
+      />
 
       {/* Horarios por persona (gerencia_administrativa + admin) */}
       <HorariosPersonalesCard horaGeneral={horaGeneral} />
