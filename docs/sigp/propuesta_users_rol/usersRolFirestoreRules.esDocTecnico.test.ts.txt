@@ -1,0 +1,369 @@
+// @vitest-environment node
+//
+// Batería de la regla `match /users/{userId}` — cierre de la ESCALADA DE ROL.
+//
+// HALLAZGO que motiva la batería: `allow create, update, delete: if
+// puedeAdministrarSST()` (sst, admin, gestion_integral) no restringía ni el
+// documento tocado ni el valor de `rol`/`role` escrito, y como los `allow` se
+// suman, la denylist de la regla de auto-edición no aplicaba a esos roles. Un
+// `sst` podía escribir `users/{cualquiera}.rol` (incluso el suyo) como
+// `admin`, y toda regla que autoriza por `rolActual()` quedaba debilitada.
+//
+// CIERRE: cualquier create/update/delete de `users` es solo `admin`; sst y
+// gestion_integral conservan únicamente `update` de documentos de TÉCNICO que
+// sigan siendo de técnico tras la escritura (rol Y role).
+//
+// PRINCIPIO (lección SB2.2): cada vía de denegación se prueba con el actor de
+// MÍNIMO PRIVILEGIO que casi puede (un `sst` / `gestion_integral` autenticado,
+// con acceso real al flujo legítimo) — no con un anónimo, cuyo 403 solo prueba
+// que existe el catch-all. Los flujos legítimos (panel + app Flutter) se
+// prueban con los MISMOS payloads que escriben hoy los componentes/Dart.
+//
+// NO forma parte del `npm test` por defecto. Se corre con:
+//   npx firebase emulators:exec --project demo-neg --only firestore \
+//     "npx vitest run --config vitest.emulator.config.ts src/hooks/sigp/__tests__/usersRolFirestoreRules.test.ts"
+
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, it, beforeAll, afterAll, beforeEach } from 'vitest'
+import {
+  initializeTestEnvironment,
+  assertSucceeds,
+  assertFails,
+  type RulesTestEnvironment,
+} from '@firebase/rules-unit-testing'
+import {
+  doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, writeBatch, FieldPath, Timestamp,
+} from 'firebase/firestore'
+
+const TIMEOUT = 30_000
+
+// ── Actores: uid -> campos del doc `users/{uid}` ──────────────────────────────
+// `sofia` (sst) e `ingrid` (gestion_integral) son los actores de mínimo
+// privilegio: tienen el acceso real a la gestión de técnicos y NADA más.
+const USERS: Record<string, Record<string, unknown>> = {
+  root:     { nombre: 'Root', rol: 'admin', estado: 'activo' },
+  sofia:    { nombre: 'Sofía', rol: 'sst', estado: 'activo' },
+  ingrid:   { nombre: 'Ingrid', rol: 'gestion_integral', estado: 'activo' },
+  marcela:  { nombre: 'Marcela', rol: 'gerencia_administrativa', estado: 'activo' },
+  giovanny: { nombre: 'Giovanny', rol: 'gerencia_general', estado: 'activo' },
+  cesar:    { nombre: 'César', rol: 'residente_obra', estado: 'activo', cliente_id: 'cli_claro' },
+  // Técnicos (objetivo legítimo de la gestión SST).
+  tec1:     { nombre: 'Técnico 1', rol: 'tecnico', estado: 'pendiente', obras_asignadas: [], contratista_id: 'c1', contratista_nombre: 'Contratista 1' },
+  tec2:     { nombre: 'Técnico 2', rol: 'tecnico', estado: 'activo', obras_asignadas: ['o1'] },
+  // Técnico "legado": sin campo `rol` (la app lee 'tecnico' por defecto).
+  tecLegacy: { nombre: 'Técnico legado', estado: 'activo', obras_asignadas: [] },
+  // Doc legado con SOLO `role` privilegiado (rolActual() lo lee de ahí).
+  legacySst: { nombre: 'Legado SST', role: 'sst', estado: 'activo' },
+  // Doc mixto: rol 'tecnico' pero role 'admin' — nunca debe ser objetivo.
+  mixto:    { nombre: 'Mixto', rol: 'tecnico', role: 'admin', estado: 'activo' },
+  // Casos de borde (revisión adversarial Opus):
+  tecRoleOnly:  { nombre: 'Técnico solo role', role: 'tecnico', estado: 'activo' },
+  nullRol:      { nombre: 'rol null', rol: null, estado: 'activo' },
+  nullRolAdmin: { nombre: 'rol null + role admin', rol: null, role: 'admin', estado: 'activo' },
+  rootLegacy:   { nombre: 'Admin legado', role: 'admin', estado: 'activo' },
+  ramiro:       { nombre: 'Ramiro', rol: 'residente_sst', estado: 'activo' },
+}
+
+type Actor = keyof typeof USERS
+
+let env: RulesTestEnvironment
+
+const db = (a: Actor) => env.authenticatedContext(a as string).firestore()
+const dbAnon = () => env.unauthenticatedContext().firestore()
+const u = (d: ReturnType<typeof db>, uid: string) => doc(d, 'users', uid)
+
+beforeAll(async () => {
+  env = await initializeTestEnvironment({
+    projectId: 'demo-neg',
+    firestore: {
+      rules: readFileSync(resolve(__dirname, '../../../../firestore.rules'), 'utf8'),
+      host: '127.0.0.1',
+      port: 8080,
+    },
+  })
+}, TIMEOUT)
+
+afterAll(async () => { await env.cleanup() })
+
+beforeEach(async () => {
+  await env.clearFirestore()
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const d = ctx.firestore()
+    for (const [uid, data] of Object.entries(USERS)) {
+      await setDoc(doc(d, 'users', uid), data)
+    }
+  })
+}, TIMEOUT)
+
+// ═════════════════════════ A. ESCALADA — debe FALLAR ═════════════════════════
+
+describe('A. escalada de rol — sst / gestion_integral NO pueden', () => {
+  const actores: Actor[] = ['sofia', 'ingrid']
+
+  for (const a of actores) {
+    it(`${a}: cambiarse el PROPIO rol a admin → denegado`, async () => {
+      await assertFails(updateDoc(u(db(a), a), { rol: 'admin' }))
+    }, TIMEOUT)
+
+    it(`${a}: cambiarse el PROPIO rol a otro rol privilegiado → denegado`, async () => {
+      // (no se prueba el rol que ya tiene: reescribirlo sin cambio es un no-op)
+      for (const rol of ['gerencia_general', 'gestion_integral', 'sst', 'director_proyectos'].filter(r => r !== USERS[a].rol)) {
+        await assertFails(updateDoc(u(db(a), a), { rol }))
+      }
+    }, TIMEOUT)
+
+    it(`${a}: escribir el campo legado role=admin en su propio doc → denegado`, async () => {
+      await assertFails(updateDoc(u(db(a), a), { role: 'admin' }))
+    }, TIMEOUT)
+
+    it(`${a}: cambiar el rol de OTRO usuario de panel → denegado`, async () => {
+      await assertFails(updateDoc(u(db(a), 'giovanny'), { rol: 'tecnico' }))
+      await assertFails(updateDoc(u(db(a), 'root'), { rol: 'tecnico' }))
+    }, TIMEOUT)
+
+    it(`${a}: ASCENDER a un técnico (rol→admin / role→admin) → denegado`, async () => {
+      await assertFails(updateDoc(u(db(a), 'tec1'), { rol: 'admin' }))
+      await assertFails(updateDoc(u(db(a), 'tec1'), { role: 'admin' }))
+      await assertFails(updateDoc(u(db(a), 'tec1'), { rol: 'residente_obra', cliente_id: 'cli_claro' }))
+    }, TIMEOUT)
+
+    it(`${a}: desactivar/tocar a un usuario de panel (no técnico) → denegado`, async () => {
+      await assertFails(updateDoc(u(db(a), 'root'), { estado: 'inactivo' }))
+      await assertFails(updateDoc(u(db(a), 'marcela'), { estado: 'inactivo' }))
+      await assertFails(updateDoc(u(db(a), 'cesar'), { cliente_id: 'cli_otro' }))
+    }, TIMEOUT)
+
+    it(`${a}: tocar un doc legado con SOLO role privilegiado → denegado`, async () => {
+      await assertFails(updateDoc(u(db(a), 'legacySst'), { estado: 'inactivo' }))
+    }, TIMEOUT)
+
+    it(`${a}: tocar un doc MIXTO (rol=tecnico pero role=admin) → denegado`, async () => {
+      await assertFails(updateDoc(u(db(a), 'mixto'), { estado: 'inactivo' }))
+    }, TIMEOUT)
+
+    it(`${a}: CREAR un users con rol admin / gestion_integral → denegado`, async () => {
+      await assertFails(setDoc(u(db(a), 'nuevo1'), { nombre: 'X', rol: 'admin', estado: 'activo' }))
+      await assertFails(setDoc(u(db(a), 'nuevo2'), { nombre: 'X', role: 'admin', estado: 'activo' }))
+      await assertFails(setDoc(u(db(a), 'nuevo3'), { nombre: 'X', rol: 'gestion_integral', estado: 'activo' }))
+    }, TIMEOUT)
+
+    it(`${a}: CREAR un users de técnico a nombre de OTRO uid → denegado (ningún flujo lo usa)`, async () => {
+      await assertFails(setDoc(u(db(a), 'nuevo4'), { nombre: 'X', rol: 'tecnico', estado: 'activo' }))
+    }, TIMEOUT)
+
+    it(`${a}: BORRAR un users (técnico o de panel) → denegado`, async () => {
+      await assertFails(deleteDoc(u(db(a), 'tec1')))
+      await assertFails(deleteDoc(u(db(a), 'giovanny')))
+    }, TIMEOUT)
+  }
+})
+
+// ══════════════ B. FLUJOS LEGÍTIMOS del panel sobre técnicos ═════════════════
+// Payloads idénticos a los de Usuarios.tsx / Contratistas.tsx / modales.
+
+describe('B. flujos del panel sobre técnicos — sst / gestion_integral / admin PUEDEN', () => {
+  const actores: Actor[] = ['sofia', 'ingrid', 'root']
+
+  for (const a of actores) {
+    it(`${a}: aprobar (estado activo + fecha_aprobacion)`, async () => {
+      await assertSucceeds(updateDoc(u(db(a), 'tec1'), { estado: 'activo', fecha_aprobacion: Timestamp.now() }))
+    }, TIMEOUT)
+
+    it(`${a}: rechazar (estado rechazado + mapa rechazo) y restaurar (dot-path)`, async () => {
+      await assertSucceeds(updateDoc(u(db(a), 'tec1'), {
+        estado: 'rechazado',
+        rechazo: { motivo: 'no pertenece', por: a, por_nombre: a, por_rol: 'sst', fecha: Timestamp.now() },
+      }))
+      await assertSucceeds(updateDoc(u(db(a), 'tec1'), {
+        estado: 'pendiente',
+        'rechazo.restaurado': { por: a, por_nombre: a, fecha: Timestamp.now() },
+      }))
+    }, TIMEOUT)
+
+    it(`${a}: desactivar y activar`, async () => {
+      await assertSucceeds(updateDoc(u(db(a), 'tec2'), { estado: 'inactivo' }))
+      await assertSucceeds(updateDoc(u(db(a), 'tec2'), { estado: 'activo' }))
+    }, TIMEOUT)
+
+    it(`${a}: asignar obras + fijar empleador (y retirarlo con deleteField)`, async () => {
+      await assertSucceeds(updateDoc(u(db(a), 'tec1'), {
+        obras_asignadas: ['o1', 'o2'], contratista_id: 'c2', contratista_nombre: 'Contratista 2',
+      }))
+      await assertSucceeds(updateDoc(u(db(a), 'tec1'), {
+        obras_asignadas: [], contratista_id: deleteField(), contratista_nombre: deleteField(),
+      }))
+    }, TIMEOUT)
+
+    it(`${a}: editar documentos (vencimientos EPS/ARL/pensión)`, async () => {
+      await assertSucceeds(updateDoc(u(db(a), 'tec2'), {
+        eps_vencimiento: '2027-01-01', arl_vencimiento: null, pension_vencimiento: '2027-06-30',
+      }))
+    }, TIMEOUT)
+
+    it(`${a}: técnico legado SIN campo rol (default tecnico) sigue gestionable`, async () => {
+      await assertSucceeds(updateDoc(u(db(a), 'tecLegacy'), { estado: 'inactivo' }))
+    }, TIMEOUT)
+
+    it(`${a}: reescribir rol='tecnico' explícito sobre un técnico (no escala) → permitido`, async () => {
+      await assertSucceeds(updateDoc(u(db(a), 'tec1'), { rol: 'tecnico', estado: 'activo' }))
+    }, TIMEOUT)
+  }
+})
+
+// ═════════════ C. FLUJOS DE LA APP FLUTTER (lectura del Dart) ════════════════
+// firestore_service.dart: aprobarUsuario → {estado:'activo'}, desactivarUsuario
+// → {estado:'inactivo'}, asignarObras → {obras_asignadas}, actualizarDocumentos
+// → {documentos}; registro (auth_service.dart) → set() propio con rol tecnico.
+
+describe('C. app Flutter — payloads reales', () => {
+  it('SST en la app: aprobar / desactivar / asignarObras sobre un técnico → permitido', async () => {
+    await assertSucceeds(updateDoc(u(db('sofia'), 'tec1'), { estado: 'activo' }))
+    await assertSucceeds(updateDoc(u(db('sofia'), 'tec1'), { estado: 'inactivo' }))
+    await assertSucceeds(updateDoc(u(db('sofia'), 'tec1'), { obras_asignadas: ['o1'] }))
+  }, TIMEOUT)
+
+  it('SST en la app: la lista muestra a TODOS, pero desactivar un NO-técnico ahora se deniega', async () => {
+    // getTodosUsuarios() no filtra por rol; antes un sst podía desactivar a un
+    // admin desde la app. Cambio de comportamiento DESEADO del cierre.
+    await assertFails(updateDoc(u(db('sofia'), 'root'), { estado: 'inactivo' }))
+  }, TIMEOUT)
+
+  it('técnico: registro (create self) con el payload exacto de toFirestore() → permitido', async () => {
+    const d = env.authenticatedContext('nuevoTec').firestore()   // sin doc previo
+    await assertSucceeds(setDoc(doc(d, 'users', 'nuevoTec'), {
+      nombre: 'Nuevo', email: 'n@x.co', estado: 'pendiente', rol: 'tecnico',
+      contratista_id: 'c1', contratista_nombre: 'C1', obras_asignadas: [],
+      documentos: {}, fecha_registro: Timestamp.now(), cedula: '123',
+    }))
+  }, TIMEOUT)
+
+  it('técnico: registro con rol admin / estado activo / obras → denegado', async () => {
+    const d = env.authenticatedContext('nuevoTec').firestore()
+    await assertFails(setDoc(doc(d, 'users', 'nuevoTec'), { nombre: 'X', rol: 'admin', estado: 'pendiente' }))
+    await assertFails(setDoc(doc(d, 'users', 'nuevoTec'), { nombre: 'X', rol: 'tecnico', estado: 'activo' }))
+    await assertFails(setDoc(doc(d, 'users', 'nuevoTec'), { nombre: 'X', rol: 'tecnico', obras_asignadas: ['o1'] }))
+  }, TIMEOUT)
+
+  it('técnico: actualizarDocumentos propio → permitido; tocar su rol/estado → denegado', async () => {
+    await assertSucceeds(updateDoc(u(db('tec1'), 'tec1'), { documentos: { cedula_url: 'https://x' } }))
+    await assertFails(updateDoc(u(db('tec1'), 'tec1'), { rol: 'admin' }))
+    await assertFails(updateDoc(u(db('tec1'), 'tec1'), { estado: 'activo' }))   // tec1 nace 'pendiente'
+    await assertFails(updateDoc(u(db('tec1'), 'tec1'), { obras_asignadas: ['o9'] }))
+  }, TIMEOUT)
+
+  it('técnico NO puede tocar a otro técnico', async () => {
+    await assertFails(updateDoc(u(db('tec2'), 'tec1'), { estado: 'activo' }))
+  }, TIMEOUT)
+})
+
+// ═════════════ D. ADMIN conserva la administración completa ═════════════════
+
+describe('D. admin — infraestructura de usuarios (Invitar, ⇄ Rol, ✎ Firma, estado)', () => {
+  it('Invitar: setDoc de un usuario de panel (payload de InvitarUsuarioModal)', async () => {
+    await assertSucceeds(setDoc(u(db('root'), 'invitado'), {
+      nombre: 'Inv', email: 'i@x.co', rol: 'sst', estado: 'activo',
+      obras_asignadas: [], fecha_creacion: Timestamp.now(),
+    }))
+  }, TIMEOUT)
+
+  it('⇄ Rol (rol legado) sobre un usuario de panel', async () => {
+    await assertSucceeds(updateDoc(u(db('root'), 'sofia'), { rol: 'admin' }))
+    await assertSucceeds(updateDoc(u(db('root'), 'sofia'), { rol: 'sst' }))
+  }, TIMEOUT)
+
+  it('✎ Firma (cargo/celular) y desactivar/activar usuarios de panel', async () => {
+    await assertSucceeds(updateDoc(u(db('root'), 'marcela'), { cargo: 'Gerente', celular: '300' }))
+    await assertSucceeds(updateDoc(u(db('root'), 'marcela'), { estado: 'inactivo' }))
+    await assertSucceeds(updateDoc(u(db('root'), 'marcela'), { estado: 'activo' }))
+  }, TIMEOUT)
+
+  it('admin puede borrar (infraestructura)', async () => {
+    await assertSucceeds(deleteDoc(u(db('root'), 'tec1')))
+  }, TIMEOUT)
+})
+
+// ═══════ F. CASOS DE BORDE (revisión adversarial) — tipos raros, legado ══════
+
+describe('F. bordes: tipos raros de rol, doc legado, batch, merge', () => {
+  const actores: Actor[] = ['sofia', 'ingrid']
+
+  for (const a of actores) {
+    it(`${a}: rol null / lista / mapa / dot-path rol.x → denegado`, async () => {
+      await assertFails(updateDoc(u(db(a), 'tec1'), { rol: null }))
+      await assertFails(updateDoc(u(db(a), 'tecLegacy'), { rol: ['admin'] }))
+      await assertFails(updateDoc(u(db(a), 'tecLegacy'), { rol: { admin: true } }))
+      await assertFails(updateDoc(u(db(a), 'tecRoleOnly'), new FieldPath('rol', 'x'), 'admin'))
+    }, TIMEOUT)
+
+    it(`${a}: técnico con SOLO role='tecnico' → gestionable, pero no ascendible`, async () => {
+      await assertSucceeds(updateDoc(u(db(a), 'tecRoleOnly'), { estado: 'inactivo' }))
+      await assertFails(updateDoc(u(db(a), 'tecRoleOnly'), { role: 'admin' }))
+      await assertFails(updateDoc(u(db(a), 'tecLegacy'), { role: 'admin' }))   // sin rol + add role admin
+    }, TIMEOUT)
+
+    it(`${a}: docs con rol null (con o sin role admin) NO son objetivo`, async () => {
+      await assertFails(updateDoc(u(db(a), 'nullRol'), { estado: 'inactivo' }))
+      await assertFails(updateDoc(u(db(a), 'nullRolAdmin'), { estado: 'inactivo' }))
+    }, TIMEOUT)
+
+    it(`${a}: setDoc merge sobre un doc inexistente → denegado (es create)`, async () => {
+      await assertFails(setDoc(u(db(a), 'brandnew'), { rol: 'tecnico', estado: 'activo' }, { merge: true }))
+    }, TIMEOUT)
+
+    it(`${a}: batch que mezcla una escritura válida con una escalada → denegado entero`, async () => {
+      const d = db(a)
+      const b = writeBatch(d)
+      b.update(u(d, 'tecLegacy'), { estado: 'activo' })
+      b.update(u(d, a), { rol: 'admin' })
+      await assertFails(b.commit())
+    }, TIMEOUT)
+
+    it(`${a}: quitarse el propio rol (deleteField) → denegado`, async () => {
+      await assertFails(updateDoc(u(db(a), a), { rol: deleteField() }))
+    }, TIMEOUT)
+  }
+
+  it('residente_sst (actor negativo): no gestiona técnicos', async () => {
+    await assertFails(updateDoc(u(db('ramiro'), 'tec1'), { estado: 'activo' }))
+  }, TIMEOUT)
+
+  it('admin LEGADO (solo role=admin) conserva la administración', async () => {
+    await assertSucceeds(updateDoc(u(db('rootLegacy'), 'tecLegacy'), { estado: 'inactivo' }))
+    await assertSucceeds(updateDoc(u(db('rootLegacy'), 'sofia'), { rol: 'sst' }))
+  }, TIMEOUT)
+
+  it('admin asciende a un técnico → sst pierde el acceso a ese doc', async () => {
+    await assertSucceeds(updateDoc(u(db('root'), 'tec1'), { rol: 'sst' }))
+    await assertFails(updateDoc(u(db('sofia'), 'tec1'), { estado: 'inactivo' }))
+  }, TIMEOUT)
+})
+
+// ═══════════ E. Otros roles y anónimo: sin cambio (siguen sin poder) ═════════
+
+describe('E. el resto de roles y anónimo — sin escritura', () => {
+  it('gerencia_administrativa / gerencia_general / residente_obra no escriben users ajenos', async () => {
+    await assertFails(updateDoc(u(db('marcela'), 'tec1'), { estado: 'activo' }))
+    await assertFails(updateDoc(u(db('giovanny'), 'tec1'), { estado: 'activo' }))
+    await assertFails(updateDoc(u(db('cesar'), 'tec1'), { estado: 'activo' }))
+  }, TIMEOUT)
+
+  it('self-update de panel (cargo/celular) sigue permitido; rol/estado propio no', async () => {
+    await assertSucceeds(updateDoc(u(db('marcela'), 'marcela'), { celular: '300' }))
+    await assertFails(updateDoc(u(db('marcela'), 'marcela'), { rol: 'admin' }))
+    await assertFails(updateDoc(u(db('sofia'), 'sofia'), { estado: 'activo', rol: 'admin' }))
+  }, TIMEOUT)
+
+  it('anónimo: no lee ni escribe', async () => {
+    await assertFails(getDoc(u(dbAnon() as never, 'tec1')))
+    await assertFails(updateDoc(u(dbAnon() as never, 'tec1'), { estado: 'activo' }))
+    await assertFails(setDoc(u(dbAnon() as never, 'x'), { rol: 'admin' }))
+  }, TIMEOUT)
+
+  it('lectura: personal de panel lee users; un técnico no lee a otro', async () => {
+    await assertSucceeds(getDoc(u(db('sofia'), 'tec1')))
+    await assertSucceeds(getDoc(u(db('ingrid'), 'root')))
+    await assertFails(getDoc(u(db('tec2'), 'tec1')))
+    await assertSucceeds(getDoc(u(db('tec2'), 'tec2')))
+  }, TIMEOUT)
+})

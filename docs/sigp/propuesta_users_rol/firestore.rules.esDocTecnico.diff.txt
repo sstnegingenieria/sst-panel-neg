@@ -1,0 +1,48 @@
+diff --git a/firestore.rules b/firestore.rules
+index 69ad640..8e639b0 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -76,6 +76,15 @@ service cloud.firestore {
+       ];
+     }
+ 
++    // 3.1. ¿Este documento de `users` es (y sigue siendo) de un técnico?
++    //    Sin `rol`/`role` cuenta como técnico (default de la app Flutter).
++    //    Se exigen AMBOS campos: un doc con rol='tecnico' pero role='admin'
++    //    NO es de técnico.
++    function esDocTecnico(d) {
++      return d.get('rol', 'tecnico') == 'tecnico'
++          && d.get('role', 'tecnico') == 'tecnico';
++    }
++
+     // 4. Solo lectura del subsistema SST (gerencia_general con visión
+     //    ejecutiva total)
+     function puedeVerSSTSoloLectura() {
+@@ -277,8 +286,25 @@ service cloud.firestore {
+                         .hasAny(['rol', 'role', 'estado', 'aprobado', 'obras_asignadas',
+                                  'contratista_id', 'contratista_nombre', 'empleador_verificacion']);
+ 
+-      // Create/update/delete administrativo: solo puedeAdministrarSST
+-      allow create, update, delete: if puedeAdministrarSST();
++      // Create/update/delete administrativo de `users`: SOLO admin.
++      // Antes era puedeAdministrarSST() (sst, admin, gestion_integral) sin
++      // restringir el documento ni el valor de `rol`: un sst podía escribirse
++      // `rol: 'admin'` (los allow se suman, así que la denylist de la
++      // auto-edición no le aplicaba) y eso debilitaba toda regla que autoriza
++      // por rolActual(). Invitar usuarios, ⇄ Rol, ✎ Firma y la gestión del
++      // personal de panel ya eran admin en la UI.
++      allow create, update, delete: if isAuthed() && rolActual() == 'admin';
++
++      // Gestión de TÉCNICOS (aprobar/rechazar/restaurar, activar/desactivar,
++      // obras, empleador, documentos): sst y gestion_integral solo pueden
++      // `update`, solo sobre un documento que ya es de técnico y que SIGUE
++      // siendo de técnico tras la escritura (rol Y role: rolActual() lee
++      // `rol` con fallback a `role`, así que se exigen ambos). Sin create ni
++      // delete: ningún flujo del panel ni de la app Flutter los usa para
++      // esta vía (el registro es "create self"; el alta de panel es admin).
++      allow update: if puedeAdministrarSST()
++                    && esDocTecnico(resource.data)
++                    && esDocTecnico(request.resource.data);
+ 
+       // Create self: al registrarse en la app, SOLO puede crear su propio doc
+       // con rol 'tecnico', estado 'pendiente', sin auto-aprobarse y sin
