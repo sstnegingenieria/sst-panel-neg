@@ -4,6 +4,7 @@
 // liquidación. Solo para proyectos en `pagado_cliente` CON gate SST 'al_dia'
 // (la regla de Firestore lo exige vía get(verificaciones_sst) — aquí además
 // se muestra y se deshabilita). El SIGP registra — no ejecuta dinero.
+import { LEYENDA_AVAL_FISICO, esAvalFisico, resumenCustodiaFisica } from '../../types/sigp/avalFisico'
 import { useState, useMemo } from 'react'
 import { doc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
 import { db } from '../../firebase/config'
@@ -174,9 +175,17 @@ export default function LiquidacionModal({ proyecto, verificacion, onClose, onDo
             title={verificacion?.sst_gate?.observacion}>
             {SST_GATE_LABEL[gate]}
           </span>
+          {esAvalFisico(verificacion?.sst_gate) && (
+            <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300"
+              title={verificacion?.sst_gate?.fisico ? resumenCustodiaFisica(verificacion.sst_gate.fisico) : undefined}>
+              📄 físico
+            </span>
+          )}
           <span className={gateOk ? 'text-emerald-800' : 'text-red-700'}>
             {gateOk
-              ? 'SST verificó al contratista — liquidación habilitada.'
+              ? (esAvalFisico(verificacion?.sst_gate)
+                  ? `Gestión Integral avaló con formatos físicos — ${LEYENDA_AVAL_FISICO} — liquidación habilitada.`
+                  : 'SST verificó al contratista — liquidación habilitada.')
               : 'Sin el aval de SST no se puede liquidar (la regla también lo impide).'}
           </span>
         </div>

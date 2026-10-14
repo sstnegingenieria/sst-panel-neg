@@ -19,6 +19,7 @@ import InputExpresion from '../../components/sigp/cotizaciones/InputExpresion'
 import { fmtMoney } from '../../utils/sigp/formato'
 import LiquidacionModal from '../../components/administrativa/LiquidacionModal'
 import ConfigEmpresaCard from '../../components/administrativa/ConfigEmpresaCard'
+import { LEYENDA_AVAL_FISICO, esAvalFisico, resumenCustodiaFisica } from '../../types/sigp/avalFisico'
 import {
   idxRiel, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR,
   SECCIONES_ADMINISTRATIVA, enBandejaAdministrativa,
@@ -592,10 +593,13 @@ export default function FacturacionPagos() {
                   {enColaVerificacionSst(p.estado) && (
                     <span
                       className={`block w-fit mt-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${SST_GATE_COLOR[estadoSstGate(gates[p.id] ?? {})]}`}
-                      title={gates[p.id]?.sst_gate?.observacion
-                        ? `Gate SST — observación: ${gates[p.id].sst_gate!.observacion}`
-                        : 'Gate SST: verificación del contratista, previa a la liquidación'}>
+                      title={esAvalFisico(gates[p.id]?.sst_gate)
+                        ? `Gate SST — aval por FORMATOS FÍSICOS (${LEYENDA_AVAL_FISICO}). ${resumenCustodiaFisica(gates[p.id].sst_gate!.fisico!)}`
+                        : gates[p.id]?.sst_gate?.observacion
+                          ? `Gate SST — observación: ${gates[p.id].sst_gate!.observacion}`
+                          : 'Gate SST: verificación del contratista, previa a la liquidación'}>
                       {SST_GATE_LABEL[estadoSstGate(gates[p.id] ?? {})]}
+                      {esAvalFisico(gates[p.id]?.sst_gate) && ' · 📄 físico'}
                     </span>
                   )}
                 </td>

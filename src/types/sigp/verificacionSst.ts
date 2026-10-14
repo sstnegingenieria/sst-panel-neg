@@ -13,7 +13,7 @@
  * PROHIBIDO agregar campos económicos a esta interfaz.
  */
 import type { Timestamp } from 'firebase/firestore'
-import type { EstadoProyecto, SstGateProyecto } from './proyecto'
+import type { AvalFisicoSst, EstadoProyecto, SstGateProyecto } from './proyecto'
 
 /** Traza del gate en la proyección: de/a son estados del GATE. */
 export interface EntradaHistorialGate {
@@ -22,6 +22,9 @@ export interface EntradaHistorialGate {
   por: string                  // uid de quien marcó
   fecha: Timestamp
   motivo: string
+  /** Copia de la evidencia cuando el aval fue FÍSICO — la traza no depende
+   *  de que `sst_gate` siga siendo el mismo después. */
+  fisico?: AvalFisicoSst
 }
 
 export interface VerificacionSst {

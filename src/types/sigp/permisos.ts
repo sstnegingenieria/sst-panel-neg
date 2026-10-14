@@ -202,6 +202,13 @@ export const veVerificacionSstUI = (rol: string | undefined) => en(rol, ROLES_VE
 export const puedeMarcarSstGateUI = (rol: string | undefined) =>
   rol === 'sst' || rol === 'residente_sst' || rol === 'gestion_integral'
 
+// Aval SST por FORMATOS FÍSICOS (con evidencia obligatoria): SOLO
+// gestion_integral — es quien da fe de que los formatos en papel existen y
+// quién los custodia. sst/residente_sst conservan el aval por app, pero NO
+// esta vía (la regla de Firestore lo exige). Admin y las gerencias, solo lectura.
+export const ROLES_AVALA_FISICO: Rol[] = ['gestion_integral']
+export const puedeAvalarFisicoUI = (rol: string | undefined) => en(rol, ROLES_AVALA_FISICO)
+
 // Aprobación de preliquidación (23-jul-2026, respaldo controlado): la titular
 // es gerencia_administrativa; gerencia_general, gestion_integral y admin son
 // APROBADORES DE RESPALDO — su aprobación exige `salvedad` (por qué no la
