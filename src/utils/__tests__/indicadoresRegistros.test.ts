@@ -61,13 +61,9 @@ describe('derivarNumDen', () => {
     expect(derivarNumDen({ patron: 'registro', config }, registros)).toEqual({ numerador: 5, denominador: 261 })
   })
 
-  it('ratio: numerador = # de registros, denominador = total de trabajadores configurado', () => {
-    const config = { total_trabajadores: 10 }
-    const registros = [
-      registro('ratio', { nombre: 'Juan', fecha: '2026-01-10' }),
-      registro('ratio', { nombre: 'Ana', fecha: '2026-01-11' }),
-    ]
-    expect(derivarNumDen({ patron: 'ratio', config }, registros)).toEqual({ numerador: 2, denominador: 10 })
+  it("un patrón retirado ('ratio') ya no deriva nada: el indicador cae a medición manual", () => {
+    const retirado = { patron: 'ratio', config: { total_trabajadores: 10 } } as unknown as Parameters<typeof derivarNumDen>[0]
+    expect(derivarNumDen(retirado, [])).toBeNull()
   })
 })
 

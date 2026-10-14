@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react'
-import { addDoc, collection, Timestamp } from 'firebase/firestore'
+import { addDoc, collection, getCountFromServer, query, Timestamp, where } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useFirestore } from './useFirestore'
 import { ROLES_PANEL_WEB } from '../types/sigp/roles'
@@ -29,6 +29,16 @@ export function useEmpleadosDirectos() {
 
   const cargar = useCallback(async () => {
     return await fsRef.current.getAllOrdered(COL, 'nombre', 'asc') as EmpleadoDirecto[]
+  }, [])
+
+  /**
+   * Conteo de empleados con activo==true por AGREGACIÓN del servidor: no
+   * descarga los documentos (cédulas incluidas). Lo usa el indicador SST-IND-06
+   * para sugerir su denominador — solo se cuenta, nunca se lee un registro.
+   */
+  const contarActivos = useCallback(async () => {
+    const snap = await getCountFromServer(query(collection(db, COL), where('activo', '==', true)))
+    return snap.data().count
   }, [])
 
   /** Usuarios ACTIVOS del panel (excluye técnicos y cliente_final) para el vínculo opcional. */
@@ -65,5 +75,5 @@ export function useEmpleadosDirectos() {
     await fsRef.current.update(COL, id, patchReactivar(uid, Timestamp.now()))
   }, [])
 
-  return { cargar, cargarUsuariosVinculables, crear, editar, darDeBaja, reactivar }
+  return { cargar, contarActivos, cargarUsuariosVinculables, crear, editar, darDeBaja, reactivar }
 }

@@ -1,6 +1,5 @@
 import type {
   ConfigChecklist,
-  ConfigRatioAnual,
   ConfigRegistroAnual,
   Indicador,
   IndicadorRegistro,
@@ -28,10 +27,6 @@ function derivarRegistroAnual(config: ConfigRegistroAnual, registros: IndicadorR
   return { numerador: dias, denominador: config.dias_programados }
 }
 
-function derivarRatio(config: ConfigRatioAnual, registros: IndicadorRegistro[]): NumDen {
-  return { numerador: registros.length, denominador: config.total_trabajadores }
-}
-
 /**
  * Deriva numerador/denominador desde la bitácora — nunca se teclean para un
  * indicador con `patron`. null si el indicador no está pilotado (F1) o le
@@ -49,8 +44,6 @@ export function derivarNumDen(
       return derivarPlan(registros)
     case 'registro':
       return derivarRegistroAnual(indicador.config as ConfigRegistroAnual, registros)
-    case 'ratio':
-      return derivarRatio(indicador.config as ConfigRatioAnual, registros)
     default:
       return null
   }

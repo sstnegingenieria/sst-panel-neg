@@ -32,7 +32,7 @@ export const TIPO_INDICADOR_COLOR: Record<TipoIndicador, string> = {
  * patrones de captura reutilizables. Solo 4 indicadores piloto (F2.1) los
  * usan; los otros 22 quedan con la entrada simple de F1 hasta F2.2.
  */
-export type PatronIndicador = 'checklist' | 'plan' | 'registro' | 'ratio'
+export type PatronIndicador = 'checklist' | 'plan' | 'registro'
 
 /** Patrón A — checklist de criterios (SST-IND-01: los 11 del Decreto 1072). */
 export interface ConfigChecklist {
@@ -47,12 +47,7 @@ export interface ConfigRegistroAnual {
   dias_programados: number
 }
 
-/** Patrón D — ratio con base externa editable (ej. total de trabajadores). */
-export interface ConfigRatioAnual {
-  total_trabajadores: number
-}
-
-export type ConfigIndicador = ConfigChecklist | ConfigPlan | ConfigRegistroAnual | ConfigRatioAnual
+export type ConfigIndicador = ConfigChecklist | ConfigPlan | ConfigRegistroAnual
 
 export interface Indicador {
   id: string
@@ -572,11 +567,12 @@ export const SEED_PATRONES: { codigo: string; patron: PatronIndicador; config: C
     patron: 'plan',
     config: {} satisfies ConfigPlan,
   },
-  {
-    codigo: 'SST-IND-06',
-    patron: 'ratio',
-    config: { total_trabajadores: 10 } satisfies ConfigRatioAnual,
-  },
+  // SST-IND-06 (Condiciones de salud) SALIÓ de aquí: se mide como indicador
+  // MANUAL de solo conteos (numerador manual; denominador sugerido desde el
+  // conteo de empleados activos — ver utils/indicadorSugerencias.ts). Ya no
+  // existe el patrón 'ratio' ni su bitácora de nombres + fecha de examen
+  // (dato personal que el indicador no necesita). Un doc ya sembrado con
+  // `patron:'ratio'` se limpia con el script de admin, no con este array.
   // SST-IND-26 (Ausentismo) SALIÓ de aquí (24-sep, integración Horario): ya
   // no tiene bitácora manual — se auto-alimenta desde `ausentismos` +
   // `empleados_directos` vía la CF `indicadorAusentismo.js` (functions/),
