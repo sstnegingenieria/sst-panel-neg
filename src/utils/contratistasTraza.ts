@@ -64,6 +64,55 @@ export function entradaCambioEstado(
   return e
 }
 
+// ── Corrección de IDENTIDAD (14-oct-2026, OK de Giovanny — cuarto permiso
+// que le faltaba a GI): quien inscribe corrige. Ingrid inscribía y avalaba
+// pero un nombre o NIT mal tecleado exigía pedirle la corrección a alguien
+// más. Cada edición de identidad deja QUIÉN corrigió QUÉ en el mismo
+// historial append-only del aval.
+//
+// ⚠ La CÉDULA vive en el sub-doc privado (Ley 1581, C2.1 paso 5) y el
+// historial está en el DOC PÚBLICO (read: if true) — su corrección se traza
+// SIN valores ("cédula actualizada"), jamás el número. El NIT es registro
+// mercantil público (RUES) y se traza con valores.
+export interface CorreccionIdentidadContratista {
+  campo: 'identidad'
+  /** "nombre: X → Y" · "nit: A → B" · "tipo: natural → juridica" ·
+   *  "cédula actualizada" (sin valores) · "vínculo técnico principal actualizado". */
+  cambios: string[]
+  por: string
+  por_nombre: string
+  por_rol: string
+  fecha: Timestamp
+}
+
+/** Entrada de historial para una corrección de identidad — null si nada
+ *  cambió (una edición sin cambios no fabrica traza-ruido). */
+export function entradaCorreccionIdentidad(
+  antes: { nombre?: string; tipo?: string; nit?: string; cedula?: string; usuario_tecnico_id?: string },
+  despues: { nombre?: string; tipo?: string; nit?: string; cedula?: string; usuario_tecnico_id?: string },
+  usuario: { uid: string; nombre?: string; rol?: string },
+  fecha: Timestamp,
+): CorreccionIdentidadContratista | null {
+  const cambios: string[] = []
+  const pub = (campo: 'nombre' | 'tipo' | 'nit') => {
+    const a = (antes[campo] ?? '').trim()
+    const d = (despues[campo] ?? '').trim()
+    if (a !== d) cambios.push(`${campo}: ${a || '—'} → ${d || '—'}`)
+  }
+  pub('nombre'); pub('tipo'); pub('nit')
+  if ((antes.cedula ?? '').trim() !== (despues.cedula ?? '').trim()) cambios.push('cédula actualizada')
+  if ((antes.usuario_tecnico_id ?? '') !== (despues.usuario_tecnico_id ?? '')) cambios.push('vínculo técnico principal actualizado')
+  if (cambios.length === 0) return null
+  return {
+    campo: 'identidad',
+    cambios,
+    por: usuario.uid,
+    por_nombre: usuario.nombre ?? '',
+    por_rol: usuario.rol ?? '',
+    fecha,
+  }
+}
+
 /** Último cambio de estado del historial (para pintar "por X · fecha" bajo
  *  el chip). Tolerante con docs legado sin historial y con entradas de
  *  otros campos que un futuro agregue al mismo arreglo. */
