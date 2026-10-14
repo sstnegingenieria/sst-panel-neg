@@ -66,7 +66,9 @@ service cloud.firestore {
       return request.resource.data.get('preliquidacion', {}).get('salvedad', '');
     }
 
-    // 3. Administración de `users` (invitar, cambiar rol, aprobar cuentas).
+    // 3. Gestión OPERATIVA de técnicos en `users` (aprobar/rechazar, obras,
+    //    empleador, documentos) — desde el 14-oct ACOTADA por esDocTecnico +
+    //    allowlist en el match: invitar, cambiar rol y borrar son solo-admin.
     //    Ya NO gobierna `formularios`/`notificaciones` — ver
     //    puedeRevisarFormularios(). Reemplaza el viejo isSST() ampliado con
     //    gestion_integral.
@@ -74,6 +76,15 @@ service cloud.firestore {
       return isAuthed() && rolActual() in [
         'sst', 'admin', 'gestion_integral'
       ];
+    }
+    // Cierre del privesc de users.rol (14-oct) — helper del Anexo A de la
+    // propuesta del frente SST/SGI: un doc "es de técnico" si rol Y role
+    // (rolActual() lee `rol` con fallback a `role`) son 'tecnico', con
+    // default 'tecnico' para los legados que solo traen uno. Se evalúa sobre
+    // resource Y request.resource: el doc debe SER técnico y SEGUIR siéndolo.
+    function esDocTecnico(d) {
+      return d.get('rol', 'tecnico') == 'tecnico'
+          && d.get('role', 'tecnico') == 'tecnico';
     }
 
     // 4. Solo lectura del subsistema SST (gerencia_general con visión
@@ -294,11 +305,52 @@ service cloud.firestore {
                     && request.auth.uid == userId
                     && !request.resource.data.diff(resource.data)
                         .affectedKeys()
+                        // 14-oct (G1/M1 de la revisión Opus del cierre del
+                        // privesc): += cliente_id (un residente podía AUTO-
+                        // reasignarse de cliente — la CF copia el claim y le
+                        // abre los datos del otro cliente: acceso cruzado) y
+                        // += cedula (un técnico podía reescribir su cédula y
+                        // el emparejamiento de nómina lo "verificaba" contra
+                        // la cédula que él mismo puso). El self-update vivo
+                        // de la app es SOLO `documentos` — nada se rompe.
                         .hasAny(['rol', 'role', 'estado', 'aprobado', 'obras_asignadas',
-                                 'contratista_id', 'contratista_nombre', 'empleador_verificacion']);
+                                 'contratista_id', 'contratista_nombre', 'empleador_verificacion',
+                                 'cliente_id', 'cedula']);
 
-      // Create/update/delete administrativo: solo puedeAdministrarSST
-      allow create, update, delete: if puedeAdministrarSST();
+      // Create/update/delete administrativo (REESCRITO 14-oct — cierre del
+      // PRIVESC de users.rol, el residual que el frente SGI/SST nombró en su
+      // aviso de ventana: mientras sst/gestion_integral pudieran escribir
+      // CUALQUIER campo de CUALQUIER usuario — incluido su propio rol —,
+      // todo control "solo gestion_integral" o "solo admin" del sistema era
+      // falsificable por escalada previa):
+      //  · admin: create/update/delete totales (⇄Rol, ✎Firma e Invitar ya
+      //    eran admin-only en UI; los roles SIGP se cambian por consola —
+      //    tocarlos desde el panel rompería claims).
+      //  · sst/gestion_integral: SOLO la gestión operativa de técnicos, por
+      //    ALLOWLIST censada contra el panel Y el código Dart de la app
+      //    (aprobar/rechazar/restaurar/activar/desactivar · obras + empleador
+      //    · vencimientos del panel · mapa `documentos` que la app escribe).
+      //    JAMÁS rol/role — el privesc queda cerrado A NIVEL DE REGLAS.
+      //    `crearUsuario()` de la app es código muerto (definido, nunca
+      //    llamado — verificado 14-oct): el create se acota sin romperla.
+      // FORMULACIÓN COMBINADA (14-oct): el Anexo A del frente (esDocTecnico —
+      // sst/GI solo tocan docs que SON técnico y SIGUEN siéndolo) + la
+      // allowlist de campos censada contra panel y app. Cada pata cierra lo
+      // que la otra deja: sin esDocTecnico, la allowlist permitiría
+      // desactivar PERSONAL (estado es campo legítimo pero el doc no);
+      // sin la allowlist, esDocTecnico permitiría falsificar
+      // empleador_verificacion o suplantar nombre/email de un técnico.
+      allow create, delete: if isAuthed() && rolActual() == 'admin';
+      allow update: if isAuthed() && rolActual() == 'admin';
+      allow update: if puedeAdministrarSST()
+                    && esDocTecnico(resource.data)
+                    && esDocTecnico(request.resource.data)
+                    && request.resource.data.diff(resource.data)
+                        .affectedKeys()
+                        .hasOnly(['estado', 'fecha_aprobacion', 'rechazo',
+                                  'obras_asignadas', 'contratista_id', 'contratista_nombre',
+                                  'eps_vencimiento', 'arl_vencimiento', 'pension_vencimiento',
+                                  'documentos']);
 
       // Create self: al registrarse en la app, SOLO puede crear su propio doc
       // con rol 'tecnico', estado 'pendiente', sin auto-aprobarse y sin
