@@ -32,6 +32,8 @@ import ActividadesSigp from './pages/sigp/ActividadesSigp'
 import Licitaciones from './pages/licitaciones/Licitaciones'
 import LicitacionNueva from './pages/licitaciones/LicitacionNueva'
 import LicitacionDetalle from './pages/licitaciones/LicitacionDetalle'
+import AccionesMejora from './pages/acciones/AccionesMejora'
+import AccionMejoraDetalle from './pages/acciones/AccionMejoraDetalle'
 import {
   ROLES_VE_DASHBOARD_SST,
   ROLES_VE_TECNICOS,
@@ -48,6 +50,7 @@ import {
   ROLES_VE_HORARIO,
   ROLES_VE_TAREAS,
   ROLES_VE_LICITACIONES,
+  ROLES_GESTIONA_ACAP,
   ROLES_VE_INDICADORES_SST,
   ROLES_GESTIONA_EMPLEADOS,
 } from './types/sigp/permisos'
@@ -145,6 +148,13 @@ function ProtectedRoutes() {
         <Route path="/licitaciones" element={<ProtectedRoute rolesPermitidos={ROLES_VE_LICITACIONES} redirectTo="/sigp/panel"><Licitaciones /></ProtectedRoute>} />
         <Route path="/licitaciones/nueva" element={<ProtectedRoute rolesPermitidos={ROLES_VE_LICITACIONES} redirectTo="/sigp/panel"><LicitacionNueva /></ProtectedRoute>} />
         <Route path="/licitaciones/:licitacionId" element={<ProtectedRoute rolesPermitidos={ROLES_VE_LICITACIONES} redirectTo="/sigp/panel"><LicitacionDetalle /></ProtectedRoute>} />
+
+        {/* Acciones de mejora / NC (AC/AP, cláusula 10.2 — Fase 1). El flag
+            sigp_acciones_enabled solo oculta el ítem del sidebar; la protección real
+            son las reglas (gestionaAcAp()), de las que ROLES_GESTIONA_ACAP es espejo.
+            redirectTo /sigp/panel: GI y admin tienen accesoSIGP (sin bucle). */}
+        <Route path="/acciones-mejora" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_ACAP} redirectTo="/sigp/panel"><AccionesMejora /></ProtectedRoute>} />
+        <Route path="/acciones-mejora/:accionId" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_ACAP} redirectTo="/sigp/panel"><AccionMejoraDetalle /></ProtectedRoute>} />
 
         {/* Rutas SIGP (placeholders F0). Protegidas por rol con ProtectedRoute
             ('admin' siempre incluido como fallback). La sección del Sidebar se
