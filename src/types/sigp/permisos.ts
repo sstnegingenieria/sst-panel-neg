@@ -439,3 +439,14 @@ export const puedeGestionarIndicadoresSstUI = (rol: string | undefined) =>
 // se agregan cuando el SIGP lo pida — no antes.
 export const ROLES_GESTIONA_EMPLEADOS: Rol[] = ['admin', 'gestion_integral', 'gerencia_administrativa']
 export const puedeGestionarEmpleadosUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_EMPLEADOS)
+
+// ── Acciones de mejora / No conformidades (AC/AP — cláusula 10.2, Fase 1) ──
+// Colección `acciones_mejora` — matriz SGI-MT-ACP-26. El detalle de una NC es
+// sensible: lectura y escritura SOLO para Gestión Integral y admin (la tarea
+// PHVA de F2 llevará solo la actividad + el enlace, no el detalle). El
+// enganche de `sst` desde un rechazo es F2.
+// ESPEJO EXACTO de gestionaAcAp() en firestore.rules:
+//   ROLES_GESTIONA_ACAP ⟷ gestionaAcAp()
+export const ROLES_GESTIONA_ACAP: Rol[] = ['gestion_integral', 'admin']
+export const puedeGestionarAcapUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_ACAP)
+export const veAccionesMejoraUI = puedeGestionarAcapUI

@@ -1658,6 +1658,195 @@ service cloud.firestore {
     }
 
     // ────────────────────────────────────────────────────────────────
+    // MÓDULO AC/AP · F1 — acciones_mejora (ISO 10.2: acciones
+    // correctivas / preventivas / de mejora)
+    // ────────────────────────────────────────────────────────────────
+    // Matriz de acciones del SGI. Dueño: Gestión Integral (+ admin). Nadie
+    // más la lee: los hallazgos y su análisis de causa son registro del SGI,
+    // no del panel en general (mínimo privilegio, como la economía de
+    // licitaciones). Espejo en el cliente: ROLES_GESTIONA_ACAP.
+    //
+    // CICLO F1: nace `borrador` (sin consecutivo); se edita mientras sea
+    // borrador; se ANULA (borrador|abierta → anulada) con motivo — `anulada`
+    // es TERMINAL (cero escrituras). Abrir = EMITIR = asignar consecutivo
+    // server-side: es F2. En F1 el consecutivo es inmutable-null, así que
+    // `abierta` es INALCANZABLE por construcción (F2 agrega la vía de
+    // emitir). Sin delete para NADIE, admin incluido: la baja es la
+    // anulación — evidencia de auditoría, cero borrado físico (5.1).
+    //
+    // Historial APPEND-ONLY (patrón historialSoloAgrega de
+    // verificaciones_sst): queda igual o crece en UNA entrada al final, con
+    // el prefijo intacto, firmada por quien escribe, y su `a`/`de` dicen la
+    // verdad (el estado que quedó / el que había) — la traza no cuenta una
+    // historia que el doc no tiene.
+    function gestionaAcAp() {
+      return isAuthed() && rolActual() in ['gestion_integral', 'admin'];
+    }
+
+    // Forma del documento — LA MISMA en create y en la edición del borrador.
+    // `numeral_norma`: ≤20 strings NO vacíos de ≤100 caracteres. Las reglas
+    // no iteran listas: se une con '|' y una regex exige segmentos de 1..100.
+    // Antes, la IDA Y VUELTA (join → split == la lista original) prueba que
+    // todo elemento es string (join CONVIERTE números a texto: el 102 volvería
+    // como '102' y la igualdad falla — lo atrapó la batería) y que ninguno
+    // trae '|' (si no, un elemento podría partirse en "segmentos" y burlar el
+    // tope de 100).
+    function contenidoAccionValido(d) {
+      return d.keys().hasOnly(['tipo', 'fecha_tratamiento', 'cliente_proceso',
+                               'lider_proceso', 'numeral_norma', 'descripcion_nc',
+                               'observaciones', 'fuente', 'origen_ref', 'causa_raiz',
+                               'estado', 'consecutivo', 'anulacion', 'creado_por',
+                               'creado_por_nombre', 'fecha_creacion',
+                               'fecha_actualizacion', 'historial'])
+          && d.keys().hasAll(['tipo', 'fecha_tratamiento', 'descripcion_nc', 'fuente',
+                              'estado', 'creado_por', 'fecha_creacion', 'historial',
+                              'causa_raiz'])
+          && d.tipo in ['correctiva', 'preventiva', 'mejora']
+          && d.fuente in ['operaciones', 'registro_sgi', 'reporte_servicios',
+                          'quejas_reclamos', 'auditoria', 'satisfaccion_cliente',
+                          'objetivos_sgi', 'mediciones', 'evaluacion_proveedores',
+                          'analisis_datos', 'inspecciones', 'rechazo_sst']
+          && d.estado in ['borrador', 'abierta', 'anulada']
+          && d.fecha_tratamiento is timestamp
+          && d.fecha_creacion is timestamp
+          && d.descripcion_nc is string
+          && d.descripcion_nc.trim().size() > 0
+          && d.descripcion_nc.size() <= 4000
+          && (!('cliente_proceso' in d) || (d.cliente_proceso is string && d.cliente_proceso.size() <= 300))
+          && (!('lider_proceso' in d) || (d.lider_proceso is string && d.lider_proceso.size() <= 300))
+          && (!('observaciones' in d) || (d.observaciones is string && d.observaciones.size() <= 4000))
+          && (!('origen_ref' in d) || d.origen_ref == null
+              || (d.origen_ref is string && d.origen_ref.size() <= 500))
+          && (!('creado_por_nombre' in d) || (d.creado_por_nombre is string && d.creado_por_nombre.size() <= 300))
+          && (!('fecha_actualizacion' in d) || d.fecha_actualizacion is timestamp)
+          && (!('consecutivo' in d) || d.consecutivo == null || d.consecutivo is string)
+          && (!('anulacion' in d) || d.anulacion is map)
+          && d.creado_por is string
+          && d.historial is list && d.historial.size() <= 300
+          && (!('numeral_norma' in d)
+              || (d.numeral_norma is list
+                  && d.numeral_norma.size() <= 20
+                  && (d.numeral_norma.size() == 0
+                      || (d.numeral_norma.join('|').split('[|]') == d.numeral_norma
+                          && d.numeral_norma.join('|').matches('^[^|]{1,100}([|][^|]{1,100})*$')))))
+          && d.causa_raiz is map
+          && d.causa_raiz.keys().hasOnly(['porque_1', 'porque_2', 'porque_3', 'porque_4', 'porque_5'])
+          && (!('porque_1' in d.causa_raiz) || (d.causa_raiz.porque_1 is string && d.causa_raiz.porque_1.size() <= 2000))
+          && (!('porque_2' in d.causa_raiz) || (d.causa_raiz.porque_2 is string && d.causa_raiz.porque_2.size() <= 2000))
+          && (!('porque_3' in d.causa_raiz) || (d.causa_raiz.porque_3 is string && d.causa_raiz.porque_3.size() <= 2000))
+          && (!('porque_4' in d.causa_raiz) || (d.causa_raiz.porque_4 is string && d.causa_raiz.porque_4.size() <= 2000))
+          && (!('porque_5' in d.causa_raiz) || (d.causa_raiz.porque_5 is string && d.causa_raiz.porque_5.size() <= 2000));
+    }
+
+    // Una entrada de historial: firmada por quien escribe, fechada ~ahora
+    // (±1 día, patrón avalAppValido — el cliente usa Timestamp.now()), y su
+    // `a` (si viene) es el estado que QUEDA tras este write.
+    function entradaAcApValida(e) {
+      return e is map
+          && e.keys().hasAll(['fecha', 'por'])
+          && e.keys().hasOnly(['fecha', 'por', 'por_nombre', 'de', 'a', 'nota'])
+          && e.por == request.auth.uid
+          && e.fecha is timestamp
+          && e.fecha > request.time - duration.value(1, 'd')
+          && e.fecha < request.time + duration.value(1, 'd')
+          && (!('por_nombre' in e) || (e.por_nombre is string && e.por_nombre.size() <= 300))
+          && (!('a' in e) || e.a == request.resource.data.estado)
+          && (!('nota' in e) || (e.nota is string && e.nota.size() <= 2500));
+    }
+
+    // Update: el historial queda IGUAL o crece en EXACTAMENTE una entrada al
+    // final (prefijo intacto); su `de` (si viene) es el estado que HABÍA.
+    function historialAcApValido() {
+      let nuevo = request.resource.data.get('historial', []);
+      let previo = resource.data.get('historial', []);
+      return nuevo is list
+          && nuevo.size() <= 300
+          && (nuevo == previo
+              || (nuevo.size() == previo.size() + 1
+                  && (previo.size() == 0 || nuevo[0:previo.size()] == previo)
+                  && entradaAcApValida(nuevo[previo.size()])
+                  && (!('de' in nuevo[previo.size()])
+                      || nuevo[previo.size()].de == resource.data.estado)));
+    }
+
+    // El bloque de anulación: quién (el que escribe, no suplantable), cuándo
+    // (~ahora) y por qué (motivo no vacío).
+    function anulacionAcApValida(a) {
+      return a is map
+          && a.keys().hasAll(['fecha', 'por', 'motivo'])
+          && a.keys().hasOnly(['fecha', 'por', 'por_nombre', 'motivo'])
+          && a.por == request.auth.uid
+          && a.fecha is timestamp
+          && a.fecha > request.time - duration.value(1, 'd')
+          && a.fecha < request.time + duration.value(1, 'd')
+          && (!('por_nombre' in a) || (a.por_nombre is string && a.por_nombre.size() <= 300))
+          && a.motivo is string
+          && a.motivo.trim().size() > 0
+          && a.motivo.size() <= 2000;
+    }
+
+    match /acciones_mejora/{accionId} {
+      allow read: if gestionaAcAp();
+
+      // Nace BORRADOR, del creador real, SIN consecutivo (se asigna
+      // server-side al emitir — F2) y SIN anulación, con UNA entrada de
+      // historial del creador hacia 'borrador' (sin `de`: no hay estado previo).
+      allow create: if gestionaAcAp()
+                    && contenidoAccionValido(request.resource.data)
+                    && request.resource.data.creado_por == request.auth.uid
+                    && request.resource.data.estado == 'borrador'
+                    && request.resource.data.get('consecutivo', null) == null
+                    && !('anulacion' in request.resource.data)
+                    && request.resource.data.fecha_creacion > request.time - duration.value(1, 'd')
+                    && request.resource.data.fecha_creacion < request.time + duration.value(1, 'd')
+                    && request.resource.data.historial.size() == 1
+                    && 'a' in request.resource.data.historial[0]
+                    && !('de' in request.resource.data.historial[0])
+                    && entradaAcApValida(request.resource.data.historial[0]);
+
+      // Dos vías, ninguna sobre una ANULADA (terminal). creado_por,
+      // creado_por_nombre, fecha_creacion y consecutivo quedan inmutables
+      // porque NINGUNA vía los admite en su diff().affectedKeys() (cambiarlos
+      // o borrarlos los haría aparecer ahí). Ninguna vía llega a 'abierta':
+      // F2 agrega la vía de emitir (consecutivo server-side + → abierta).
+      allow update: if gestionaAcAp()
+                    && resource.data.estado != 'anulada'
+                    && historialAcApValido()
+                    && (
+                      // ── EDICIÓN del borrador: solo campos descriptivos; el
+                      // estado no cambia y no se introduce `anulacion`.
+                      (resource.data.estado == 'borrador'
+                       && request.resource.data.estado == 'borrador'
+                       && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['tipo', 'fecha_tratamiento', 'cliente_proceso',
+                                    'lider_proceso', 'numeral_norma', 'descripcion_nc',
+                                    'observaciones', 'fuente', 'origen_ref', 'causa_raiz',
+                                    'historial', 'fecha_actualizacion'])
+                       && contenidoAccionValido(request.resource.data))
+                      ||
+                      // ── ANULACIÓN (borrador|abierta → anulada): el write toca
+                      // SOLO estado/anulacion/historial/fecha_actualizacion,
+                      // con el bloque de anulación completo y UNA entrada nueva
+                      // de historial hacia 'anulada'. El resto del doc no cambia
+                      // (por eso no se re-valida su forma: un `abierta` de F2
+                      // traerá campos que el hasOnly de F1 no conoce).
+                      (resource.data.estado in ['borrador', 'abierta']
+                       && request.resource.data.estado == 'anulada'
+                       && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['estado', 'anulacion', 'historial', 'fecha_actualizacion'])
+                       && anulacionAcApValida(request.resource.data.anulacion)
+                       && (!('fecha_actualizacion' in request.resource.data)
+                           || request.resource.data.fecha_actualizacion is timestamp)
+                       && request.resource.data.historial.size()
+                            == resource.data.get('historial', []).size() + 1
+                       && 'a' in request.resource.data.historial[request.resource.data.historial.size() - 1])
+                    );
+
+      // Sin delete para NADIE (admin incluido): la baja es la anulación.
+      allow delete: if false;
+    }
+
+    // ────────────────────────────────────────────────────────────────
     // CATCH-ALL: denegar todo lo no especificado explícitamente
     // ────────────────────────────────────────────────────────────────
     // Incluye la colección `consecutivos` del SIGP: solo la Cloud

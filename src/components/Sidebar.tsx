@@ -21,6 +21,7 @@ import {
   veOcUI,
   veTareasUI,
   veLicitacionesUI,
+  veAccionesMejoraUI,
   veActividadesUI,
   veIndicadoresSstUI,
   puedeGestionarEmpleadosUI,
@@ -253,6 +254,10 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   // lo permite, y quien protege de verdad son las reglas.
   const licitacionesEnabled = useFeatureFlag('sigp_licitaciones_enabled', false)
   const mostrarLicitaciones = licitacionesEnabled && veLicitacionesUI(user?.rol)
+  // Acciones de mejora / NC (AC/AP, Fase 1): grupo propio, solo gestion_integral +
+  // admin. Default in-app FALSE (oculto hasta que Giovanny cree el parámetro).
+  const accionesEnabled = useFeatureFlag('sigp_acciones_enabled', false)
+  const mostrarAcciones = accionesEnabled && veAccionesMejoraUI(user?.rol)
   const { misTareas, balones } = useTareasPendientes(mostrarTareas, user?.uid)
   // 07-sep — badge de la cola de Verificación SST (hallazgo Tesoro III):
   // montado SOLO para quien puede LEER la proyección (cero lecturas ajenas).
@@ -413,6 +418,37 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
                   )}
                 </span>
               )}
+            </NavLink>
+          </div>
+        )}
+
+        {/* Grupo ACCIONES DE MEJORA / NC (AC/AP, cláusula 10.2 — Fase 1). Gateado por
+            sigp_acciones_enabled + veAccionesMejoraUI (espejo de gestionaAcAp()). */}
+        {mostrarAcciones && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            {!collapsed && (
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                Acciones de Mejora / NC
+              </p>
+            )}
+            <NavLink
+              to="/acciones-mejora"
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  isActive
+                    ? 'bg-brand-50 text-brand-700 font-semibold'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                }`
+              }
+            >
+              <span className="flex-shrink-0">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+              </span>
+              {!collapsed && <span>Acciones de Mejora / NC</span>}
             </NavLink>
           </div>
         )}

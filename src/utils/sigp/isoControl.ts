@@ -73,3 +73,16 @@ export const ORDEN_COMPRA: ControlDocumentalIso = {
   modificado: 'AGO-2026',
   nombre: 'ORDEN DE COMPRA Y/O SERVICIO',
 }
+
+// ── Matriz de Acciones Correctivas y Preventivas (módulo AC/AP, F1) ──
+// Código REAL de la matriz oficial del SGI (SGI-MT-ACP-26 — dato dado por
+// Gestión Integral, no inventado desde el panel). Versión 01, modificada el
+// 14 de abril de 2025. Es el encabezado en PANTALLA del detalle de la acción
+// (componente EncabezadoIso); no hay PDF de este formato todavía.
+export const ACCION_MEJORA: ControlDocumentalIso = {
+  area: 'SISTEMA DE GESTIÓN INTEGRAL',
+  codigo: 'SGI-MT-ACP-26',
+  version: '01',
+  modificado: '14/04/2025',
+  nombre: 'MATRIZ DE ACCIONES CORRECTIVAS Y PREVENTIVAS',
+}
