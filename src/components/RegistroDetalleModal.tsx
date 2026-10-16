@@ -5,6 +5,7 @@ import { Formulario, TIPO_LABELS } from './RegistrosTable'
 import { puedeAprobarRegistros } from '../types/sigp/permisos'
 import type { Obra } from './ObrasTable'
 import { getEstadoGeo } from '../utils/geo'
+import { SeccionCierrePermiso } from './CierrePermiso'
 
 interface Props {
   formulario: Formulario
@@ -116,6 +117,9 @@ export default function RegistroDetalleModal({ formulario: f, obra, onClose, onV
               {f.version   && <InfoItem label="Versión"   value={f.version} />}
             </div>
           </section>
+
+          {/* Cierre del permiso (solo permisos de trabajo) */}
+          <SeccionCierrePermiso f={f} />
 
           {/* Fotos */}
           {f.fotos_urls && f.fotos_urls.length > 0 && (

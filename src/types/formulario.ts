@@ -142,3 +142,66 @@ export function formatRelativeDate(iso: string): string {
   if (days < 30) return `hace ${Math.floor(days / 7)} sem`
   return formatDate(iso)
 }
+
+// ── Cierre de permisos de trabajo ────────────────────────────────────────────
+// Los permisos de trabajo tienen dos fases en la app: apertura (se diligencia,
+// firma y envía) y cierre (el técnico lo completa DESPUÉS, sobre el MISMO doc
+// formularios/{id}). El cierre se guarda dentro de `data` (→ campos_dinamicos):
+// fase_permiso, hora_cierre, supervisor_cierre_nombre, condicion_final y
+// observaciones_cierre. No hay fecha de cierre — solo la hora cruda que el
+// técnico escribió; NO se deriva fecha de ningún otro dato (follow-up de app).
+
+/** Tipos con cierre (los mismos 4 que ofrece la app en _tiposPermiso). */
+export const TIPOS_PERMISO_CON_CIERRE: ReadonlySet<string> = new Set([
+  'permiso_alturas',
+  'permiso_caliente',
+  'permiso_electrico',
+  'permiso_espacios_confinados',
+])
+
+export interface CierrePermiso {
+  /** 'cerrado' | 'abierto'. Un permiso sin señal de fase ni datos → no se devuelve cierre. */
+  estado: 'cerrado' | 'abierto'
+  hora?: string
+  supervisor?: string
+  condicionFinal?: string
+  observaciones?: string
+  /** true si la condición final registrada no es "Favorable". */
+  noFavorable: boolean
+}
+
+function textoNoVacio(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined
+  const t = v.trim()
+  return t === '' ? undefined : t
+}
+
+/**
+ * Estado de cierre de un permiso, o null si el formulario no es un permiso
+ * con cierre (o no hay evidencia de su fase).
+ * - cerrado: fase_permiso === 'completado' O hay algún dato de cierre con valor.
+ * - abierto: fase_permiso === 'apertura' y sin datos de cierre.
+ * - null: tipo ajeno, o permiso sin fase ni datos de cierre (anteriores al
+ *   flujo de fases: no se afirma "abierto" sin evidencia).
+ */
+export function cierrePermisoDe(
+  f: Pick<Formulario, 'tipo' | 'campos_dinamicos'>,
+): CierrePermiso | null {
+  if (!TIPOS_PERMISO_CON_CIERRE.has(f.tipo)) return null
+  const c = f.campos_dinamicos ?? {}
+  const hora = textoNoVacio(c.hora_cierre)
+  const supervisor = textoNoVacio(c.supervisor_cierre_nombre)
+  const condicionFinal = textoNoVacio(c.condicion_final)
+  const observaciones = textoNoVacio(c.observaciones_cierre)
+  const hayDatos = !!(hora || supervisor || condicionFinal || observaciones)
+
+  if (c.fase_permiso === 'completado' || hayDatos) {
+    return {
+      estado: 'cerrado',
+      hora, supervisor, condicionFinal, observaciones,
+      noFavorable: !!condicionFinal && condicionFinal.toLowerCase() !== 'favorable',
+    }
+  }
+  if (c.fase_permiso === 'apertura') return { estado: 'abierto', noFavorable: false }
+  return null
+}
