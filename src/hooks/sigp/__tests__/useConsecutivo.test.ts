@@ -143,6 +143,29 @@ describe('useConsecutivo (contra emulador)', () => {
   )
 
   it(
+    'AC / AP / MEJ: serie ANUAL propia, padding 3, contadores independientes (y AC no toca ACT)',
+    async () => {
+      const { obtener } = useConsecutivo()
+      const ac1 = await obtener('AC')
+      const ap1 = await obtener('AP')
+      const mej1 = await obtener('MEJ')
+      const ac2 = await obtener('AC')
+      const act1 = await obtener('ACT')
+
+      expect(ac1).toBe(`AC-${YEAR}-001`)
+      expect(ac2).toBe(`AC-${YEAR}-002`)
+      expect(ap1).toBe(`AP-${YEAR}-001`)
+      expect(mej1).toBe(`MEJ-${YEAR}-001`)
+      expect(act1).toBe(`ACT-${YEAR}-001`)
+      expect(await leerUltimoConsecutivo('AC', YEAR)).toBe(2)
+      expect(await leerUltimoConsecutivo('AP', YEAR)).toBe(1)
+      expect(await leerUltimoConsecutivo('MEJ', YEAR)).toBe(1)
+      expect(await leerUltimoConsecutivo('ACT', YEAR)).toBe(1)
+    },
+    TIMEOUT,
+  )
+
+  it(
     'rechaza un prefijo inválido con code invalid-argument',
     async () => {
       const { obtener } = useConsecutivo()

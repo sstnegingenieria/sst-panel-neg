@@ -30,7 +30,7 @@ const { FieldValue } = require('firebase-admin/firestore');
 
 // Nota: admin.initializeApp() ya se llama en index.js — no re-inicializar
 
-const PREFIJOS_VALIDOS = ['SOL', 'VIS', 'COT', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC', 'CAT', 'OC', 'PEA', 'LIC'];
+const PREFIJOS_VALIDOS = ['SOL', 'VIS', 'COT', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC', 'CAT', 'OC', 'PEA', 'LIC', 'AC', 'AP', 'MEJ'];
 
 // Padding mínimo por prefijo en la serie ANUAL. El default es 3
 // (PRY-2026-001). LIC pide 4 porque el volumen anual de procesos de SECOP se
