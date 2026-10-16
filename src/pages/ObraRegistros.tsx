@@ -9,6 +9,7 @@ import RegistroCard from '../components/RegistroCard'
 import RegistroKanban from '../components/RegistroKanban'
 import RegistroDetalleModal from '../components/RegistroDetalleModal'
 import { TIPO_LABELS, type Formulario } from '../types/formulario'
+import { SEMANAS, enPeriodo, etiquetaMes, mesesPresentes, type SemanaMes } from '../utils/semanaMes'
 
 type ViewMode = 'lista' | 'kanban'
 type EstadoFilter = 'todos' | 'pendiente' | 'aprobado' | 'rechazado'
@@ -24,10 +25,27 @@ export default function ObraRegistros() {
   const [view, setView] = useState<ViewMode>('lista')
   const [estadoFilter, setEstadoFilter] = useState<EstadoFilter>('todos')
   const [search, setSearch] = useState('')
+  const [mesSel, setMesSel] = useState<string>('todos')
+  const [semanaFilter, setSemanaFilter] = useState<SemanaMes | 'todas'>('todas')
   const [selected, setSelected] = useState<Formulario | null>(null)
 
+  // Meses con formatos (más reciente primero). El desplegable "Mes" solo se
+  // ofrece si la obra abarca 2 o más — con uno solo no hay nada que desambiguar.
+  const meses = useMemo(
+    () => mesesPresentes(formularios.map(f => f.timestamp_creacion)),
+    [formularios],
+  )
+  // Si el mes elegido ya no existe (p. ej. se cambió de obra), vuelve a "todos".
+  const mesFilter = meses.includes(mesSel) ? mesSel : 'todos'
+
+  // Periodo (Mes + Semana): base de los contadores de los chips de estado.
+  const delPeriodo = useMemo(
+    () => formularios.filter(f => enPeriodo(f.timestamp_creacion, mesFilter, semanaFilter)),
+    [formularios, mesFilter, semanaFilter],
+  )
+
   const filtrados = useMemo(() => {
-    let result = formularios
+    let result = delPeriodo
     if (estadoFilter !== 'todos') {
       result = result.filter(f => (f.revision_sst?.estado ?? 'pendiente') === estadoFilter)
     }
@@ -39,18 +57,25 @@ export default function ObraRegistros() {
       )
     }
     return result
-  }, [formularios, estadoFilter, search])
+  }, [delPeriodo, estadoFilter, search])
 
+  // Totales de la obra (tarjetas del encabezado): no dependen de los filtros.
+  const totales = useMemo(() => ({
+    todos: formularios.length,
+    pendiente: formularios.filter(f => (f.revision_sst?.estado ?? 'pendiente') === 'pendiente').length,
+  }), [formularios])
+
+  // Contadores de los chips de estado: respetan Mes y Semana (no estado ni búsqueda).
   const counts = useMemo(() => {
-    const c = { todos: formularios.length, pendiente: 0, aprobado: 0, rechazado: 0 }
-    for (const f of formularios) {
+    const c = { todos: delPeriodo.length, pendiente: 0, aprobado: 0, rechazado: 0 }
+    for (const f of delPeriodo) {
       const e = f.revision_sst?.estado ?? 'pendiente'
       if (e === 'pendiente') c.pendiente++
       else if (e === 'aprobado') c.aprobado++
       else if (e === 'rechazado') c.rechazado++
     }
     return c
-  }, [formularios])
+  }, [delPeriodo])
 
   // ── Acciones (visto bueno, marcar descargado) ──
 
@@ -152,11 +177,11 @@ export default function ObraRegistros() {
           </div>
           <div className="flex gap-2">
             <div className="bg-white/10 rounded-md px-3 py-1.5 text-center">
-              <span className="block text-lg font-bold leading-tight">{counts.todos}</span>
+              <span className="block text-lg font-bold leading-tight">{totales.todos}</span>
               <span className="text-[9px] uppercase opacity-70 tracking-wide">Registros</span>
             </div>
             <div className="rounded-md px-3 py-1.5 text-center" style={{ background: 'rgba(245,158,11,0.22)' }}>
-              <span className="block text-lg font-bold leading-tight">{counts.pendiente}</span>
+              <span className="block text-lg font-bold leading-tight">{totales.pendiente}</span>
               <span className="text-[9px] uppercase opacity-70 tracking-wide">Pendientes</span>
             </div>
           </div>
@@ -198,6 +223,28 @@ export default function ObraRegistros() {
             {opt.l}
           </button>
         ))}
+
+        {/* Periodo: Mes (solo si la obra abarca varios) + Semana del mes */}
+        {meses.length >= 2 && (
+          <select
+            value={mesFilter}
+            onChange={e => setMesSel(e.target.value)}
+            aria-label="Filtrar por mes"
+            className="text-xs px-2.5 py-1.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-gray-400 focus:outline-none focus:border-brand-500"
+          >
+            <option value="todos">Todos los meses</option>
+            {meses.map(m => <option key={m} value={m}>{etiquetaMes(m)}</option>)}
+          </select>
+        )}
+        <select
+          value={semanaFilter}
+          onChange={e => setSemanaFilter(e.target.value === 'todas' ? 'todas' : (Number(e.target.value) as SemanaMes))}
+          aria-label="Filtrar por semana del mes"
+          className="text-xs px-2.5 py-1.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-gray-400 focus:outline-none focus:border-brand-500"
+        >
+          <option value="todas">Todas las semanas</option>
+          {SEMANAS.map(w => <option key={w.valor} value={w.valor}>{w.label}</option>)}
+        </select>
 
         {/* View toggle */}
         <div className="bg-gray-100 rounded-md p-0.5 flex gap-0.5">
