@@ -7,6 +7,7 @@ import {
 } from '../types/formulario'
 import type { Obra } from './ObrasTable'
 import { getEstadoGeo } from '../utils/geo'
+import { ChipCierrePermiso } from './CierrePermiso'
 
 interface Props {
   formulario: Formulario
@@ -83,6 +84,7 @@ export default function RegistroCard({ formulario: f, obra, onClick }: Props) {
         <span className={`inline-block text-[10px] font-medium px-2.5 py-0.5 rounded-full capitalize ${REVISION_BADGE[revEstado]}`}>
           {revEstado}
         </span>
+        <div className="mt-1"><ChipCierrePermiso f={f} /></div>
         {geo.estado === 'fuera_de_sitio' && (
           <span
             className="inline-block text-[10px] font-medium px-2.5 py-0.5 rounded-full bg-orange-100 text-orange-800 mt-1"

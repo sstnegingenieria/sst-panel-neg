@@ -6,6 +6,7 @@ import {
 } from '../types/formulario'
 import type { Obra } from './ObrasTable'
 import { getEstadoGeo } from '../utils/geo'
+import { ChipCierrePermiso } from './CierrePermiso'
 
 interface Props {
   formularios: Formulario[]
@@ -55,6 +56,7 @@ function KanbanCard({ f, obra, onClick }: { f: Formulario; obra?: Obra; onClick:
       <div className="text-[9px] text-gray-400 mt-0.5">
         {formatShortDate(f.timestamp_creacion)}
       </div>
+      <div className="mt-1 empty:hidden"><ChipCierrePermiso f={f} compacto /></div>
       {geo.estado === 'fuera_de_sitio' && (
         <div className="mt-1">
           <span
