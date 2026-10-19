@@ -23,17 +23,20 @@ import SelectField from '../../components/shared/SelectField'
 import { useTareasPendientes } from '../../hooks/sigp/useTareasPendientes'
 import { listarAsignables } from '../../utils/sigp/tareas'
 import type { PersonaAsignable } from '../../utils/sigp/tareas'
-import { compararTareas, tareasActivasOrdenadas } from '../../utils/sigp/tareasUi'
+import {
+  compararTareas, tareasActivasOrdenadas, esTareaVencida, diasDeVencida, rutaContexto,
+} from '../../utils/sigp/tareasUi'
 import { puedeAsignarTareasUI } from '../../types/sigp/permisos'
 import {
   ESTADOS_TAREA, ESTADO_TAREA_LABEL, ESTADO_TAREA_COLOR,
   PRIORIDADES_TAREA, PRIORIDAD_TAREA_LABEL, PRIORIDAD_TAREA_COLOR,
+  FASE_TAREA_LABEL, FASE_TAREA_COLOR, esFaseTarea,
   esTareaTerminal,
   patchIniciarTarea, patchPasarBalon, patchDevolverBalon, patchCerrarTarea,
   patchAnularTarea, patchReasignarTarea,
 } from '../../types/sigp/tarea'
 import type {
-  TareaConId, EstadoTarea, PrioridadTarea, ContextoTarea,
+  TareaConId, EstadoTarea, PrioridadTarea,
 } from '../../types/sigp/tarea'
 
 const MAX_ARCHIVO_BYTES = 10 * 1024 * 1024
@@ -63,13 +66,6 @@ function fFechaCorta(ts: unknown): string | null {
   return d ? d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : null
 }
 
-function fechaVencida(ts: unknown): boolean {
-  const d = (ts as { toDate?: () => Date } | undefined)?.toDate?.()
-  if (!d) return false
-  const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
-  return d.getTime() < hoy.getTime()
-}
-
 /** Fecha de un input type="date" (YYYY-MM-DD) a las 12:00 local — evita
  *  corrimientos de un día por huso horario (patrón PermisosIngreso). */
 function timestampDeInputFecha(v: string): Timestamp {
@@ -79,23 +75,6 @@ function timestampDeInputFecha(v: string): Timestamp {
 function fechaInputDe(ts: unknown): string {
   const d = (ts as { toDate?: () => Date } | undefined)?.toDate?.()
   return d ? d.toISOString().slice(0, 10) : ''
-}
-
-/** Ruta navegable del contexto. Resuelve con `ruta_id ?? id` (SB2.2):
- *  `id` es siempre el documento ORIGEN; `ruta_id` es el override de
- *  navegación para entidades sin ficha propia — una OC se navega por la
- *  ficha de su proyecto (`ruta_id` = proyecto_id), que es donde vive su
- *  sección (C2: surfacear, no reinventar). */
-function rutaContexto(c: ContextoTarea): string | null {
-  const destino = c.ruta_id ?? c.id
-  switch (c.tipo) {
-    case 'solicitud': return `/sigp/solicitudes/${destino}`
-    case 'cotizacion': return `/sigp/cotizaciones/${destino}`
-    case 'proyecto': return `/sigp/proyectos/${destino}`
-    case 'cliente': return `/sigp/clientes/${destino}`
-    case 'orden_compra': return `/sigp/proyectos/${destino}`
-    default: return null
-  }
 }
 
 /** Orden de la pestaña Equipo: activas primero (orden de trabajo), luego
@@ -124,16 +103,35 @@ export default function Tareas() {
     if (t === 'balon' || searchParams.get('balon')) return 'balon'
     return 'mis'
   })
+  // Deep-link ?vencidas=1 (badge rojo del Sidebar / pop-up): "Mis tareas"
+  // filtrada a las vencidas. Solo aplica a la pestaña "Mis tareas".
+  const [soloVencidas, setSoloVencidas] = useState(() => !!searchParams.get('vencidas'))
   const cambiarTab = (t: Tab) => {
     setTab(t)
+    setSoloVencidas(false)
     const next = new URLSearchParams()
     if (t !== 'mis') next.set('tab', t)
     setSearchParams(next, { replace: true })
   }
+  const alternarVencidas = (valor: boolean) => {
+    setSoloVencidas(valor)
+    const next = new URLSearchParams()
+    if (valor) next.set('vencidas', '1')
+    setSearchParams(next, { replace: true })
+  }
+  // El enlace (badge / pop-up) puede llegar con la página YA montada: el estado
+  // sigue a la URL, no solo se lee al montar.
+  useEffect(() => {
+    const v = !!searchParams.get('vencidas')
+    setSoloVencidas(v)
+    if (v) setTab('mis')
+  }, [searchParams])
 
   // ── Datos vivos: "Mis tareas" + "Balón" (mismo hook que el badge del Sidebar)
   const { tareasAsignadas, balonesTareas } = useTareasPendientes(!!user?.uid, user?.uid)
   const misTareasOrdenadas = useMemo(() => tareasActivasOrdenadas(tareasAsignadas), [tareasAsignadas])
+  const misVencidas = useMemo(() => misTareasOrdenadas.filter(t => esTareaVencida(t)), [misTareasOrdenadas])
+  const misVisibles = soloVencidas ? misVencidas : misTareasOrdenadas
   const balonesOrdenados = useMemo(() => [...balonesTareas].sort(compararTareas), [balonesTareas])
 
   // ── Personas asignables (selector de balón / reasignar / nueva tarea)
@@ -483,11 +481,25 @@ export default function Tareas() {
       {/* ── Mis tareas ─────────────────────────────────────────────────── */}
       {tab === 'mis' && (
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-          {misTareasOrdenadas.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-10">No tienes tareas pendientes 🎉</p>
+          {(misVencidas.length > 0 || soloVencidas) && (
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100">
+              <button onClick={() => alternarVencidas(false)}
+                className={`text-xs px-3 py-1 rounded-full border transition ${!soloVencidas ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}>
+                Todas ({misTareasOrdenadas.length})
+              </button>
+              <button onClick={() => alternarVencidas(true)}
+                className={`text-xs px-3 py-1 rounded-full border transition ${soloVencidas ? 'bg-red-600 text-white border-red-600' : 'bg-white text-red-700 border-red-200 hover:border-red-400'}`}>
+                ⚠ Vencidas ({misVencidas.length})
+              </button>
+            </div>
+          )}
+          {misVisibles.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-10">
+              {soloVencidas ? 'No tienes tareas vencidas 🎉' : 'No tienes tareas pendientes 🎉'}
+            </p>
           ) : (
             <div className="divide-y divide-gray-100">
-              {misTareasOrdenadas.map(t => (
+              {misVisibles.map(t => (
                 <FilaTarea key={t.id} t={t} variant="mis" uid={user.uid} puedeAsignar={puedeAsignar}
                   expanded={expandedId === t.id} onToggle={() => toggleExpand(t.id)}
                   aplicando={aplicandoId === t.id}
@@ -782,7 +794,10 @@ function FilaTarea({
   const prioridad: PrioridadTarea = t.prioridad ?? 'media'
   const esAutoTarea = !!t.creada_por && !!t.asignada_a && t.creada_por === uid && t.asignada_a === uid
   const puedeAccionesAsignador = variant === 'equipo' ? puedeAsignar : (puedeAsignar || esAutoTarea)
-  const vencida = fechaVencida(t.fecha_limite) && !esTareaTerminal(estado)
+  const { user: usuarioFila } = useAuth()
+  const diasVencida = diasDeVencida({ estado, fecha_limite: t.fecha_limite })
+  const vencida = diasVencida > 0
+  const fase = esFaseTarea(t.fase) ? t.fase : null
   const historial = Array.isArray(t.historial) ? t.historial : []
 
   return (
@@ -802,8 +817,16 @@ function FilaTarea({
                 🏈 En cancha de {t.balon_en.nombre || '—'}
               </span>
             )}
+            {fase && (
+              <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold ${FASE_TAREA_COLOR[fase]}`}
+                title="Fase del ciclo PHVA de la acción de mejora">
+                {fase} · {FASE_TAREA_LABEL[fase]}
+              </span>
+            )}
             {vencida && (
-              <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-100 text-red-700">⚠ Vencida</span>
+              <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-100 text-red-700">
+                ⚠ Vencida hace {diasVencida} día{diasVencida === 1 ? '' : 's'}
+              </span>
             )}
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-xs text-gray-400">
@@ -880,8 +903,8 @@ function FilaTarea({
           {t.descripcion && <p className="text-sm text-gray-600 whitespace-pre-wrap">{t.descripcion}</p>}
 
           {t.contexto?.label && (
-            rutaContexto(t.contexto) ? (
-              <Link to={rutaContexto(t.contexto)!}
+            rutaContexto(t.contexto, usuarioFila?.rol) ? (
+              <Link to={rutaContexto(t.contexto, usuarioFila?.rol)!}
                 className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 bg-brand-50 rounded-full px-2.5 py-1 hover:bg-brand-100">
                 {t.contexto.label} →
               </Link>

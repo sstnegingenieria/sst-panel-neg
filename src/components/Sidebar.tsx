@@ -258,7 +258,7 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   // admin. Default in-app FALSE (oculto hasta que Giovanny cree el parámetro).
   const accionesEnabled = useFeatureFlag('sigp_acciones_enabled', false)
   const mostrarAcciones = accionesEnabled && veAccionesMejoraUI(user?.rol)
-  const { misTareas, balones } = useTareasPendientes(mostrarTareas, user?.uid)
+  const { misTareas, balones, vencidas } = useTareasPendientes(mostrarTareas, user?.uid)
   // 07-sep — badge de la cola de Verificación SST (hallazgo Tesoro III):
   // montado SOLO para quien puede LEER la proyección (cero lecturas ajenas).
   const pendientesVerificacion = usePendientesVerificacionSst(veVerificacionSstUI(user?.rol))
@@ -401,8 +401,9 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
                 </svg>
                 {collapsed && badgeTareas > 0 && (
                   <span
-                    onClick={e => { e.preventDefault(); e.stopPropagation(); navigate('/tareas?pendientes=1'); onNavigate?.() }}
-                    className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 rounded-full cursor-pointer" title="Tareas pendientes" />
+                    onClick={e => { e.preventDefault(); e.stopPropagation(); navigate(vencidas > 0 ? '/tareas?vencidas=1' : '/tareas?pendientes=1'); onNavigate?.() }}
+                    className={`absolute -top-1 -right-1 w-4 h-4 rounded-full cursor-pointer ${vencidas > 0 ? 'bg-red-600' : 'bg-orange-500'}`}
+                    title={vencidas > 0 ? `Tareas pendientes — ${vencidas} vencida${vencidas === 1 ? '' : 's'}` : 'Tareas pendientes'} />
                 )}
               </span>
               {!collapsed && (
@@ -414,6 +415,14 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
                       title="Tareas y balones pendientes — clic para verlas"
                       className="ml-auto bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center cursor-pointer">
                       {badgeTareas > 99 ? '99+' : badgeTareas}
+                    </span>
+                  )}
+                  {vencidas > 0 && (
+                    <span
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); navigate('/tareas?vencidas=1'); onNavigate?.() }}
+                      title={`${vencidas} tarea${vencidas === 1 ? '' : 's'} vencida${vencidas === 1 ? '' : 's'} — clic para verlas`}
+                      className={`${badgeTareas > 0 ? 'ml-1' : 'ml-auto'} bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center cursor-pointer`}>
+                      ⚠ {vencidas > 99 ? '99+' : vencidas}
                     </span>
                   )}
                 </span>
