@@ -115,7 +115,7 @@ export default function CierreAnticipadoProyecto({ proyecto, comprasEjecutadas, 
     if (!previa || !consecutivoOk) return
     setAplicando(true)
     try {
-      const incurrido = await ejecutarCierreAnticipado(proyecto, asigs, comprasEjecutadas, datos, user?.uid ?? '')
+      const incurrido = await ejecutarCierreAnticipado(proyecto, asigs, comprasEjecutadas, datos, user?.uid ?? '', user?.nombre)
       if (incurrido == null) { toast('La cancelación fue rehusada por el guard', 'error'); return }
       const okObra = await sincronizarObraEspejo({ ...proyecto, estado: 'cancelado' })
       toast(`${proyecto.consecutivo} cancelado — incurrido ${fmtMoney(incurrido.total)}${okObra ? '' : ' · la obra SST no se pudo inactivar (reintenta con 🏗)'}`)

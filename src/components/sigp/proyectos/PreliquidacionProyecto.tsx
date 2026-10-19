@@ -141,7 +141,7 @@ export default function PreliquidacionProyecto({ proyecto, puedeGestionar, puede
   }
 
   const entrada = (de: string, a: string, motivo: string) => ({
-    de, a, por: user?.uid ?? '', fecha: Timestamp.now(), motivo,
+    de, a, por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: Timestamp.now(), motivo,
   })
 
   const definir = async () => {

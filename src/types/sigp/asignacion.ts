@@ -185,7 +185,13 @@ export interface SenalAlcanceAsignacion {
 export interface EntradaHistorialAsignacion {
   de: EstadoAsignacion | null
   a: EstadoAsignacion
+  /** uid del autor, o 'sistema' (asignaciones sintetizadas legacy). */
   por: string
+  /** Nombre del autor denormalizado al escribir (19-oct, patrón Tareas) —
+   *  el del momento del acto; viejas sin él se resuelven por uid en la UI
+   *  (utils/sigp/autoria.ts). Los builders NO lo ponen: la UI envuelve la
+   *  entrada nueva con `conAutor()` al escribir. */
+  por_nombre?: string
   fecha: Timestamp
   motivo?: string
 }

@@ -12,6 +12,7 @@ import { db } from '../../firebase/config'
 import {
   sintetizarAsignacionLegacy, resumenAsignacionesDe, patchCancelarProyecto,
 } from '../../types/sigp/asignacion'
+import { conAutor } from './autoria'
 import type { AsignacionContratista, DatosCierreAnticipado, ContextoAlcance } from '../../types/sigp/asignacion'
 import type { Proyecto, CierreAnticipado } from '../../types/sigp/proyecto'
 
@@ -101,6 +102,7 @@ export async function ejecutarCierreAnticipado(
   comprasCf: number,
   datos: DatosCierreAnticipado,
   uid: string,
+  nombre?: string,   // 19-oct: por_nombre en las entradas nuevas (conAutor)
 ): Promise<CierreAnticipado['incurrido'] | null> {
   const r = patchCancelarProyecto(p, asigs, comprasCf, datos, uid, Timestamp.now())
   if (!r) return null
@@ -117,13 +119,13 @@ export async function ejecutarCierreAnticipado(
   const batch = writeBatch(db)
   for (const c of r.cancelaciones) {
     batch.update(doc(db, 'proyectos', p.id, 'asignaciones', c.id), {
-      ...c.sub, historial: arrayUnion(c.entradaHistorial),
+      ...c.sub, historial: arrayUnion(conAutor(c.entradaHistorial, uid, nombre)),
     })
   }
   batch.update(doc(db, 'proyectos', p.id), {
     ...r.padre,
     resumen_asignaciones: r.resumen,
-    historial: arrayUnion(r.entradaHistorial),
+    historial: arrayUnion(conAutor(r.entradaHistorial, uid, nombre)),
   })
   if (anotarCotizacion && p.cotizacion_id) {
     batch.update(doc(db, 'cotizaciones', p.cotizacion_id), {
