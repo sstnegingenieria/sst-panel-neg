@@ -3,6 +3,7 @@ import type { ObraConStats } from '../hooks/useObrasConRegistros'
 import { formatRelativeDate } from '../types/formulario'
 import { DIRECCION_ORDEN, type SortBy } from '../utils/ordenObras'
 import EstadoSstBar from './EstadoSstBar'
+import ObjetoObra from './ObjetoObra'
 
 interface Props {
   obras: ObraConStats[]
@@ -84,6 +85,7 @@ export default function RegistrosLista({ obras, sortBy, onSort }: Props) {
                       Inactiva
                     </span>
                   )}
+                  <ObjetoObra alcance={obra.alcance} className="mt-0.5 max-w-xs" />
                 </td>
                 <td className="px-3 py-2.5 font-mono text-[11px] text-gray-500">{obra.codigo}</td>
                 <td className="px-3 py-2.5 text-gray-700">{obra.cliente || '—'}</td>
