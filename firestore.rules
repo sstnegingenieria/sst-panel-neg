@@ -1666,13 +1666,20 @@ service cloud.firestore {
     // no del panel en general (mínimo privilegio, como la economía de
     // licitaciones). Espejo en el cliente: ROLES_GESTIONA_ACAP.
     //
-    // CICLO F1: nace `borrador` (sin consecutivo); se edita mientras sea
-    // borrador; se ANULA (borrador|abierta → anulada) con motivo — `anulada`
-    // es TERMINAL (cero escrituras). Abrir = EMITIR = asignar consecutivo
-    // server-side: es F2. En F1 el consecutivo es inmutable-null, así que
-    // `abierta` es INALCANZABLE por construcción (F2 agrega la vía de
-    // emitir). Sin delete para NADIE, admin incluido: la baja es la
-    // anulación — evidencia de auditoría, cero borrado físico (5.1).
+    // CICLO: nace `borrador` (sin consecutivo); se edita mientras sea
+    // borrador; se EMITE (borrador → abierta: F2a) asignando el consecutivo;
+    // se ANULA (borrador|abierta → anulada) con motivo — `anulada` es
+    // TERMINAL (cero escrituras). Sin delete para NADIE, admin incluido: la
+    // baja es la anulación — evidencia de auditoría, cero borrado físico (5.1).
+    //
+    // EMITIR (F2a, OPCIÓN A — decisión de Giovanny): la regla valida la FORMA
+    // del consecutivo (prefijo según el tipo, año en curso, número ≥ 1) y que
+    // la causa raíz esté COMPLETA, pero NO puede comprobar que el número
+    // provenga de la CF generarConsecutivo: el contador `consecutivos` es de
+    // la CF y las reglas no lo cruzan. RESIDUAL: un gestor con un cliente
+    // modificado podría escribir un número bien formado sin pasar por la CF
+    // (saltándose la serie o repitiéndola). El uso normal es seguro (la UI
+    // siempre lo pide a la CF). Cerrarlo = que la CF emita en una transacción.
     //
     // Historial APPEND-ONLY (patrón historialSoloAgrega de
     // verificaciones_sst): queda igual o crece en UNA entrada al final, con
@@ -1785,6 +1792,36 @@ service cloud.firestore {
           && a.motivo.size() <= 2000;
     }
 
+    // F2a — prefijo del consecutivo según el tipo de acción.
+    function prefijoAcAp(tipo) {
+      return tipo == 'correctiva' ? 'AC' : (tipo == 'preventiva' ? 'AP' : (tipo == 'mejora' ? 'MEJ' : '__tipo_invalido__'));
+    }
+
+    // F2a — FORMA del consecutivo: `PREFIJO-AAAA-NNN` (NNN ≥ 3 dígitos, > 0), con el
+    // prefijo que corresponde al TIPO de la acción y el AÑO en curso (UTC: el
+    // mismo año que usa la CF, que corre en UTC, y `request.time`). Una acción
+    // correctiva no puede llevar un AP-…; un número de otro año no se acepta
+    // (un write tardío que cruza el año se rechaza: la UI pide un número nuevo).
+    function consecutivoAcApValido(c, tipo) {
+      return c is string
+          && c.size() <= 24
+          && c.matches('^(AC|AP|MEJ)-[0-9]{4}-([0-9]{3}|[1-9][0-9]{3,})$')
+          && c.split('-')[0] == prefijoAcAp(tipo)
+          && int(c.split('-')[1]) == request.time.year()
+          && int(c.split('-')[2]) >= 1;
+    }
+
+    // F2a — los 5 por qués diligenciados (no vacíos). En borrador son
+    // progresivos; al EMITIR se exigen completos.
+    function causaRaizCompleta(cr) {
+      return cr is map
+          && cr.get('porque_1', '') is string && cr.get('porque_1', '').trim().size() > 0
+          && cr.get('porque_2', '') is string && cr.get('porque_2', '').trim().size() > 0
+          && cr.get('porque_3', '') is string && cr.get('porque_3', '').trim().size() > 0
+          && cr.get('porque_4', '') is string && cr.get('porque_4', '').trim().size() > 0
+          && cr.get('porque_5', '') is string && cr.get('porque_5', '').trim().size() > 0;
+    }
+
     match /acciones_mejora/{accionId} {
       allow read: if gestionaAcAp();
 
@@ -1804,11 +1841,11 @@ service cloud.firestore {
                     && !('de' in request.resource.data.historial[0])
                     && entradaAcApValida(request.resource.data.historial[0]);
 
-      // Dos vías, ninguna sobre una ANULADA (terminal). creado_por,
+      // Tres vías, ninguna sobre una ANULADA (terminal). creado_por,
       // creado_por_nombre, fecha_creacion y consecutivo quedan inmutables
       // porque NINGUNA vía los admite en su diff().affectedKeys() (cambiarlos
-      // o borrarlos los haría aparecer ahí). Ninguna vía llega a 'abierta':
-      // F2 agrega la vía de emitir (consecutivo server-side + → abierta).
+      // o borrarlos los haría aparecer ahí) — salvo la de EMITIR, que fija el
+      // consecutivo UNA vez (de null a su valor) y jamás lo vuelve a tocar.
       allow update: if gestionaAcAp()
                     && resource.data.estado != 'anulada'
                     && historialAcApValido()
@@ -1828,8 +1865,8 @@ service cloud.firestore {
                       // SOLO estado/anulacion/historial/fecha_actualizacion,
                       // con el bloque de anulación completo y UNA entrada nueva
                       // de historial hacia 'anulada'. El resto del doc no cambia
-                      // (por eso no se re-valida su forma: un `abierta` de F2
-                      // traerá campos que el hasOnly de F1 no conoce).
+                      // (por eso no se re-valida su forma: no se toca nada más, y
+                      // el consecutivo de la abierta queda tal cual).
                       (resource.data.estado in ['borrador', 'abierta']
                        && request.resource.data.estado == 'anulada'
                        && request.resource.data.diff(resource.data).affectedKeys()
@@ -1840,6 +1877,28 @@ service cloud.firestore {
                        && request.resource.data.historial.size()
                             == resource.data.get('historial', []).size() + 1
                        && 'a' in request.resource.data.historial[request.resource.data.historial.size() - 1])
+                      ||
+                      // ── EMITIR (borrador → abierta) — F2a: el write toca SOLO
+                      // estado/consecutivo/historial/fecha_actualizacion; el
+                      // consecutivo pasa de null a un valor de FORMA válida para
+                      // el tipo y el año (ver consecutivoAcApValido: forma, no
+                      // procedencia — opción A); la causa raíz debe estar
+                      // COMPLETA; el resultado sigue siendo un documento válido
+                      // (un abierta no trae campos nuevos); y la entrada de
+                      // historial nueva dice borrador → abierta.
+                      (resource.data.estado == 'borrador'
+                       && request.resource.data.estado == 'abierta'
+                       && resource.data.get('consecutivo', null) == null
+                       && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['estado', 'consecutivo', 'historial', 'fecha_actualizacion'])
+                       && consecutivoAcApValido(request.resource.data.get('consecutivo', null),
+                                                resource.data.tipo)
+                       && causaRaizCompleta(resource.data.causa_raiz)
+                       && contenidoAccionValido(request.resource.data)
+                       && request.resource.data.historial.size()
+                            == resource.data.get('historial', []).size() + 1
+                       && 'a' in request.resource.data.historial[request.resource.data.historial.size() - 1]
+                       && 'de' in request.resource.data.historial[request.resource.data.historial.size() - 1])
                     );
 
       // Sin delete para NADIE (admin incluido): la baja es la anulación.

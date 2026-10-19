@@ -21,11 +21,13 @@
 import { readFileSync } from 'node:fs'
 import { describe, it, beforeAll, afterAll, expect } from 'vitest'
 import { initializeTestEnvironment, assertFails, assertSucceeds, type RulesTestEnvironment } from '@firebase/rules-unit-testing'
-import { addDoc, collection, doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore'
+import { addDoc, collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where, Timestamp } from 'firebase/firestore'
 import {
-  FORM_ACCION_VACIO, construirAlta, patchAnular, patchEditar,
+  FORM_ACCION_VACIO, actividadesAbiertas, construirAlta, patchAnular, patchEditar, patchEmitir,
   type AccionFormData, type AccionMejora,
 } from '../../../types/sigp/accionMejora'
+import { construirTareaAcap, type TareaConId } from '../../../types/sigp/tarea'
+import { agruparPorFase } from '../../../utils/sigp/tareasUi'
 
 let env: RulesTestEnvironment
 const cache: Record<string, ReturnType<ReturnType<RulesTestEnvironment['authenticatedContext']>['firestore']>> = {}
@@ -99,5 +101,84 @@ describe('los documentos de los builders reales PASAN las reglas', () => {
   it('un rol que NO gestiona (sst) no puede crear con el mismo documento válido', async () => {
     const alta = construirAlta(form(), { uid: 'sst1', nombre: 'SST' }, Timestamp.now())!
     await assertFails(addDoc(collection(db('sst1'), 'acciones_mejora'), alta))
+  })
+})
+
+
+// ════════════════════ F2a — EMITIR + PLAN PHVA (builders reales ⟷ reglas) ════════════════════
+describe('F2a: emitir y plan PHVA con los builders reales', () => {
+  const actor = { uid: 'gi', nombre: 'Ingrid' }
+  const ANIO = new Date().getUTCFullYear()
+
+  it('crear → completar los 5 por qués → emitir (patchEmitir) → crear actividades PHVA → leerlas por contexto', async () => {
+    const ref = await addDoc(collection(db('gi'), 'acciones_mejora'), construirAlta(form(), actor, Timestamp.now())!)
+
+    // Incompleta: el builder ya la rechaza (y la regla también, ver batería G).
+    const borrador0 = { id: ref.id, ...((await getDoc(ref)).data() as AccionMejora) }
+    expect(patchEmitir(borrador0, `AC-${ANIO}-001`, actor, Timestamp.now())).toBeNull()
+
+    // Completa la causa raíz por la vía de edición.
+    await updateDoc(ref, patchEditar(borrador0, COMPLETO, actor, Timestamp.now())! as Record<string, unknown>)
+    const borrador = { id: ref.id, ...((await getDoc(ref)).data() as AccionMejora) }
+
+    // EMITIR: el documento que produce el builder real PASA la regla de la 3.ª vía.
+    const patch = patchEmitir(borrador, `AC-${ANIO}-001`, actor, Timestamp.now())!
+    await assertSucceeds(updateDoc(ref, patch as Record<string, unknown>).catch(e => { throw new Error('PASO EMITIR: ' + e.message) }))
+    const abierta = { id: ref.id, ...((await getDoc(ref)).data() as AccionMejora) }
+    expect(abierta.estado).toBe('abierta')
+    expect(abierta.consecutivo).toBe(`AC-${ANIO}-001`)
+    expect(abierta.historial).toHaveLength(borrador.historial.length + 1)
+
+    // Ya abierta: no se edita, no se re-emite, no se le cambia el consecutivo.
+    expect(patchEditar(abierta, COMPLETO, actor, Timestamp.now())).toBeNull()
+    expect(patchEmitir(abierta, `AC-${ANIO}-002`, actor, Timestamp.now())).toBeNull()
+    await assertFails(updateDoc(ref, { consecutivo: `AC-${ANIO}-002` }))
+
+    // PLAN PHVA: dos actividades (fases distintas) con el builder real, creadas por GI.
+    const fecha = Timestamp.fromDate(new Date(Date.now() + 7 * 86_400_000))
+    const t1 = construirTareaAcap({
+      titulo: 'Revisar el procedimiento de entrega', responsable: { uid: 'sst1', nombre: 'Sofía SST' },
+      fechaLimite: fecha, acapId: abierta.id, consecutivo: abierta.consecutivo!, fase: 'P',
+    }, actor, Timestamp.now())!
+    const t2 = construirTareaAcap({
+      titulo: 'Capacitar al equipo', responsable: { uid: 'gi', nombre: 'Ingrid' },
+      fechaLimite: fecha, acapId: abierta.id, consecutivo: abierta.consecutivo!, fase: 'H',
+    }, actor, Timestamp.now())!
+    await assertSucceeds(addDoc(collection(db('gi'), 'tareas'), t1).catch(e => { throw new Error('PASO TAREA P: ' + e.message) }))
+    await assertSucceeds(addDoc(collection(db('gi'), 'tareas'), t2).catch(e => { throw new Error('PASO TAREA H: ' + e.message) }))
+
+    // Lectura de vuelta: DOS igualdades (como useTareasDeContexto), agrupada por fase.
+    const snap = await getDocs(query(collection(db('gi'), 'tareas'),
+      where('contexto.tipo', '==', 'ac_ap'), where('contexto.id', '==', abierta.id)))
+    const porFase = agruparPorFase(snap.docs.map(d => ({ id: d.id, ...d.data() }) as TareaConId))
+    expect(porFase.P.map(t => t.titulo)).toEqual(['Revisar el procedimiento de entrega'])
+    expect(porFase.H.map(t => t.titulo)).toEqual(['Capacitar al equipo'])
+    expect(porFase.V).toEqual([])
+    expect(porFase.P[0].contexto).toMatchObject({ tipo: 'ac_ap', id: abierta.id, label: `AC-${ANIO}-001` })
+    expect(actividadesAbiertas(snap.docs.map(d => ({ id: d.id, ...d.data() }) as TareaConId))).toHaveLength(2)
+
+    // Anular la abierta conserva el consecutivo y NO toca las tareas (solo se avisa).
+    const anul = patchAnular(abierta, 'Se resolvió por otra vía', actor, Timestamp.now())!
+    await assertSucceeds(updateDoc(ref, anul as Record<string, unknown>))
+    const fin = (await getDoc(ref)).data() as AccionMejora
+    expect(fin.estado).toBe('anulada')
+    expect(fin.consecutivo).toBe(`AC-${ANIO}-001`)
+    const despues = await getDocs(query(collection(db('gi'), 'tareas'), where('contexto.id', '==', abierta.id)))
+    expect(despues.docs.every(d => d.data().estado === 'pendiente')).toBe(true)
+  })
+
+  it('un rol sin permiso (sst) no puede emitir aunque el documento sea el del builder real', async () => {
+    const ref = await addDoc(collection(db('gi'), 'acciones_mejora'), construirAlta(COMPLETO, actor, Timestamp.now())!)
+    const borrador = { id: ref.id, ...((await getDoc(ref)).data() as AccionMejora) }
+    const patch = patchEmitir(borrador, `AC-${ANIO}-003`, { uid: 'sst1', nombre: 'SST' }, Timestamp.now())!
+    await assertFails(updateDoc(doc(db('sst1'), 'acciones_mejora', ref.id), patch as Record<string, unknown>))
+  })
+
+  it('preventiva y mejora emiten con su propio prefijo', async () => {
+    for (const [tipo, pref] of [['preventiva', 'AP'], ['mejora', 'MEJ']] as const) {
+      const ref = await addDoc(collection(db('gi'), 'acciones_mejora'), construirAlta({ ...COMPLETO, tipo }, actor, Timestamp.now())!)
+      const borrador = { id: ref.id, ...((await getDoc(ref)).data() as AccionMejora) }
+      await assertSucceeds(updateDoc(ref, patchEmitir(borrador, `${pref}-${ANIO}-010`, actor, Timestamp.now())! as Record<string, unknown>))
+    }
   })
 })

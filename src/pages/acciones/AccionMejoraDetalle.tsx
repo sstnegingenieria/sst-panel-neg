@@ -4,15 +4,18 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useAccionesMejora } from '../../hooks/useAccionesMejora'
+import { useTareasDeContexto } from '../../hooks/sigp/useTareasDeContexto'
 import { puedeGestionarAcapUI } from '../../types/sigp/permisos'
 import {
-  CLAVES_PORQUE, ESTADO_ACCION_COLOR, ESTADO_ACCION_LABEL, FUENTE_ACCION_LABEL,
-  TIPO_ACCION_COLOR, TIPO_ACCION_LABEL, formDeAccion, porquesDiligenciados, puedeAnularAccion, puedeEditarAccion,
+  CLAVES_PORQUE, ESTADO_ACCION_COLOR, PREFIJO_POR_TIPO, ESTADO_ACCION_LABEL, FUENTE_ACCION_LABEL,
+  TIPO_ACCION_COLOR, TIPO_ACCION_LABEL, actividadesAbiertas, faltantesParaEmitir, formDeAccion, porquesDiligenciados,
+  puedeAnularAccion, puedeEditarAccion, puedeEmitirAccion,
   type AccionFormData, type AccionMejoraConId,
 } from '../../types/sigp/accionMejora'
 import { ACCION_MEJORA } from '../../utils/sigp/isoControl'
 import EncabezadoIso from '../../components/sigp/shared/EncabezadoIso'
 import AccionMejoraFormModal from '../../components/sigp/acciones/AccionMejoraFormModal'
+import PlanAccionPhva from '../../components/sigp/acciones/PlanAccionPhva'
 import Modal from '../../components/shared/Modal'
 import { toast } from '../../components/shared/Toast'
 import { fFechaAccion } from './AccionesMejora'
@@ -30,7 +33,7 @@ export default function AccionMejoraDetalle() {
   const { accionId } = useParams<{ accionId: string }>()
   const { user } = useAuth()
   const puedeGestionar = puedeGestionarAcapUI(user?.rol)
-  const { cargarUna, editar, anular } = useAccionesMejora()
+  const { cargarUna, editar, anular, emitir } = useAccionesMejora()
 
   const [accion, setAccion] = useState<AccionMejoraConId | null>(null)
   const [loading, setLoading] = useState(true)
@@ -38,6 +41,7 @@ export default function AccionMejoraDetalle() {
   const [guardando, setGuardando] = useState(false)
   const [anulando, setAnulando] = useState(false)
   const [motivo, setMotivo] = useState('')
+  const [emitiendo, setEmitiendo] = useState(false)
 
   const load = useCallback(async () => {
     if (!accionId) return
@@ -51,6 +55,31 @@ export default function AccionMejoraDetalle() {
     }
   }, [accionId, cargarUna])
   useEffect(() => { load() }, [load])
+
+  // Plan PHVA: las actividades son tareas del contexto {ac_ap, id}. En borrador no
+  // existe plan (se arma al emitir), así que no se suscribe.
+  const { porFase, tareas, loading: tareasLoading, error: tareasError } = useTareasDeContexto(
+    'ac_ap', accion && accion.estado !== 'borrador' ? accion.id : undefined,
+  )
+  const abiertas = actividadesAbiertas(tareas)
+  const faltantes = accion ? faltantesParaEmitir(accion) : []
+
+  const handleEmitir = async () => {
+    if (!user || !accion) return
+    setGuardando(true)
+    try {
+      const r = await emitir(accion, { uid: user.uid, nombre: user.nombre })
+      if (!r.ok) { toast(r.faltantes[0] ?? 'No se puede emitir', 'error'); return }
+      toast(`${r.consecutivo} emitida`)
+      setEmitiendo(false)
+      await load()
+    } catch {
+      // El consecutivo (si ya se pidió a la CF) queda guardado: reintentar NO quema otro.
+      toast('No se pudo emitir — el consecutivo se conserva para reintentar', 'error')
+    } finally {
+      setGuardando(false)
+    }
+  }
 
   const handleEditar = async (form: AccionFormData) => {
     if (!user || !accion) return
@@ -110,7 +139,7 @@ export default function AccionMejoraDetalle() {
             {ESTADO_ACCION_LABEL[accion.estado] ?? accion.estado}
           </span>
           <span className="font-mono text-sm text-gray-600">
-            {accion.consecutivo ?? 'Sin consecutivo — se asigna al emitir (Fase 2)'}
+            {accion.consecutivo ?? 'Sin consecutivo — se asigna al emitir'}
           </span>
         </div>
         {puedeGestionar && (
@@ -119,6 +148,13 @@ export default function AccionMejoraDetalle() {
               <button type="button" onClick={() => setEditando(true)}
                 className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium">
                 ✎ Editar
+              </button>
+            )}
+            {puedeEmitirAccion(accion.estado) && (
+              <button type="button" onClick={() => setEmitiendo(true)} disabled={faltantes.length > 0}
+                title={faltantes.length > 0 ? faltantes.join(' · ') : 'Asigna el consecutivo y abre la acción'}
+                className="px-3 py-1.5 rounded-lg bg-brand-700 hover:bg-brand-800 text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                Emitir
               </button>
             )}
             {puedeAnularAccion(accion.estado) && (
@@ -164,6 +200,26 @@ export default function AccionMejoraDetalle() {
         ))}
       </section>
 
+      {puedeEmitirAccion(accion.estado) && puedeGestionar && faltantes.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
+          <p className="font-semibold mb-1">Para emitir falta:</p>
+          <ul className="list-disc pl-5">
+            {faltantes.map(f => <li key={f}>{f}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <PlanAccionPhva
+        accionId={accion.id}
+        consecutivo={accion.consecutivo}
+        estado={accion.estado}
+        puedeGestionar={puedeGestionar}
+        creador={user ? { uid: user.uid, nombre: user.nombre } : null}
+        porFase={porFase}
+        cargando={tareasLoading}
+        error={tareasError}
+      />
+
       <section className="bg-white border border-gray-200 rounded-xl p-5">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Historial</h2>
         <ul className="flex flex-col gap-2">
@@ -186,6 +242,21 @@ export default function AccionMejoraDetalle() {
       />
 
       <Modal
+        isOpen={emitiendo}
+        title="Emitir acción"
+        onClose={() => setEmitiendo(false)}
+        actions={[
+          { label: 'Volver', variant: 'secondary', onClick: () => setEmitiendo(false) },
+          { label: 'Emitir y asignar consecutivo', onClick: handleEmitir, loading: guardando },
+        ]}
+      >
+        <p className="text-sm text-gray-600">
+          Al emitir se asigna el consecutivo <b>{PREFIJO_POR_TIPO[accion.tipo]}-AAAA-NNN</b> y
+          la acción pasa a <b>abierta</b>: ya no se edita y se arma su plan de acción PHVA. El consecutivo no se puede cambiar después.
+        </p>
+      </Modal>
+
+      <Modal
         isOpen={anulando}
         title="Anular acción"
         onClose={() => setAnulando(false)}
@@ -197,6 +268,12 @@ export default function AccionMejoraDetalle() {
         <p className="text-sm text-gray-600 mb-3">
           La anulación es la baja: queda registrada con su motivo y la acción permanece como evidencia. No se puede deshacer.
         </p>
+        {abiertas.length > 0 && (
+          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
+            {abiertas.length} actividad{abiertas.length === 1 ? '' : 'es'} abierta{abiertas.length === 1 ? '' : 's'};
+            {' '}{abiertas.length === 1 ? 'gestiónala' : 'gestiónalas'} desde Tareas. Anular la acción no {abiertas.length === 1 ? 'la cancela' : 'las cancela'}.
+          </p>
+        )}
         <label className="text-sm font-medium text-gray-700">Motivo de la anulación <span className="text-red-500">*</span></label>
         <textarea
           value={motivo}
