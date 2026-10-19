@@ -5,7 +5,7 @@ import { functions } from '../../firebase/config'
  * Prefijos válidos para consecutivos del SIGP.
  * Debe mantenerse en sincronía con PREFIJOS_VALIDOS en functions/consecutivos.js.
  */
-export type PrefijoConsecutivo = 'SOL' | 'VIS' | 'COT' | 'OFR' | 'PRY' | 'ACT' | 'LIQ' | 'FAC' | 'NC' | 'CAT' | 'OC' | 'PEA' | 'LIC'
+export type PrefijoConsecutivo = 'SOL' | 'VIS' | 'COT' | 'OFR' | 'PRY' | 'ACT' | 'LIQ' | 'FAC' | 'NC' | 'CAT' | 'OC' | 'PEA' | 'LIC' | 'AC' | 'AP' | 'MEJ'
 
 interface GenerarConsecutivoRequest {
   prefijo: PrefijoConsecutivo

@@ -11,9 +11,10 @@
  * esPersonalPanel() — es rol futuro sin usuarios; cuando se active habrá
  * que revisitar su acceso (no podría listar personas ni leer tareas).
  */
-import { collection, getDocs, query, where } from 'firebase/firestore'
+import { addDoc, collection, getDocs, query, Timestamp, where } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import { ROLES_PANEL_WEB } from '../../types/sigp/roles'
+import { construirTareaAcap, type DatosTareaAcap } from '../../types/sigp/tarea'
 
 export interface PersonaAsignable {
   uid: string
@@ -40,4 +41,19 @@ export async function listarAsignables(): Promise<PersonaAsignable[]> {
     })
     .filter(p => roles.includes(p.rol))
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }))
+}
+
+/**
+ * Crea la tarea de una actividad del plan PHVA de una AC/AP. Todo el documento sale
+ * del builder `construirTareaAcap` (la UI no arma writes). Devuelve el id de la
+ * tarea creada, o null si los datos no sirven (sin escribir). Lanza si la regla
+ * deniega (p. ej. un rol sin permiso para asignar a otros).
+ */
+export async function crearTareaAcap(
+  datos: DatosTareaAcap, creador: { uid: string; nombre: string },
+): Promise<string | null> {
+  const tarea = construirTareaAcap(datos, creador, Timestamp.now())
+  if (!tarea) return null
+  const ref = await addDoc(collection(db, 'tareas'), tarea)
+  return ref.id
 }

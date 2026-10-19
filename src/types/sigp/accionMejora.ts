@@ -2,10 +2,13 @@
  * Módulo Acciones de Mejora / No Conformidades (AC/AP) — FASE 1.
  *
  * Digitaliza la MATRIZ DE ACCIONES CORRECTIVAS Y PREVENTIVAS (SGI-MT-ACP-26,
- * cláusula 10.2 de las normas ISO). F1 cubre SOLO la captura de la no
- * conformidad + la causa raíz (5 por qués). Lo que NO está acá, a propósito:
- *  - F2: el plan de acción PHVA (vía Tareas), el CONSECUTIVO (AC/AP/MEJ,
- *    server-side, al EMITIR — nunca al abrir un borrador) y el paso a 'abierta'.
+ * cláusula 10.2 de las normas ISO). F1 = captura de la no conformidad + la
+ * causa raíz (5 por qués). F2a (este archivo, sección «Emitir») agrega:
+ *  - EMITIR (borrador → abierta): asigna el CONSECUTIVO (AC/AP/MEJ-AAAA-NNN) que
+ *    la CF generarConsecutivo entrega — nunca al abrir un borrador — y exige la
+ *    causa raíz COMPLETA (los 5 por qués).
+ *  - El plan de acción PHVA se arma como TAREAS (types/sigp/tarea.ts).
+ * Lo que NO está acá, a propósito:
  *  - F3: verificación de eficacia y cierre.
  *
  * Decisiones (Giovanny, 14-oct):
@@ -317,3 +320,108 @@ export function patchAnular(
 
 export const puedeEditarAccion = (estado: EstadoAccion): boolean => estado === 'borrador'
 export const puedeAnularAccion = (estado: EstadoAccion): boolean => estado !== 'anulada'
+
+
+// ── F2a · Emitir (borrador → abierta) ────────────────────────────────────────
+// EMITIR = asignar el consecutivo y abrir la acción. El consecutivo lo entrega
+// la CF `generarConsecutivo` (contador transaccional anual por prefijo) y el
+// CLIENTE lo escribe en el doc.
+//
+// OPCIÓN A (decisión de Giovanny) — RESIDUAL DOCUMENTADO: la regla de Firestore
+// valida la FORMA del consecutivo (prefijo según el tipo, año en curso, número),
+// pero NO puede comprobar que provenga de la CF: `consecutivos` es de la CF y
+// las reglas no cruzan ese contador. Un gestor (gestion_integral/admin) con un
+// cliente modificado podría escribir un número bien formado sin pasar por la CF
+// (saltándose la serie o repitiéndola). El uso normal es seguro: la UI siempre
+// pide el número a la CF, y la serie sale única y secuencial del contador.
+// Cerrarlo del todo = que la CF emita (callable que asigne el consecutivo y abra
+// la acción en la misma transacción) — queda como endurecimiento futuro.
+
+export const PREFIJO_POR_TIPO: Record<TipoAccion, 'AC' | 'AP' | 'MEJ'> = {
+  correctiva: 'AC',
+  preventiva: 'AP',
+  mejora: 'MEJ',
+}
+
+/**
+ * ¿Es `c` un consecutivo legal para una acción de este tipo, emitida en el año
+ * `anio` (UTC — el año del reloj del servidor, igual que la CF y que
+ * `request.time.year()` en la regla)? ESPEJO de `consecutivoAcApValido()` de
+ * firestore.rules: `PREFIJO-AAAA-NNN` con NNN de ≥3 dígitos y > 0.
+ */
+export function consecutivoAcApValido(
+  c: string | null | undefined, tipo: TipoAccion, anio: number,
+): boolean {
+  if (typeof c !== 'string') return false
+  const m = /^(AC|AP|MEJ)-(\d{4})-(\d{3}|[1-9]\d{3,})$/.exec(c)
+  return !!m
+    && m[1] === PREFIJO_POR_TIPO[tipo]
+    && Number(m[2]) === anio
+    && Number(m[3]) >= 1
+}
+
+/** Año UTC de un Timestamp (la CF usa el año del servidor, en UTC). */
+export const anioUtcDe = (ts: Timestamp): number => ts.toDate().getUTCFullYear()
+
+/**
+ * Qué le falta a un BORRADOR para poder emitirse (vacío = listo). La causa raíz
+ * se exige COMPLETA al emitir: en borrador es progresiva, pero abrir una acción
+ * sin sus 5 por qués es abrir un análisis a medias. Espejo de `causaRaizCompleta`
+ * en la regla.
+ */
+export function faltantesParaEmitir(
+  a: Pick<AccionMejora, 'estado' | 'causa_raiz' | 'descripcion_nc'>,
+): string[] {
+  const faltan: string[] = []
+  if (a.estado !== 'borrador') faltan.push('Solo un borrador se puede emitir')
+  if (!(a.descripcion_nc ?? '').trim()) faltan.push('Falta la descripción de la no conformidad')
+  CLAVES_PORQUE.forEach((k, i) => {
+    if (!(a.causa_raiz?.[k] ?? '').trim()) faltan.push(`Falta el ¿Por qué? ${i + 1} de la causa raíz`)
+  })
+  return faltan
+}
+
+/**
+ * Emisión: borrador → abierta con su consecutivo. Toca SOLO
+ * estado/consecutivo/historial/fecha_actualizacion (lo que admite la 3.ª vía de
+ * la regla). null si no es legal: no es borrador, la causa raíz no está completa
+ * o el consecutivo no corresponde al tipo/año.
+ */
+export function patchEmitir(
+  accion: Pick<AccionMejora, 'estado' | 'tipo' | 'causa_raiz' | 'descripcion_nc' | 'historial'>,
+  consecutivo: string,
+  actor: Actor,
+  ahora: Timestamp,
+): Partial<AccionMejora> | null {
+  if (faltantesParaEmitir(accion).length > 0) return null
+  if (!consecutivoAcApValido(consecutivo, accion.tipo, anioUtcDe(ahora))) return null
+  return {
+    estado: 'abierta',
+    consecutivo,
+    fecha_actualizacion: ahora,
+    historial: [...(accion.historial ?? []), evento(actor, ahora, {
+      de: 'borrador', a: 'abierta', nota: `Acción emitida — consecutivo ${consecutivo}`,
+    })],
+  }
+}
+// ── F2a · Anular: avisar las actividades abiertas (sin cancelarlas) ─────────
+
+/** Lo mínimo de una tarea que necesita el aviso (estructural: no importa tarea.ts). */
+export interface ActividadResumen {
+  id: string
+  titulo: string
+  estado: string
+  asignada_a_nombre?: string
+}
+
+/**
+ * Actividades del plan que siguen ABIERTAS (ni hechas ni anuladas). Al anular la
+ * acción solo se AVISA de ellas: no se cancelan en lote — cada responsable las
+ * cierra o las anula desde Tareas, con su propio comentario (una acción anulada
+ * no debe borrar en silencio el trabajo de otras personas).
+ */
+export function actividadesAbiertas<T extends ActividadResumen>(tareas: readonly T[]): T[] {
+  return tareas.filter(t => t.estado !== 'hecha' && t.estado !== 'anulada')
+}
+
+export const puedeEmitirAccion = (estado: EstadoAccion): boolean => estado === 'borrador'
