@@ -20,7 +20,7 @@ export default function RecordatorioTareas() {
   const tareasEnabled = useFeatureFlag('sigp_tareas_enabled', false)
   const navigate = useNavigate()
   const activo = tareasEnabled && veTareasUI(user?.rol)
-  const { misTareas, tareasAsignadas, balones } = useTareasPendientes(activo, user?.uid)
+  const { misTareas, tareasAsignadas, balones, vencidas } = useTareasPendientes(activo, user?.uid)
 
   const [visible, setVisible] = useState(false)
   const [decidido, setDecidido] = useState(false)
@@ -31,11 +31,12 @@ export default function RecordatorioTareas() {
     if (!activo || !user || decidido) return
     const clave = CLAVE_LS(user.uid, claveDia(new Date()))
     if (localStorage.getItem(clave)) { setDecidido(true); return }
-    if (misTareas > 0 || balones > 0) {
+    // Las vencidas pueden incluir tareas en espera (no cuentan en misTareas): disparan solas.
+    if (misTareas > 0 || balones > 0 || vencidas > 0) {
       setVisible(true)
       setDecidido(true)
     }
-  }, [activo, user, misTareas, balones, decidido])
+  }, [activo, user, misTareas, balones, vencidas, decidido])
 
   if (!visible || !user) return null
 
@@ -51,11 +52,12 @@ export default function RecordatorioTareas() {
   const partes: string[] = []
   if (misTareas > 0) partes.push(`${misTareas} tarea${misTareas === 1 ? '' : 's'} pendiente${misTareas === 1 ? '' : 's'}`)
   if (balones > 0) partes.push(`${balones} balón${balones === 1 ? '' : 'es'} en tu cancha`)
+  if (vencidas > 0) partes.push(`${vencidas} vencida${vencidas === 1 ? '' : 's'}`)
 
   return (
-    <div className="fixed bottom-4 right-4 z-[60] max-w-sm bg-white border border-brand-300 rounded-xl shadow-lg p-4"
+    <div className={`fixed bottom-4 right-4 z-[60] max-w-sm bg-white border rounded-xl shadow-lg p-4 ${vencidas > 0 ? 'border-red-300' : 'border-brand-300'}`}
       role="alert">
-      <p className="text-sm font-semibold text-gray-800">✓ Tareas</p>
+      <p className="text-sm font-semibold text-gray-800">{vencidas > 0 ? '⚠ Tareas' : '✓ Tareas'}</p>
       <p className="text-xs text-gray-600 mt-1">
         Tienes {partes.join(' y ')}.
         {proxima?.titulo && <> Próxima: <b>{proxima.titulo}</b>.</>}
@@ -69,7 +71,9 @@ export default function RecordatorioTareas() {
           marcarVisto()
           // Micro-fix (14-ago): con SOLO balones (sin tareas propias abiertas)
           // aterrizar en "Balón en mi cancha" — no en una "Mis tareas" vacía.
-          navigate(balones > 0 && misTareas === 0 ? '/tareas?balon=1' : '/tareas?pendientes=1')
+          // Con vencidas, directo a ellas; con solo balones, a "Balón en mi cancha".
+          navigate(vencidas > 0 ? '/tareas?vencidas=1'
+            : balones > 0 && misTareas === 0 ? '/tareas?balon=1' : '/tareas?pendientes=1')
         }}
           className="text-xs px-3 py-1 rounded-lg font-medium bg-brand-700 hover:bg-brand-800 text-white">
           Ver tareas

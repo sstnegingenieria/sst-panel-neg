@@ -53,6 +53,28 @@ export const PRIORIDAD_TAREA_COLOR: Record<PrioridadTarea, string> = {
   alta: 'bg-red-100 text-red-700',
 }
 
+/** Fase PHVA (ciclo Planear · Hacer · Verificar · Actuar) de la actividad de
+ *  una acción de mejora (AC/AP, cláusula 10.2). Solo la llevan las tareas
+ *  creadas desde ese módulo; en el resto de tareas queda ausente. */
+export const FASES_TAREA = ['P', 'H', 'V', 'A'] as const
+export type FaseTarea = typeof FASES_TAREA[number]
+
+export const FASE_TAREA_LABEL: Record<FaseTarea, string> = {
+  P: 'Planear', H: 'Hacer', V: 'Verificar', A: 'Actuar',
+}
+
+// Sin azules (marca). Cada fase con su identidad; el chip siempre lleva letra
+// + nombre, así que el color no es el único portador del significado.
+export const FASE_TAREA_COLOR: Record<FaseTarea, string> = {
+  P: 'bg-violet-100 text-violet-800',
+  H: 'bg-teal-100 text-teal-800',
+  V: 'bg-fuchsia-100 text-fuchsia-800',
+  A: 'bg-stone-200 text-stone-700',
+}
+
+export const esFaseTarea = (v: unknown): v is FaseTarea =>
+  typeof v === 'string' && (FASES_TAREA as readonly string[]).includes(v)
+
 // ── Sub-tipos ────────────────────────────────────────────────────────────────
 
 /** Enlace OPCIONAL a la entidad de la que nace la tarea. Solo referencia
@@ -62,9 +84,13 @@ export const PRIORIDAD_TAREA_COLOR: Record<PrioridadTarea, string> = {
  *  referencial, no textual — Trinorma: la cadena acción → documento origen
  *  se sigue por id). `ruta_id` es el override de NAVEGACIÓN para entidades
  *  sin ficha propia: una OC se navega por la ficha de su proyecto, así que
- *  `id` = doc id de la OC y `ruta_id` = proyecto_id. */
+ *  `id` = doc id de la OC y `ruta_id` = proyecto_id.
+ *
+ *  `ac_ap` (AC/AP Fase 2): `id` = id de la acción de mejora, `label` = su
+ *  consecutivo (AC/AP/MEJ-AAAA-NNN). Se navega a /acciones-mejora/:id, que
+ *  solo abren GI y admin (rutaContexto aplica ese gate). */
 export interface ContextoTarea {
-  tipo: 'solicitud' | 'cotizacion' | 'proyecto' | 'cliente' | 'obra' | 'orden_compra' | 'otro'
+  tipo: 'solicitud' | 'cotizacion' | 'proyecto' | 'cliente' | 'obra' | 'orden_compra' | 'ac_ap' | 'otro'
   id: string
   ruta_id?: string
   label: string            // p. ej. "COT-2026-021 · Plaza San Nicolás"
@@ -108,6 +134,8 @@ export interface Tarea {
   fecha_limite?: Timestamp
   requiere_evidencia?: boolean
   contexto?: ContextoTarea
+  /** Fase PHVA — solo tareas de AC/AP (contexto.tipo === 'ac_ap'). */
+  fase?: FaseTarea
   balon_en?: BalonTarea | null
   comentario_cierre?: string
   evidencia_url?: string
@@ -203,6 +231,74 @@ export function construirTareaSenal(
     fecha_creacion: ahora,
     historial: [evento(ahora, creador, 'pendiente', 'pendiente',
       'Creada automáticamente por la cola de señales de alcance (proyecto facturado)')],
+  }
+}
+
+// ── Tareas de AC/AP (Fase 2) ─────────────────────────────────────────────────
+// Las actividades del plan PHVA de una acción de mejora se crean como tareas.
+// Este builder FIJA la forma (la acordada con el módulo AC/AP): el módulo no
+// arma el documento a mano, así que no puede divergir. Quien lo llama es GI
+// (puede asignar a otros — regla puedeAsignarTareas) y persiste el resultado
+// con addDoc; la regla exige creada_por == auth.uid, que el builder cumple al
+// tomarlo del creador.
+
+export interface DatosTareaAcap {
+  /** Descripción de la actividad → `titulo`. */
+  titulo: string
+  responsable: { uid: string; nombre: string }
+  /** Fecha de ejecución → `fecha_limite`. OBLIGATORIA: una actividad PHVA sin
+   *  fecha nunca podría vencer (decisión 19-oct). */
+  fechaLimite: Timestamp
+  /** id del documento de la AC/AP → `contexto.id`. */
+  acapId: string
+  /** Consecutivo (AC/AP/MEJ-AAAA-NNN) → `contexto.label`. Exigido: el label se
+   *  denormaliza al crear y no se actualiza, así que no se crea una tarea de
+   *  una acción aún sin consecutivo. */
+  consecutivo: string
+  fase: FaseTarea
+  descripcion?: string
+  prioridad?: PrioridadTarea
+}
+
+/** Motivo por el que unos datos NO sirven para crear la tarea, o null si sirven.
+ *  Para mostrar el porqué en la UI; el builder usa el mismo criterio. */
+export function motivoInvalidoTareaAcap(
+  d: DatosTareaAcap, creador: { uid: string },
+): string | null {
+  if (!creador?.uid) return 'Falta el creador'
+  if (!d.titulo?.trim()) return 'Falta la descripción de la actividad'
+  if (!d.responsable?.uid) return 'Falta el responsable'
+  if (!d.fechaLimite || typeof d.fechaLimite.toMillis !== 'function') return 'Falta la fecha de ejecución'
+  if (!d.acapId?.trim()) return 'Falta el id de la acción de mejora'
+  if (!d.consecutivo?.trim()) return 'La acción de mejora aún no tiene consecutivo'
+  if (!esFaseTarea(d.fase)) return 'La fase debe ser P, H, V o A'
+  return null
+}
+
+export function construirTareaAcap(
+  datos: DatosTareaAcap,
+  creador: { uid: string; nombre: string },
+  ahora: Timestamp,
+): Tarea | null {
+  if (motivoInvalidoTareaAcap(datos, creador)) return null
+  const consecutivo = datos.consecutivo.trim()
+  return {
+    titulo: datos.titulo.trim(),
+    ...(datos.descripcion?.trim() ? { descripcion: datos.descripcion.trim() } : {}),
+    asignada_a: datos.responsable.uid,
+    asignada_a_nombre: datos.responsable.nombre,
+    asignada_por: creador.uid,
+    asignada_por_nombre: creador.nombre,
+    creada_por: creador.uid,
+    estado: 'pendiente',
+    activa: true,
+    prioridad: datos.prioridad ?? 'media',
+    fecha_limite: datos.fechaLimite,
+    contexto: { tipo: 'ac_ap', id: datos.acapId.trim(), label: consecutivo },
+    fase: datos.fase,
+    fecha_creacion: ahora,
+    historial: [evento(ahora, creador, 'pendiente', 'pendiente',
+      `Creada desde la acción de mejora ${consecutivo} (fase ${datos.fase} · ${FASE_TAREA_LABEL[datos.fase]})`)],
   }
 }
 
