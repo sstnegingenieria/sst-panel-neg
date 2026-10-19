@@ -11,7 +11,7 @@
 // puedeMarcarCompraOcUI.
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { ChangeEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { collection, getDocs, doc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../firebase/config'
@@ -78,6 +78,12 @@ export default function OrdenesCompraSigp() {
   const [aplicandoId, setAplicandoId] = useState<string | null>(null)
   // Default: "Por revisar" — es la cola de trabajo de quien revisa (OC2).
   const [seccion, setSeccion] = useState<Seccion>('emitida')
+  // Deep-link desde la ficha del proyecto (19-oct): `?oc={id}` aterriza en la
+  // pill del estado de ESA orden con la fila resaltada — el mismo patrón de
+  // `?senal=1` y del "quitárselo". El param se consume (replace); el resaltado
+  // se limpia al cambiar de pill.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [resaltadaId, setResaltadaId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -92,6 +98,23 @@ export default function OrdenesCompraSigp() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Aterrizaje del deep-link: con las órdenes cargadas, ubicar la OC del
+  // param, abrir SU pill, resaltarla y hacer scroll (diferido 150ms e
+  // instantáneo — el smooth se cancela con el re-render, gotcha del #136).
+  useEffect(() => {
+    const ocId = searchParams.get('oc')
+    if (!ocId || ordenes.length === 0) return
+    const oc = ordenes.find(o => o.id === ocId)
+    if (oc) {
+      setSeccion(PILLS.some(p => p.clave === oc.estado) ? oc.estado as Seccion : 'todas')
+      setResaltadaId(oc.id)
+      setTimeout(() => {
+        document.getElementById(`oc-${ocId}`)?.scrollIntoView({ behavior: 'auto', block: 'center' })
+      }, 150)
+    }
+    setSearchParams({}, { replace: true })
+  }, [ordenes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ═══════════════════════════════════════════════════════════════════════
   // Comprar (C3) — aprobada → comprada, valor real + soporte obligatorios
@@ -341,7 +364,7 @@ export default function OrdenesCompraSigp() {
 
       <div className="flex items-center gap-1.5 flex-wrap">
         {PILLS.filter(p => !p.soloConDocs || (conteo[p.clave] ?? 0) > 0 || seccion === p.clave).map(p => (
-          <button key={p.clave} onClick={() => setSeccion(p.clave)}
+          <button key={p.clave} onClick={() => { setSeccion(p.clave); setResaltadaId(null) }}
             className={`px-3 py-1.5 rounded-full text-xs font-medium border ${
               seccion === p.clave ? 'bg-brand-700 border-brand-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
             {p.etiqueta} ({conteo[p.clave] ?? 0})
@@ -376,7 +399,8 @@ export default function OrdenesCompraSigp() {
               </td></tr>
             )}
             {!loading && filtradas.map(oc => (
-              <tr key={oc.id} className="border-b border-gray-100 hover:bg-gray-50">
+              <tr key={oc.id} id={`oc-${oc.id}`}
+              className={`border-b border-gray-100 hover:bg-gray-50 ${resaltadaId === oc.id ? 'ring-2 ring-inset ring-amber-400 bg-amber-50/40' : ''}`}>
                 <td className="py-3 px-4">
                   <Link to={`/sigp/proyectos/${oc.proyecto_id}`} className="font-mono text-brand-700 font-semibold hover:underline">
                     {oc.consecutivo || 'sin código'}

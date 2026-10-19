@@ -16,7 +16,7 @@
 // - apruebaOcUI: LEGACY — solo anular las `aprobada` del régimen anterior.
 // - veOcUI: lectura (además gerencia_administrativa + gestion_integral).
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import type { ChangeEvent } from 'react'
 import {
   collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, arrayUnion, deleteField, Timestamp,
@@ -155,6 +155,9 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
   // un F5 no lo re-dispare). Patrón `?pendientes=1` del pipeline (§48).
   const seccionRef = useRef<HTMLDivElement>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  // 19-oct: deep-link a la bandeja — "que un párrafo explique dónde queda
+  // algo no es navegación" (Giovanny trabado buscando cómo validar la 008).
+  const navigate = useNavigate()
   const ocParamRef = useRef(false)
   useEffect(() => {
     if (ocParamRef.current || searchParams.get('oc') !== 'crear') return
@@ -548,7 +551,7 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
                     <span className="text-red-600">Motivo de anulación: {motivoAnulacion(oc)}</span>
                   )}
                   {oc.estado === 'emitida' && (
-                    <span>En cola de revisión de Gestión Administrativa — se valida o devuelve desde la bandeja de Órdenes de compra.</span>
+                    <span>En cola de revisión de Gestión Administrativa — el botón «{puedeRevisarOcUI(user?.rol) ? 'Ir a revisar' : 'Ver en la bandeja'} →» abre la bandeja con esta OC resaltada.</span>
                   )}
                   {oc.estado === 'revisada' && oc.revision && (
                     <span className="text-emerald-700">
@@ -614,6 +617,18 @@ export default function OrdenesCompraProyecto({ proyecto, reload }: Props) {
                     <button onClick={() => { setAnularTarget(oc); setAnularMotivo('') }} disabled={aplicando}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">
                       Anular
+                    </button>
+                  )}
+                  {/* 19-oct: el botón donde está la frustración — la revisión
+                      vive en la bandeja (OC2) y la ficha solo lo DECÍA en
+                      prosa; deep-link con la OC resaltada (patrón ?senal=1 /
+                      "quitárselo"). Para quien revisa es su acción; para el
+                      resto, ver la cola donde espera. */}
+                  {oc.estado === 'emitida' && veOcUI(user?.rol) && (
+                    <button onClick={() => navigate(`/sigp/ordenes-compra?oc=${oc.id}`)}
+                      title="Abre la bandeja de Órdenes de compra con esta OC resaltada — ahí se valida o se devuelve (Gestión Administrativa; GG/admin como respaldo)"
+                      className="text-xs px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                      {puedeRevisarOcUI(user?.rol) ? 'Ir a revisar →' : 'Ver en la bandeja →'}
                     </button>
                   )}
                   {/* OC2 — devuelta: el CREADOR la corrige y re-envía (mismo
