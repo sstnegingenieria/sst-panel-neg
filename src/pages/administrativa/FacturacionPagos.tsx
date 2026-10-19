@@ -232,21 +232,41 @@ export default function FacturacionPagos() {
     return () => { vivo = false }
   }, [proyectos]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 'todas' = el ciclo activo (los cerrados solo en su sección/histórico).
+  // "Por cobrar" usa PREDICADO, no estado: incluye el liquidado ANTICIPADO
+  // cuyo pago sigue pendiente (23-jul). P2-2: "Por aprobar"/"Por girar"
+  // suman las asignaciones de los proyectos MIGRADOS (contadas del resumen
+  // denormalizado) a la vía de estado legacy. Extraído del memo (19-oct)
+  // para que el filtro por cliente derive sus conteos de la MISMA sección.
+  const estadoSeccion = SECCIONES_ADMINISTRATIVA.find(s => s.clave === seccion)?.estado
+  const enSeccion = (p: Proyecto) =>
+    seccion === 'por_cobrar' ? pagoClientePendiente(p)
+    : seccion === 'por_aprobar' ? (p.estado === 'preliquidacion_definida' || asignacionesPorAprobar(p) > 0)
+    : seccion === 'por_anticipo' ? (p.estado === 'preliquidacion_aprobada' || asignacionesPorGirar(p) > 0)
+    : seccion === 'en_camino' ? enCaminoAdministrativa(p.estado)
+    : estadoSeccion ? p.estado === estadoSeccion
+    : (p.estado !== 'cerrado' && p.estado !== 'cancelado')
+
+  // 19-oct: filtro por CLIENTE — desplegable con conteo (patrón Obras y
+  // Verificaciones, no chips), derivado de los proyectos de la sección
+  // visible (jamás de la colección `clientes`); compone en AND con la
+  // búsqueda y el orden.
+  const [filtroCliente, setFiltroCliente] = useState('')
+  // Al cambiar de sección el filtro se limpia: las opciones son de la sección
+  // visible y un cliente arrastrado podría dejar una lista vacía sin decir
+  // por qué.
+  useEffect(() => { setFiltroCliente('') }, [seccion])
+  const clienteDe = (p: Proyecto) => (p.snapshot.cliente ?? '').trim() || '—'
+  const clientesConConteo = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const p of proyectos.filter(enSeccion)) m.set(clienteDe(p), (m.get(clienteDe(p)) ?? 0) + 1)
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es', { sensitivity: 'base' }))
+  }, [proyectos, seccion]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
-    // 'todas' = el ciclo activo (los cerrados solo en su sección/histórico).
-    // "Por cobrar" usa PREDICADO, no estado: incluye el liquidado ANTICIPADO
-    // cuyo pago sigue pendiente (23-jul).
-    const estadoSeccion = SECCIONES_ADMINISTRATIVA.find(s => s.clave === seccion)?.estado
-    // P2-2: "Por aprobar"/"Por girar" suman las asignaciones de los proyectos
-    // MIGRADOS (contadas del resumen denormalizado) a la vía de estado legacy.
-    const base = proyectos.filter(p =>
-      seccion === 'por_cobrar' ? pagoClientePendiente(p)
-      : seccion === 'por_aprobar' ? (p.estado === 'preliquidacion_definida' || asignacionesPorAprobar(p) > 0)
-      : seccion === 'por_anticipo' ? (p.estado === 'preliquidacion_aprobada' || asignacionesPorGirar(p) > 0)
-      : seccion === 'en_camino' ? enCaminoAdministrativa(p.estado)
-      : estadoSeccion ? p.estado === estadoSeccion
-      : (p.estado !== 'cerrado' && p.estado !== 'cancelado'))
+    const base = proyectos.filter(enSeccion)
+      .filter(p => !filtroCliente || clienteDe(p) === filtroCliente)
     const lista = q
       ? base.filter(p =>
           p.consecutivo.toLowerCase().includes(q) ||
@@ -268,7 +288,7 @@ export default function FacturacionPagos() {
     const multiEtapa = seccion === 'todas' || seccion === 'en_camino'
     return [...lista].sort((a, b) =>
       (multiEtapa ? idxRiel(a.estado) - idxRiel(b.estado) : 0) || porOrden(a, b))
-  }, [proyectos, busqueda, seccion, orden])
+  }, [proyectos, busqueda, seccion, orden, filtroCliente]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const conteo = useMemo(() => Object.fromEntries(
     SECCIONES_ADMINISTRATIVA.map(s => [s.clave, proyectos.filter(p =>
@@ -481,6 +501,14 @@ export default function FacturacionPagos() {
         <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
           placeholder="Buscar por PRY, sitio, código, cliente o N° de factura…"
           className="flex-1 min-w-[260px] px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+        <select value={filtroCliente} onChange={e => setFiltroCliente(e.target.value)}
+          title="Filtra los proyectos de la sección por cliente"
+          className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+          <option value="">Todos los clientes</option>
+          {clientesConConteo.map(([c, n]) => (
+            <option key={c} value={c}>{c} ({n})</option>
+          ))}
+        </select>
         <select value={orden} onChange={e => cambiarOrden(e.target.value as OrdenBandeja)}
           title="Orden de los proyectos dentro de la sección"
           className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
@@ -510,7 +538,7 @@ export default function FacturacionPagos() {
             )}
             {!loading && filtrados.length === 0 && (
               <tr><td colSpan={8} className="py-12 text-center text-gray-400">
-                No hay proyectos en el ciclo de facturación{busqueda ? ' con esa búsqueda' : ''}.
+                No hay proyectos en el ciclo de facturación{busqueda || filtroCliente ? ' con ese filtro o búsqueda' : ''}.
               </td></tr>
             )}
             {!loading && filtrados.map(p => (
