@@ -24,14 +24,16 @@ const cf = require('../../../../functions/consecutivos.js') as {
 const PREFIJOS_PREVIOS = [
   'SOL', 'VIS', 'COT', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC', 'CAT', 'OC', 'PEA',
 ]
+/** Prefijos agregados DESPUÉS de LIC (AC/AP, cláusula 10.2) — ver consecutivoAcap.test.ts. */
+const PREFIJOS_POSTERIORES = ['AC', 'AP', 'MEJ']
 
 describe('PREFIJOS_VALIDOS', () => {
   it('LIC está en la lista blanca', () => {
     expect(cf.PREFIJOS_VALIDOS).toContain('LIC')
   })
 
-  it('los 12 prefijos previos siguen ahí, en el mismo orden, y LIC va al final', () => {
-    expect(cf.PREFIJOS_VALIDOS).toEqual([...PREFIJOS_PREVIOS, 'LIC'])
+  it('los 12 prefijos previos siguen ahí, en el mismo orden, y LIC va a continuación', () => {
+    expect(cf.PREFIJOS_VALIDOS).toEqual([...PREFIJOS_PREVIOS, 'LIC', ...PREFIJOS_POSTERIORES])
   })
 
   it('no hay duplicados', () => {
