@@ -66,7 +66,7 @@ export default function PermisosIngreso({ proyecto, puedeGestionar, reload }: Pr
         historial: arrayUnion({
           de: esPrimerRegistro ? 'contratista_asignado' : 'permisos_en_tramite',
           a: 'permisos_en_tramite',
-          por: user?.uid ?? '', fecha: ahora,
+          por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora,
           motivo: `Permisos de ingreso: ${PERMISOS_LABEL[estado]}${entidad.trim() ? ` · ${entidad.trim()}` : ''}`,
         }),
       })

@@ -40,7 +40,7 @@ export default function SatisfaccionClienteCard({ proyecto, puedeGestionar, relo
         },
         fecha_actualizacion: ahora,
         historial: arrayUnion({
-          de: proyecto.estado, a: proyecto.estado, por: user?.uid ?? '', fecha: ahora,
+          de: proyecto.estado, a: proyecto.estado, por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora,
           motivo: `Encuesta de satisfacción del cliente registrada — ${puntaje}/5`,
         }),
       })

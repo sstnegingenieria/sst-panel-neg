@@ -36,6 +36,8 @@ import {
 } from '../../../types/sigp/asignacion'
 import type { AsignacionContratista } from '../../../types/sigp/asignacion'
 import { cargarAsignaciones, asegurarMigrado, crearAsignacion, escribirAsignacion } from '../../../utils/sigp/asignaciones'
+import { autorDe, conAutor } from '../../../utils/sigp/autoria'
+import { useNombresUsuarios } from '../../../hooks/sigp/useNombresUsuarios'
 import { ID_TAREA_SENAL, patchCerrarTarea } from '../../../types/sigp/tarea'
 import type { Tarea } from '../../../types/sigp/tarea'
 import { MODALIDAD_CONTRATISTA_LABEL, MODALIDADES_CONTRATISTA, anticipoValorDe, sstGateAlDia, totalComprasReembolsos, claveItemAlcance, idxRiel, ESTADOS_PROYECTO } from '../../../types/sigp/proyecto'
@@ -66,6 +68,10 @@ const fFecha = (t?: { toDate?: () => Date }) =>
 
 export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAprobar, reload }: Props) {
   const { user } = useAuth()
+  // 19-oct: la línea de tiempo de la asignación dice QUIÉN (agregado 2 del
+  // OK — aquí se decide a quién se le da trabajo y por cuánto).
+  const nombres = useNombresUsuarios()
+  const [histAbierto, setHistAbierto] = useState<Record<string, boolean>>({})
   const alcance = proyecto.snapshot.alcance ?? []
   const [subdocs, setSubdocs] = useState<AsignacionContratista[]>([])
   const [cargado, setCargado] = useState(false)
@@ -179,7 +185,10 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
             c, [...atomosSel], esDirectaNueva ? 'todo_costo' : modalidad,
             esDirectaNueva ? undefined : materiales, proyecto.snapshot, vigentes, user?.uid ?? '', ahora, nota,
             esDirectaNueva ? 'administracion_directa' : undefined)
-      await crearAsignacion(proyecto.id, proyecto.snapshot, nuevo, vigentes)
+      // 19-oct: el historial del alta es 100% fresco — se denormaliza el
+      // nombre en todas sus entradas (conAutor solo toca las del uid propio).
+      await crearAsignacion(proyecto.id, proyecto.snapshot,
+        { ...nuevo, historial: nuevo.historial.map(h => conAutor(h, user?.uid, user?.nombre)) }, vigentes)
       // Transición del proyecto (máquina actual, sin cambios hasta el switch)
       // + 21-sep (3b/3c — RESTAURACIÓN deliberada, no diseño final): la
       // primera asignación NO histórica fija el campo SINGULAR del padre,
@@ -190,7 +199,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const patchPadre: Record<string, unknown> = {}
       if (proyecto.estado === 'creado') {
         patchPadre.estado = 'contratista_asignado'
-        patchPadre.historial = arrayUnion({ de: 'creado', a: 'contratista_asignado', por: user?.uid ?? '', fecha: ahora, motivo: `Contratista asignado: ${c.nombre}` })
+        patchPadre.historial = arrayUnion({ de: 'creado', a: 'contratista_asignado', por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora, motivo: `Contratista asignado: ${c.nombre}` })
       }
       if (!esHistorica && !proyecto.asignacion) {
         patchPadre.asignacion = construirSingularDesde({ ...nuevo, id: 'pendiente' } as AsignacionContratista)
@@ -222,7 +231,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const r = patchCancelarAsignacion(target, cancelarMotivo, user?.uid ?? '', ahora)
       if (!r) { toast('No se puede cancelar esta asignación', 'error'); return }
       const trasPatch = vigentes.map(a => a.id === target.id
-        ? { ...a, ...r.sub, historial: [...a.historial, r.entradaHistorial] } as AsignacionContratista : a)
+        ? { ...a, ...r.sub, historial: [...a.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : a)
       // 21-sep (3b, borde del cancelar — pedido Giovanny): si la cancelada es
       // la del SINGULAR del padre, se re-apunta a otra viva en el MISMO batch
       // (sin viva → se limpia: la próxima asignación lo vuelve a fijar). Sin
@@ -234,7 +243,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         patchSingular = {
           asignacion: siguiente ? construirSingularDesde(siguiente) : deleteField(),
           historial: arrayUnion({
-            de: proyecto.estado, a: proyecto.estado, por: user?.uid ?? '', fecha: ahora,
+            de: proyecto.estado, a: proyecto.estado, por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora,
             motivo: siguiente
               ? `Contratista principal re-apuntado a ${siguiente.contratista_nombre} (la asignación de ${target.contratista_nombre} se canceló)`
               : `Contratista principal retirado (se canceló ${target.contratista_nombre} y no queda otra asignación viva)`,
@@ -242,7 +251,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         }
       }
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch, patchSingular)
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch, patchSingular)
       toast(r.incurrido.total > 0
         ? `Cancelada — queda PENDIENTE de liquidar lo incurrido (${fmtMoney(r.incurrido.total)})`
         : 'Cancelada — sin plata afuera, sus actividades quedan libres')
@@ -285,9 +294,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         user?.uid ?? '', ahora, ajustarValor, proyectoEnEjecucion)
       if (!r) { toast('Sin cambios que aplicar (¿falta confirmar el valor?)', 'error'); return }
       const trasPatch = vigentes.map(a => a.id === target.id
-        ? { ...a, ...r.sub, ...(r.resuelveSenal ? { alcance_desactualizado: undefined } : {}), historial: [...a.historial, r.entradaHistorial] } as AsignacionContratista : a)
+        ? { ...a, ...r.sub, ...(r.resuelveSenal ? { alcance_desactualizado: undefined } : {}), historial: [...a.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : a)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { ...r.sub, ...(r.resuelveSenal ? { alcance_desactualizado: deleteField() } : {}), historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+        { ...r.sub, ...(r.resuelveSenal ? { alcance_desactualizado: deleteField() } : {}), historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
       toast('Átomos ajustados — valor del contratista ' +
         (target.preliquidacion?.valor_contratista === ajustarValor ? 'confirmado' : 'actualizado') +
         (r.sobreGiro ? ' · ⚠ SOBRE-GIRO registrado (anticipo > valor)' : '') +
@@ -315,9 +324,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         motivo, user?.uid ?? '', ahora)
       if (!r) return
       const trasPatch = vigentes.map(x => x.id === target.id
-        ? { ...x, alcance_desactualizado: undefined, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+        ? { ...x, alcance_desactualizado: undefined, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { alcance_desactualizado: deleteField(), historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+        { alcance_desactualizado: deleteField(), historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
       // Cierre de la tarea de señal (facturados) SI quien resuelve es su
       // responsable — si no, la tarea queda para que él verifique y cierre.
       try {
@@ -357,9 +366,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         { valor_contratista: definirValor, anticipo_pct: definirPct ?? 50 }, proyecto.snapshot, user?.uid ?? '', ahora)
       if (!r) { toast('La preliquidación solo se define antes de aprobar', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
-        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
       toast(`Preliquidación definida — ${fmtMoney(definirValor)} · pendiente de aprobación de Gerencia Administrativa`)
       setDefinirTarget(null)
       await recargarTodo()
@@ -381,9 +390,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         esRespaldo ? salvedad.trim() : undefined)
       if (!r) { toast('Solo se aprueba una preliquidación definida', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
-        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
       toast(esRespaldo ? 'Aprobada como RESPALDO — salvedad registrada' : 'Preliquidación aprobada')
       setAprobarTarget(null); setSalvedad('')
       await recargarTodo()
@@ -411,9 +420,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       }, user?.uid ?? '', ahora)
       if (!r) { toast('El anticipo se registra sobre una preliquidación aprobada', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
-        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
       toast(`Anticipo registrado — ${fmtMoney(girarValor)}`)
       setGirarTarget(null)
       await recargarTodo()
@@ -444,7 +453,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     try {
       const tras = asigs.map(x => x.id === target.id ? { ...x, ...r.sub } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, tras)
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, tras)
       toast(r.anula
         ? 'Anticipo ANULADO — la asignación vuelve a preliquidación aprobada'
         : 'Anticipo corregido')
@@ -476,12 +485,12 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         corregirMotivo, user?.uid ?? '', ahora)
       if (!r) { toast('Sin cambios que corregir', 'error'); return }
       const patchSub: Record<string, unknown> = {
-        ...r.sub, historial: arrayUnion(r.entradaHistorial),
+        ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)),
         ...(r.resuelveSenal ? { alcance_desactualizado: deleteField() } : {}),
       }
       const trasPatch = vigentes.map(x => x.id === target.id
         ? {
-            ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial],
+            ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)],
             ...(r.resuelveSenal ? { alcance_desactualizado: undefined } : {}),
           } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id, patchSub, trasPatch)
@@ -601,10 +610,10 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const r = patchAgregarReembolso(target, compra)
       if (!r) { toast('Solo en asignaciones vivas de contratista (no liquidadas/canceladas/directas)', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
-        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
       // Mismo batch sub + resumen: el reembolso entra al indicador al instante
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
       toast(`Reembolso de ${target.contratista_nombre} registrado — ${fmtMoney(reembValor)} · se reconoce en SU liquidación`)
       setReembTarget(null)
       await recargarTodo()
@@ -672,9 +681,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const r = patchMarcarAdministracionDirecta(target, user?.uid ?? '', ahora)
       if (!r) { toast('Solo se marca una asignación sin tipo, sin economía y en estado asignada', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
-        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
       toast('Marcada como administración directa — sin ciclo de pago')
       await recargarTodo()
     } catch { toast('Error al marcar', 'error') } finally { setAplicando(false) }
@@ -701,11 +710,11 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         user?.uid ?? '', ahora, estimarMotivo.trim() || undefined)
       if (!r) { toast('Re-estimar exige motivo (o la asignación no admite estimación)', 'error'); return }
       const patchSub: Record<string, unknown> = {
-        ...r.sub, historial: arrayUnion(r.entradaHistorial),
+        ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)),
         ...(r.resuelveSenal ? { alcance_desactualizado: deleteField() } : {}),
       }
       const trasPatch = vigentes.map(x => x.id === target.id
-        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial],
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)],
             ...(r.resuelveSenal ? { alcance_desactualizado: undefined } : {}) } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id, patchSub, trasPatch)
       toast(`Costo propio estimado — ${fmtMoney(estimarCosto)}${r.resuelveSenal ? ' · señal de alcance resuelta' : ''}`)
@@ -729,13 +738,13 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         cerrarNota.trim() || undefined, user?.uid ?? '', ahora)
       if (!r) { toast('Solo se cierra una administración directa estimada', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
-        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
       // Puente materializado (07-sep): si el cierre de la directa deja TODO
       // liquidado y el ciclo administrativo ya llegó (pagado/facturado), el
       // padre transiciona en el mismo batch.
       const puente = puenteLiquidadoContratista(trasPatch, proyecto.estado)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch,
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch,
         puente ? {
           estado: 'liquidado_contratista',
           historial: arrayUnion({
@@ -789,13 +798,13 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       }, gateSst, user?.uid ?? '', ahora)
       if (!r) { toast('La liquidación no procede en este estado (gates del builder)', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
-        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
       // Puente materializado (07-sep): la ÚLTIMA liquidación transiciona el
       // padre en el MISMO batch — la bandeja "Por cerrar" y la proyección
       // SST lo heredan; la guarda del padre (gate al_dia) protege el batch.
       const puente = puenteLiquidadoContratista(trasPatch, proyecto.estado)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch,
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch,
         puente ? {
           estado: 'liquidado_contratista',
           historial: arrayUnion({
@@ -1212,6 +1221,34 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                           Cancelar asignación
                         </button>
                       </>
+                    )}
+                  </div>
+                )}
+                {/* 19-oct: la línea de tiempo de la asignación dice QUIÉN —
+                    el historial existía desde P2-2 pero era write-only
+                    (nadie lo pintaba); patrón "+ Ver historial" de
+                    ActividadDetalle. Autor: por_nombre → lookup uid → '—';
+                    'sistema' = asignaciones sintetizadas legacy. */}
+                {(a.historial ?? []).length > 0 && (
+                  <div className="pt-0.5">
+                    <button onClick={() => setHistAbierto(h => ({ ...h, [a.id]: !h[a.id] }))}
+                      className="text-[11px] text-gray-400 hover:text-gray-600 font-medium">
+                      {histAbierto[a.id] ? '− Ocultar' : '+ Ver'} historial ({(a.historial ?? []).length})
+                    </button>
+                    {histAbierto[a.id] && (
+                      <ol className="mt-1.5 space-y-1.5 border-l-2 border-gray-100 pl-3">
+                        {[...(a.historial ?? [])].reverse().map((h, i) => (
+                          <li key={i} className="text-xs">
+                            <p className="text-gray-700">
+                              {h.de
+                                ? <>{ESTADO_ASIG_LABEL[h.de]} → <span className="font-medium">{ESTADO_ASIG_LABEL[h.a]}</span></>
+                                : <span className="font-medium">{ESTADO_ASIG_LABEL[h.a]}</span>}
+                            </p>
+                            {h.motivo && <p className="text-gray-500">{h.motivo}</p>}
+                            <p className="text-[11px] text-gray-400">{fFecha(h.fecha)} · {autorDe(h, nombres)}</p>
+                          </li>
+                        ))}
+                      </ol>
                     )}
                   </div>
                 )}

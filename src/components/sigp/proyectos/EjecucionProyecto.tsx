@@ -69,7 +69,7 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
       ...extra,
       estado: a,
       fecha_actualizacion: ahora,
-      historial: arrayUnion({ de, a, por: user?.uid ?? '', fecha: ahora, motivo }),
+      historial: arrayUnion({ de, a, por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora, motivo }),
     })
     // Bloque D — obra-espejo SST: nace (upsert idempotente) al entrar en
     // ejecución y pasa a inactiva en el handoff a facturación. Un fallo aquí

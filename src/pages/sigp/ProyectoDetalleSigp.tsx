@@ -25,6 +25,8 @@ import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
 import { ESTADOS_PROYECTO, idxRiel, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO, costoEjecutadoDe, TIPO_CIERRE_LABEL } from '../../types/sigp/proyecto'
 import type { Proyecto } from '../../types/sigp/proyecto'
+import { autorEntradaProyecto } from '../../utils/sigp/autoria'
+import { useNombresUsuarios } from '../../hooks/sigp/useNombresUsuarios'
 import { esCoordenadaValida, urlVerificarEnMaps } from '../../utils/geo'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
@@ -46,6 +48,8 @@ export default function ProyectoDetalleSigp() {
   const puedeGestionar = puedeGestionarProyectosUI(user?.rol) && !cerrado && !cancelado
   const puedeAprobar = puedeAprobarPreliquidacionUI(user?.rol) && !cerrado
   const [loading, setLoading] = useState(true)
+  // 19-oct: la línea de tiempo dice QUIÉN — mapa uid→nombre (best-effort).
+  const nombres = useNombresUsuarios()
   // 17-sep (arreglo #5): compras agregadas por la CF (C3) para la vía dual
   // del costo ejecutado en la tarjeta PRC; best-effort — sin permiso o sin
   // doc, la canasta sigue con $0 de compras (mismo criterio del Panel).
@@ -471,7 +475,10 @@ export default function ProyectoDetalleSigp() {
                     : <span className="font-semibold">{ESTADO_PRY_LABEL[h.a]}</span>}
                 </p>
                 {h.motivo && <p className="text-xs text-gray-500">{h.motivo}</p>}
-                <p className="text-[11px] text-gray-400">{fFecha(h.fecha)}</p>
+                {/* 19-oct: QUIÉN — por_nombre congelado → lookup uid → '—';
+                    las entradas de CF dicen "el sistema" (nacimiento y cambio
+                    de alcance con la persona que autorizó, dato guardado) */}
+                <p className="text-[11px] text-gray-400">{fFecha(h.fecha)} · {autorEntradaProyecto(h, proyecto, nombres)}</p>
               </div>
             </li>
           ))}

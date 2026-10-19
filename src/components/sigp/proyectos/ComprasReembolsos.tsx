@@ -82,7 +82,7 @@ export default function ComprasReembolsos({ proyecto, puedeGestionar, reload }: 
         compras_reembolsos: arrayUnion(compra),
         fecha_actualizacion: ahora,
         historial: arrayUnion({
-          de: proyecto.estado, a: proyecto.estado, por: user?.uid ?? '', fecha: ahora,
+          de: proyecto.estado, a: proyecto.estado, por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora,
           motivo: `Compra/reembolso del contratista registrada — ${compra.concepto}: ${fmtMoney(valor)} (línea separada de la mano de obra; se reconoce en la liquidación)`,
         }),
       })

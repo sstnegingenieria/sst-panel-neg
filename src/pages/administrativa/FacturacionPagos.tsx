@@ -109,7 +109,7 @@ export default function FacturacionPagos() {
         estado: 'cerrado',
         fecha_actualizacion: ahora,
         historial: arrayUnion({
-          de: 'liquidado_contratista', a: 'cerrado', por: user?.uid ?? '', fecha: ahora,
+          de: 'liquidado_contratista', a: 'cerrado', por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora,
           motivo: 'Cierre formal del proyecto — ciclo administrativo completo (factura · pago · gate SST · liquidación)' +
             (notasCierre.trim() ? ` · Notas: ${notasCierre.trim()}` : ''),
         }),
@@ -322,7 +322,7 @@ export default function FacturacionPagos() {
         estado: 'facturado',
         fecha_actualizacion: ahora,
         historial: arrayUnion({
-          de: 'enviado_a_facturacion', a: 'facturado', por: user?.uid ?? '', fecha: ahora,
+          de: 'enviado_a_facturacion', a: 'facturado', por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora,
           motivo: `Factura registrada — N° ${numero.trim()} por ${fmtMoney(valor)}`
             + (previasDelSitio.length ? ` — registrada CON la advertencia de sitio ya facturado a la vista (${previasDelSitio.map(f => f.numero).join(', ')})` : ''),
         }),
@@ -338,7 +338,7 @@ export default function FacturacionPagos() {
   // ── 08-oct — ANULAR la factura vigente (nunca editar número ni CUFE) ──
   const anularFactura = async () => {
     if (!anularTarget) return
-    const patch = patchAnularFactura(anularTarget, anularMotivo, notaCredito, user?.uid ?? '', Timestamp.now())
+    const patch = patchAnularFactura(anularTarget, anularMotivo, notaCredito, user?.uid ?? '', Timestamp.now(), user?.nombre)
     if (!patch) return
     setAplicando(true)
     try {
@@ -392,7 +392,7 @@ export default function FacturacionPagos() {
         ...(posterior ? {} : { estado: 'pagado_cliente' }),
         fecha_actualizacion: ahora,
         historial: arrayUnion({
-          de: pagoTarget.estado, a: posterior ? pagoTarget.estado : 'pagado_cliente', por: user?.uid ?? '', fecha: ahora,
+          de: pagoTarget.estado, a: posterior ? pagoTarget.estado : 'pagado_cliente', por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora,
           motivo: `Pago del cliente registrado — ${fmtMoney(pagoValor)} por ${MEDIO_PAGO_LABEL[pagoMedio].toLowerCase()}` +
             (posterior ? ' (posterior a la liquidación anticipada — cierra la cuenta por cobrar; el estado se mantiene)' : ''),
         }),

@@ -485,6 +485,7 @@ export function patchAnularFactura(
   notaCredito: string,
   uid: string,
   ahora: Timestamp,
+  nombre?: string,             // 19-oct: por_nombre denormalizado en la entrada nueva
 ): {
   estado: 'enviado_a_facturacion'
   facturacion: null
@@ -508,6 +509,7 @@ export function patchAnularFactura(
     facturas_anuladas: [...(p.facturas_anuladas ?? []), anulada],
     historial: [...p.historial, {
       de: 'facturado', a: 'enviado_a_facturacion', por: uid, fecha: ahora,
+      ...(nombre ? { por_nombre: nombre } : {}),
       motivo: `Factura ${p.facturacion.numero} ANULADA (nota crédito ${notaCredito.trim()}): ${motivo.trim()} — el registro queda congelado en facturas anuladas; la correcta se registra como factura nueva`,
     }],
     fecha_actualizacion: ahora,
@@ -1132,7 +1134,19 @@ export const promedioEvaluacion = (criterios: Record<CriterioEvaluacion, number>
 export interface EntradaHistorialProyecto {
   de?: EstadoProyecto          // ausente en la entrada de nacimiento
   a: EstadoProyecto
-  por: string                  // uid
+  /** uid del autor, o 'sistema' (entradas de CF: nacimiento, cambio de
+   *  alcance). NOTA DOCUMENTADA (19-oct-2026): los escritores del cliente
+   *  usan `user?.uid ?? ''` — el fallback '' jamás se ha materializado
+   *  (censo de prod: 604/604 entradas con autor; las rutas exigen sesión)
+   *  y SE DEJA COMO ESTÁ a propósito: cambiarlo no mejora ningún dato
+   *  existente y solo agrega riesgo a un camino que funciona. */
+  por: string
+  /** Nombre del autor DENORMALIZADO al escribir (19-oct, patrón Tareas):
+   *  lo que era cierto en el momento del acto — si la persona cambia de
+   *  nombre en `users`, el historial viejo no se reescribe solo (mismo
+   *  criterio de los snapshots). Entradas anteriores no lo traen y la UI
+   *  las resuelve por uid (utils/sigp/autoria.ts). */
+  por_nombre?: string
   fecha: Timestamp
   motivo?: string
 }

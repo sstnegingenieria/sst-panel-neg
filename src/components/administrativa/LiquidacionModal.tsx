@@ -129,7 +129,7 @@ export default function LiquidacionModal({ proyecto, verificacion, onClose, onDo
         estado: 'liquidado_contratista',
         fecha_actualizacion: ahora,
         historial: arrayUnion({
-          de: proyecto.estado, a: 'liquidado_contratista', por: user?.uid ?? '', fecha: ahora,
+          de: proyecto.estado, a: 'liquidado_contratista', por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora,
           motivo: (anticipada
             ? `Liquidación ANTICIPADA del contratista (cliente sin pagar — acuerdo con ${acuerdoCon.trim()} el ${acuerdoFecha}; justificación: ${justificacion.trim()}) — `
             : 'Liquidación del contratista — ') +

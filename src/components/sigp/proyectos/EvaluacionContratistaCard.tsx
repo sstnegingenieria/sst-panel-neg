@@ -20,6 +20,7 @@ import type { Proyecto, CriterioEvaluacion, EvaluacionContratista } from '../../
 import { patchEvaluarContratista, tipoDe } from '../../../types/sigp/asignacion'
 import type { AsignacionContratista } from '../../../types/sigp/asignacion'
 import { cargarAsignaciones, escribirAsignacion } from '../../../utils/sigp/asignaciones'
+import { conAutor } from '../../../utils/sigp/autoria'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
@@ -92,11 +93,11 @@ export default function EvaluacionContratistaCard({ proyecto, puedeGestionar, re
       const r = patchEvaluarContratista(a, pjA[a.id] ?? {}, comA[a.id], user?.uid ?? '', ahora)
       if (!r) { toast('Faltan puntajes, o la asignación no es evaluable', 'error'); return }
       const trasPatch = asigs.map(x => x.id === a.id
-        ? { ...x, ...r.sub, historial: [...x.historial, r.entradaHistorial] } as AsignacionContratista : x)
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
       // Sub + resumen en el MISMO batch: los contadores evaluados/evaluables
       // que consume el hito de cierre quedan al día al instante.
       await escribirAsignacion(proyecto.id, proyecto.snapshot.alcance ?? [], a.id,
-        { ...r.sub, historial: arrayUnion(r.entradaHistorial) }, trasPatch)
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
       toast(`${a.contratista_nombre} evaluado — promedio ${fmtNum(r.evaluacion.promedio)}/5`)
       setAsigs(trasPatch)
       await reload()
@@ -189,7 +190,7 @@ export default function EvaluacionContratistaCard({ proyecto, puedeGestionar, re
         },
         fecha_actualizacion: ahora,
         historial: arrayUnion({
-          de: proyecto.estado, a: proyecto.estado, por: user?.uid ?? '', fecha: ahora,
+          de: proyecto.estado, a: proyecto.estado, por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora,
           motivo: `Contratista evaluado — promedio ${fmtNum(promedioEvaluacion(criterios))}/5`,
         }),
       })
