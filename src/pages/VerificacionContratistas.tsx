@@ -41,6 +41,7 @@ import AvalFisicoModal from '../components/sigp/verificacion/AvalFisicoModal'
 import RastroCustodiaModal from '../components/sigp/verificacion/RastroCustodiaModal'
 import type { EstadoSstGate } from '../types/sigp/proyecto'
 import type { VerificacionSst } from '../types/sigp/verificacionSst'
+import ObjetoObra from '../components/ObjetoObra'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
   t?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—'
@@ -71,6 +72,10 @@ export default function VerificacionContratistas() {
   // el próximo write del proyecto; acá NO se rellena ni se adivina).
   const [filtroCliente, setFiltroCliente] = useState('')
   const [busqueda, setBusqueda] = useState('')
+  // Objeto/alcance de cada obra-espejo (obras/{obra_id}.alcance), leído una vez y
+  // cruzado por obra_id — la proyección verificaciones_sst NO lo trae. Si no se
+  // puede leer o falta el doc, se omite en silencio (es solo contexto visual).
+  const [alcancePorObra, setAlcancePorObra] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -85,6 +90,22 @@ export default function VerificacionContratistas() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    let cancelado = false
+    getDocs(collection(db, 'obras'))
+      .then(snap => {
+        if (cancelado) return
+        const mapa: Record<string, string> = {}
+        for (const d of snap.docs) {
+          const a = d.data().alcance
+          if (typeof a === 'string' && a.trim()) mapa[d.id] = a
+        }
+        setAlcancePorObra(mapa)
+      })
+      .catch(() => { /* contexto opcional: sin alcance, sin línea */ })
+    return () => { cancelado = true }
+  }, [])
 
   // Empujón de UI: ¿la obra tiene formularios en la app? Falla abierta — si el
   // conteo no se puede leer, se muestran las dos vías (jamás se esconde "Al día"
@@ -246,6 +267,7 @@ export default function VerificacionContratistas() {
                   <td className="py-3 px-4 text-gray-700">{(v.cliente_nombre ?? '').trim() || '—'}</td>
                   <td className="py-3 px-4">
                     <span className="font-medium text-gray-800">{v.nombre_sitio || '—'}</span>
+                    <ObjetoObra alcance={alcancePorObra[v.obra_id]} className="mt-0.5 max-w-xs" />
                     <Link to={`/registros/${v.obra_id}`}
                       className="block text-[11px] text-brand-700 hover:underline"
                       title="Formularios SST de la obra-espejo de este proyecto">
