@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import type { ObraConStats } from '../hooks/useObrasConRegistros'
 import { formatRelativeDate } from '../types/formulario'
 import EstadoSstBar from './EstadoSstBar'
+import ObjetoObra from './ObjetoObra'
 
 interface Props {
   obra: ObraConStats
@@ -34,6 +35,9 @@ export default function ObraCard({ obra }: Props) {
           {inactiva ? 'Inactiva' : 'Obra activa'}
         </span>
       </div>
+
+      {/* Objeto/alcance: distingue proyectos del mismo cliente en el mismo sitio */}
+      <ObjetoObra alcance={obra.alcance} className="mb-1" />
 
       {/* Código + cliente */}
       <div className="font-mono text-[10px] text-gray-400 truncate mb-3">
