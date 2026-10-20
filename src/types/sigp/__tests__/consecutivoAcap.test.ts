@@ -16,29 +16,45 @@ vi.mock('firebase-admin/firestore', () => ({ FieldValue: { serverTimestamp: () =
 const cf = require('../../../../functions/consecutivos.js') as {
   PREFIJOS_VALIDOS: string[]
   PADDING_MINIMO_ANUAL: Record<string, number>
+  ROLES_POR_PREFIJO: Record<string, string[]>
 }
 
 const NUEVOS = ['AC', 'AP', 'MEJ']
-const ANTERIORES = [
-  'SOL', 'VIS', 'COT', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC', 'CAT', 'OC', 'PEA', 'LIC',
-]
+// CONTRATO desde el mapa prefijo→roles (19-oct): la whitelist se deriva de
+// ROLES_POR_PREFIJO (deny-by-default) — los reservados sin llamador
+// (OFR/ACT/LIQ/FAC/NC/PRY) salieron de la superficie y quedan documentados
+// en comentario de la CF. El test anterior fijaba la lista de 16; este fija
+// la de 10 EN USO.
+const EN_USO = ['SOL', 'VIS', 'COT', 'CAT', 'OC', 'PEA', 'LIC', 'AC', 'AP', 'MEJ']
 
-describe('PREFIJOS_VALIDOS — AC / AP / MEJ', () => {
+describe('PREFIJOS_VALIDOS — AC / AP / MEJ (contrato post-mapa)', () => {
   it('los tres están en la lista blanca', () => {
     for (const p of NUEVOS) expect(cf.PREFIJOS_VALIDOS).toContain(p)
   })
 
-  it('los 13 anteriores siguen ahí, en el mismo orden, y los nuevos van al final', () => {
-    expect(cf.PREFIJOS_VALIDOS).toEqual([...ANTERIORES, ...NUEVOS])
+  it('la whitelist es EXACTAMENTE los prefijos en uso (deriva del mapa de roles)', () => {
+    expect(cf.PREFIJOS_VALIDOS).toEqual(EN_USO)
   })
 
   it('no hay duplicados', () => {
     expect(new Set(cf.PREFIJOS_VALIDOS).size).toBe(cf.PREFIJOS_VALIDOS.length)
   })
 
-  it('AC no colisiona con ACT: son prefijos (y contadores consecutivos/{prefijo}_{año}) distintos', () => {
-    expect(cf.PREFIJOS_VALIDOS).toContain('ACT')
+  it('los reservados sin llamador están FUERA de la superficie (deny-by-default)', () => {
+    for (const p of ['OFR', 'ACT', 'LIQ', 'FAC', 'NC', 'PRY']) {
+      expect(cf.PREFIJOS_VALIDOS).not.toContain(p)
+      expect(cf.ROLES_POR_PREFIJO[p]).toBeUndefined()
+    }
+  })
+
+  it('AC no colisiona con ACT: ACT quedó reservado y sus contadores son distintos de todos modos', () => {
     expect(`AC_2026`).not.toBe(`ACT_2026`)
+  })
+
+  it('AC/AP/MEJ son de gestion_integral + admin (mandato 19-oct)', () => {
+    for (const p of NUEVOS) {
+      expect([...cf.ROLES_POR_PREFIJO[p]].sort()).toEqual(['admin', 'gestion_integral'])
+    }
   })
 })
 

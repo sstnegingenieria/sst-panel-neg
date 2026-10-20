@@ -20,10 +20,10 @@ const cf = require('../../../../functions/consecutivos.js') as {
   PADDING_MINIMO_ANUAL: Record<string, number>
 }
 
-/** Los 12 prefijos que existían ANTES de LIC, en su orden original. */
-const PREFIJOS_PREVIOS = [
-  'SOL', 'VIS', 'COT', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC', 'CAT', 'OC', 'PEA',
-]
+/** Los prefijos EN USO que existían antes de LIC — desde el mapa prefijo→roles
+ *  (19-oct) la whitelist deriva de ROLES_POR_PREFIJO y los reservados sin
+ *  llamador (OFR/ACT/LIQ/FAC/NC/PRY) salieron de la superficie. */
+const PREFIJOS_PREVIOS = ['SOL', 'VIS', 'COT', 'CAT', 'OC', 'PEA']
 /** Prefijos agregados DESPUÉS de LIC (AC/AP, cláusula 10.2) — ver consecutivoAcap.test.ts. */
 const PREFIJOS_POSTERIORES = ['AC', 'AP', 'MEJ']
 
@@ -32,7 +32,7 @@ describe('PREFIJOS_VALIDOS', () => {
     expect(cf.PREFIJOS_VALIDOS).toContain('LIC')
   })
 
-  it('los 12 prefijos previos siguen ahí, en el mismo orden, y LIC va a continuación', () => {
+  it('los prefijos en uso previos siguen ahí, en el mismo orden, y LIC va a continuación', () => {
     expect(cf.PREFIJOS_VALIDOS).toEqual([...PREFIJOS_PREVIOS, 'LIC', ...PREFIJOS_POSTERIORES])
   })
 

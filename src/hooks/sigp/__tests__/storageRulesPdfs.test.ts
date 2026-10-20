@@ -131,7 +131,6 @@ describe('regresión — bloques auth-only intactos', () => {
     ['lpus/{clienteId}/{lpuId}/{fileName}', 'lpus/cliente_001/lpu_001/original.xlsx'],
     ['solicitudes/{solicitudId}/{fileName}', 'solicitudes/sol_001/adjunto.pdf'],
     ['visitas/{visitaId}/**', 'visitas/vis_001/fotos/hallazgo_1.png'],
-    ['cotizaciones/{cotizacionId}/**', 'cotizaciones/cot_001/evidencia/aprobacion.pdf'],
     ['proyectos/{proyectoId}/**', 'proyectos/pry_001/permisos/permiso.pdf'],
   ]
 
@@ -147,6 +146,17 @@ describe('regresión — bloques auth-only intactos', () => {
       await assertFails(uploadString(ref(storageAnon(), path), 'x', 'raw', META_PDF))
     }, TIMEOUT)
   }
+
+  // EXPECTATIVA ACTUALIZADA (19-oct): `cotizaciones/**` dejó de ser auth-only
+  // en C2.1 pasos 3+4 (17-ago) — exige el claim `perfil == 'interno'`. Este
+  // caso había quedado con el contrato VIEJO y nunca se re-corrió en masivo
+  // (el runner no levantaba el emulador de Storage). El POSITIVO con claim
+  // está cubierto por la batería C2.1 (19/19 con uploadBytes real).
+  it('cotizaciones/{cotizacionId}/**: autenticado SIN claim interno → denegado (C2.1)', async () => {
+    await assertFails(
+      uploadString(ref(storageDe(UID_A), 'cotizaciones/cot_001/evidencia/aprobacion.pdf'), 'x', 'raw', META_PDF),
+    )
+  }, TIMEOUT)
 })
 
 // ─────────── regresión: bloques con tipoDoc + tamaño + contentType ───────────
@@ -190,12 +200,17 @@ describe('regresión — proveedores/{proveedorId}/{tipoDoc}/{fileName}', () => 
 })
 
 describe('regresión — ausentismos/{ausentismoId}/{tipoDoc}/{fileName}', () => {
-  it('write válido (soporte, imagen, <10MB) → permitido; lectura autenticada → permitida', async () => {
+  // EXPECTATIVA ACTUALIZADA (19-oct): el soporte de ausentismos dejó de ser
+  // auth-only en C2.1 paso 4 (gerencia+admin por claim) y desde el #157
+  // también lo escribe gestion_integral por claim. Un autenticado SIN claims
+  // se DENIEGA. Los positivos con claim están cubiertos por las baterías
+  // C2.1 (19/19) y #157 (17/17).
+  it('soporte con autenticado SIN claims → denegado (C2.1 + #157)', async () => {
     const path = 'ausentismos/aus_001/soporte/uuid-1001.png'
-    await assertSucceeds(
+    await assertFails(
       uploadString(ref(storageDe(UID_A), path), 'img', 'raw', META_IMG),
     )
-    await assertSucceeds(getBytes(ref(storageDe(UID_B), path)))
+    await assertFails(getBytes(ref(storageDe(UID_B), path)))
   }, TIMEOUT)
 
   it("tipoDoc fuera de ['soporte'] → denegado", async () => {

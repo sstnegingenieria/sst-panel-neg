@@ -18,10 +18,16 @@
  * La transacción de Firestore garantiza secuencialidad y evita
  * duplicados bajo concurrencia.
  *
- * Requiere autenticación (request.auth.uid). El rol no se valida
- * aquí — se controla desde el panel qué roles pueden invocar. Las
- * reglas de Firestore también impedirán escritura directa a
- * `consecutivos` (se configuran cuando se creen las reglas del SIGP).
+ * MAPA PREFIJO → ROLES (19-oct-2026, hallazgo del frente SGI/SST + mandato
+ * de Giovanny): quemar un número es EMITIR evidencia ISO — la contigüidad
+ * de la serie se rompe con cada número quemado sin usar, y un consecutivo
+ * de un documento que no te corresponde emitir es un acto fuera de rol.
+ * La CF verifica server-side contra el DOC de users (jamás claims — "la
+ * fuente auditable de quién accede a qué es el DOC", precisión Trinorma)
+ * que el solicitante esté ACTIVO y su rol esté en la lista del prefijo.
+ * El mapa ESPEJA los gates de UI existentes (la función hace cumplir la
+ * política, no inventa una nueva) y un test espejo en el panel
+ * (consecutivosRoles.test.ts) tumba la suite si divergen.
  */
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
@@ -30,7 +36,34 @@ const { FieldValue } = require('firebase-admin/firestore');
 
 // Nota: admin.initializeApp() ya se llama en index.js — no re-inicializar
 
-const PREFIJOS_VALIDOS = ['SOL', 'VIS', 'COT', 'OFR', 'PRY', 'ACT', 'LIQ', 'FAC', 'NC', 'CAT', 'OC', 'PEA', 'LIC', 'AC', 'AP', 'MEJ'];
+// DENY-BY-DEFAULT: un prefijo fuera de este mapa se RECHAZA.
+// Espejos de UI: SOL/VIS/COT/CAT ⟷ ROLES_GESTIONA_CLIENTES · OC ⟷
+// ROLES_CREA_OC · PEA ⟷ ROLES_GESTIONA_ACTIVIDADES (los residentes emiten
+// sus propuestas) · LIC ⟷ ROLES_VE_LICITACIONES · AC/AP/MEJ = definición
+// de Gestión Integral (acciones de mejora / NC — mandato 19-oct).
+const ROLES_POR_PREFIJO = {
+  SOL: ['admin', 'gerencia_general', 'operacion_comercial', 'auxiliar_proyectos', 'director_proyectos'],
+  VIS: ['admin', 'gerencia_general', 'operacion_comercial', 'auxiliar_proyectos', 'director_proyectos'],
+  COT: ['admin', 'gerencia_general', 'operacion_comercial', 'auxiliar_proyectos', 'director_proyectos'],
+  CAT: ['admin', 'gerencia_general', 'operacion_comercial', 'auxiliar_proyectos', 'director_proyectos'],
+  OC: ['auxiliar_proyectos', 'director_proyectos', 'gerencia_general', 'admin'],
+  PEA: ['admin', 'gerencia_general', 'auxiliar_proyectos', 'director_proyectos', 'residente_obra'],
+  LIC: ['operacion_comercial', 'gerencia_general', 'gerencia_administrativa', 'director_proyectos', 'admin'],
+  AC: ['gestion_integral', 'admin'],
+  AP: ['gestion_integral', 'admin'],
+  MEJ: ['gestion_integral', 'admin'],
+};
+
+// RESERVADOS sin llamador — FUERA de la superficie a propósito (un prefijo
+// sin consumidor es puro riesgo sin beneficio; censo 19-oct: 0 llamadores,
+// 0 contadores en prod). La reserva documental se conserva aquí:
+//   OFR (cotizaciones legacy) · ACT (actas de entrega) · LIQ (liquidaciones
+//   finales) · FAC (facturas) · NC (no conformidades — hoy AC/AP/MEJ).
+//   PRY: lo quema SOLO la CF crearProyectoAlAprobar en su propia
+//   transacción — que este callable lo aceptara era un hueco silencioso
+//   sobre el MISMO contador.
+// Para habilitar uno: agregarlo al mapa con sus roles (y su UI).
+const PREFIJOS_VALIDOS = Object.keys(ROLES_POR_PREFIJO);
 
 // Padding mínimo por prefijo en la serie ANUAL. El default es 3
 // (PRY-2026-001). LIC pide 4 porque el volumen anual de procesos de SECOP se
@@ -67,12 +100,27 @@ const generarConsecutivo = onCall(
       );
     }
 
+    // VERIFICACIÓN DE ROL server-side contra el DOC de users (patrón
+    // resincronizarClaims): rol en la lista del prefijo Y estado activo.
+    // Lecturas NO tolerantes: sin doc legible no se quema número.
+    const db0 = admin.firestore();
+    const userSnap = await db0.doc(`users/${request.auth.uid}`).get();
+    const usuario = userSnap.exists ? userSnap.data() : null;
+    const rol = usuario ? usuario.rol : undefined;
+    const activo = usuario ? usuario.estado === 'activo' : false;
+    if (!activo || !ROLES_POR_PREFIJO[prefijo].includes(rol)) {
+      throw new HttpsError(
+        'permission-denied',
+        `El rol no está autorizado para emitir consecutivos ${prefijo}.`
+      );
+    }
+
     // Generación transaccional.
     // CAT es acumulativo (sin año, padding 4, contador `consecutivos/CAT`);
     // el resto usa contador anual `consecutivos/{prefijo}_{año}`.
     const esCatalogo = prefijo === 'CAT';
     const año = new Date().getFullYear();
-    const db = admin.firestore();
+    const db = db0;
     const ref = db.doc(esCatalogo ? 'consecutivos/CAT' : `consecutivos/${prefijo}_${año}`);
 
     try {
@@ -112,7 +160,7 @@ const generarConsecutivo = onCall(
   }
 );
 
-// PREFIJOS_VALIDOS y PADDING_MINIMO_ANUAL se exportan para los tests
-// (precedente: functions/horario.js exporta sus helpers puros). index.js solo
-// desestructura `generarConsecutivo`.
-module.exports = { generarConsecutivo, PREFIJOS_VALIDOS, PADDING_MINIMO_ANUAL };
+// PREFIJOS_VALIDOS, PADDING_MINIMO_ANUAL y ROLES_POR_PREFIJO se exportan
+// para los tests (el test espejo del panel compara el mapa contra los
+// arrays de permisos.ts). index.js solo desestructura `generarConsecutivo`.
+module.exports = { generarConsecutivo, PREFIJOS_VALIDOS, PADDING_MINIMO_ANUAL, ROLES_POR_PREFIJO };
