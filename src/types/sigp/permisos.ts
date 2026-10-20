@@ -450,3 +450,13 @@ export const puedeGestionarEmpleadosUI = (rol: string | undefined) => en(rol, RO
 export const ROLES_GESTIONA_ACAP: Rol[] = ['gestion_integral', 'admin']
 export const puedeGestionarAcapUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_ACAP)
 export const veAccionesMejoraUI = puedeGestionarAcapUI
+
+// ── Actas de entrega de EPP (SST-FT-AEP-18) ──
+// Colecciones `actas_epp` (cédula + firma del colaborador: dato personal,
+// Ley 1581) y `catalogo_epp`. Escriben y leen las actas SOLO Gestión Integral
+// y admin; el catálogo lo lee todo el personal del panel y lo edita el mismo
+// par. ESPEJO EXACTO de gestionaEpp() en firestore.rules:
+//   ROLES_GESTIONA_EPP ⟷ gestionaEpp()
+export const ROLES_GESTIONA_EPP: Rol[] = ['gestion_integral', 'admin']
+export const puedeGestionarEppUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_EPP)
+export const veEppUI = puedeGestionarEppUI

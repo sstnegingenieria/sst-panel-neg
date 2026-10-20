@@ -21,7 +21,7 @@ export default function Header({ onToggleSidebar }: HeaderProps) {
   const { user, logout, cerrandoSesion } = useAuth()
 
   return (
-    <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0">
+    <header className="print:hidden h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0">
       {/* Toggle sidebar */}
       <button
         onClick={onToggleSidebar}
