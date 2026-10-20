@@ -3,7 +3,7 @@
 // colaborador, tabla de EPP, cláusulas y firmas. Es la MISMA vista en pantalla y en papel.
 import EncabezadoIso from '../shared/EncabezadoIso'
 import { ACTA_ENTREGA_EPP } from '../../../utils/sigp/isoControl'
-import { CLAUSULAS_EPP, CLAUSULAS_PENDIENTES, INTRO_EPP } from '../../../utils/sigp/eppClausulas'
+import { CLAUSULAS_EPP, CLAUSULAS_PENDIENTES, ENCABEZADO_CLAUSULAS_EPP, INTRO_EPP } from '../../../utils/sigp/eppClausulas'
 import type { ActaEpp } from '../../../types/sigp/epp'
 
 const fFecha = (ts: { toDate?: () => Date } | undefined | null) =>
@@ -78,7 +78,8 @@ export default function ActaEppImprimible({ acta }: { acta: ActaEpp }) {
         </tbody>
       </table>
 
-      <ol className="list-decimal pl-5 text-sm text-justify flex flex-col gap-2">
+      <p className="text-sm font-semibold">{ENCABEZADO_CLAUSULAS_EPP}</p>
+      <ol className="list-decimal pl-5 text-sm text-justify flex flex-col gap-2 -mt-2">
         {CLAUSULAS_EPP.map((cl, i) => <li key={i} className="whitespace-pre-wrap">{cl}</li>)}
       </ol>
 

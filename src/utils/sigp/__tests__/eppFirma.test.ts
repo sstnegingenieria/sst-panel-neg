@@ -3,7 +3,7 @@ import { Timestamp } from 'firebase/firestore'
 import {
   contenidoCanonico, hashContenidoActa, trazosSuficientes, verificarIntegridadActa, type Trazo,
 } from '../eppFirma'
-import { CLAUSULAS_EPP, CLAUSULAS_PENDIENTES, clausulasListas } from '../eppClausulas'
+import { CLAUSULAS_EPP, CLAUSULAS_PENDIENTES, ENCABEZADO_CLAUSULAS_EPP, INTRO_EPP, clausulasListas } from '../eppClausulas'
 import { ACTA_ENTREGA_EPP } from '../isoControl'
 
 const linea = (n: number, dx = 4, dy = 1): Trazo => Array.from({ length: n }, (_, i) => ({ x: 10 + i * dx, y: 50 + (i % 5) * dy }))
@@ -70,6 +70,13 @@ describe('cláusulas y encabezado oficial', () => {
   it('son 3 cláusulas y el guard de firma depende de que el texto legal esté cargado', () => {
     expect(CLAUSULAS_EPP).toHaveLength(3)
     expect(clausulasListas()).toBe(!CLAUSULAS_PENDIENTES)
+  })
+  it('el texto legal está cargado (sin marcadores) y el guard permite firmar', () => {
+    expect(CLAUSULAS_PENDIENTES).toBe(false)
+    expect(clausulasListas()).toBe(true)
+    expect([INTRO_EPP, ENCABEZADO_CLAUSULAS_EPP, ...CLAUSULAS_EPP].some(t => t.includes('[Pendiente'))).toBe(false)
+    expect(ENCABEZADO_CLAUSULAS_EPP).toBe('El colaborador manifiesta que:')
+    expect(CLAUSULAS_EPP[1]).toBe('En caso de daño de la dotación o parte de ella, el trabajador debe devolver a la empresa.')
   })
   it('el encabezado es el del documento oficial confirmado por Gestión Integral', () => {
     expect(ACTA_ENTREGA_EPP).toEqual({

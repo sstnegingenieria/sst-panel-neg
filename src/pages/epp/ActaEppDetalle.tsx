@@ -10,7 +10,7 @@ import {
   ESTADO_ACTA_EPP_COLOR, ESTADO_ACTA_EPP_LABEL, puedeAnularActaEpp, puedeEditarActaEpp, puedeFirmarActaEpp,
   type ActaEppConId,
 } from '../../types/sigp/epp'
-import { CLAUSULAS_EPP, clausulasListas } from '../../utils/sigp/eppClausulas'
+import { CLAUSULAS_EPP, ENCABEZADO_CLAUSULAS_EPP, clausulasListas } from '../../utils/sigp/eppClausulas'
 import { verificarIntegridadActa } from '../../utils/sigp/eppFirma'
 import ActaEppImprimible from '../../components/sigp/epp/ActaEppImprimible'
 import FirmaCanvas from '../../components/sigp/epp/FirmaCanvas'
@@ -156,7 +156,8 @@ export default function ActaEppDetalle() {
             Pasa el equipo a <b>{acta.colaborador.nombre}</b>: debe leer las cláusulas y firmar en el recuadro.
             Al guardar, el acta queda <b>firmada e inmutable</b>.
           </p>
-          <ol className="list-decimal pl-5 text-sm text-gray-700 flex flex-col gap-1">
+          <p className="text-sm font-semibold text-gray-800">{ENCABEZADO_CLAUSULAS_EPP}</p>
+          <ol className="list-decimal pl-5 text-sm text-gray-700 flex flex-col gap-1 -mt-1">
             {CLAUSULAS_EPP.map((c, i) => <li key={i} className="whitespace-pre-wrap">{c}</li>)}
           </ol>
           {!textoListo && (

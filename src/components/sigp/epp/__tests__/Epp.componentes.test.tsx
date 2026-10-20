@@ -52,9 +52,15 @@ describe('ActaEppImprimible', () => {
     expect(screen.getByText('Entrega duplicada')).toBeTruthy()
     expect(screen.getByText('Casco blanco dieléctrico')).toBeTruthy()
   })
-  it('sin cláusulas cargadas avisa (solo en pantalla) en lugar de fingir el texto legal', () => {
+  it('pinta el texto legal TEXTUAL (introducción, "El colaborador manifiesta que:" y las 3 cláusulas) y ya no avisa de pendiente', () => {
     render(<MemoryRouter><ActaEppImprimible acta={acta()} /></MemoryRouter>)
-    expect(screen.getByText(/texto legal de la introducción y de las cláusulas aún no está cargado/)).toBeTruthy()
+    expect(screen.getByText('Con la presente acta se hace entrega de los siguientes elementos de protección personal:')).toBeTruthy()
+    expect(screen.getByText('El colaborador manifiesta que:')).toBeTruthy()
+    expect(screen.getByText(/La dotación que aquí se entrega es y será de la empresa en todo momento/)).toBeTruthy()
+    expect(screen.getByText('En caso de daño de la dotación o parte de ella, el trabajador debe devolver a la empresa.')).toBeTruthy()
+    expect(screen.getByText(/Autorizo expresamente a la empresa mediante este documento a descontar de salarios/)).toBeTruthy()
+    expect(screen.queryByText(/aún no está cargado/)).toBeNull()
+    expect(screen.queryByText(/\[Pendiente/)).toBeNull()
   })
 })
 
