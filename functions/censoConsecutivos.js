@@ -31,9 +31,16 @@ const { FieldValue } = require('firebase-admin/firestore');
 
 // Serie anual → [colección, campo que lleva el consecutivo]. Solo series EN
 // USO (espejo del mapa de generarConsecutivo); una serie sin contador en
-// `consecutivos` se omite (no existe → no puede tener huecos). AC/AP/MEJ se
-// suman aquí cuando sus colecciones existan en prod (hoy el frente SGI/SST
-// las está estrenando — agregar [colección, campo] es una línea).
+// `consecutivos` se omite (no existe → no puede tener huecos).
+//
+// ⚠ AC/AP/MEJ (pendientes, 0 emitidas al 20-oct-2026): las TRES series viven
+// en UNA colección compartida (`acciones_mejora`, campo `consecutivo`, dato
+// del frente SGI/SST) — sumarlas NO es solo mapear [colección, campo]:
+// `numerosUsadosDe` toma todos los consecutivos de la colección sin mirar el
+// prefijo, y un AP-2026-001 contaría como "usado 1" también para la serie AC
+// (huecos fantasma o huecos tapados). Al agregarlas hay que filtrar por
+// prefijo del VALOR leído (startsWith sobre el consecutivo). El frente avisa
+// cuando exista la primera emitida.
 const SERIES_ANUALES = {
   SOL: ['solicitudes', 'consecutivo'],
   VIS: ['visitas', 'consecutivo'],
