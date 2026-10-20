@@ -96,6 +96,32 @@ export async function signOutTestUser(): Promise<void> {
 }
 
 /**
+ * Siembra el doc `users/{uid}` por REST owner (bypassa reglas) — necesario
+ * desde el mapa prefijo→roles (19-oct): `generarConsecutivo` verifica rol y
+ * estado contra el DOC de users antes de quemar número.
+ */
+export async function seedUserDoc(
+  uid: string,
+  rol: string,
+  estado: 'activo' | 'inactivo' = 'activo',
+  nombre = 'Tester Emulador',
+): Promise<void> {
+  const url = `http://${FIRESTORE_HOST}/v1/projects/${PROJECT_ID}/databases/(default)/documents/users/${uid}`
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fields: {
+        nombre: { stringValue: nombre },
+        rol: { stringValue: rol },
+        estado: { stringValue: estado },
+      },
+    }),
+  })
+  if (!res.ok) throw new Error(`No se pudo sembrar users/${uid} (status ${res.status})`)
+}
+
+/**
  * Espera a que el emulador de Firestore responda. `firebase emulators:exec` ya
  * garantiza que los emuladores están arriba antes de correr los tests; esto añade
  * un margen por si el arranque tarda un instante en aceptar conexiones.

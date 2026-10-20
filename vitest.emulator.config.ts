@@ -12,5 +12,10 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/hooks/sigp/__tests__/**/*.{test,spec}.ts'],
+    // SECUENCIAL (19-oct): cada batería hace clearFirestore()/clearAuth() en
+    // su beforeEach — en paralelo se limpian el emulador ENTRE SÍ y el run
+    // masivo fallaba desde que la carpeta dejó de tener un solo archivo
+    // (las baterías siempre se corrieron por archivo, por eso nadie lo vio).
+    fileParallelism: false,
   },
 })
