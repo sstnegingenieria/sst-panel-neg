@@ -28,6 +28,9 @@
 // como DO-FT-RV-23 versión 3 del 16/10/2024 (cuando se construya ese
 // módulo, usa el formato existente).
 export interface ControlDocumentalIso {
+  /** Etiqueta del sistema de gestión sobre el cuadro (p. ej. "SG-SST"); opcional:
+   *  los demás formatos no la llevan. */
+  sistema?: string
   area: string
   codigo: string
   version: string
@@ -72,6 +75,19 @@ export const ORDEN_COMPRA: ControlDocumentalIso = {
   version: '05',
   modificado: 'AGO-2026',
   nombre: 'ORDEN DE COMPRA Y/O SERVICIO',
+}
+
+// ── Acta de entrega de EPP (módulo Actas EPP) ──
+// Código REAL del documento oficial, confirmado por Ingrid (GI, 19-oct-2026):
+// SST-FT-AEP-18 · versión 02 · modificado 06 FEB 2024 · área de Gestión Humana
+// y H.S.E.Q. Encabezado en PANTALLA/impresión del acta (EncabezadoIso).
+export const ACTA_ENTREGA_EPP: ControlDocumentalIso = {
+  sistema: 'SG-SST',
+  area: 'ÁREA DE GESTIÓN HUMANA Y H.S.E.Q',
+  codigo: 'SST-FT-AEP-18',
+  version: '02',
+  modificado: '06 FEB 2024',
+  nombre: 'FORMATO DE ACTA DE ENTREGA DE EPP',
 }
 
 // ── Matriz de Acciones Correctivas y Preventivas (módulo AC/AP, F1) ──

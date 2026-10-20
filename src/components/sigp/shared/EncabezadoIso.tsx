@@ -15,6 +15,7 @@ export default function EncabezadoIso({ control }: { control: ControlDocumentalI
       aria-label={`Control documental ${control.codigo}`}
     >
       <dl className="p-3 text-[11px] leading-5 border-b sm:border-b-0 sm:border-r border-black">
+        {control.sistema && <div className="font-bold">{control.sistema}</div>}
         <div><dt className="inline font-semibold">Proceso: </dt><dd className="inline">{control.area}</dd></div>
         <div><dt className="inline font-semibold">Código: </dt><dd className="inline">{control.codigo}</dd></div>
         <div><dt className="inline font-semibold">Versión: </dt><dd className="inline">{control.version}</dd></div>

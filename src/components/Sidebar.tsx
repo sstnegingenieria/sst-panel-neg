@@ -22,6 +22,7 @@ import {
   veTareasUI,
   veLicitacionesUI,
   veAccionesMejoraUI,
+  veEppUI,
   veActividadesUI,
   veIndicadoresSstUI,
   puedeGestionarEmpleadosUI,
@@ -258,6 +259,10 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   // admin. Default in-app FALSE (oculto hasta que Giovanny cree el parámetro).
   const accionesEnabled = useFeatureFlag('sigp_acciones_enabled', false)
   const mostrarAcciones = accionesEnabled && veAccionesMejoraUI(user?.rol)
+  // Actas de entrega de EPP (SST-FT-AEP-18): grupo propio, solo gestion_integral +
+  // admin. Default in-app FALSE (oculto hasta que Giovanny cree el parámetro).
+  const eppEnabled = useFeatureFlag('sigp_epp_enabled', false)
+  const mostrarEpp = eppEnabled && veEppUI(user?.rol)
   const { misTareas, balones, vencidas } = useTareasPendientes(mostrarTareas, user?.uid)
   // 07-sep — badge de la cola de Verificación SST (hallazgo Tesoro III):
   // montado SOLO para quien puede LEER la proyección (cero lecturas ajenas).
@@ -287,7 +292,7 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-50 lg:static lg:z-auto h-screen bg-white border-r border-gray-200 text-gray-700 flex flex-col transition-all duration-300 w-60 ${
+      className={`print:hidden fixed inset-y-0 left-0 z-50 lg:static lg:z-auto h-screen bg-white border-r border-gray-200 text-gray-700 flex flex-col transition-all duration-300 w-60 ${
         collapsed ? 'lg:w-16' : 'lg:w-60'
       } ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}
     >
@@ -459,6 +464,44 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
               </span>
               {!collapsed && <span>Acciones de Mejora / NC</span>}
             </NavLink>
+          </div>
+        )}
+
+        {/* Grupo ACTAS DE ENTREGA DE EPP (SST-FT-AEP-18). Gateado por sigp_epp_enabled +
+            veEppUI (espejo de gestionaEpp() en firestore.rules). */}
+        {mostrarEpp && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            {!collapsed && (
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                Actas EPP
+              </p>
+            )}
+            {[
+              { to: '/actas-epp', label: 'Actas de entrega', end: true },
+              { to: '/actas-epp/catalogo', label: 'Catálogo EPP', end: false },
+            ].map(item => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                onClick={onNavigate}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                    isActive
+                      ? 'bg-brand-50 text-brand-700 font-semibold'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  }`
+                }
+              >
+                <span className="flex-shrink-0">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                  </svg>
+                </span>
+                {!collapsed && <span>{item.label}</span>}
+              </NavLink>
+            ))}
           </div>
         )}
 

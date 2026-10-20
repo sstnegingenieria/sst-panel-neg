@@ -34,6 +34,10 @@ import LicitacionNueva from './pages/licitaciones/LicitacionNueva'
 import LicitacionDetalle from './pages/licitaciones/LicitacionDetalle'
 import AccionesMejora from './pages/acciones/AccionesMejora'
 import AccionMejoraDetalle from './pages/acciones/AccionMejoraDetalle'
+import ActasEpp from './pages/epp/ActasEpp'
+import ActaEppEditor from './pages/epp/ActaEppEditor'
+import ActaEppDetalle from './pages/epp/ActaEppDetalle'
+import CatalogoEpp from './pages/epp/CatalogoEpp'
 import {
   ROLES_VE_DASHBOARD_SST,
   ROLES_VE_TECNICOS,
@@ -51,6 +55,7 @@ import {
   ROLES_VE_TAREAS,
   ROLES_VE_LICITACIONES,
   ROLES_GESTIONA_ACAP,
+  ROLES_GESTIONA_EPP,
   ROLES_VE_INDICADORES_SST,
   ROLES_GESTIONA_EMPLEADOS,
 } from './types/sigp/permisos'
@@ -155,6 +160,15 @@ function ProtectedRoutes() {
             redirectTo /sigp/panel: GI y admin tienen accesoSIGP (sin bucle). */}
         <Route path="/acciones-mejora" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_ACAP} redirectTo="/sigp/panel"><AccionesMejora /></ProtectedRoute>} />
         <Route path="/acciones-mejora/:accionId" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_ACAP} redirectTo="/sigp/panel"><AccionMejoraDetalle /></ProtectedRoute>} />
+
+        {/* Actas de entrega de EPP (SST-FT-AEP-18). El flag sigp_epp_enabled solo oculta
+            el ítem del sidebar; la protección real son las reglas (gestionaEpp()), de las
+            que ROLES_GESTIONA_EPP es espejo. GI y admin tienen accesoSIGP (sin bucle). */}
+        <Route path="/actas-epp" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_EPP} redirectTo="/sigp/panel"><ActasEpp /></ProtectedRoute>} />
+        <Route path="/actas-epp/nueva" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_EPP} redirectTo="/sigp/panel"><ActaEppEditor /></ProtectedRoute>} />
+        <Route path="/actas-epp/catalogo" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_EPP} redirectTo="/sigp/panel"><CatalogoEpp /></ProtectedRoute>} />
+        <Route path="/actas-epp/:actaId" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_EPP} redirectTo="/sigp/panel"><ActaEppDetalle /></ProtectedRoute>} />
+        <Route path="/actas-epp/:actaId/editar" element={<ProtectedRoute rolesPermitidos={ROLES_GESTIONA_EPP} redirectTo="/sigp/panel"><ActaEppEditor /></ProtectedRoute>} />
 
         {/* Rutas SIGP (placeholders F0). Protegidas por rol con ProtectedRoute
             ('admin' siempre incluido como fallback). La sección del Sidebar se

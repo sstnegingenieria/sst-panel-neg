@@ -22,7 +22,7 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-50 print:block print:h-auto print:overflow-visible">
       <Sidebar
         collapsed={esEscritorio ? collapsed : false}
         mobileOpen={mobileOpen}
@@ -38,9 +38,9 @@ export default function Layout() {
         />
       )}
 
-      <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+      <div className="flex flex-col flex-1 overflow-hidden min-w-0 print:block print:overflow-visible">
         <Header onToggleSidebar={toggle} sidebarCollapsed={collapsed} />
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6 print:overflow-visible print:p-0">
           <Outlet />
         </main>
       </div>

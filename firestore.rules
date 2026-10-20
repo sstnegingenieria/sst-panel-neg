@@ -1906,6 +1906,247 @@ service cloud.firestore {
     }
 
     // ────────────────────────────────────────────────────────────────
+    // ACTAS DE ENTREGA DE EPP (SST-FT-AEP-18) — catalogo_epp + actas_epp
+    // ────────────────────────────────────────────────────────────────
+    // El acta lleva la CÉDULA del colaborador (dato personal, Ley 1581) y su
+    // firma: lectura y escritura SOLO para Gestión Integral y admin (espejo en
+    // el cliente: ROLES_GESTIONA_EPP). El catálogo (elementos ofrecidos al
+    // armar un acta) lo lee todo el personal del panel y lo edita el mismo par.
+    //
+    // CICLO del acta: nace `borrador` (editable) → `firmada` (INMUTABLE:
+    // contenido, firma y hash congelados) → `anulada` (marca + motivo SIN tocar
+    // el contenido firmado; la corrección es un acta nueva). Una borrador
+    // también se anula. Sin delete para NADIE, admin incluido: la baja es la
+    // anulación — evidencia (restricción 5.1).
+    //
+    // LÍMITES HONESTOS (documentados, no ocultos):
+    //  · Las reglas no iteran listas: de `items` y `firmantes_empresa` solo se
+    //    valida el tamaño; la forma de cada fila la valida el builder del cliente.
+    //  · Es una firma electrónica SIMPLE: la regla no puede probar que el
+    //    colaborador dibujó el PNG, solo que lo registró GI/admin y que, firmada,
+    //    nadie la cambia (ni el contenido que respalda).
+    function gestionaEpp() {
+      return isAuthed() && rolActual() in ['gestion_integral', 'admin'];
+    }
+
+    function catalogoEppValido(d) {
+      return d.keys().hasOnly(['nombre', 'especificacion', 'unidad', 'cantidad_default',
+                               'activo', 'creado_por', 'fecha_creacion',
+                               'actualizado_por', 'fecha_actualizacion'])
+          && d.keys().hasAll(['nombre', 'especificacion', 'unidad', 'cantidad_default',
+                              'activo', 'creado_por', 'fecha_creacion',
+                              'actualizado_por', 'fecha_actualizacion'])
+          && d.nombre is string && d.nombre.trim().size() > 0 && d.nombre.size() <= 120
+          && d.especificacion is string && d.especificacion.size() <= 500
+          && d.unidad is string && d.unidad.trim().size() > 0 && d.unidad.size() <= 40
+          && d.cantidad_default is int && d.cantidad_default >= 1 && d.cantidad_default <= 99
+          && d.activo is bool
+          && d.creado_por is string
+          && d.fecha_creacion is timestamp
+          && d.actualizado_por is string
+          && d.fecha_actualizacion is timestamp;
+    }
+
+    match /catalogo_epp/{itemId} {
+      allow read: if esPersonalPanel();
+      allow create: if gestionaEpp()
+                    && catalogoEppValido(request.resource.data)
+                    && request.resource.data.creado_por == request.auth.uid
+                    && request.resource.data.actualizado_por == request.auth.uid;
+      // creado_por y fecha_creacion inmutables; el último editor queda firmado.
+      allow update: if gestionaEpp()
+                    && catalogoEppValido(request.resource.data)
+                    && request.resource.data.creado_por == resource.data.creado_por
+                    && request.resource.data.fecha_creacion == resource.data.fecha_creacion
+                    && request.resource.data.actualizado_por == request.auth.uid;
+      // Baja SOFT (activo): sin delete para nadie.
+      allow delete: if false;
+    }
+
+    function colaboradorEppValido(c) {
+      return c is map
+          && c.keys().hasOnly(['fuente', 'ref_id', 'nombre', 'cedula', 'cargo', 'contratista_nombre'])
+          && c.keys().hasAll(['fuente', 'ref_id', 'nombre', 'cedula', 'cargo'])
+          && c.fuente in ['directo', 'contratista']
+          && c.ref_id is string && c.ref_id.size() > 0 && c.ref_id.size() <= 100
+          && c.nombre is string && c.nombre.trim().size() > 0 && c.nombre.size() <= 200
+          && c.cedula is string && c.cedula.trim().size() > 0 && c.cedula.size() <= 30
+          && c.cargo is string && c.cargo.size() <= 200
+          && (!('contratista_nombre' in c)
+              || (c.contratista_nombre is string && c.contratista_nombre.size() <= 200));
+    }
+
+    // Forma del documento — LA MISMA en create, en la edición del borrador y en
+    // la firma. Coherencia firma ⟷ estado: `firmado` es true SOLO si trae
+    // firma, hash y fecha_firma (los tres o ninguno); un borrador jamás está
+    // firmado; una firmada siempre lo está; `anulacion` ⟺ estado 'anulada'.
+    function contenidoActaEppValido(d) {
+      return d.keys().hasOnly(['colaborador', 'items', 'firmantes_empresa', 'fecha',
+                               'clausulas_version', 'estado', 'firmado',
+                               'firma_colaborador', 'firma_hash', 'fecha_firma', 'anulacion',
+                               'entregado_por', 'entregado_por_nombre',
+                               'creado_por', 'creado_por_nombre', 'fecha_creacion',
+                               'fecha_actualizacion', 'historial'])
+          && d.keys().hasAll(['colaborador', 'items', 'firmantes_empresa', 'fecha',
+                              'clausulas_version', 'estado', 'firmado',
+                              'entregado_por', 'creado_por', 'fecha_creacion', 'historial'])
+          && colaboradorEppValido(d.colaborador)
+          && d.items is list && d.items.size() >= 1 && d.items.size() <= 30
+          && d.firmantes_empresa is list && d.firmantes_empresa.size() >= 1 && d.firmantes_empresa.size() <= 5
+          && d.fecha is timestamp
+          && d.fecha <= d.fecha_creacion + duration.value(1, 'd')
+          && d.fecha >= d.fecha_creacion - duration.value(30, 'd')
+          && d.clausulas_version is string && d.clausulas_version.size() > 0 && d.clausulas_version.size() <= 20
+          && d.estado in ['borrador', 'firmada', 'anulada']
+          && d.firmado is bool
+          && d.entregado_por is string
+          && d.creado_por is string
+          && d.fecha_creacion is timestamp
+          && d.historial is list && d.historial.size() <= 300
+          && (!('entregado_por_nombre' in d) || (d.entregado_por_nombre is string && d.entregado_por_nombre.size() <= 300))
+          && (!('creado_por_nombre' in d) || (d.creado_por_nombre is string && d.creado_por_nombre.size() <= 300))
+          && (!('fecha_actualizacion' in d) || d.fecha_actualizacion is timestamp)
+          && d.firmado == ('firma_colaborador' in d)
+          && d.firmado == ('firma_hash' in d)
+          && d.firmado == ('fecha_firma' in d)
+          && (d.estado != 'borrador' || d.firmado == false)
+          && (d.estado != 'firmada' || d.firmado == true)
+          && (d.estado == 'anulada') == ('anulacion' in d)
+          && (!d.firmado || firmaEppValida(d))
+          && (!('anulacion' in d) || d.anulacion is map);
+    }
+
+    // La firma: PNG en data URL (con tope de tamaño), hash SHA-256 hex y fecha ~ahora.
+    function firmaEppValida(d) {
+      return d.firma_colaborador is string
+          && d.firma_colaborador.size() > 40
+          && d.firma_colaborador.size() <= 100000
+          && d.firma_colaborador.matches('^data:image/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$')
+          && d.firma_colaborador.size() % 4 == 2
+          && d.firma_hash is string
+          && d.firma_hash.matches('^[0-9a-f]{64}$')
+          && d.fecha_firma is timestamp
+          && d.fecha_firma > request.time - duration.value(1, 'd')
+          && d.fecha_firma < request.time + duration.value(1, 'd');
+    }
+
+    // Una entrada de historial: firmada por quien escribe, fechada ~ahora, y su
+    // `a` (si viene) es el estado que QUEDA tras este write.
+    function entradaActaEppValida(e) {
+      return e is map
+          && e.keys().hasAll(['fecha', 'por'])
+          && e.keys().hasOnly(['fecha', 'por', 'por_nombre', 'de', 'a', 'nota'])
+          && e.por == request.auth.uid
+          && e.fecha is timestamp
+          && e.fecha > request.time - duration.value(1, 'd')
+          && e.fecha < request.time + duration.value(1, 'd')
+          && (!('por_nombre' in e) || (e.por_nombre is string && e.por_nombre.size() <= 300))
+          && (!('a' in e) || e.a == request.resource.data.estado)
+          && (!('nota' in e) || (e.nota is string && e.nota.size() <= 2500));
+    }
+
+    // Update: el historial queda IGUAL o crece en EXACTAMENTE una entrada al
+    // final (prefijo intacto); su `de` (si viene) es el estado que HABÍA.
+    function historialActaEppValido() {
+      let nuevo = request.resource.data.get('historial', []);
+      let previo = resource.data.get('historial', []);
+      return nuevo is list
+          && nuevo.size() <= 300
+          && (nuevo == previo
+              || (nuevo.size() == previo.size() + 1
+                  && (previo.size() == 0 || nuevo[0:previo.size()] == previo)
+                  && entradaActaEppValida(nuevo[previo.size()])
+                  && (!('de' in nuevo[previo.size()])
+                      || nuevo[previo.size()].de == resource.data.estado)));
+    }
+
+    function anulacionActaEppValida(a) {
+      return a is map
+          && a.keys().hasAll(['fecha', 'por', 'motivo'])
+          && a.keys().hasOnly(['fecha', 'por', 'por_nombre', 'motivo'])
+          && a.por == request.auth.uid
+          && a.fecha is timestamp
+          && a.fecha > request.time - duration.value(1, 'd')
+          && a.fecha < request.time + duration.value(1, 'd')
+          && (!('por_nombre' in a) || (a.por_nombre is string && a.por_nombre.size() <= 300))
+          && a.motivo is string
+          && a.motivo.trim().size() > 0
+          && a.motivo.size() <= 2000;
+    }
+
+    match /actas_epp/{actaId} {
+      allow read: if gestionaEpp();
+
+      // Nace BORRADOR, del creador real (que es quien entrega), SIN firma ni
+      // anulación, con UNA entrada de historial hacia 'borrador'.
+      allow create: if gestionaEpp()
+                    && contenidoActaEppValido(request.resource.data)
+                    && request.resource.data.creado_por == request.auth.uid
+                    && request.resource.data.entregado_por == request.auth.uid
+                    && request.resource.data.estado == 'borrador'
+                    && request.resource.data.firmado == false
+                    && request.resource.data.fecha_creacion > request.time - duration.value(1, 'd')
+                    && request.resource.data.fecha_creacion < request.time + duration.value(1, 'd')
+                    && request.resource.data.historial.size() == 1
+                    && 'a' in request.resource.data.historial[0]
+                    && !('de' in request.resource.data.historial[0])
+                    && entradaActaEppValida(request.resource.data.historial[0]);
+
+      // Tres vías, ninguna sobre una ANULADA (terminal). La FIRMADA solo admite
+      // la anulación: el contenido firmado no tiene vía de edición. creado_por,
+      // entregado_por y fecha_creacion quedan inmutables porque ninguna vía los
+      // admite en su diff().affectedKeys().
+      allow update: if gestionaEpp()
+                    && resource.data.estado != 'anulada'
+                    && historialActaEppValido()
+                    && (
+                      // ── EDICIÓN del borrador: solo contenido descriptivo.
+                      (resource.data.estado == 'borrador'
+                       && request.resource.data.estado == 'borrador'
+                       && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['colaborador', 'items', 'firmantes_empresa', 'fecha',
+                                    'historial', 'fecha_actualizacion'])
+                       && contenidoActaEppValido(request.resource.data)
+                       && request.resource.data.historial.size() <= 290
+                       && request.resource.data.historial.size()
+                            == resource.data.get('historial', []).size() + 1)
+                      ||
+                      // ── FIRMAR (borrador → firmada): el write toca SOLO
+                      // estado/firmado/firma/hash/fecha_firma/historial; el
+                      // contenido que respalda la firma no cambia en este write.
+                      (resource.data.estado == 'borrador'
+                       && request.resource.data.estado == 'firmada'
+                       && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['estado', 'firmado', 'firma_colaborador', 'firma_hash',
+                                    'fecha_firma', 'historial', 'fecha_actualizacion'])
+                       && request.resource.data.firmado == true
+                       && contenidoActaEppValido(request.resource.data)
+                       && request.resource.data.historial.size()
+                            == resource.data.get('historial', []).size() + 1
+                       && request.resource.data.historial[request.resource.data.historial.size() - 1].get('de', '') == 'borrador'
+                       && request.resource.data.historial[request.resource.data.historial.size() - 1].get('a', '') == 'firmada')
+                      ||
+                      // ── ANULAR (borrador|firmada → anulada): SOLO marca +
+                      // motivo + historial; firma, hash y contenido quedan
+                      // tal cual (por eso no se re-valida el contenido).
+                      (resource.data.estado in ['borrador', 'firmada']
+                       && request.resource.data.estado == 'anulada'
+                       && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['estado', 'anulacion', 'historial', 'fecha_actualizacion'])
+                       && anulacionActaEppValida(request.resource.data.anulacion)
+                       && (!('fecha_actualizacion' in request.resource.data)
+                           || request.resource.data.fecha_actualizacion is timestamp)
+                       && request.resource.data.historial.size()
+                            == resource.data.get('historial', []).size() + 1
+                       && 'a' in request.resource.data.historial[request.resource.data.historial.size() - 1]
+                       && 'de' in request.resource.data.historial[request.resource.data.historial.size() - 1])
+                    );
+
+      // Sin delete para NADIE (admin incluido): la baja es la anulación.
+      allow delete: if false;
+    }
+
+    // ────────────────────────────────────────────────────────────────
     // CATCH-ALL: denegar todo lo no especificado explícitamente
     // ────────────────────────────────────────────────────────────────
     // Incluye la colección `consecutivos` del SIGP: solo la Cloud
