@@ -39,6 +39,7 @@ const { latidoJornada } = require('./jornadas');
 const { sincronizarClaims, resincronizarClaims } = require('./claims');
 const { emparejarAlRegistrarse, emparejarAlCargarNomina } = require('./nomina');
 const { recalcularAlEscribirAusentismo, recalcularAlEscribirEmpleado } = require('./indicadorAusentismo');
+const { censoConsecutivos } = require('./censoConsecutivos');
 
 exports.generarConsecutivo = generarConsecutivo;
 exports.asignarObraAlPrincipal = asignarObraAlPrincipal;
@@ -54,3 +55,4 @@ exports.emparejarAlRegistrarse = emparejarAlRegistrarse;
 exports.emparejarAlCargarNomina = emparejarAlCargarNomina;
 exports.recalcularAlEscribirAusentismo = recalcularAlEscribirAusentismo;
 exports.recalcularAlEscribirEmpleado = recalcularAlEscribirEmpleado;
+exports.censoConsecutivos = censoConsecutivos;

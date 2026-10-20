@@ -33,6 +33,8 @@ import {
 } from '../../types/sigp/permisos'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import type { Solicitud } from '../../types/sigp/solicitud'
+import { estadoCensoConsecutivos } from '../../types/sigp/censoConsecutivos'
+import type { CensoConsecutivos } from '../../types/sigp/censoConsecutivos'
 
 /** Indicador "sin datos" (mismo shape que el `sinDatos` interno de
  *  indicadores.ts, no exportado): usado cuando el rol NO puede ver compras —
@@ -197,6 +199,9 @@ export default function PanelSigp() {
   const [metasIso, setMetasIso] = useState<MetasIso>(METAS_ISO_DEFAULT)
   const [editandoMetasIso, setEditandoMetasIso] = useState(false)
   const [metasIsoForm, setMetasIsoForm] = useState<MetasIso>(METAS_ISO_DEFAULT)
+  // Censo de consecutivos (20-oct): doc escrito SOLO por la CF programada;
+  // el Panel lo lee y pinta el chip con LA FECHA del último censo.
+  const [censo, setCenso] = useState<CensoConsecutivos | null>(null)
 
   const puedeVerCompras = veOcUI(user?.rol)
   // §16 (ii): comercial NO lee `proyectos` (regla puedeVerProyectos). El Panel
@@ -208,7 +213,7 @@ export default function PanelSigp() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [pr, so, vi, co, cp, cfg] = await Promise.all([
+      const [pr, so, vi, co, cp, cfg, cen] = await Promise.all([
         // try/catch propio: si la lectura fallara (p. ej. reglas más nuevas
         // que este build), degrada a [] sin tumbar el resto del Panel.
         puedeVerProyectos
@@ -222,6 +227,8 @@ export default function PanelSigp() {
         // Meta del indicador operativo "Margen real" — configuración editable
         // (gerencia_general/admin). Ausente/error → sin meta (sin semáforo).
         getDoc(doc(db, 'configuracion', 'indicadores')).catch(() => null),
+        // Censo de consecutivos (lo escribe la CF programada; aquí solo lectura).
+        getDoc(doc(db, 'configuracion', 'censo_consecutivos')).catch(() => null),
       ])
       // Cierre anticipado (28-sep): los CANCELADOS quedan FUERA de toda la
       // medición en este único punto — un cancelado con presupuesto completo
@@ -237,6 +244,7 @@ export default function PanelSigp() {
         ? Object.fromEntries(cp.docs.map(d => [d.id, (d.data().compras_ejecutadas_total as number) ?? 0]))
         : {})
       setMetaMargen(cfg?.exists() ? ((cfg.data().meta_margen_pct as number) ?? null) : null)
+      setCenso(cen?.exists() ? (cen.data() as CensoConsecutivos) : null)
       const metas = metasIsoDe(cfg?.exists() ? (cfg.data() as { metas_iso?: Partial<MetasIso> }) : null)
       setMetasIso(metas)
       setMetasIsoForm(metas)
@@ -287,6 +295,22 @@ export default function PanelSigp() {
   const margenPill = margenPillBase && margenPillBase.s === 'rojo'
     ? { ...margenPillBase, texto: 'Muy bajo meta' }
     : margenPillBase
+
+  // Censo de consecutivos — el chip dice SIEMPRE cuándo se verificó; sin doc
+  // o censo vencido el estado es "no sé" (alerta), aunque el último resultado
+  // haya sido limpio: un ✓ sin fecha vigente sería peor que nada.
+  const censoEstado = useMemo(() => estadoCensoConsecutivos(censo, Date.now()), [censo])
+  const censoFecha = censo?.fecha?.toDate
+    ? censo.fecha.toDate().toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
+    : null
+  const censoSeriesMal = useMemo(
+    () => censo?.series
+      ? Object.entries(censo.series)
+          .filter(([, s]) => (s.sin_documentar?.length ?? 0) > 0)
+          .map(([clave, s]) => `${clave}: ${s.sin_documentar.join(', ')}`)
+      : [],
+    [censo],
+  )
 
   const guardarMeta = async () => {
     if (metaPendiente == null || !Number.isFinite(metaPendiente) || metaPendiente < 0) {
@@ -674,6 +698,36 @@ export default function PanelSigp() {
                 </div>
               </div>
             </div>
+
+            {/* Censo de consecutivos — señal PROGRAMADA (Cloud Scheduler,
+                lunes 07:00 Bogotá). El Panel solo LEE el doc que escribe la
+                CF; la fecha del censo es parte del mensaje en los 4 estados. */}
+            {censoEstado.estado === 'sin_censo' && (
+              <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-[12px] text-gray-500">
+                🔢 Censo de consecutivos: aún sin correr — se ejecuta automáticamente cada lunes a las 7:00 a.m.
+              </div>
+            )}
+            {censoEstado.estado === 'vencido' && (
+              <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-[12px] text-amber-800">
+                ⚠ <span className="font-bold">Censo de consecutivos VENCIDO</span> — último: {censoFecha} (hace {censoEstado.diasDesde} días).
+                El resultado de entonces ya no se puede dar por vigente; si esto persiste, el proceso programado está caído.
+              </div>
+            )}
+            {censoEstado.estado === 'ok' && (
+              <div className="mt-4 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-[12px] text-gray-600 flex flex-wrap items-center gap-x-2">
+                <span className="font-semibold text-[#3C8B2E]">🔢 Series de consecutivos contiguas ✓</span>
+                <span className="text-gray-400">· censo del {censoFecha}</span>
+              </div>
+            )}
+            {censoEstado.estado === 'huecos' && (
+              <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-[12px] text-red-700">
+                <span className="font-bold">⚠ {censo?.total_sin_documentar} número(s) de consecutivo sin explicar</span>
+                <span className="text-red-500"> · censo del {censoFecha}</span>
+                {censoSeriesMal.length > 0 && (
+                  <span className="block mt-0.5 font-mono text-[11px]">{censoSeriesMal.join(' · ')}</span>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}
