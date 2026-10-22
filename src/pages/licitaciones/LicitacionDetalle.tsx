@@ -405,7 +405,14 @@ export default function LicitacionDetalle() {
         onConfirmar={async datos => {
           if (!user?.uid) return
           const ok = await persistir(
-            patchPresentarLicitacion(lic, { uid: user.uid }, Timestamp.now(), datos),
+            // El checklist del pliego (invariante 8) se CABLEA en el A.2, que
+            // es quien lo carga. Con la lista vacía el gate no objeta, así que
+            // el comportamiento es EXACTAMENTE el de hoy — pero el parámetro
+            // es obligatorio por tipo, así que no se puede olvidar: cuando el
+            // A.2 traiga los requisitos, aquí es donde entran.
+            patchPresentarLicitacion(lic, { uid: user.uid }, Timestamp.now(), datos, {
+              requisitos: [],
+            }),
             'Presentada — datos de competencia registrados',
           )
           if (ok) setModal(null)
