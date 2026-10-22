@@ -4,7 +4,8 @@ import {
   CAMPO_RUP_DE, valorNegDesdeRup, evaluarIndicador, patchEvaluarIndicador,
   MOTIVOS_VIGENCIA, MOTIVO_VIGENCIA_LABEL, evaluarVigencia,
   overrideCumplimientoValido, resumenCumplimiento, puedePresentar,
-  motivoBloqueoPresentacion,
+  motivoBloqueoPresentacion, bloqueoPresentacion,
+  MOTIVOS_BLOQUEO_PRESENTACION, BLOQUEOS_CON_OVERRIDE,
 } from '../cumplimiento'
 import { INDICADORES_RUP } from '../../../types/sigp/requisito'
 import type { Requisito, EstadoRequisito, IndicadorRup } from '../../../types/sigp/requisito'
@@ -406,14 +407,18 @@ describe('resumenCumplimiento', () => {
     expect(resumenCumplimiento(conEstados('cumple', 'no_cumple')).listoParaPresentar).toBe(false)
   })
 
-  it('CHECKLIST VACÍO: la fórmula da listo, y `sin_requisitos` lo DICE', () => {
-    // "No anoté ningún requisito" NO es "revisé todo y está en orden". La
-    // fórmula acordada da `true`; el flag existe para que la UI lo pueda
-    // advertir y la decisión se tome a la vista, no por omisión.
+  it('CHECKLIST VACÍO: NO está listo, y `sin_requisitos` lo dice', () => {
+    // "No anoté ningún requisito" NO es "revisé todo y está en orden".
     const r = resumenCumplimiento([])
     expect(r.total).toBe(0)
-    expect(r.listoParaPresentar).toBe(true)
     expect(r.sin_requisitos).toBe(true)
+    expect(r.listoParaPresentar).toBe(false)
+  })
+
+  it('un solo requisito en cumple SÍ alcanza — el bloqueo es por vacío, no por cantidad', () => {
+    const r = resumenCumplimiento(conEstados('cumple'))
+    expect(r.sin_requisitos).toBe(false)
+    expect(r.listoParaPresentar).toBe(true)
   })
 })
 
@@ -495,9 +500,86 @@ describe('puedePresentar — el camino limpio', () => {
   })
 })
 
+describe('puedePresentar — el CHECKLIST VACÍO bloquea', () => {
+  const OVERRIDE = { por: 'uid-pedro', en: AHORA, motivo: 'La dirección asume el riesgo' }
+
+  it('CLAVE: vacío ⇒ false', () => {
+    expect(puedePresentar([])).toBe(false)
+  })
+
+  it('CLAVE: vacío CON override ⇒ sigue false', () => {
+    // Mismo tratamiento que el pendiente del caso COPNIA: no hay nada que
+    // autorizar cuando todavía no se sabe qué pide el pliego. Un override
+    // aquí sería una firma en blanco.
+    expect(puedePresentar([], OVERRIDE)).toBe(false)
+  })
+
+  it('CLAVE: un requisito en cumple ⇒ true', () => {
+    expect(puedePresentar(conEstados('cumple'))).toBe(true)
+  })
+
+  it('el motivo es SIN_REQUISITOS y NO cede ante override', () => {
+    expect(bloqueoPresentacion([])!.codigo).toBe('SIN_REQUISITOS')
+    expect(bloqueoPresentacion([], OVERRIDE)!.codigo).toBe('SIN_REQUISITOS')
+    expect(BLOQUEOS_CON_OVERRIDE).not.toContain('SIN_REQUISITOS')
+  })
+})
+
+describe('bloqueoPresentacion — el motivo tipificado', () => {
+  const OVERRIDE = { por: 'uid-pedro', en: AHORA, motivo: 'Subsanable en observaciones' }
+
+  it('null cuando se puede presentar', () => {
+    expect(bloqueoPresentacion(conEstados('cumple'))).toBeNull()
+    expect(bloqueoPresentacion(conEstados('cumple', 'no_cumple'), OVERRIDE)).toBeNull()
+  })
+
+  it('los tres códigos son alcanzables', () => {
+    const vistos = [
+      bloqueoPresentacion([])!.codigo,
+      bloqueoPresentacion(conEstados('pendiente'))!.codigo,
+      bloqueoPresentacion(conEstados('no_cumple'))!.codigo,
+    ]
+    expect(vistos).toEqual(['SIN_REQUISITOS', 'PENDIENTES', 'NO_CUMPLEN'])
+    expect([...MOTIVOS_BLOQUEO_PRESENTACION].sort()).toEqual([...vistos].sort())
+  })
+
+  it('precedencia: el vacío manda sobre todo lo demás (no hay nada más que decir)', () => {
+    expect(bloqueoPresentacion([])!.codigo).toBe('SIN_REQUISITOS')
+  })
+
+  it('precedencia: el pendiente manda sobre el no_cumple', () => {
+    // Es también el que hay que resolver primero.
+    expect(bloqueoPresentacion(conEstados('pendiente', 'no_cumple'))!.codigo).toBe('PENDIENTES')
+  })
+
+  it('SOLO NO_CUMPLEN cede ante override — los otros dos son ignorancia, no riesgo', () => {
+    expect([...BLOQUEOS_CON_OVERRIDE]).toEqual(['NO_CUMPLEN'])
+    expect(bloqueoPresentacion(conEstados('pendiente'), OVERRIDE)!.codigo).toBe('PENDIENTES')
+    expect(bloqueoPresentacion(conEstados('no_cumple'), OVERRIDE)).toBeNull()
+  })
+
+  it('el gate y el motivo salen de la MISMA fuente', () => {
+    const listas: EstadoRequisito[][] = [
+      [], ['cumple'], ['pendiente'], ['no_cumple'], ['cumple', 'no_aplica'],
+      ['pendiente', 'no_cumple'],
+    ]
+    for (const l of listas) {
+      for (const o of [undefined, OVERRIDE]) {
+        const lista = conEstados(...l)
+        expect(puedePresentar(lista, o), `[${l.join('+')}] override=${!!o}`)
+          .toBe(bloqueoPresentacion(lista, o) === null)
+      }
+    }
+  })
+})
+
 describe('motivoBloqueoPresentacion — el botón gris dice QUÉ falta', () => {
   it('null cuando se puede presentar', () => {
     expect(motivoBloqueoPresentacion(conEstados('cumple'))).toBeNull()
+  })
+
+  it('el vacío lo dice con esas palabras', () => {
+    expect(motivoBloqueoPresentacion([])).toContain('vacío')
   })
 
   it('nombra los pendientes, en singular y plural', () => {

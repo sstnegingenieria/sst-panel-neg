@@ -705,9 +705,11 @@ describe('invariante 7 — inmutabilidad del consecutivo', () => {
 describe('captura al PRESENTAR — los tres datos o nada', () => {
   const lista = () => base({ estado: 'en_preparacion', consecutivo: CONS })
   const DATOS = { oferta_neg: 45_000_000, manifestaciones: 22, ofertas_recibidas: 8 }
-  // Checklist que no objeta: estos casos prueban la CAPTURA (1.4), no el gate
-  // de cumplimiento (invariante 8, con su propio describe en requisito.test.ts).
-  const SIN_OBJECION = { requisitos: [] }
+  // Checklist que NO objeta: estos casos prueban la CAPTURA (1.4), no el gate
+  // de cumplimiento (invariante 8, con su propio describe más abajo).
+  // Ojo: la lista VACÍA sí objeta desde el cierre de A.1 — hace falta al
+  // menos un requisito verificado.
+  const SIN_OBJECION = { requisitos: [{ estado: 'cumple' as const }] }
 
   it('con los tres datos, presenta y los deja escritos', () => {
     const patch = patchPresentarLicitacion(lista(), ACTOR, AHORA, DATOS, SIN_OBJECION)
@@ -990,11 +992,18 @@ describe('INVARIANTE 8 — no se presenta con el checklist abierto', () => {
       .toBeNull()
   })
 
-  it('CHECKLIST VACÍO: hoy pasa — la fórmula acordada, con su consecuencia a la vista', () => {
-    // Un checklist vacío no objeta, así que la invariante 8 no frena nada
-    // cuando nadie capturó requisitos. `resumenCumplimiento.sin_requisitos`
-    // existe para que la UI lo advierta; cambiar el gate es decisión aparte.
-    expect(presentar([])).not.toBeNull()
+  it('CLAVE RECHAZO: CHECKLIST VACÍO — no se presenta sin haber anotado nada', () => {
+    // Si el vacío pasara, la invariante 8 no frenaría nada cuando nadie
+    // capturó requisitos: una garantía que se cita sin existir.
+    expect(presentar([])).toBeNull()
+  })
+
+  it('el vacío tampoco cede ante override', () => {
+    expect(presentar([], OVERRIDE)).toBeNull()
+  })
+
+  it('UN requisito en cumple ya alcanza — el bloqueo es por vacío, no por cantidad', () => {
+    expect(presentar(reqs('cumple'))).not.toBeNull()
   })
 
   it('el patch sigue escribiendo todo lo del 1.4 — el gate no cambió la forma', () => {

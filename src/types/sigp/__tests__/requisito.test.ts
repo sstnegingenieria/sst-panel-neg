@@ -9,6 +9,7 @@ import type { Timestamp } from 'firebase/firestore'
 import {
   CATEGORIAS_REQUISITO, TIPOS_EVIDENCIA, ESTADOS_REQUISITO, INDICADORES_RUP,
   CATEGORIA_REQUISITO_LABEL, ESTADO_REQUISITO_LABEL, INDICADOR_RUP_LABEL,
+  REF_PERSONA_TIPOS, REF_PERSONA_TIPO_LABEL,
   veredictoFirmado, personalAcreditado, indicadorMedido, requisitoConsistente,
   clonarRequisitosComoPlantilla,
   puedeMarcarseRequisito, patchMarcarRequisito,
@@ -95,7 +96,7 @@ describe('INVARIANTE 1 — la plantilla NO hereda estado', () => {
     }),
     reqPersonal({
       estado: 'cumple', verificado_por: 'uid-pedro', verificado_en: ANTES,
-      persona: { nombre: 'Luis Peña', documento: '79123456', cargo: 'Residente' },
+      persona: { nombre: 'Luis Peña', cargo: 'Residente', ref_tipo: 'empleado_directo', ref_id: 'emp-7' },
     }),
   ]
 
@@ -228,7 +229,10 @@ describe('INVARIANTE 2 — estado !== pendiente ⟹ firmado', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('INVARIANTE 3 — personal: cumple exige persona con nombre y documento', () => {
-  const PERSONA = { nombre: 'Luis Peña', documento: '79123456', cargo: 'Residente' }
+  const PERSONA = {
+    nombre: 'Luis Peña', cargo: 'Residente',
+    ref_tipo: 'empleado_directo' as const, ref_id: 'emp-7',
+  }
 
   it('con persona completa, cumple', () => {
     expect(personalAcreditado({ categoria: 'personal', estado: 'cumple', persona: PERSONA }))
@@ -244,21 +248,38 @@ describe('INVARIANTE 3 — personal: cumple exige persona con nombre y documento
     expect(patchMarcarRequisito(reqPersonal(), 'cumple', ACTOR, AHORA)).toBeNull()
   })
 
-  it('RECHAZO: persona sin nombre o sin documento — "alguien" no acredita nada', () => {
-    const sinNombre = { nombre: '  ', documento: '79123456', cargo: 'Residente' }
-    const sinDoc = { nombre: 'Luis Peña', documento: '', cargo: 'Residente' }
+  it('RECHAZO: persona sin nombre o sin REFERENCIA — "alguien" no acredita nada', () => {
+    const sinNombre = { ...PERSONA, nombre: '  ' }
+    const sinRef = { ...PERSONA, ref_id: '' }
     expect(personalAcreditado({ categoria: 'personal', estado: 'cumple', persona: sinNombre }))
       .toBe(false)
-    expect(personalAcreditado({ categoria: 'personal', estado: 'cumple', persona: sinDoc }))
+    expect(personalAcreditado({ categoria: 'personal', estado: 'cumple', persona: sinRef }))
       .toBe(false)
     expect(patchMarcarRequisito(reqPersonal(), 'cumple', ACTOR, AHORA, { persona: sinNombre }))
       .toBeNull()
   })
 
-  it('el cargo NO es obligatorio: lo que identifica es nombre + documento', () => {
-    const sinCargo = { nombre: 'Luis Peña', documento: '79123456', cargo: '' }
+  it('el cargo NO es obligatorio: lo que identifica es nombre + referencia', () => {
+    const sinCargo = { ...PERSONA, cargo: '' }
     expect(patchMarcarRequisito(reqPersonal(), 'cumple', ACTOR, AHORA, { persona: sinCargo }))
       .not.toBeNull()
+  })
+
+  it('RECHAZO: referencia con ref_tipo inventado', () => {
+    const falso = { ...PERSONA, ref_tipo: 'papelito' as unknown as typeof PERSONA.ref_tipo }
+    expect(personalAcreditado({ categoria: 'personal', estado: 'cumple', persona: falso }))
+      .toBe(false)
+    expect(patchMarcarRequisito(reqPersonal(), 'cumple', ACTOR, AHORA, { persona: falso }))
+      .toBeNull()
+  })
+
+  it('los cuatro registros declarados sirven como referencia', () => {
+    for (const t of REF_PERSONA_TIPOS) {
+      const p = { ...PERSONA, ref_tipo: t }
+      expect(personalAcreditado({ categoria: 'personal', estado: 'cumple', persona: p }), t)
+        .toBe(true)
+      expect(REF_PERSONA_TIPO_LABEL[t], t).toBeTruthy()
+    }
   })
 
   it('no_cumple SIN persona es legítimo — suele ser "no tenemos a nadie"', () => {
@@ -346,7 +367,12 @@ describe('puedeMarcarseRequisito ⟷ patchMarcarRequisito — no divergen', () =
     { nombre: 'personal a cumple sin persona', r: reqPersonal(), destino: 'cumple' },
     {
       nombre: 'personal a cumple con persona', r: reqPersonal(), destino: 'cumple',
-      datos: { persona: { nombre: 'Luis', documento: '79123456', cargo: 'R' } },
+      datos: {
+        persona: {
+          nombre: 'Luis', cargo: 'R',
+          ref_tipo: 'usuario_panel' as const, ref_id: 'uid-luis',
+        },
+      },
     },
     { nombre: 'indicador a cumple sin valor', r: reqIndicador(), destino: 'cumple' },
     { nombre: 'indicador a cumple con valor', r: reqIndicador(), destino: 'cumple', datos: { valor_neg: 3 } },
@@ -396,7 +422,10 @@ describe('REGRESIÓN COPNIA — la pérdida real de 2026 no puede repetirse', ()
       estado: 'cumple',
       verificado_por: 'uid-pedro',
       verificado_en: ANTES,
-      persona: { nombre: 'Luis Peña', documento: '79123456', cargo: 'Ingeniero residente' },
+      persona: {
+        nombre: 'Luis Peña', cargo: 'Ingeniero residente',
+        ref_tipo: 'empleado_directo', ref_id: 'emp-7',
+      },
       observacion: 'Matrícula 25202-123456 verificada en el portal del COPNIA',
     }),
   ]
@@ -433,7 +462,12 @@ describe('REGRESIÓN COPNIA — la pérdida real de 2026 no puede repetirse', ()
     const nueva = clonarRequisitosComoPlantilla(anterior, ACTOR, AHORA)
     const verificados = nueva.map(r => {
       const datos = r.categoria === 'personal'
-        ? { persona: { nombre: 'Ana Ríos', documento: '52987654', cargo: 'Ingeniera residente' } }
+        ? {
+          persona: {
+            nombre: 'Ana Ríos', cargo: 'Ingeniera residente',
+            ref_tipo: 'empleado_directo' as const, ref_id: 'emp-11',
+          },
+        }
         : undefined
       const patch = patchMarcarRequisito(r, 'cumple', { uid: 'uid-pedro' }, AHORA, datos)
       expect(patch, r.descripcion).not.toBeNull()
@@ -467,6 +501,39 @@ describe('REGRESIÓN COPNIA — la pérdida real de 2026 no puede repetirse', ()
    * `estado` entre requisitos. Un test de comportamiento prueba que la que
    * HAY no lo copia; este prueba que no apareció otra.
    */
+  /**
+   * GUARDARRAÍL LEY 1581 — la cédula no vuelve al checklist.
+   *
+   * El sistema ya tiene un custodio por dato personal (C2.1 paso 5 sacó la
+   * cédula del doc público de contratistas y las reglas prohíben que vuelva).
+   * Un campo de identificación en `PersonaRequisito` crearía un SEGUNDO
+   * custodio, en una colección con otros lectores — reabriendo por una puerta
+   * nueva lo que ese bloque cerró.
+   */
+  it('GUARDARRAÍL Ley 1581: `persona` NO admite documento de identidad', () => {
+    const fuente = readFileSync(resolve(__dirname, '../requisito.ts'), 'utf8')
+    const PROHIBIDOS = ['documento', 'cedula', 'nit', 'identificacion', 'numero_documento']
+
+    // (a) Dentro de la interfaz `PersonaRequisito` no aparece NINGUNO.
+    const bloque = /export interface PersonaRequisito \{[\s\S]*?\n\}/.exec(fuente)?.[0] ?? ''
+    expect(bloque, 'no se encontró la interfaz PersonaRequisito').not.toBe('')
+    for (const w of PROHIBIDOS) {
+      expect(bloque.toLowerCase(), `"${w}" reapareció en PersonaRequisito`).not.toContain(w)
+    }
+
+    // (b) En TODO el archivo, ninguno como DECLARACIÓN de campo. Acotado a
+    // `campo:` para no chocar con `documento_empresa_id` ni con el valor
+    // 'documento_empresa' de REF_PERSONA_TIPOS, que son otra cosa.
+    for (const w of PROHIBIDOS) {
+      expect(fuente, `campo "${w}:" declarado en requisito.ts`)
+        .not.toMatch(new RegExp(`\\b${w}\\s*:`, 'i'))
+    }
+
+    // (c) El tipo en runtime: las claves de una persona válida son exactamente cuatro.
+    const p = { nombre: 'X', cargo: 'Y', ref_tipo: 'empleado_directo' as const, ref_id: 'z' }
+    expect(Object.keys(p).sort()).toEqual(['cargo', 'nombre', 'ref_id', 'ref_tipo'])
+  })
+
   it('GUARDARRAÍL: el archivo fuente no copia `estado` de un requisito a otro', () => {
     const fuente = readFileSync(resolve(__dirname, '../requisito.ts'), 'utf8')
 

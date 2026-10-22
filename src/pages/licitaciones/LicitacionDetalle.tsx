@@ -405,11 +405,19 @@ export default function LicitacionDetalle() {
         onConfirmar={async datos => {
           if (!user?.uid) return
           const ok = await persistir(
-            // El checklist del pliego (invariante 8) se CABLEA en el A.2, que
-            // es quien lo carga. Con la lista vacía el gate no objeta, así que
-            // el comportamiento es EXACTAMENTE el de hoy — pero el parámetro
-            // es obligatorio por tipo, así que no se puede olvidar: cuando el
-            // A.2 traiga los requisitos, aquí es donde entran.
+            // ⚠ AQUÍ SE CABLEA EL CHECKLIST EN EL A.2 — y hasta entonces
+            // PRESENTAR ESTÁ BLOQUEADO a propósito.
+            //
+            // Desde el cierre de A.1 un checklist VACÍO objeta con motivo
+            // `SIN_REQUISITOS` (invariante 8): no se presenta sin haber
+            // anotado y verificado lo que pide el pliego. Esta lista vacía es
+            // honesta — hoy el módulo no carga requisitos —, así que el patch
+            // devuelve `null` y la presentación no procede.
+            //
+            // Pasar un requisito ficticio para "desbloquear" sería anular el
+            // gate que este bloque existe para crear. El A.2 trae los
+            // requisitos reales y, con ellos, `motivoBloqueoPresentacion`
+            // para que el botón diga qué falta en vez de solo estar gris.
             patchPresentarLicitacion(lic, { uid: user.uid }, Timestamp.now(), datos, {
               requisitos: [],
             }),

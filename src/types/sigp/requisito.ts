@@ -20,9 +20,10 @@
  *     `no_aplica`: decidir que algo no aplica también es decidir.
  *
  *  3. `categoria === 'personal'` ⟹ marcarlo `cumple` exige `persona` con
- *     `nombre` y `documento` no vacíos. Un requisito de personal NO se puede
- *     dar por cumplido en abstracto: el pliego pide una persona concreta con
- *     cédula, no la idea de que existe alguien.
+ *     `nombre` no vacío y una REFERENCIA resoluble (`ref_tipo` + `ref_id`).
+ *     Un requisito de personal NO se puede dar por cumplido en abstracto: el
+ *     pliego pide una persona concreta, no la idea de que existe alguien.
+ *     ⚠ La cédula NO se copia aquí — ver `PersonaRequisito`.
  *
  *  4. `tipo_evidencia === 'indicador'` ⟹ marcar `cumple` a mano sin
  *     `valor_neg` se rechaza. EL INDICADOR SE EVALÚA, NO SE DECLARA: el
@@ -102,14 +103,59 @@ export const INDICADOR_RUP_LABEL: Record<IndicadorRup, string> = {
 // ── Sub-tipos ────────────────────────────────────────────────────────────────
 
 /**
- * La persona concreta que acredita un requisito de personal.
- * `nombre` y `documento` son lo que exige la invariante 3; `cargo` es el rol
- * que pide el pliego ("ingeniero residente", "especialista en alturas").
+ * Registros del panel donde YA vive el dato personal de alguien.
+ *
+ * `ref_tipo` + `ref_id` apuntan al registro; el requisito NO guarda copia.
+ * No hay valor "externo" a propósito: si la persona no está en ningún
+ * registro, hay que inscribirla — esa fricción es la correcta, porque es la
+ * que mantiene un solo custodio por dato.
+ */
+export const REF_PERSONA_TIPOS = [
+  'empleado_directo',     // maestro `empleados_directos` (lo mantiene GI)
+  'usuario_panel',        // `users` — personal con cuenta
+  'nomina_contratista',   // `contratistas/{id}/privado/nomina`
+  'documento_empresa',    // una certificación que ya es DocumentoEmpresa
+] as const
+export type RefPersonaTipo = typeof REF_PERSONA_TIPOS[number]
+
+export const REF_PERSONA_TIPO_LABEL: Record<RefPersonaTipo, string> = {
+  empleado_directo: 'Personal directo NEG',
+  usuario_panel: 'Usuario del panel',
+  nomina_contratista: 'Nómina del contratista',
+  documento_empresa: 'Documento de la empresa',
+}
+
+/**
+ * La persona concreta que acredita un requisito de personal — POR REFERENCIA.
+ *
+ * ⛔ AQUÍ NO VA NINGÚN DOCUMENTO DE IDENTIDAD, y hay un test de guarda que
+ * tumba la suite si reaparece `documento`, `cedula`, `nit`, `identificacion`
+ * o `numero_documento`.
+ *
+ * La cédula es dato personal bajo la Ley 1581/2012 y el sistema ya tiene UN
+ * custodio para ella: `contratistas/{id}/privado/datos` (C2.1 paso 5, donde
+ * se sacó del doc público y las reglas prohíben que vuelva), la nómina
+ * precargada en `contratistas/{id}/privado/nomina`, y el maestro
+ * `empleados_directos`. Copiarla al checklist de cada licitación crearía un
+ * segundo custodio que envejece solo, en una colección cuyos lectores son
+ * otros — y volvería a abrir, por una puerta nueva, lo que ese bloque cerró.
+ *
+ * Lo que el checklist necesita saber no es el número: es QUIÉN y DÓNDE está
+ * acreditado. `nombre` y `cargo` son lo que sale en la propuesta; `ref_tipo`
+ * y `ref_id` son el puntero al registro que sí custodia el dato.
+ *
+ * Es la restricción §5.10 de la casa aplicada a datos personales: cuando ya
+ * hay un custodio, guardamos la referencia, no una segunda copia.
  */
 export interface PersonaRequisito {
+  /** Nombre como va en la propuesta. */
   nombre: string
-  documento: string
+  /** El rol que pide el pliego ("ingeniero residente", "coordinador de alturas"). */
   cargo: string
+  /** Qué registro custodia sus datos. */
+  ref_tipo: RefPersonaTipo
+  /** Id de la ficha en ese registro. */
+  ref_id: string
 }
 
 // ── El requisito ─────────────────────────────────────────────────────────────
@@ -173,7 +219,12 @@ export function personalAcreditado(
   if (r.categoria !== 'personal') return true
   if (r.estado !== 'cumple') return true
   const p = r.persona
-  return p !== null && p.nombre.trim() !== '' && p.documento.trim() !== ''
+  if (p === null) return false
+  // Nombre + referencia RESOLUBLE. Sin el puntero, "Luis Peña" sigue siendo
+  // una afirmación sin respaldo: nadie puede ir a verificar nada.
+  return p.nombre.trim() !== ''
+    && p.ref_id.trim() !== ''
+    && REF_PERSONA_TIPOS.includes(p.ref_tipo)
 }
 
 /**

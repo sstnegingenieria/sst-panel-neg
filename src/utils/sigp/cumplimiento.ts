@@ -215,23 +215,39 @@ export interface ResumenCumplimiento {
   no_aplican: number
   /** `true` si no hay NINGÚN requisito capturado. Ver la nota de abajo. */
   sin_requisitos: boolean
-  /** Sin override: exige cero pendientes y cero no_cumplen. */
+  /** Sin override: exige AL MENOS UN requisito, cero pendientes y cero
+   *  no_cumplen. Ver `MOTIVOS_BLOQUEO_PRESENTACION`. */
   listoParaPresentar: boolean
 }
+
+export const MOTIVOS_BLOQUEO_PRESENTACION = [
+  'SIN_REQUISITOS', 'PENDIENTES', 'NO_CUMPLEN',
+] as const
+export type MotivoBloqueoPresentacion = typeof MOTIVOS_BLOQUEO_PRESENTACION[number]
+
+/**
+ * Cuáles de los tres motivos CEDEN ante un override con motivo escrito.
+ *
+ * Solo `NO_CUMPLEN`. Los otros dos son estados de IGNORANCIA, no de riesgo:
+ *  · `PENDIENTES`      nadie puede justificar por escrito algo que no ha mirado.
+ *  · `SIN_REQUISITOS`  no hay nada que autorizar — ni siquiera se sabe qué
+ *                      pide el pliego. Un override aquí sería una firma en
+ *                      blanco.
+ * Lo que se autoriza con motivo es un riesgo CONOCIDO.
+ */
+export const BLOQUEOS_CON_OVERRIDE: readonly MotivoBloqueoPresentacion[] = ['NO_CUMPLEN']
 
 /**
  * Cuenta el checklist.
  *
- * ⚠ NOTA SOBRE EL CHECKLIST VACÍO. Con cero requisitos, `pendientes` y
- * `no_cumplen` valen 0 y `listoParaPresentar` sale `true` — la fórmula
- * acordada aplicada al pie. Pero "no anoté ningún requisito" NO es lo mismo
- * que "revisé todo y está en orden", y en ese caso el gate de la invariante 8
- * no frena nada: exactamente el estado de cosas previo al módulo.
+ * ⚠ EL CHECKLIST VACÍO BLOQUEA (decisión del cierre de A.1). "No anoté
+ * ningún requisito" NO es lo mismo que "revisé todo y está en orden": con un
+ * `true` ahí, el gate de la invariante 8 no frenaría nada cuando nadie
+ * capturó requisitos — exactamente el estado de cosas previo al módulo, y
+ * una garantía que se cita sin existir.
  *
- * Por eso `sin_requisitos` viaja en el resumen: para que la UI lo pueda
- * decir y para que la decisión de si un checklist vacío debe bloquear la
- * presentación se tome a la vista, no por omisión. NO se cambió la fórmula
- * por cuenta propia.
+ * Y NO cede ante override, igual que los pendientes: no hay nada que
+ * autorizar cuando todavía no se sabe qué pide el pliego.
  */
 export function resumenCumplimiento(
   requisitos: readonly Pick<Requisito, 'estado'>[],
@@ -247,17 +263,52 @@ export function resumenCumplimiento(
     no_cumplen,
     no_aplican: cuenta('no_aplica'),
     sin_requisitos: requisitos.length === 0,
-    listoParaPresentar: pendientes === 0 && no_cumplen === 0,
+    listoParaPresentar: requisitos.length > 0 && pendientes === 0 && no_cumplen === 0,
   }
+}
+
+/**
+ * POR QUÉ no se puede presentar — motivo TIPIFICADO, o `null` si sí se puede.
+ *
+ * Fuente única del gate: `puedePresentar` y el texto de la UI salen de aquí,
+ * así que no pueden decir cosas distintas.
+ *
+ * Precedencia: SIN_REQUISITOS → PENDIENTES → NO_CUMPLEN. Se reporta el
+ * primero que aplique, que es también el que hay que resolver primero.
+ */
+export function bloqueoPresentacion(
+  requisitos: readonly Pick<Requisito, 'estado'>[],
+  override?: OverrideCumplimiento | null,
+): { codigo: MotivoBloqueoPresentacion; mensaje: string } | null {
+  const r = resumenCumplimiento(requisitos)
+
+  if (r.sin_requisitos) {
+    return {
+      codigo: 'SIN_REQUISITOS',
+      mensaje: 'El checklist del pliego está vacío — no hay nada verificado',
+    }
+  }
+  if (r.pendientes > 0) {
+    return {
+      codigo: 'PENDIENTES',
+      mensaje: `${r.pendientes} requisito${r.pendientes === 1 ? '' : 's'} sin verificar`,
+    }
+  }
+  if (r.no_cumplen > 0 && !overrideCumplimientoValido(override)) {
+    return {
+      codigo: 'NO_CUMPLEN',
+      mensaje: `${r.no_cumplen} requisito${r.no_cumplen === 1 ? '' : 's'} que no cumple`
+        + ' — se necesita un motivo escrito para presentarse de todos modos',
+    }
+  }
+  return null
 }
 
 /**
  * EL GATE (invariante 8 de `licitacion.ts`). ¿Se puede presentar?
  *
- *   pendientes > 0            NO, y el override NO lo salva. Un pendiente es
- *                             "no sabemos": nadie puede justificar por
- *                             escrito algo que no ha mirado. Lo que se
- *                             autoriza con motivo es un riesgo CONOCIDO.
+ *   checklist vacío           NO, y el override NO lo salva.
+ *   pendientes > 0            NO, y el override NO lo salva.
  *   no_cumplen > 0            solo con override con motivo escrito.
  *   todo cumple/no_aplica     sí.
  *
@@ -268,25 +319,16 @@ export function puedePresentar(
   requisitos: readonly Pick<Requisito, 'estado'>[],
   override?: OverrideCumplimiento | null,
 ): boolean {
-  const r = resumenCumplimiento(requisitos)
-  if (r.pendientes > 0) return false
-  if (r.no_cumplen === 0) return true
-  return overrideCumplimientoValido(override)
+  return bloqueoPresentacion(requisitos, override) === null
 }
 
 /**
- * Por qué NO se puede presentar, en una frase. `null` si sí se puede.
- * Para que el botón deshabilitado diga qué falta en vez de solo estar gris.
+ * El motivo en una frase, para que el botón deshabilitado diga qué falta en
+ * vez de solo estar gris. `null` si se puede presentar.
  */
 export function motivoBloqueoPresentacion(
   requisitos: readonly Pick<Requisito, 'estado'>[],
   override?: OverrideCumplimiento | null,
 ): string | null {
-  if (puedePresentar(requisitos, override)) return null
-  const r = resumenCumplimiento(requisitos)
-  if (r.pendientes > 0) {
-    return `${r.pendientes} requisito${r.pendientes === 1 ? '' : 's'} sin verificar`
-  }
-  return `${r.no_cumplen} requisito${r.no_cumplen === 1 ? '' : 's'} que no cumple`
-    + ' — se necesita un motivo escrito para presentarse de todos modos'
+  return bloqueoPresentacion(requisitos, override)?.mensaje ?? null
 }
