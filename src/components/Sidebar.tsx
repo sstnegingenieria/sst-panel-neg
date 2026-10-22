@@ -222,18 +222,12 @@ const sigpNavItems: {
       </svg>
     ),
   },
-  // Compras · C2 (02-ago-2026): órdenes de compra con proveedor — visible si
-  // veOcUI(rol) (filtro en el render, junto al de Proyectos).
-  {
-    to: '/sigp/ordenes-compra',
-    label: 'Órdenes de compra',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M3 3h1.5l1.5 12.75h12l1.5-9H6.75M8.25 19.5a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm9 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
-      </svg>
-    ),
-  },
+  // "Órdenes de compra" vivió aquí de C2 (02-ago) al 22-oct-2026: desde el
+  // cambio de régimen OC2 (#138/#139) su bandeja es el puesto de trabajo de
+  // gerencia_administrativa → se movió al grupo ADMINISTRATIVA, junto a
+  // Proveedores. Solo agrupación de menú: la RUTA sigue /sigp/ordenes-compra
+  // (los deep-links "Ir a revisar →" de la ficha dependen de ella) y el gate
+  // sigue veOcUI.
 ]
 
 export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: SidebarProps) {
@@ -283,7 +277,6 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
   const actividadesEnabled = useFeatureFlag('sigp_actividades_enabled', false)
   const visibleSigpItems = sigpNavItems.filter(item =>
     (item.to !== '/sigp/proyectos' || (f2Enabled && veProyectosUI(user?.rol)))
-    && (item.to !== '/sigp/ordenes-compra' || veOcUI(user?.rol))
     && (item.to !== '/sigp/actividades' || (actividadesEnabled && veActividadesUI(user?.rol)))
     && (user?.rol !== 'gerencia_administrativa' || !ocultosParaGerenciaAdm.includes(item.to)))
   // Bloque 6: "Obras" vive SIEMPRE en el bloque SST (vista informativa; las
@@ -600,8 +593,10 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
         {/* #3 Horario (07-ago): el grupo se abre si el rol ve la bandeja
             administrativa O la de horario — gestion_integral y
             director_proyectos entran SOLO por Horario; cada ítem conserva
-            su propio gate. */}
-        {sigpEnabled && f2Enabled && (veFacturacionUI(user?.rol) || veHorarioUI(user?.rol) || puedeGestionarEmpleadosUI(user?.rol)) && (
+            su propio gate. OC2 (22-oct): también se abre por veOcUI — al
+            mover acá "Órdenes de compra", auxiliar/director entran SOLO por
+            ese ítem (sin esta vía, el movimiento se los habría escondido). */}
+        {sigpEnabled && f2Enabled && (veFacturacionUI(user?.rol) || veHorarioUI(user?.rol) || puedeGestionarEmpleadosUI(user?.rol) || veOcUI(user?.rol)) && (
           <div className="mt-4 pt-4 border-t border-gray-100">
             {!collapsed && (
               <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
@@ -652,6 +647,32 @@ export default function Sidebar({ collapsed, mobileOpen = false, onNavigate }: S
                   </svg>
                 </span>
                 {!collapsed && <span>Proveedores</span>}
+              </NavLink>
+            )}
+
+            {/* Órdenes de compra (movida del grupo SIGP el 22-oct-2026 —
+                régimen OC2: la cola la resuelve gerencia_administrativa y el
+                documento se emite contra un proveedor). MISMA ruta y MISMO
+                gate de siempre: solo cambió de sección en el menú. */}
+            {veOcUI(user?.rol) && (
+              <NavLink
+                to="/sigp/ordenes-compra"
+                onClick={onNavigate}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                    isActive
+                      ? 'bg-brand-50 text-brand-700 font-semibold'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  }`
+                }
+              >
+                <span className="flex-shrink-0">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M3 3h1.5l1.5 12.75h12l1.5-9H6.75M8.25 19.5a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm9 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+                  </svg>
+                </span>
+                {!collapsed && <span>Órdenes de compra</span>}
               </NavLink>
             )}
 
