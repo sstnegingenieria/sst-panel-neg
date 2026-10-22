@@ -2,11 +2,17 @@
 // Los proyectos NACEN al aprobar cotizaciones; aquí no se crean a mano.
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
+import { collection, getDocs, query, where } from 'firebase/firestore'
+import { db } from '../../firebase/config'
 import { useFirestore } from '../../hooks/useFirestore'
 import { useFeatureFlag } from '../../hooks/useFeatureFlag'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney } from '../../utils/sigp/formato'
 import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR } from '../../types/sigp/proyecto'
+import {
+  cambioEnVuelo, proyectoVivoDe, diasCambioEnVuelo, UMBRAL_CAMBIO_EN_VUELO_DIAS,
+} from '../../types/sigp/cotizacion'
+import type { Cotizacion } from '../../types/sigp/cotizacion'
 import {
   subEtapaProyectoDe, SUB_ETAPAS_PREPARACION, SUB_ETAPA_LABEL,
   separarSenales, diasSenal, UMBRAL_SENAL_ALCANCE_DIAS,
@@ -37,6 +43,14 @@ export default function ProyectosSigp() {
   // son 3; si algún día son decenas, el problema es la cola, no la query).
   const [filtroSenal, setFiltroSenal] = useState(false)
   const [diasSenalPorProyecto, setDiasSenalPorProyecto] = useState<Record<string, number>>({})
+  // PR C (22-oct) — cola de VERSIONES DE CAMBIO en vuelo: un cambio abierto
+  // significa que el proyecto corre sobre un alcance que alguien ya declaró
+  // equivocado. Join por doc-id (proyecto.id == cotización.id, 1:1); la
+  // query usa el índice de campo único de cambio_en_curso.version — sin
+  // índice compuesto. Las dos salidas (aprobar/descartar) viven en la
+  // cotización, a donde apunta el chip.
+  const [filtroCambio, setFiltroCambio] = useState(false)
+  const [cambiosEnVuelo, setCambiosEnVuelo] = useState<Record<string, { version: number; dias: number | null }>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -54,6 +68,27 @@ export default function ProyectosSigp() {
   useEffect(() => { if (f2Enabled) load() }, [f2Enabled, load])
 
   const senalesOperativas = useMemo(() => separarSenales(proyectos).operativas, [proyectos])
+
+  // Cambios en vuelo — best-effort: si la lectura falla, la bandeja vive sin
+  // la cola (jamás se rompe por ella).
+  useEffect(() => {
+    if (!f2Enabled) return
+    let vivo = true
+    ;(async () => {
+      try {
+        const snap = await getDocs(query(collection(db, 'cotizaciones'), where('cambio_en_curso.version', '>=', 1)))
+        const ahora = Date.now()
+        const map: Record<string, { version: number; dias: number | null }> = {}
+        for (const d of snap.docs) {
+          const c = { id: d.id, ...d.data() } as Cotizacion
+          if (!cambioEnVuelo(c) || !proyectoVivoDe(c)) continue
+          map[d.id] = { version: c.cambio_en_curso!.version, dias: diasCambioEnVuelo(c, ahora) }
+        }
+        if (vivo) setCambiosEnVuelo(map)
+      } catch { /* best-effort */ }
+    })()
+    return () => { vivo = false }
+  }, [f2Enabled])
 
   useEffect(() => {
     let vivo = true
@@ -97,6 +132,7 @@ export default function ProyectosSigp() {
       (!filtroSubEtapa || subEtapaProyectoDe(p) === filtroSubEtapa) &&
       (!filtroCliente || p.snapshot.cliente?.trim() === filtroCliente) &&
       (!filtroSenal || senalesOperativas.some(s => s.id === p.id)) &&
+      (!filtroCambio || cambiosEnVuelo[p.id] != null) &&
       (!q ||
         p.consecutivo.toLowerCase().includes(q) ||
         p.snapshot.cliente.toLowerCase().includes(q) ||
@@ -106,7 +142,7 @@ export default function ProyectosSigp() {
         (p.cotizacion_consecutivo ?? '').toLowerCase().includes(q) ||
         (p.solicitud_consecutivo ?? '').toLowerCase().includes(q)),
     )
-  }, [proyectos, filtroEstado, filtroSubEtapa, filtroCliente, filtroSenal, senalesOperativas, busqueda])
+  }, [proyectos, filtroEstado, filtroSubEtapa, filtroCliente, filtroSenal, senalesOperativas, filtroCambio, cambiosEnVuelo, busqueda])
 
   if (!f2Enabled) {
     return (
@@ -140,6 +176,24 @@ export default function ProyectosSigp() {
           {' '}— {filtroSenal ? 'mostrando solo señaladas (clic para quitar)' : 'clic para verlas'}
         </button>
       )}
+
+      {/* PR C — cola de versiones de cambio en vuelo: mismo patrón que las
+          señales; un cambio enviado hace tres semanas significa que el
+          proyecto corre sobre un alcance que alguien ya declaró equivocado. */}
+      {(() => {
+        const conCambio = proyectos.filter(p => cambiosEnVuelo[p.id] != null)
+        if (conCambio.length === 0) return null
+        const max = Math.max(0, ...conCambio.map(p => cambiosEnVuelo[p.id].dias ?? 0))
+        return (
+          <button onClick={() => setFiltroCambio(f => !f)}
+            className={`w-full text-left rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
+              filtroCambio ? 'bg-amber-100 border-amber-400 text-amber-900' : 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'}`}>
+            ± {conCambio.length} versión(es) de cambio EN VUELO
+            {max > 0 && <> · la más vieja lleva <b className={max > UMBRAL_CAMBIO_EN_VUELO_DIAS ? 'text-red-700' : ''}>{max} días</b></>}
+            {' '}— el proyecto corre sobre el alcance anterior hasta aprobar o descartar el cambio · {filtroCambio ? 'mostrando solo estos (clic para quitar)' : 'clic para verlos'}
+          </button>
+        )
+      })()}
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-100">
@@ -226,6 +280,17 @@ export default function ProyectosSigp() {
                             className={`ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold ${tarde ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}
                             title="Señal de alcance sin resolver — clic para ir a revisarla">
                             ⚠ señal{d != null ? ` · hace ${d} días` : ''}
+                          </Link>
+                        )
+                      })()}
+                      {cambiosEnVuelo[p.id] != null && (() => {
+                        const { version, dias } = cambiosEnVuelo[p.id]
+                        const tarde = dias != null && dias > UMBRAL_CAMBIO_EN_VUELO_DIAS
+                        return (
+                          <Link to={`/sigp/cotizaciones/${p.id}`}
+                            className={`ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold ${tarde ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}
+                            title="Versión de cambio en vuelo — el proyecto corre sobre el alcance anterior; clic para ir a la cotización (aprobar o descartar)">
+                            ± cambio v{version} en vuelo{dias != null ? ` · hace ${dias} días` : ''}
                           </Link>
                         )
                       })()}

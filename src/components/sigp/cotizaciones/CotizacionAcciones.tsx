@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  doc, getDoc, setDoc, updateDoc, arrayUnion, deleteField, Timestamp,
+  doc, getDoc, setDoc, updateDoc, arrayUnion, deleteField, Timestamp, writeBatch,
 } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
@@ -15,6 +15,7 @@ import { toast } from '../../shared/Toast'
 import Modal from '../../shared/Modal'
 import {
   puedeNuevaVersion, puedeVersionDeCambio, esVersionDeCambio,
+  cambioEnVuelo, proyectoVivoDe, patchDescartarCambio,
   subtotalesPorGrupo, modoAgrupacionDe, actividadesDe, confirmacionAlcanceDe,
 } from '../../../types/sigp/cotizacion'
 import { puedeGestionarProyectosUI } from '../../../types/sigp/permisos'
@@ -48,6 +49,9 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
   const [aplicando, setAplicando] = useState(false)
   const [modalRechazo, setModalRechazo] = useState(false)
   const [motivo, setMotivo] = useState('')
+  // PR C (22-oct): descartar la versión de cambio — motivo obligatorio.
+  const [modalDescartar, setModalDescartar] = useState(false)
+  const [motivoDescartar, setMotivoDescartar] = useState('')
   const [modalAprobar, setModalAprobar] = useState(false)
   const [evidencia, setEvidencia] = useState<File | null>(null)
   // ── P1 — guard al aprobar (03-sep): el modal muestra el alcance que se va a
@@ -126,6 +130,11 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
   // helper amplio que incluye ambos lados); este gate es de UI.
   const puedeIniciarCambio = puedeGestionar || puedeGestionarProyectosUI(user?.rol)
   const enCambio = esVersionDeCambio(cotizacion)
+  // PR C (22-oct): con cambio en vuelo y proyecto VIVO, "Rechazar" SE
+  // REEMPLAZA por "Descartar versión de cambio" — rechazar es del cliente
+  // sobre una cotización; descartar es de la casa sobre una versión que no
+  // prosperó (vocabulario con dueño, #136). Ofrecer ambos produjo el 025.
+  const descartable = cambioEnVuelo(cotizacion) && proyectoVivoDe(cotizacion)
 
   if (!puedeGestionar && !puedeIniciarCambio) return null
 
@@ -192,6 +201,10 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
 
   const rechazar = async () => {
     if (!motivo.trim()) return
+    // Defensa en profundidad del guard PR C: una versión de cambio con
+    // proyecto vivo no se rechaza — se descarta (el padre no puede quedar
+    // `rechazada` con el proyecto corriendo; caso 025).
+    if (descartable) { toast('Esta es una versión de CAMBIO con proyecto vivo — usá "Descartar versión de cambio"', 'error'); return }
     setAplicando(true)
     try {
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id), {
@@ -320,7 +333,10 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
       })
       await updateDoc(doc(db, 'cotizaciones', cotizacion.id), {
         estado: 'borrador', version_activa: n,
-        cambio_en_curso: { version: n, iniciado_por: user?.uid ?? '', fecha: ahora },
+        // version_aprobada CONGELADA (PR C): en este punto version_activa ES
+        // la versión aprobada vigente (puedeVersionDeCambio exige 'aprobada')
+        // — el destino exacto de la restauración si el cambio se descarta.
+        cambio_en_curso: { version: n, iniciado_por: user?.uid ?? '', fecha: ahora, version_aprobada: cotizacion.version_activa },
         fecha_envio: deleteField(), motivo_rechazo: deleteField(),
         pdf_desactualizado: deleteField(),
         fecha_actualizacion: ahora,
@@ -329,6 +345,56 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
       toast(`Versión de cambio ${etiquetaVersion(n)} creada (borrador) — edita, envía y aprueba con la evidencia del cliente`)
       await reload()
     } catch { toast('Error al crear la versión de cambio', 'error') } finally { setAplicando(false) }
+  }
+
+  /** PR C (22-oct) — descartar la versión de cambio: el padre vuelve a
+   *  `aprobada` sobre la versión VIGENTE del proyecto y la versión descartada
+   *  queda archivada con su marcador (jamás se borra — restricción 5.1).
+   *  La versión aprobada se resuelve de `version_aprobada` congelada al crear
+   *  el cambio; para cambios anteriores al campo, de `proyecto.cotizacion_version`
+   *  (comercial no lee proyectos — en ese caso legacy, descarta un gestor). */
+  const descartarCambio = async () => {
+    if (!motivoDescartar.trim()) return
+    setAplicando(true)
+    try {
+      let versionAprobada: number | null = cotizacion.cambio_en_curso?.version_aprobada ?? null
+      if (versionAprobada == null && cotizacion.proyecto_id) {
+        try {
+          const p = await getDoc(doc(db, 'proyectos', cotizacion.proyecto_id))
+          const v = p.exists() ? (p.data().cotizacion_version as number | undefined) : undefined
+          versionAprobada = typeof v === 'number' ? v : null
+        } catch { versionAprobada = null }
+      }
+      const patch = patchDescartarCambio(cotizacion, versionAprobada, motivoDescartar)
+      if (!patch) {
+        toast('No se pudo resolver la versión aprobada vigente — un gestor de proyectos puede descartarla desde esta misma pantalla', 'error')
+        return
+      }
+      const ahora = Timestamp.now()
+      // UN writeBatch: padre restaurado + marcador en la versión descartada.
+      const batch = writeBatch(db)
+      batch.update(doc(db, 'cotizaciones', cotizacion.id), {
+        estado: patch.estado, version_activa: patch.version_activa,
+        cambio_en_curso: deleteField(), motivo_cambio: deleteField(),
+        fecha_envio: deleteField(), motivo_rechazo: deleteField(),
+        pdf_desactualizado: deleteField(),
+        fecha_actualizacion: ahora,
+        historial: arrayUnion(entrada(efectivo, 'aprobada', {
+          motivo: `Versión de cambio v${patch.version_descartada} DESCARTADA — ${motivoDescartar.trim()} (el alcance vigente sigue siendo ${etiquetaVersion(patch.version_activa) || 'la emisión inicial'})`,
+          version: patch.version_descartada,
+        })),
+      })
+      batch.update(doc(db, 'cotizaciones', cotizacion.id, 'versiones', String(patch.version_descartada)), {
+        descartada: {
+          por: user?.uid ?? '', fecha: ahora, motivo: motivoDescartar.trim(),
+          ...(user?.nombre ? { por_nombre: user.nombre } : {}),
+        },
+      })
+      await batch.commit()
+      toast(`Versión de cambio v${patch.version_descartada} descartada — ${cotizacion.consecutivo} vuelve a Aprobada`)
+      setModalDescartar(false); setMotivoDescartar('')
+      await reload()
+    } catch { toast('Error al descartar la versión de cambio', 'error') } finally { setAplicando(false) }
   }
 
   return (
@@ -363,13 +429,30 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
             className="text-sm px-3 py-1.5 rounded-lg font-medium border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
             ✓ Aprobar
           </button>
-          <button onClick={() => { setModalRechazo(true); setMotivo('') }} disabled={aplicando}
-            className="text-sm px-3 py-1.5 rounded-lg font-medium border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">
-            ✕ Rechazar
-          </button>
+          {/* PR C: con cambio en vuelo + proyecto vivo, Rechazar NO se ofrece
+              — su lugar lo toma "Descartar versión de cambio" (abajo). */}
+          {!descartable && (
+            <button onClick={() => { setModalRechazo(true); setMotivo('') }} disabled={aplicando}
+              className="text-sm px-3 py-1.5 rounded-lg font-medium border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">
+              ✕ Rechazar
+            </button>
+          )}
         </>
       )}
-      {puedeNuevaVersion(efectivo) && puedeGestionar && (
+      {/* PR C (22-oct): descartar el cambio — disponible en los TRES estados
+          abiertos del cambio (borrador, enviada, rechazada legacy como el
+          025); mismos roles que lo inician. */}
+      {descartable && puedeIniciarCambio && (
+        <button onClick={() => { setModalDescartar(true); setMotivoDescartar('') }} disabled={aplicando}
+          title="El cambio no prosperó: la cotización vuelve a APROBADA sobre el alcance vigente del proyecto; la versión de cambio queda archivada como descartada"
+          className="text-sm px-3 py-1.5 rounded-lg font-medium border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">
+          ✕ Descartar versión de cambio
+        </button>
+      )}
+      {/* PR C: con cambio en vuelo no se apila otra versión encima (dejaría
+          `cambio_en_curso` colgando de una versión no-activa) — primero se
+          descarta o se aprueba el cambio. */}
+      {puedeNuevaVersion(efectivo) && puedeGestionar && !descartable && (
         <button onClick={nuevaVersion} disabled={aplicando}
           className="text-sm px-3 py-1.5 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
           + Nueva versión
@@ -440,6 +523,30 @@ export default function CotizacionAcciones({ cotizacion, efectivo, puedeGestiona
             <button onClick={rechazar} disabled={!motivo.trim() || aplicando}
               className="text-sm px-3 py-1.5 rounded-lg font-medium bg-red-600 hover:bg-red-700 text-white disabled:opacity-50">
               {aplicando ? 'Aplicando…' : 'Rechazar'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal descartar versión de cambio (PR C) — motivo obligatorio */}
+      <Modal isOpen={modalDescartar} onClose={() => setModalDescartar(false)} title={`Descartar versión de cambio de ${cotizacion.consecutivo}`}>
+        <div className="space-y-3">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            La cotización vuelve a <span className="font-bold">APROBADA</span> sobre el alcance vigente
+            {proyectoConsecutivo ? <> de <span className="font-semibold">{proyectoConsecutivo}</span></> : null}
+            {' '}— el proyecto sigue corriendo sobre lo ya aprobado. La versión de cambio
+            {cotizacion.cambio_en_curso ? ` v${cotizacion.cambio_en_curso.version}` : ''} queda
+            archivada como descartada (no se borra).
+          </div>
+          <p className="text-sm text-gray-600">Motivo del descarte (obligatorio) — por qué el cambio no prosperó:</p>
+          <textarea value={motivoDescartar} onChange={e => setMotivoDescartar(e.target.value)} rows={3} autoFocus
+            placeholder="Ej: el cliente desistió del cambio, se registró por error, se reemplaza por otro alcance…"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setModalDescartar(false)} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Volver</button>
+            <button onClick={descartarCambio} disabled={!motivoDescartar.trim() || aplicando}
+              className="text-sm px-3 py-1.5 rounded-lg font-medium bg-red-600 hover:bg-red-700 text-white disabled:opacity-50">
+              {aplicando ? 'Aplicando…' : 'Descartar el cambio'}
             </button>
           </div>
         </div>

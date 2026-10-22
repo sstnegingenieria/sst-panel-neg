@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import type { Cotizacion } from '../../../types/sigp/cotizacion'
 import {
   ESTADO_COT_LABEL, ESTADO_COT_COLOR, estadoEfectivo,
+  cambioEnVuelo, proyectoVivoDe, diasCambioEnVuelo, UMBRAL_CAMBIO_EN_VUELO_DIAS,
   diasDesdeEnvio, colorSeguimiento,
 } from '../../../types/sigp/cotizacion'
 import { etiquetaVersion, fmtMoney } from '../../../utils/sigp/formato'
@@ -88,6 +89,18 @@ export default function CotizacionesTable({ cotizaciones, loading, clienteNombre
                         <span className={`ml-1.5 inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-medium ${colorSeguimiento(dias)}`}
                           title="Días desde el envío (seguimiento)">
                           hace {dias} {dias === 1 ? 'día' : 'días'}
+                        </span>
+                      )
+                    })()}
+                    {/* PR C (22-oct): cambio de alcance en vuelo — el proyecto
+                        corre sobre el alcance anterior hasta aprobar/descartar. */}
+                    {cambioEnVuelo(c) && proyectoVivoDe(c) && (() => {
+                      const dias = diasCambioEnVuelo(c, Date.now())
+                      const tarde = dias != null && dias > UMBRAL_CAMBIO_EN_VUELO_DIAS
+                      return (
+                        <span className={`ml-1.5 inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${tarde ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}
+                          title={`Versión de cambio v${c.cambio_en_curso!.version} en vuelo — ${c.proyecto_consecutivo ?? 'su proyecto'} sigue sobre el alcance anterior hasta aprobar o descartar el cambio`}>
+                          ± cambio en vuelo{dias != null ? ` · hace ${dias} días` : ''}
                         </span>
                       )
                     })()}

@@ -22,6 +22,8 @@ import SatisfaccionClienteCard from '../../components/sigp/proyectos/Satisfaccio
 import CierreAnticipadoProyecto from '../../components/sigp/proyectos/CierreAnticipadoProyecto'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
+import { cambioEnVuelo, diasCambioEnVuelo, UMBRAL_CAMBIO_EN_VUELO_DIAS } from '../../types/sigp/cotizacion'
+import type { Cotizacion } from '../../types/sigp/cotizacion'
 import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
 import { ESTADOS_PROYECTO, idxRiel, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO, costoEjecutadoDe, TIPO_CIERRE_LABEL } from '../../types/sigp/proyecto'
 import type { Proyecto } from '../../types/sigp/proyecto'
@@ -54,13 +56,28 @@ export default function ProyectoDetalleSigp() {
   // del costo ejecutado en la tarjeta PRC; best-effort — sin permiso o sin
   // doc, la canasta sigue con $0 de compras (mismo criterio del Panel).
   const [comprasEjecutadas, setComprasEjecutadas] = useState(0)
+  // PR C (22-oct): cambio de alcance EN VUELO en la cotización origen —
+  // mientras vuela, el proyecto corre sobre el alcance anterior y la ficha
+  // lo dice (la señal alcance_desactualizado solo nace DESPUÉS de aterrizar).
+  // Best-effort: 1 getDoc solo en origen 'cotizacion'.
+  const [cambioVuelo, setCambioVuelo] = useState<{ version: number; dias: number | null } | null>(null)
 
   const load = useCallback(async () => {
     if (!proyectoId) return
     setLoading(true)
     try {
       const snap = await getDoc(doc(db, 'proyectos', proyectoId))
-      setProyecto(snap.exists() ? ({ id: snap.id, ...snap.data() } as Proyecto) : null)
+      const p = snap.exists() ? ({ id: snap.id, ...snap.data() } as Proyecto) : null
+      setProyecto(p)
+      if (p && p.origen !== 'preventivo') {
+        try {
+          const cot = await getDoc(doc(db, 'cotizaciones', p.cotizacion_id ?? proyectoId))
+          const c = cot.exists() ? ({ id: cot.id, ...cot.data() } as Cotizacion) : null
+          setCambioVuelo(c && cambioEnVuelo(c)
+            ? { version: c.cambio_en_curso!.version, dias: diasCambioEnVuelo(c, Date.now()) }
+            : null)
+        } catch { setCambioVuelo(null) }
+      } else setCambioVuelo(null)
       try {
         const cSnap = await getDoc(doc(db, 'compras_proyecto', proyectoId))
         setComprasEjecutadas((cSnap.data()?.compras_ejecutadas_total as number | undefined) ?? 0)
@@ -257,6 +274,23 @@ export default function ProyectoDetalleSigp() {
           </div>
         )}
       </div>
+
+      {/* PR C (22-oct) — cambio de alcance EN VUELO: mientras la versión de
+          cambio no se apruebe ni se descarte, el proyecto corre sobre el
+          alcance ANTERIOR — y la ficha lo dice con la antigüedad a la vista. */}
+      {cambioVuelo && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${
+          (cambioVuelo.dias ?? 0) > UMBRAL_CAMBIO_EN_VUELO_DIAS
+            ? 'border-red-300 bg-red-50 text-red-800'
+            : 'border-amber-300 bg-amber-50 text-amber-800'}`}>
+          <span className="font-bold">± Versión de cambio v{cambioVuelo.version} en vuelo</span>
+          {cambioVuelo.dias != null && <> · hace <b>{cambioVuelo.dias} días</b></>}
+          {' '}— este proyecto sigue corriendo sobre el alcance ANTERIOR ({proyecto.cotizacion_consecutivo ?? 'la cotización'}{etiquetaVersion(proyecto.cotizacion_version ?? 1) ? ` ${etiquetaVersion(proyecto.cotizacion_version ?? 1)}` : ''} aprobada) hasta que el cambio se apruebe o se descarte.{' '}
+          <Link to={`/sigp/cotizaciones/${proyecto.cotizacion_id ?? proyecto.id}`} className="font-semibold underline hover:no-underline">
+            Ir a la cotización →
+          </Link>
+        </div>
+      )}
 
       {/* P2-1 — Presupuesto y cambios: los TRES números (aprobado al inicio ·
           aprobado hoy · costo ejecutado en la preliquidación) + el registro de
