@@ -315,6 +315,10 @@ export interface VersionCotizacion {
   fecha_envio?: Timestamp      // cuándo se envió ESTA versión
   pdf_url?: string             // PDF generado al enviar (cara al cliente)
   pdf_hash?: string            // SHA-256 de los bytes del PDF (evidencia de integridad)
+  /** PR C (22-oct): marcador de versión de CAMBIO descartada — la versión no
+   *  se borra jamás (restricción 5.1): queda con su PDF/hash si llegó a
+   *  enviarse, y este marcador la cuenta honesta en timeline y comparación. */
+  descartada?: { por: string; por_nombre?: string; fecha: Timestamp; motivo: string }
   creada_por: string
   fecha_creacion: Timestamp
 }
@@ -405,8 +409,12 @@ export interface Cotizacion {
   // registro PRC). Distinta del "+ Nueva versión" comercial (que sigue
   // prohibido desde aprobada).
   /** Marca de cambio en curso — puesta al crear la versión de cambio,
-   *  limpiada al aprobarla (o al abandonar el intento con otra aprobación). */
-  cambio_en_curso?: { version: number; iniciado_por: string; fecha: Timestamp }
+   *  limpiada al aprobarla o al DESCARTARLA (PR C, 22-oct).
+   *  `version_aprobada` (22-oct) se CONGELA al crear el cambio con la versión
+   *  aprobada vigente de ese momento — es el destino de la restauración al
+   *  descartar (hecho capturado, no deducción; los cambios creados antes del
+   *  campo se resuelven leyendo `proyecto.cotizacion_version`). */
+  cambio_en_curso?: { version: number; iniciado_por: string; fecha: Timestamp; version_aprobada?: number }
   /** Motivo del cambio — obligatorio al APROBAR una versión de cambio; la CF
    *  lo copia a la entrada de `cambios_alcance` del proyecto y luego el campo
    *  se limpia junto con `cambio_en_curso`. */
@@ -519,6 +527,78 @@ export function puedeVersionDeCambio(
 export const esVersionDeCambio = (
   c: Pick<Cotizacion, 'cambio_en_curso' | 'version_activa'>,
 ): boolean => c.cambio_en_curso?.version === c.version_activa
+
+// ── PR C (22-oct-2026) — cambios en vuelo: cola + descartar ──────────────────
+//
+// El censo del 22-oct midió el hueco real: 5 de 5 proyectos "con cotización
+// no aprobada" eran versiones de cambio ABIERTAS sin cerrar (21–38 días) —
+// el proyecto corre sobre un alcance que alguien ya declaró equivocado y
+// nada lo decía. Dos piezas: el predicado de la cola (con antigüedad y
+// umbral nombrado) y la puerta que faltaba — DESCARTAR el cambio, que
+// devuelve el padre a `aprobada` sobre la versión vigente del proyecto.
+// Vocabulario con dueño (decisión de Giovanny, coherente con #136):
+// RECHAZAR es del cliente sobre una cotización; DESCARTAR es de la casa
+// sobre una versión que no prosperó — con cambio en vuelo y proyecto vivo,
+// "Rechazar" SE REEMPLAZA por "Descartar" (ofrecer ambos produjo el 025).
+
+/**
+ * Umbral de la cola de cambios en vuelo: 15 días — supuesto NOMBRADO sin
+ * calibrar, el mismo de las señales de alcance (UMBRAL_SENAL_ALCANCE_DIAS):
+ * misma familia — un desfase de alcance declarado y sin resolver. "No es un
+ * plazo, es un 'mirá esto'" (los 5 casos reales del censo llevaban 21–38
+ * días: con 15, todos encienden — y todos deben encender).
+ */
+export const UMBRAL_CAMBIO_EN_VUELO_DIAS = 15
+
+/** ¿Hay una versión de cambio ABIERTA? (borrador, enviada O rechazada del
+ *  cambio — las tres son "abierta sin cerrar"; una cola solo de enviadas
+ *  habría dejado fuera al 061 en borrador y al 025 rechazado). */
+export const cambioEnVuelo = (
+  c: Pick<Cotizacion, 'cambio_en_curso' | 'estado'>,
+): boolean => c.cambio_en_curso != null && c.estado !== 'aprobada'
+
+/** Antigüedad del cambio en vuelo en días (desde que alguien declaró el
+ *  alcance equivocado — la fecha de CREACIÓN del cambio, no la de envío). */
+export function diasCambioEnVuelo(
+  c: Pick<Cotizacion, 'cambio_en_curso' | 'estado'>,
+  ahoraMs: number,
+): number | null {
+  if (!cambioEnVuelo(c)) return null
+  const ms = c.cambio_en_curso?.fecha?.toMillis?.()
+  if (ms == null) return null
+  return Math.max(0, Math.floor((ahoraMs - ms) / 86_400_000))
+}
+
+/** Proyecto VIVO de la cotización: existe y no está anotado como cancelado
+ *  (la anotación denormalizada del cierre anticipado — comercial no lee
+ *  `proyectos` por §16, así que el predicado sale del propio doc). */
+export const proyectoVivoDe = (
+  c: Pick<Cotizacion, 'proyecto_id' | 'proyecto_cancelado'>,
+): boolean => !!c.proyecto_id && !c.proyecto_cancelado
+
+/**
+ * Descartar la versión de cambio — builder PURO (el mismo valida el botón y
+ * ejecuta): el padre vuelve a `aprobada` con `version_activa` = la versión
+ * APROBADA VIGENTE (la que el proyecto tiene aplicada — `version_aprobada`
+ * congelada al crear el cambio, o `proyecto.cotizacion_version` para los
+ * cambios anteriores al campo; JAMÁS `version − 1` deducido). La versión
+ * descartada NO se borra (restricción 5.1): queda en la subcolección con su
+ * marcador `descartada` — el caller la marca en el MISMO writeBatch.
+ * Devuelve null si no hay cambio en vuelo, sin motivo, o sin versión
+ * aprobada resoluble.
+ */
+export function patchDescartarCambio(
+  c: Pick<Cotizacion, 'estado' | 'cambio_en_curso' | 'version_activa'>,
+  versionAprobada: number | null | undefined,
+  motivo: string,
+): { estado: 'aprobada'; version_activa: number; version_descartada: number } | null {
+  if (!cambioEnVuelo(c)) return null
+  if (!motivo.trim()) return null
+  if (versionAprobada == null || versionAprobada < 1) return null
+  const vCambio = c.cambio_en_curso!.version
+  if (versionAprobada >= vCambio) return null  // la vigente jamás es la descartada ni posterior
+  return { estado: 'aprobada', version_activa: versionAprobada, version_descartada: vCambio }
+}
 
 // ── Lógica pura (totales + vencida) ───────────────────────────────────────────
 

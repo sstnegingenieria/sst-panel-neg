@@ -9,7 +9,10 @@ import { useFirestore } from '../../hooks/useFirestore'
 import { toast } from '../../components/shared/Toast'
 import { useAuth } from '../../contexts/AuthContext'
 import { puedeGestionarCotizacionesUI } from '../../types/sigp/permisos'
-import { ESTADOS_COTIZACION, ESTADO_COT_LABEL, estadoEfectivo } from '../../types/sigp/cotizacion'
+import {
+  ESTADOS_COTIZACION, ESTADO_COT_LABEL, estadoEfectivo,
+  cambioEnVuelo, proyectoVivoDe, diasCambioEnVuelo, UMBRAL_CAMBIO_EN_VUELO_DIAS,
+} from '../../types/sigp/cotizacion'
 import type { Cliente } from '../../types/sigp/cliente'
 
 export default function CotizacionesSigp() {
@@ -35,6 +38,8 @@ export default function CotizacionesSigp() {
   }
   const [filtroEstado, setFiltroEstado] = useState(searchParams.get('pendientes') ? 'pendiente_diligenciar' : '')
   const [filtroCliente, setFiltroCliente] = useState('')
+  // PR C (22-oct): filtro de cambios en vuelo (lo activa el banner).
+  const [filtroCambio, setFiltroCambio] = useState(false)
   const [busqueda, setBusqueda] = useState('')
   const [formOpen, setFormOpen] = useState(false)
 
@@ -65,9 +70,10 @@ export default function CotizacionesSigp() {
     return cotizaciones.filter(c =>
       (!filtroEstado || estadoEfectivo(c) === filtroEstado) &&
       (!filtroCliente || c.cliente_id === filtroCliente) &&
+      (!filtroCambio || (cambioEnVuelo(c) && proyectoVivoDe(c))) &&
       matchQ(c),
     )
-  }, [cotizaciones, filtroEstado, filtroCliente, busqueda, clienteNombres])
+  }, [cotizaciones, filtroEstado, filtroCliente, filtroCambio, busqueda, clienteNombres])
 
   const stats = useMemo(() => {
     const efectivos = cotizaciones.map(estadoEfectivo)
@@ -139,6 +145,24 @@ export default function CotizacionesSigp() {
         <StatCard title="Vencidas" value={loading ? '…' : stats.vencidas} loading={loading} color="purple"
           icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} />
       </div>
+
+      {/* PR C (22-oct) — cola de cambios en vuelo (patrón señales de alcance):
+          comercial es quien persigue la aprobación del cliente. */}
+      {(() => {
+        const enVuelo = cotizaciones.filter(c => cambioEnVuelo(c) && proyectoVivoDe(c))
+        if (enVuelo.length === 0) return null
+        const ahora = Date.now()
+        const max = Math.max(0, ...enVuelo.map(c => diasCambioEnVuelo(c, ahora) ?? 0))
+        return (
+          <button onClick={() => setFiltroCambio(f => !f)}
+            className={`w-full text-left rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
+              filtroCambio ? 'bg-amber-100 border-amber-400 text-amber-900' : 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'}`}>
+            ± {enVuelo.length} versión(es) de cambio EN VUELO
+            {max > 0 && <> · la más vieja lleva <b className={max > UMBRAL_CAMBIO_EN_VUELO_DIAS ? 'text-red-700' : ''}>{max} días</b></>}
+            {' '}— cada una tiene un proyecto corriendo sobre el alcance anterior · {filtroCambio ? 'mostrando solo estas (clic para quitar)' : 'clic para verlas'}
+          </button>
+        )
+      })()}
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-4 flex-wrap">
