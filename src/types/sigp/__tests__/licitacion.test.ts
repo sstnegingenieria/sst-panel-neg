@@ -16,6 +16,8 @@ import {
   type Licitacion, type EstadoLicitacion, type OverrideSemaforo,
   type ResultadoSemaforoLicitacion,
 } from '../licitacion'
+import { puedePresentar } from '../../../utils/sigp/cumplimiento'
+import type { EstadoRequisito } from '../requisito'
 
 const ts = (ms: number) => ({ toMillis: () => ms, seconds: ms / 1000 } as unknown as Timestamp)
 const AHORA = ts(1_000_000)
@@ -703,9 +705,14 @@ describe('invariante 7 — inmutabilidad del consecutivo', () => {
 describe('captura al PRESENTAR — los tres datos o nada', () => {
   const lista = () => base({ estado: 'en_preparacion', consecutivo: CONS })
   const DATOS = { oferta_neg: 45_000_000, manifestaciones: 22, ofertas_recibidas: 8 }
+  // Checklist que NO objeta: estos casos prueban la CAPTURA (1.4), no el gate
+  // de cumplimiento (invariante 8, con su propio describe más abajo).
+  // Ojo: la lista VACÍA sí objeta desde el cierre de A.1 — hace falta al
+  // menos un requisito verificado.
+  const SIN_OBJECION = { requisitos: [{ estado: 'cumple' as const }] }
 
   it('con los tres datos, presenta y los deja escritos', () => {
-    const patch = patchPresentarLicitacion(lista(), ACTOR, AHORA, DATOS)
+    const patch = patchPresentarLicitacion(lista(), ACTOR, AHORA, DATOS, SIN_OBJECION)
     expect(patch).not.toBeNull()
     expect(patch!.estado).toBe('presentada')
     expect(patch!.oferta_neg).toBe(45_000_000)
@@ -718,7 +725,7 @@ describe('captura al PRESENTAR — los tres datos o nada', () => {
     for (const k of ['oferta_neg', 'manifestaciones', 'ofertas_recibidas'] as const) {
       const parcial = { ...DATOS }
       delete (parcial as Record<string, unknown>)[k]
-      expect(patchPresentarLicitacion(lista(), ACTOR, AHORA, parcial), k).toBeNull()
+      expect(patchPresentarLicitacion(lista(), ACTOR, AHORA, parcial, SIN_OBJECION), k).toBeNull()
     }
   })
 
@@ -740,21 +747,21 @@ describe('captura al PRESENTAR — los tres datos o nada', () => {
 
   it('RECHAZO: presentar en rojo sin override (el portero sigue vivo)', () => {
     const roja = base({ estado: 'en_preparacion', consecutivo: CONS, semaforo: 'rojo' })
-    expect(patchPresentarLicitacion(roja, ACTOR, AHORA, DATOS)).toBeNull()
+    expect(patchPresentarLicitacion(roja, ACTOR, AHORA, DATOS, SIN_OBJECION)).toBeNull()
   })
 
   it('RECHAZO: presentar sin consecutivo cuando la invariante 6 lo exige', () => {
     const sinNumero = base({ estado: 'en_preparacion', consecutivo: '' })
-    expect(patchPresentarLicitacion(sinNumero, ACTOR, AHORA, DATOS)).toBeNull()
+    expect(patchPresentarLicitacion(sinNumero, ACTOR, AHORA, DATOS, SIN_OBJECION)).toBeNull()
   })
 
   it('un MIGRADO puede presentarse sin consecutivo', () => {
     const historico = base({ estado: 'en_preparacion', consecutivo: '', migrado: true })
-    expect(patchPresentarLicitacion(historico, ACTOR, AHORA, DATOS)).not.toBeNull()
+    expect(patchPresentarLicitacion(historico, ACTOR, AHORA, DATOS, SIN_OBJECION)).not.toBeNull()
   })
 
   it('RECHAZO: desde un estado que no lleva a presentada', () => {
-    expect(patchPresentarLicitacion(base({ estado: 'detectada' }), ACTOR, AHORA, DATOS)).toBeNull()
+    expect(patchPresentarLicitacion(base({ estado: 'detectada' }), ACTOR, AHORA, DATOS, SIN_OBJECION)).toBeNull()
   })
 })
 
@@ -909,5 +916,102 @@ describe('builders — sello de trazabilidad y pureza', () => {
     expect(l.activa).toBe(true)
     aplicar(patchAvanzarLicitacion(l, 'en_preparacion', ACTOR, AHORA, { consecutivo: CONS }))
     expect(l.consecutivo).toBe(CONS)
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════════════════
+// INVARIANTE 8 — el gate de cumplimiento (A.1)
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe('INVARIANTE 8 — no se presenta con el checklist abierto', () => {
+  const lista = () => base({ estado: 'en_preparacion', consecutivo: CONS })
+  const DATOS = { oferta_neg: 45_000_000, manifestaciones: 22, ofertas_recibidas: 8 }
+  const reqs = (...e: EstadoRequisito[]) => e.map(x => ({ estado: x }))
+  const OVERRIDE = { por: 'uid-pedro', en: AHORA, motivo: 'Riesgo asumido por la dirección' }
+
+  const presentar = (
+    requisitos: { estado: EstadoRequisito }[],
+    override?: typeof OVERRIDE | null,
+  ) => patchPresentarLicitacion(lista(), ACTOR, AHORA, DATOS, { requisitos, override })
+
+  it('con todo el checklist cumplido, presenta', () => {
+    expect(presentar(reqs('cumple', 'cumple', 'no_aplica'))).not.toBeNull()
+  })
+
+  it('CLAVE RECHAZO: un requisito PENDIENTE frena la presentación', () => {
+    expect(presentar(reqs('cumple', 'pendiente'))).toBeNull()
+  })
+
+  it('CLAVE: el override NO salva un pendiente — no se justifica lo que no se miró', () => {
+    expect(presentar(reqs('cumple', 'pendiente'), OVERRIDE)).toBeNull()
+  })
+
+  it('RECHAZO: un NO_CUMPLE sin override frena', () => {
+    expect(presentar(reqs('cumple', 'no_cumple'))).toBeNull()
+  })
+
+  it('un NO_CUMPLE CON override con motivo escrito sí pasa', () => {
+    expect(presentar(reqs('cumple', 'no_cumple'), OVERRIDE)).not.toBeNull()
+  })
+
+  it('RECHAZO: override con motivo vacío no sirve', () => {
+    expect(presentar(reqs('no_cumple'), { ...OVERRIDE, motivo: '   ' })).toBeNull()
+  })
+
+  it('EL PREDICADO DEL BOTÓN Y EL DEL BUILDER SON EL MISMO', () => {
+    // Si divergieran, el botón se habilitaría para un patch que devuelve null
+    // — o peor, se deshabilitaría para uno válido y nadie podría presentar.
+    // Mismo contrato que `datosPresentacionCompletos` en el 1.4.
+    const casos: { r: EstadoRequisito[]; o?: typeof OVERRIDE | null }[] = [
+      { r: ['cumple'] },
+      { r: ['pendiente'] },
+      { r: ['pendiente'], o: OVERRIDE },
+      { r: ['no_cumple'] },
+      { r: ['no_cumple'], o: OVERRIDE },
+      { r: ['no_cumple'], o: { ...OVERRIDE, motivo: '' } },
+      { r: ['cumple', 'no_aplica'] },
+      { r: ['cumple', 'pendiente', 'no_cumple'], o: OVERRIDE },
+      { r: [] },
+    ]
+    for (const c of casos) {
+      const requisitos = reqs(...c.r)
+      const permite = puedePresentar(requisitos, c.o)
+      const patch = presentar(requisitos, c.o)
+      expect(permite, `[${c.r.join('+')}] override=${!!c.o}`).toBe(patch !== null)
+    }
+  })
+
+  it('el gate NO reemplaza a los demás: los tres datos siguen siendo obligatorios', () => {
+    const limpio = { requisitos: reqs('cumple') }
+    expect(patchPresentarLicitacion(lista(), ACTOR, AHORA, {}, limpio)).toBeNull()
+  })
+
+  it('el gate NO reemplaza al PORTERO: en rojo sin override de semáforo sigue frenado', () => {
+    const roja = base({ estado: 'en_preparacion', consecutivo: CONS, semaforo: 'rojo' })
+    expect(patchPresentarLicitacion(roja, ACTOR, AHORA, DATOS, { requisitos: reqs('cumple') }))
+      .toBeNull()
+  })
+
+  it('CLAVE RECHAZO: CHECKLIST VACÍO — no se presenta sin haber anotado nada', () => {
+    // Si el vacío pasara, la invariante 8 no frenaría nada cuando nadie
+    // capturó requisitos: una garantía que se cita sin existir.
+    expect(presentar([])).toBeNull()
+  })
+
+  it('el vacío tampoco cede ante override', () => {
+    expect(presentar([], OVERRIDE)).toBeNull()
+  })
+
+  it('UN requisito en cumple ya alcanza — el bloqueo es por vacío, no por cantidad', () => {
+    expect(presentar(reqs('cumple'))).not.toBeNull()
+  })
+
+  it('el patch sigue escribiendo todo lo del 1.4 — el gate no cambió la forma', () => {
+    const patch = presentar(reqs('cumple'))!
+    expect(patch.estado).toBe('presentada')
+    expect(patch.oferta_neg).toBe(45_000_000)
+    expect(patch.manifestaciones).toBe(22)
+    expect(patch.ofertas_recibidas).toBe(8)
+    expect(activaConsistente(patch.estado, patch.activa)).toBe(true)
   })
 })

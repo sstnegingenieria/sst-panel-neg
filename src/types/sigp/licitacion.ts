@@ -25,8 +25,18 @@
  *     NO aplica a los registros `migrado` (ver el campo).
  *  7. `consecutivo` es inmutable una vez asignado. La única transición legal
  *     es `'' -> 'LIC-AAAA-NNNN'`, y ocurre UNA vez.
+ *  8. GATE DE CUMPLIMIENTO (A.1): no se pasa a `presentada` si el checklist
+ *     del pliego tiene requisitos SIN VERIFICAR, ni con requisitos que NO
+ *     CUMPLEN salvo override con motivo escrito. El predicado es
+ *     `puedePresentar` de `utils/sigp/cumplimiento.ts` — el MISMO que usa la
+ *     UI para deshabilitar el botón, con test de que no divergen.
  */
 import type { Timestamp } from 'firebase/firestore'
+// Función PURA de la capa de utils. Precedente de la casa: `proyecto.ts` y
+// `preventivos.ts` importan `esCoordenadaValida` de `utils/geo`.
+import { puedePresentar } from '../../utils/sigp/cumplimiento'
+import type { OverrideCumplimiento } from '../../utils/sigp/cumplimiento'
+import type { Requisito } from './requisito'
 
 export type { Timestamp }
 
@@ -556,17 +566,35 @@ export function datosPresentacionCompletos(d: Partial<DatosPresentacion>): boole
 }
 
 /**
- * Transición a `presentada` CON la captura. Sin los tres datos devuelve
- * `null` — el botón de la UI se deshabilita con el mismo predicado, así que
- * la regla vive en un solo lugar.
+ * El checklist del pliego, para el gate de la invariante 8.
+ *
+ * Se pasa EXPLÍCITAMENTE y es OBLIGATORIO a propósito: con un parámetro
+ * opcional, olvidarlo dejaría el gate inerte sin que nada avise — una
+ * invariante que no se aplica es peor que no tenerla, porque se cita como
+ * garantía. El tipo obliga a que cada camino diga con qué checklist presenta.
+ */
+export interface DatosCumplimiento {
+  requisitos: readonly Pick<Requisito, 'estado'>[]
+  /** Presentarse a sabiendas, con motivo escrito. Ver `puedePresentar`. */
+  override?: OverrideCumplimiento | null
+}
+
+/**
+ * Transición a `presentada` CON la captura y CON el gate de cumplimiento.
+ * Sin los tres datos, o con el checklist abierto, devuelve `null` — el botón
+ * de la UI se deshabilita con los mismos predicados, así que cada regla vive
+ * en un solo lugar.
  */
 export function patchPresentarLicitacion(
   l: Licitacion, actor: ActorLicitacion, ahora: Timestamp,
   datos: Partial<DatosPresentacion>,
+  cumplimiento: DatosCumplimiento,
 ) {
   if (!puedeTransicionarLicitacion(l.estado, 'presentada')) return null
   if (!porteroPermite(l, 'presentada')) return null
   if (!datosPresentacionCompletos(datos)) return null
+  // Invariante 8 — el checklist manda.
+  if (!puedePresentar(cumplimiento.requisitos, cumplimiento.override)) return null
   // `presentada` exige consecutivo (invariante 6): debe venir de en_preparacion
   // o manifestada, que ya lo tienen. Un migrado está exento.
   if (exigeConsecutivo('presentada', l.migrado) && l.consecutivo === '') return null
