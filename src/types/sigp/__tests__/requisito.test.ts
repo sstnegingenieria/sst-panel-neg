@@ -273,13 +273,51 @@ describe('INVARIANTE 3 — personal: cumple exige persona con nombre y documento
       .toBeNull()
   })
 
-  it('los cuatro registros declarados sirven como referencia', () => {
+  it('los CINCO registros declarados sirven como referencia', () => {
     for (const t of REF_PERSONA_TIPOS) {
       const p = { ...PERSONA, ref_tipo: t }
       expect(personalAcreditado({ categoria: 'personal', estado: 'cumple', persona: p }), t)
         .toBe(true)
       expect(REF_PERSONA_TIPO_LABEL[t], t).toBeTruthy()
     }
+    expect(REF_PERSONA_TIPOS).toHaveLength(5)
+  })
+
+  /**
+   * A.1b — el profesional que se PROPONE y solo se vincula si NEG gana. No
+   * está en ninguna nómina ni tiene cuenta: su hoja de vida se adjunta a la
+   * licitación. No crea custodia de datos personales en ningún registro.
+   */
+  it('adjunto_licitacion con ref_id válido SATISFACE la invariante 3', () => {
+    const propuesto = {
+      nombre: 'Marta Quiroga',
+      cargo: 'Especialista en estructuras',
+      ref_tipo: 'adjunto_licitacion' as const,
+      ref_id: 'licitaciones/lic-7/propuesta/hv-marta.pdf',
+    }
+    expect(personalAcreditado({ categoria: 'personal', estado: 'cumple', persona: propuesto }))
+      .toBe(true)
+    const patch = patchMarcarRequisito(reqPersonal(), 'cumple', ACTOR, AHORA, { persona: propuesto })
+    expect(patch).not.toBeNull()
+    expect(patch!.persona).toEqual(propuesto)
+  })
+
+  it('adjunto_licitacion con ref_id VACÍO no la satisface', () => {
+    // Sin el archivo, "Marta Quiroga" vuelve a ser una afirmación sin
+    // respaldo: no hay nada que la entidad pueda mirar.
+    const sinArchivo = {
+      nombre: 'Marta Quiroga',
+      cargo: 'Especialista en estructuras',
+      ref_tipo: 'adjunto_licitacion' as const,
+      ref_id: '',
+    }
+    expect(personalAcreditado({ categoria: 'personal', estado: 'cumple', persona: sinArchivo }))
+      .toBe(false)
+    expect(patchMarcarRequisito(reqPersonal(), 'cumple', ACTOR, AHORA, { persona: sinArchivo }))
+      .toBeNull()
+    expect(personalAcreditado({
+      categoria: 'personal', estado: 'cumple', persona: { ...sinArchivo, ref_id: '   ' },
+    })).toBe(false)
   })
 
   it('no_cumple SIN persona es legítimo — suele ser "no tenemos a nadie"', () => {
@@ -532,6 +570,14 @@ describe('REGRESIÓN COPNIA — la pérdida real de 2026 no puede repetirse', ()
     // (c) El tipo en runtime: las claves de una persona válida son exactamente cuatro.
     const p = { nombre: 'X', cargo: 'Y', ref_tipo: 'empleado_directo' as const, ref_id: 'z' }
     expect(Object.keys(p).sort()).toEqual(['cargo', 'nombre', 'ref_id', 'ref_tipo'])
+  })
+
+  it('GUARDARRAÍL de frontera: el tipo declara que el módulo NO escribe en registros ajenos', () => {
+    // `users`, `contratistas` y `empleados_directos` son de otros frentes.
+    // Si alguien borra esa advertencia del tipo, que al menos caiga la suite.
+    const fuente = readFileSync(resolve(__dirname, '../requisito.ts'), 'utf8')
+    expect(fuente).toContain('SOLO LEE')
+    expect(fuente).toContain('NUNCA escribe')
   })
 
   it('GUARDARRAÍL: el archivo fuente no copia `estado` de un requisito a otro', () => {

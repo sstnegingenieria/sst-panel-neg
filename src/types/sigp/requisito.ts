@@ -110,11 +110,42 @@ export const INDICADOR_RUP_LABEL: Record<IndicadorRup, string> = {
  * registro, hay que inscribirla — esa fricción es la correcta, porque es la
  * que mantiene un solo custodio por dato.
  */
+/**
+ * ⛔ FRONTERA DEL MÓDULO: licitaciones SOLO LEE `users` y `contratistas`
+ * (y sus sub-documentos). NUNCA escribe en ellas — son de otros frentes:
+ * `users` lo administra SST/GI (y su `rol` solo admin, PR #165),
+ * `contratistas` lo inscribe GI y su aval lo mueve Gestión Administrativa.
+ * Lo mismo con `empleados_directos`, que mantiene el frente SGI/SST.
+ * Este módulo apunta a esos registros; no los toca. Mismo patrón que el
+ * "consulta, no gestión" de la regla 7.2 de la casa.
+ *
+ * ⚠ QUIÉN PUEDE RESOLVER CADA REFERENCIA (verificado en firestore.rules,
+ * 22-oct). Los roles del módulo son `gestionaLicitaciones()`:
+ * operacion_comercial · gerencia_general · gerencia_administrativa ·
+ * director_proyectos · admin.
+ *
+ *   usuario_panel        TODOS      read de `users` = esPersonalPanel()
+ *   nomina_contratista   TODOS      read del privado incluye
+ *                                   puedeGestionarProyectos() ∪ gestionaCompras()
+ *   documento_empresa    TODOS      colección propia del módulo
+ *   adjunto_licitacion   TODOS      Storage `licitaciones/**` = esInterno()
+ *   empleado_directo     SOLO gerencia_administrativa y admin
+ *                                   read = gestionaEmpleados() — Karen
+ *                                   (operacion_comercial), gerencia_general y
+ *                                   director_proyectos pueden GUARDAR el
+ *                                   puntero pero NO seguirlo.
+ *
+ * Esa asimetría no invalida el puntero —queda auditable y gerencia sí lo
+ * resuelve—, pero el A.2 tiene que mostrarla honestamente en vez de pintar
+ * un enlace roto. Si molesta, se acota el selector por rol; ampliar el read
+ * de `empleados_directos` NO es decisión de este módulo.
+ */
 export const REF_PERSONA_TIPOS = [
-  'empleado_directo',     // maestro `empleados_directos` (lo mantiene GI)
+  'empleado_directo',     // maestro `empleados_directos` (lo mantiene el frente SGI/SST)
   'usuario_panel',        // `users` — personal con cuenta
   'nomina_contratista',   // `contratistas/{id}/privado/nomina`
   'documento_empresa',    // una certificación que ya es DocumentoEmpresa
+  'adjunto_licitacion',   // un archivo en Storage bajo `licitaciones/{id}/...`
 ] as const
 export type RefPersonaTipo = typeof REF_PERSONA_TIPOS[number]
 
@@ -123,7 +154,27 @@ export const REF_PERSONA_TIPO_LABEL: Record<RefPersonaTipo, string> = {
   usuario_panel: 'Usuario del panel',
   nomina_contratista: 'Nómina del contratista',
   documento_empresa: 'Documento de la empresa',
+  adjunto_licitacion: 'Adjunto de esta licitación',
 }
+
+/**
+ * `adjunto_licitacion` — el profesional que se PROPONE.
+ *
+ * Es el caso que las otras cuatro referencias no cubren: el pliego exige un
+ * especialista que NEG vincula solo si gana, así que todavía no está en
+ * ninguna nómina ni tiene cuenta. Su hoja de vida y su matrícula se adjuntan
+ * a la licitación y `ref_id` apunta a ese archivo
+ * (`licitaciones/{id}/{tipoDoc}/{fileName}`, con `tipoDoc` de la whitelist
+ * que ya existe desde el 1.2: pliego · propuesta · evidencia · subsanacion
+ * — no hace falta tocar `storage.rules`).
+ *
+ * Por qué NO rompe la regla del custodio único: no CREA custodia de datos
+ * personales en ningún registro del panel. El archivo es el soporte que la
+ * entidad va a mirar, con el mismo alcance y la misma vida que la propuesta;
+ * si NEG gana y la persona entra, ahí sí la inscribe el frente que
+ * corresponda y la referencia futura será a su registro. Mientras tanto no
+ * hay una ficha a medio llenar envejeciendo en una colección ajena.
+ */
 
 /**
  * La persona concreta que acredita un requisito de personal — POR REFERENCIA.

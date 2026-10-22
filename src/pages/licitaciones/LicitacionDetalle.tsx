@@ -27,12 +27,13 @@ import {
   patchOverrideSemaforo, patchPresentarLicitacion, patchCerrarConResultado,
   exigeConsecutivo, pctNeg, pctGanador,
 } from '../../types/sigp/licitacion'
-import type { EstadoLicitacion, Licitacion } from '../../types/sigp/licitacion'
+import type { DatosCumplimiento, EstadoLicitacion, Licitacion } from '../../types/sigp/licitacion'
 import { probabilidadSorteo } from '../../utils/sigp/semaforo'
 import { SEMAFORO_CHIP } from '../../utils/sigp/bandejaLicitaciones'
 import {
   evaluarVentana, isoLocal, frasesSorteo, REFERENCIA_OFERTA, fueraDeBanda,
 } from '../../utils/sigp/ventanaLicitacion'
+import { bloqueoPresentacion } from '../../utils/sigp/cumplimiento'
 import { useCriterioSemaforo, useConfigLicitaciones } from '../../hooks/sigp/useLicitaciones'
 import { useConsecutivo } from '../../hooks/sigp/useConsecutivo'
 import { fmtMoney, fmtNum } from '../../utils/sigp/formato'
@@ -89,6 +90,17 @@ export default function LicitacionDetalle() {
   const [destinoResultado, setDestinoResultado] = useState<'adjudicada' | 'perdida'>('adjudicada')
 
   const hoy = useMemo(() => isoLocal(new Date()), [])
+
+  // ── Invariante 8: el gate de cumplimiento ──
+  // El A.2 carga los requisitos del pliego; hoy la lista es VACÍA y eso
+  // bloquea con motivo `SIN_REQUISITOS`. Un solo punto: lo que se pasa al
+  // patch builder es exactamente lo que se evalúa para el aviso, así que el
+  // texto nunca puede contradecir al botón.
+  const cumplimiento: DatosCumplimiento = useMemo(() => ({ requisitos: [] }), [])
+  const bloqueo = useMemo(
+    () => bloqueoPresentacion(cumplimiento.requisitos, cumplimiento.override),
+    [cumplimiento],
+  )
 
   if (cargando) return <p className="text-sm text-gray-500">Cargando…</p>
   if (!lic) {
@@ -360,8 +372,13 @@ export default function LicitacionDetalle() {
                     )
                   }
                   if (destino === 'presentada') {
+                    // Invariante 8: el botón se deshabilita con el MISMO
+                    // predicado que el patch builder, y dice POR QUÉ. Antes
+                    // el patch devolvía null y el usuario veía un toast
+                    // genérico de "movimiento no válido", que no era cierto.
                     return (
-                      <button key={destino} disabled={aplicando}
+                      <button key={destino} disabled={aplicando || bloqueo !== null}
+                        title={bloqueo?.mensaje}
                         onClick={() => setModal('presentar')}
                         className="px-3 py-1.5 rounded bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium disabled:opacity-50">
                         Marcar presentada
@@ -393,6 +410,38 @@ export default function LicitacionDetalle() {
                   quede escrito por qué se trabaja igual.
                 </p>
               )}
+
+              {/* ── Invariante 8: por qué no se puede presentar ──
+                  El texto sale de `bloqueoPresentacion()`, la MISMA fuente
+                  que evalúa el patch builder. Un botón gris sin explicación
+                  obliga a adivinar; peor todavía era el toast genérico. */}
+              {salidas.includes('presentada') && bloqueo && (
+                <div className={`mt-2 rounded border px-3 py-2 text-xs ${
+                  bloqueo.codigo === 'SIN_REQUISITOS'
+                    ? 'border-gray-300 bg-gray-50 text-gray-600'
+                    : 'border-amber-300 bg-amber-50 text-amber-900'
+                }`}>
+                  {bloqueo.codigo === 'SIN_REQUISITOS' ? (
+                    <>
+                      <span className="font-semibold">
+                        Presentar está bloqueado: el checklist del pliego todavía no existe.
+                      </span>{' '}
+                      Se habilita en el siguiente bloque del módulo, cuando se puedan
+                      registrar y verificar los requisitos. No es un error — es el estado
+                      esperado hasta entonces.
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-semibold">
+                        {bloqueo.codigo === 'PENDIENTES'
+                          ? 'Hay requisitos sin verificar.'
+                          : 'Hay requisitos que no cumplen.'}
+                      </span>{' '}
+                      {bloqueo.mensaje}
+                    </>
+                  )}
+                </div>
+              )}
             </section>
           )}
         </div>
@@ -405,22 +454,14 @@ export default function LicitacionDetalle() {
         onConfirmar={async datos => {
           if (!user?.uid) return
           const ok = await persistir(
-            // ⚠ AQUÍ SE CABLEA EL CHECKLIST EN EL A.2 — y hasta entonces
-            // PRESENTAR ESTÁ BLOQUEADO a propósito.
+            // `cumplimiento` es el MISMO objeto que evalúa el aviso y
+            // deshabilita el botón (ver arriba). Hoy va vacío a propósito y
+            // el gate objeta con `SIN_REQUISITOS`: el A.2 lo llena con los
+            // requisitos reales y este call site no cambia.
             //
-            // Desde el cierre de A.1 un checklist VACÍO objeta con motivo
-            // `SIN_REQUISITOS` (invariante 8): no se presenta sin haber
-            // anotado y verificado lo que pide el pliego. Esta lista vacía es
-            // honesta — hoy el módulo no carga requisitos —, así que el patch
-            // devuelve `null` y la presentación no procede.
-            //
-            // Pasar un requisito ficticio para "desbloquear" sería anular el
-            // gate que este bloque existe para crear. El A.2 trae los
-            // requisitos reales y, con ellos, `motivoBloqueoPresentacion`
-            // para que el botón diga qué falta en vez de solo estar gris.
-            patchPresentarLicitacion(lic, { uid: user.uid }, Timestamp.now(), datos, {
-              requisitos: [],
-            }),
+            // Pasar un requisito ficticio para "desbloquear" anularía el gate
+            // que este bloque existe para crear.
+            patchPresentarLicitacion(lic, { uid: user.uid }, Timestamp.now(), datos, cumplimiento),
             'Presentada — datos de competencia registrados',
           )
           if (ok) setModal(null)
