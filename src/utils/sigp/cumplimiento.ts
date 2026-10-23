@@ -19,13 +19,22 @@
  *    por cumplido", pero jamás dice "cumple": que un papel esté vigente no
  *    significa que sea el papel correcto ni que su contenido alcance. El
  *    `cumple` lo pone una persona, con firma (invariante 2 de `requisito.ts`).
+ *
+ * ── LA VIGENCIA ENTRA POR CONTRATO, NO POR IMPORT ───────────────────────────
+ *
+ * Este motor NO importa `utils/sigp/vigencias.ts`. Depende del TIPO
+ * `MotorVigencias` (`types/sigp/motorVigencias.ts`) y recibe la
+ * implementación por parámetro, porque `vigencias.ts` es PROVISIONAL: el
+ * frente SIGP va a consolidarlo con su `utils/vencimiento.ts` y quedará uno
+ * solo. Con el motor inyectado, esa consolidación cuesta UN archivo — el que
+ * decide qué se inyecta — y no treinta.
  */
 import type { Timestamp } from 'firebase/firestore'
 import type {
   Requisito, EstadoRequisito, IndicadorRup, OperadorRequisito,
 } from '../../types/sigp/requisito'
 import type { DocumentoEmpresa, IndicadoresRup } from '../../types/sigp/documentoEmpresa'
-import { venceAntesDe } from './vigencias'
+import type { MotorVigencias } from '../../types/sigp/motorVigencias'
 
 // ── Traducción indicador exigido → campo del RUP ─────────────────────────────
 
@@ -165,11 +174,18 @@ const NO_OBJETA: VeredictoVigencia = { objeta: false, estado: null, motivo: null
  * La distinción entre `pendiente` y `no_cumple` no es cosmética: lo ausente
  * se consigue (alguien lo sube y el proceso sigue), lo que vence antes del
  * cierre es un hecho contra el que no se puede presentar sin renovarlo.
+ *
+ * El `motor` es OBLIGATORIO y entra por el contrato `MotorVigencias`, no por
+ * un import de `vigencias.ts`. Obligatorio a propósito: un default que
+ * apuntara a la implementación provisional reconstruiría en silencio
+ * exactamente el acoplamiento que este parámetro existe para evitar, y nadie
+ * lo notaría hasta el día de la consolidación con SIGP. Si falta, no compila.
  */
 export function evaluarVigencia(
   r: Pick<Requisito, 'tipo_evidencia'>,
   doc: Pick<DocumentoEmpresa, 'fecha_vigencia_hasta' | 'activo'> | null | undefined,
   fechaCierre: Timestamp | null | undefined,
+  motor: Pick<MotorVigencias, 'venceAntesDe'>,
 ): VeredictoVigencia {
   if (r.tipo_evidencia !== 'documento_empresa') return NO_OBJETA
   if (!doc) return { objeta: true, estado: 'pendiente', motivo: 'DOCUMENTO_AUSENTE' }
@@ -177,7 +193,7 @@ export function evaluarVigencia(
     return { objeta: true, estado: 'pendiente', motivo: 'DOCUMENTO_INACTIVO' }
   }
   if (!fechaCierre) return NO_OBJETA
-  if (venceAntesDe(doc, fechaCierre)) {
+  if (motor.venceAntesDe(doc, fechaCierre)) {
     return { objeta: true, estado: 'no_cumple', motivo: 'VENCE_ANTES_DEL_CIERRE' }
   }
   return NO_OBJETA

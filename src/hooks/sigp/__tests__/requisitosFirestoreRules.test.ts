@@ -13,6 +13,12 @@
 //     al escribir la plantilla.
 //   · `admin`, que puede casi todo, recibiendo 403 en el delete.
 //   · `gestion_integral`, que lee media casa, sin lectura de requisitos.
+//   · `gerencia_administrativa` (Marcela), que escribe dinero en medio
+//     sistema, recibiendo 403 en LOS DOS documentos de configuración de
+//     licitaciones (plantilla y criterio del semáforo) — corrección del
+//     23-oct-2026: definir qué pide un pliego y con qué criterio se mide un
+//     proceso es conocimiento del área de licitaciones, no trabajo
+//     administrativo. Quien entra en su lugar es `director_proyectos`.
 //
 // NO forma parte del `npm test` por defecto. Se corre con:
 //   npx firebase emulators:exec --project demo-neg --only firestore \
@@ -320,8 +326,8 @@ describe('requisitos — delete denegado para TODOS', () => {
 describe('configuracion/plantilla_requisitos', () => {
   const LEEN: Actor[] = ['karen', 'giovanny', 'marcela', 'diego', 'root', 'paula', 'ingrid']
   const NO_LEEN: Actor[] = ['sofia', 'cesar']
-  const ESCRIBEN: Actor[] = ['giovanny', 'marcela', 'root']
-  const NO_ESCRIBEN: Actor[] = ['karen', 'diego', 'paula', 'ingrid', 'sofia', 'cesar']
+  const ESCRIBEN: Actor[] = ['giovanny', 'diego', 'root']
+  const NO_ESCRIBEN: Actor[] = ['karen', 'marcela', 'paula', 'ingrid', 'sofia', 'cesar']
 
   for (const a of LEEN) {
     it(`26. ${ROLES[a]} LEE la plantilla (accesoSIGP) → permitido`, async () => {
@@ -353,7 +359,8 @@ describe('configuracion/plantilla_requisitos', () => {
   }, TIMEOUT)
 
   it('31. sin delete: el historial de versiones de la plantilla no se borra', async () => {
-    for (const a of ['giovanny', 'marcela', 'root'] as Actor[]) {
+    // Con los tres que SÍ pueden escribirla: poder editar no es poder borrar.
+    for (const a of ['giovanny', 'diego', 'root'] as Actor[]) {
       await assertFails(deleteDoc(doc(db(a), PLANTILLA)))
     }
   }, TIMEOUT)
@@ -362,6 +369,20 @@ describe('configuracion/plantilla_requisitos', () => {
     await assertFails(getDoc(doc(dbAnon(), PLANTILLA)))
     await assertFails(updateDoc(doc(dbAnon(), PLANTILLA), { version_actual: 'v1.1' }))
   }, TIMEOUT)
+
+  it('32-bis. CLAVE: la corrección del 23-oct en LOS DOS documentos', async () => {
+    // El eje del cambio, probado como un solo hecho: la configuración de
+    // licitaciones la define el área de licitaciones.
+    // gerencia_administrativa FUERA de los dos; director_proyectos DENTRO de
+    // los dos. Y ambos SIGUEN LEYENDO (accesoSIGP) — no se les quitó nada
+    // que necesiten para trabajar.
+    await assertFails(updateDoc(doc(db('marcela'), PLANTILLA), { version_actual: 'v1.1' }))
+    await assertFails(updateDoc(doc(db('marcela'), CRITERIO), { version_actual: 'v1.1' }))
+    await assertSucceeds(updateDoc(doc(db('diego'), PLANTILLA), { version_actual: 'v1.1' }))
+    await assertSucceeds(updateDoc(doc(db('diego'), CRITERIO), { version_actual: 'v1.1' }))
+    await assertSucceeds(getDoc(doc(db('marcela'), PLANTILLA)))
+    await assertSucceeds(getDoc(doc(db('marcela'), CRITERIO)))
+  }, TIMEOUT)
 })
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -369,8 +390,17 @@ describe('configuracion/plantilla_requisitos', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('regresión — los bloques vecinos siguen como estaban', () => {
-  it('33. `semaforo_versiones` conserva su escritura (GG/GA/admin) y karen fuera', async () => {
-    await assertSucceeds(updateDoc(doc(db('marcela'), CRITERIO), {
+  it('33. `semaforo_versiones` quedó en [GG, director_proyectos, admin] y karen sigue fuera', async () => {
+    // NO es un caso de "sin cambios": este diff REDUJO la escritura del
+    // criterio sacando a gerencia_administrativa (ver 32-bis). Lo que sí es
+    // regresión es que karen siga fuera — lo que el 1.2 vino a garantizar.
+    await assertSucceeds(updateDoc(doc(db('diego'), CRITERIO), {
+      version_actual: 'v1.0',
+    }))
+    await assertSucceeds(updateDoc(doc(db('giovanny'), CRITERIO), {
+      version_actual: 'v1.0',
+    }))
+    await assertFails(updateDoc(doc(db('marcela'), CRITERIO), {
       version_actual: 'v1.0',
     }))
     await assertFails(updateDoc(doc(db('karen'), CRITERIO), {
