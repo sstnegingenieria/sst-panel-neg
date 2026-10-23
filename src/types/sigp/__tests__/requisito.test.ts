@@ -37,6 +37,7 @@ const req = (extra?: Partial<Requisito>): Requisito => ({
   verificado_por: null,
   verificado_en: null,
   observacion: '',
+  activo: true,
   creado_por: 'uid-karen',
   creado_en: ANTES,
   actualizado_por: 'uid-karen',

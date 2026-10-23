@@ -221,8 +221,23 @@ export interface Requisito {
   fuente_pliego: string | null
 
   tipo_evidencia: TipoEvidencia
-  /** Apunta a un `DocumentoEmpresa`. Solo con
-   *  `tipo_evidencia === 'documento_empresa'`. */
+  /**
+   * Apunta a un `DocumentoEmpresa`. Solo con
+   * `tipo_evidencia === 'documento_empresa'`.
+   *
+   * 🔴 ALCANCE (A.2a): **la colección `documentos_empresa` NO EXISTE
+   * todavía** y su dueño está PENDIENTE DE DECISIÓN DE FRONTERAS — los
+   * papeles de habilitación de la empresa (RUP, cámara, pólizas,
+   * parafiscales) son material que Gestión Integral ya custodia en otros
+   * frentes, y crear una colección propia del módulo sin esa conversación
+   * repetiría el error del SEGUNDO custodio que el A.1b acaba de cerrar
+   * para la cédula.
+   *
+   * Hasta que se resuelva, los requisitos con
+   * `tipo_evidencia === 'documento_empresa'` NO TIENEN A QUÉ APUNTAR y se
+   * verifican con `ref_tipo: 'adjunto_licitacion'` — el archivo adjunto al
+   * proceso. Este campo queda declarado y sin consumidor, deliberadamente.
+   */
   documento_empresa_id: string | null
   /** Solo con `tipo_evidencia === 'documento_personal'` o
    *  `categoria === 'personal'`. Ver invariante 3. */
@@ -241,6 +256,22 @@ export interface Requisito {
   verificado_por: string | null
   verificado_en: Timestamp | null
   observacion: string
+
+  /**
+   * Soft-delete (restricción 5.1 de la casa): nada se borra físicamente, y
+   * las reglas de `licitaciones/{id}/requisitos` DENIEGAN el delete incluso
+   * para admin.
+   *
+   * Los dos caminos, que NO son el mismo:
+   *  · `activo: false`  — el requisito estaba MAL CREADO (duplicado, typo,
+   *    se capturó del pliego equivocado). Deja de contar para el checklist.
+   *  · `estado: 'no_aplica'` — el requisito es REAL y del pliego, pero no
+   *    nos aplica. Cuenta como resuelto y exige firma (invariante 2).
+   *
+   * Confundirlos borra información: un `no_aplica` dice que alguien lo
+   * miró y decidió; un `activo: false` dice que nunca debió estar ahí.
+   */
+  activo: boolean
 
   creado_por: string
   creado_en: Timestamp
@@ -353,6 +384,7 @@ export function clonarRequisitosComoPlantilla(
     verificado_por: null,
     verificado_en: null,
     observacion: '',
+    activo: true,
 
     creado_por: actor.uid,
     creado_en: ahora,
