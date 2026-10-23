@@ -264,9 +264,14 @@ service cloud.firestore {
     //     `operacion_comercial` LEE el criterio (vía el read de
     //     `configuracion/{docId}`) y no lo ESCRIBE — quien es medido por el
     //     criterio no lo redefine.
+    //     `gerencia_administrativa` quedó FUERA (corrección 23-oct-2026):
+    //     el criterio con que se mide un proceso público es conocimiento del
+    //     área de licitaciones, no trabajo administrativo. Entra
+    //     `director_proyectos`, que sí lo es. Reducción de superficie sobre
+    //     un rol de otro frente — avisada, no silenciosa.
     function escribeCriterioSemaforo() {
       return isAuthed() && rolActual() in [
-        'gerencia_general', 'gerencia_administrativa', 'admin'
+        'gerencia_general', 'director_proyectos', 'admin'
       ];
     }
 
@@ -277,14 +282,16 @@ service cloud.firestore {
     //     un proceso / quién define la lista de lo que un pliego suele
     //     pedir), y si algún día una de las dos cambia, se cambia sola y no
     //     por cirugía sobre la otra.
-    //     `operacion_comercial` y `director_proyectos` TRABAJAN CONTRA la
-    //     plantilla y no la editan: quien es medido por una lista no la
-    //     redefine. La LECTURA la da el match genérico de
-    //     `configuracion/{docId}` (accesoSIGP) — la plantilla no tiene nada
-    //     reservado.
+    //     `operacion_comercial` TRABAJA CONTRA la plantilla y no la edita:
+    //     quien es medido por una lista no la redefine.
+    //     `gerencia_administrativa` está FUERA por la misma razón que en el
+    //     criterio: la plantilla de requisitos de pliego es conocimiento del
+    //     área de licitaciones, no trabajo administrativo.
+    //     La LECTURA la da el match genérico de `configuracion/{docId}`
+    //     (accesoSIGP) — la plantilla no tiene nada reservado.
     function editaPlantillaRequisitos() {
       return isAuthed() && rolActual() in [
-        'gerencia_general', 'gerencia_administrativa', 'admin'
+        'gerencia_general', 'director_proyectos', 'admin'
       ];
     }
 
@@ -1392,7 +1399,7 @@ service cloud.firestore {
     // incluye a operacion_comercial — no se re-declara aquí (patrón del match
     // `configuracion/horario`: cada bloque declara solo lo que AMPLÍA).
     // ESCRITURA: este match la extiende de [GG, admin] a
-    // escribeCriterioSemaforo() = [GG, gerencia_administrativa, admin].
+    // escribeCriterioSemaforo() = [GG, director_proyectos, admin].
     // En Firestore los matches se UNEN, así que el resultado es exactamente
     // esa lista — y `operacion_comercial` sigue fuera por ambas vías.
     // Sin delete: el historial de versiones del criterio no se borra.
@@ -1404,7 +1411,7 @@ service cloud.firestore {
     // LECTURA: la da el match genérico de arriba (accesoSIGP) — la plantilla
     // es la lista de lo que un pliego suele pedir, no tiene nada reservado.
     // ESCRITURA: este match la extiende de [GG, admin] a
-    // editaPlantillaRequisitos() = [GG, gerencia_administrativa, admin].
+    // editaPlantillaRequisitos() = [GG, director_proyectos, admin].
     // En Firestore los matches se UNEN, así que el resultado es exactamente
     // esa lista — y `operacion_comercial` sigue fuera por ambas vías.
     // Sin delete: el historial de versiones de la plantilla no se borra.

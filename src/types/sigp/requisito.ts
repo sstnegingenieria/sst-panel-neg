@@ -225,18 +225,31 @@ export interface Requisito {
    * Apunta a un `DocumentoEmpresa`. Solo con
    * `tipo_evidencia === 'documento_empresa'`.
    *
-   * 🔴 ALCANCE (A.2a): **la colección `documentos_empresa` NO EXISTE
-   * todavía** y su dueño está PENDIENTE DE DECISIÓN DE FRONTERAS — los
-   * papeles de habilitación de la empresa (RUP, cámara, pólizas,
-   * parafiscales) son material que Gestión Integral ya custodia en otros
-   * frentes, y crear una colección propia del módulo sin esa conversación
-   * repetiría el error del SEGUNDO custodio que el A.1b acaba de cerrar
-   * para la cédula.
+   * ── ALCANCE (resuelto el 23-oct-2026) ──────────────────────────────────
    *
-   * Hasta que se resuelva, los requisitos con
-   * `tipo_evidencia === 'documento_empresa'` NO TIENEN A QUÉ APUNTAR y se
+   * **`documentos_empresa` es de SIGP y licitaciones NO la construye.** La
+   * frontera quedó decidida: los papeles de habilitación de la empresa (RUP,
+   * cámara de comercio, pólizas, parafiscales, estados financieros) son
+   * material que ya custodia otro frente — levantar una colección propia del
+   * módulo habría creado un SEGUNDO custodio que envejece solo, el mismo
+   * error que el A.1b cerró para la cédula y el que la restricción §5.10
+   * nombra: cuando ya hay un custodio, se guarda la referencia, no otra
+   * copia.
+   *
+   * Este campo es, entonces, una REFERENCIA HACIA ADELANTE a una colección
+   * de ellos: queda declarado, con su forma fijada, y se cablea cuando SIGP
+   * la publique. Mientras no exista, los requisitos con
+   * `tipo_evidencia === 'documento_empresa'` no tienen a qué apuntar y se
    * verifican con `ref_tipo: 'adjunto_licitacion'` — el archivo adjunto al
-   * proceso. Este campo queda declarado y sin consumidor, deliberadamente.
+   * proceso, que no crea custodia porque tiene el alcance y la vida de la
+   * propuesta.
+   *
+   * Consecuencia que A.2b debe mostrar HONESTAMENTE, no disimular: un
+   * requisito de documento de empresa se verifica hoy contra un adjunto del
+   * proceso, y eso es un estado transitorio declarado — no un enlace roto ni
+   * una carpeta documental propia a medio hacer. El tipo `DocumentoEmpresa`
+   * y el motor de vigencias quedan listos y sin consumidor,
+   * deliberadamente: son el contrato con el que se leerá lo de SIGP.
    */
   documento_empresa_id: string | null
   /** Solo con `tipo_evidencia === 'documento_personal'` o

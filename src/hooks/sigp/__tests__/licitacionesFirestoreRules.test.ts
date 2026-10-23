@@ -5,6 +5,10 @@
 //   - match /licitaciones/{id}/economia/{docId} (read/write acotado)
 //   - match /configuracion/semaforo_versiones   (escritura del criterio)
 //
+// 23-oct-2026: la escritura del criterio pasó de [GG, gerencia_administrativa,
+// admin] a [GG, director_proyectos, admin]. Los casos 29 y 31 están
+// INVERTIDOS respecto del 1.2 a propósito — ver el comentario de cada uno.
+//
 // PRINCIPIO DE LA BATERÍA (lección de método del SB2.2): cada vía de
 // DENEGACIÓN se prueba con el actor de MÍNIMO PRIVILEGIO que casi puede — no
 // con un anónimo. Un 403 anónimo no prueba nada de una regla por rol: prueba
@@ -515,16 +519,21 @@ describe('configuracion/semaforo_versiones — segregación de funciones', () =>
     await assertSucceeds(updateDoc(doc(db('giovanny'), CRITERIO), { version_actual: 'v2.0' }))
   }, TIMEOUT)
 
-  it('29. gerencia_administrativa SÍ escribe (es lo que agrega este match)', async () => {
-    await assertSucceeds(updateDoc(doc(db('marcela'), CRITERIO), { version_actual: 'v2.0' }))
+  it('29. CLAVE: gerencia_administrativa NO escribe el criterio (corrección 23-oct)', async () => {
+    // Estuvo DENTRO del helper desde el 1.2 por un motivo equivocado ("es
+    // configuración, la toca gerencia"). El criterio con que se mide un
+    // proceso público es conocimiento del área de licitaciones, no trabajo
+    // administrativo. Reducción de superficie sobre un rol de otro frente.
+    await assertFails(updateDoc(doc(db('marcela'), CRITERIO), { version_actual: 'v2.0' }))
+    await assertFails(setDoc(doc(db('marcela'), CRITERIO), { versiones: {}, version_actual: 'v2.0' }))
   }, TIMEOUT)
 
   it('30. admin SÍ escribe', async () => {
     await assertSucceeds(updateDoc(doc(db('root'), CRITERIO), { version_actual: 'v2.0' }))
   }, TIMEOUT)
 
-  it('31. RECHAZO: director_proyectos no escribe el criterio', async () => {
-    await assertFails(updateDoc(doc(db('diego'), CRITERIO), { version_actual: 'v2.0' }))
+  it('31. director_proyectos SÍ escribe (es lo que agrega este match)', async () => {
+    await assertSucceeds(updateDoc(doc(db('diego'), CRITERIO), { version_actual: 'v2.0' }))
   }, TIMEOUT)
 
   it('32. RECHAZO: delete del criterio denegado incluso a gerencia_general', async () => {
@@ -532,11 +541,17 @@ describe('configuracion/semaforo_versiones — segregación de funciones', () =>
     await assertFails(deleteDoc(doc(db('root'), CRITERIO)))
   }, TIMEOUT)
 
-  it('33. REGRESIÓN: configuracion/indicadores NO ganó a gerencia_administrativa', async () => {
+  it('33. REGRESIÓN: configuracion/indicadores NO ganó a director_proyectos', async () => {
     // El match nuevo es de un doc específico; el genérico sigue en [GG, admin].
+    // Se prueba con los DOS roles que el criterio trata distinto: el que
+    // ENTRÓ (diego) no se filtra al genérico, y el que SALIÓ (marcela)
+    // tampoco lo tenía por esa vía.
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), 'configuracion/indicadores'), { meta_margen_pct: 15 })
     })
+    await assertFails(updateDoc(doc(db('diego'), 'configuracion/indicadores'), {
+      meta_margen_pct: 20,
+    }))
     await assertFails(updateDoc(doc(db('marcela'), 'configuracion/indicadores'), {
       meta_margen_pct: 20,
     }))
