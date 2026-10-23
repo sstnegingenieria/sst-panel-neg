@@ -1,0 +1,141 @@
+{
+  "version": "v1.0",
+  "nombre": "Pliego típico — reporte del área comercial (oct-2026)",
+  "origen": "Lista reportada por Karen Cartagena como los requisitos que aparecen en la mayoría de los pliegos que NEG atiende. NO es el pliego de un proceso concreto: es el punto de partida para no empezar de cero cada vez.",
+  "nota_descripcion": "Las descripciones son el NOMBRE CANÓNICO del requisito, no el texto literal de un pliego — cada entidad lo redacta distinto. Al clonar la plantilla a una licitación, quien la trabaja reemplaza o completa la descripción con el texto literal del pliego y llena `fuente_pliego` con su numeral. La plantilla es una lista de PREGUNTAS, no de respuestas: todos los requisitos nacen en `pendiente`.",
+  "nota_capitulo": "`capitulo` conserva en cuál de las tres listas de Karen venía cada ítem (la agrupación del pliego). `categoria` es la taxonomía del modelo y NO siempre coincide: el pliego agrupa 'experiencia' y 'personal mínimo' bajo Técnicos, pero el modelo tiene categorías propias para ambos — y en el caso de `personal` eso NO es cosmético, porque la invariante 3 (un requisito de personal no se cumple en abstracto) se dispara por `categoria === 'personal'`. Dejarlo en `tecnico` apagaría en silencio la guarda COPNIA justo en el requisito que costó la pérdida de 2026. `capitulo` es metadato de procedencia de la plantilla; `Requisito` no lo lleva todavía.",
+  "items": [
+    {
+      "capitulo": "juridicos",
+      "categoria": "juridico",
+      "descripcion": "Carta de presentación de la oferta",
+      "tipo_evidencia": "declaracion"
+    },
+    {
+      "capitulo": "juridicos",
+      "categoria": "juridico",
+      "descripcion": "Certificado de aportes a parafiscales y seguridad social",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "juridicos",
+      "categoria": "juridico",
+      "descripcion": "Cédula de ciudadanía del representante legal",
+      "tipo_evidencia": "documento_personal"
+    },
+    {
+      "capitulo": "juridicos",
+      "categoria": "juridico",
+      "descripcion": "Certificado de existencia y representación legal",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "juridicos",
+      "categoria": "juridico",
+      "descripcion": "Antecedentes de la empresa (fiscales, disciplinarios, judiciales y medidas correctivas)",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "juridicos",
+      "categoria": "juridico",
+      "descripcion": "Antecedentes del representante legal (fiscales, disciplinarios, judiciales y medidas correctivas)",
+      "tipo_evidencia": "documento_personal"
+    },
+    {
+      "capitulo": "juridicos",
+      "categoria": "juridico",
+      "descripcion": "Formatos de la entidad diligenciados",
+      "tipo_evidencia": "otro"
+    },
+    {
+      "capitulo": "juridicos",
+      "categoria": "juridico",
+      "descripcion": "Certificación MiPyme",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "juridicos",
+      "categoria": "juridico",
+      "descripcion": "Apoyo a la industria nacional",
+      "tipo_evidencia": "declaracion"
+    },
+    {
+      "capitulo": "juridicos",
+      "categoria": "juridico",
+      "descripcion": "Empresa de mujeres",
+      "tipo_evidencia": "declaracion"
+    },
+    {
+      "capitulo": "tecnicos",
+      "categoria": "experiencia",
+      "descripcion": "Experiencia acreditada",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "tecnicos",
+      "categoria": "personal",
+      "descripcion": "Personal mínimo requerido",
+      "tipo_evidencia": "documento_personal"
+    },
+    {
+      "capitulo": "tecnicos",
+      "categoria": "tecnico",
+      "descripcion": "Documentos del Sistema de Gestión SST",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "tecnicos",
+      "categoria": "tecnico",
+      "descripcion": "Factores de calidad",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "tecnicos",
+      "categoria": "tecnico",
+      "descripcion": "Factores ambientales",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "financieros",
+      "categoria": "financiero",
+      "descripcion": "Estados financieros",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "financieros",
+      "categoria": "financiero",
+      "descripcion": "Capacidad residual",
+      "tipo_evidencia": "otro"
+    },
+    {
+      "capitulo": "financieros",
+      "categoria": "financiero",
+      "descripcion": "RUP — Registro Único de Proponentes",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "financieros",
+      "categoria": "financiero",
+      "descripcion": "Garantía de seriedad de la oferta",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "financieros",
+      "categoria": "financiero",
+      "descripcion": "Oferta económica",
+      "tipo_evidencia": "otro"
+    },
+    {
+      "capitulo": "financieros",
+      "categoria": "financiero",
+      "descripcion": "RUT — Registro Único Tributario",
+      "tipo_evidencia": "documento_empresa"
+    },
+    {
+      "capitulo": "financieros",
+      "categoria": "financiero",
+      "descripcion": "Certificación bancaria",
+      "tipo_evidencia": "documento_empresa"
+    }
+  ]
+}
