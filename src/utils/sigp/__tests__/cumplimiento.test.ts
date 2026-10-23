@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import type { Timestamp } from 'firebase/firestore'
 import {
@@ -7,6 +9,8 @@ import {
   motivoBloqueoPresentacion, bloqueoPresentacion,
   MOTIVOS_BLOQUEO_PRESENTACION, BLOQUEOS_CON_OVERRIDE,
 } from '../cumplimiento'
+import { motorVigenciasProvisional } from '../vigencias'
+import type { MotorVigencias } from '../../../types/sigp/motorVigencias'
 import { INDICADORES_RUP } from '../../../types/sigp/requisito'
 import type { Requisito, EstadoRequisito, IndicadorRup } from '../../../types/sigp/requisito'
 import type { DocumentoEmpresa, IndicadoresRup } from '../../../types/sigp/documentoEmpresa'
@@ -46,6 +50,7 @@ const req = (extra?: Partial<Requisito>): Requisito => ({
   verificado_por: null,
   verificado_en: null,
   observacion: '',
+  activo: true,
   creado_por: 'uid-karen',
   creado_en: AHORA,
   actualizado_por: 'uid-karen',
@@ -292,22 +297,30 @@ describe('evaluarVigencia — vence antes del cierre', () => {
   const rDoc = req({ tipo_evidencia: 'documento_empresa', documento_empresa_id: 'doc-1' })
   const CIERRE = dia(2026, 9, 15, 17)
 
+  // El motor entra INYECTADO (contrato `MotorVigencias`). Acá se inyecta la
+  // implementación provisional, que es la que hoy rige; el caso del seam de
+  // más abajo prueba que de verdad se consulta la inyectada y no un import
+  // escondido.
+  type ArgsEval = Parameters<typeof evaluarVigencia>
+  const evalVig = (r: ArgsEval[0], d: ArgsEval[1], cierre: ArgsEval[2]) =>
+    evaluarVigencia(r, d, cierre, motorVigenciasProvisional)
+
   it('CLAVE: el documento vence antes del cierre ⇒ no_cumple con motivo', () => {
-    const v = evaluarVigencia(rDoc, doc({ fecha_vigencia_hasta: dia(2026, 9, 10) }), CIERRE)
+    const v = evalVig(rDoc, doc({ fecha_vigencia_hasta: dia(2026, 9, 10) }), CIERRE)
     expect(v.objeta).toBe(true)
     expect(v.estado).toBe('no_cumple')
     expect(v.motivo).toBe('VENCE_ANTES_DEL_CIERRE')
   })
 
   it('vigencia el MISMO día del cierre ⇒ no objeta', () => {
-    const v = evaluarVigencia(rDoc, doc({ fecha_vigencia_hasta: dia(2026, 9, 15, 0) }), CIERRE)
+    const v = evalVig(rDoc, doc({ fecha_vigencia_hasta: dia(2026, 9, 15, 0) }), CIERRE)
     expect(v.objeta).toBe(false)
   })
 
   it('CLAVE: cuando no objeta, NO dice "cumple" — solo que no tiene nada en contra', () => {
     // Principio 2: los automáticos vetan, no aprueban. Que un papel esté
     // vigente no significa que sea el papel correcto.
-    const v = evaluarVigencia(rDoc, doc(), CIERRE)
+    const v = evalVig(rDoc, doc(), CIERRE)
     expect(v.objeta).toBe(false)
     expect(v.estado).toBeNull()
     expect(v.motivo).toBeNull()
@@ -315,7 +328,7 @@ describe('evaluarVigencia — vence antes del cierre', () => {
 
   it('documento AUSENTE ⇒ pendiente (se consigue), no no_cumple', () => {
     for (const faltante of [null, undefined]) {
-      const v = evaluarVigencia(rDoc, faltante, CIERRE)
+      const v = evalVig(rDoc, faltante, CIERRE)
       expect(v.objeta).toBe(true)
       expect(v.estado).toBe('pendiente')
       expect(v.motivo).toBe('DOCUMENTO_AUSENTE')
@@ -323,24 +336,24 @@ describe('evaluarVigencia — vence antes del cierre', () => {
   })
 
   it('documento ARCHIVADO ⇒ pendiente: hay que apuntar al vigente', () => {
-    const v = evaluarVigencia(rDoc, doc({ activo: false }), CIERRE)
+    const v = evalVig(rDoc, doc({ activo: false }), CIERRE)
     expect(v.estado).toBe('pendiente')
     expect(v.motivo).toBe('DOCUMENTO_INACTIVO')
   })
 
   it('un documento que NO vence nunca objeta', () => {
-    expect(evaluarVigencia(rDoc, doc({ fecha_vigencia_hasta: null }), CIERRE).objeta).toBe(false)
+    expect(evalVig(rDoc, doc({ fecha_vigencia_hasta: null }), CIERRE).objeta).toBe(false)
   })
 
   it('sin fecha de cierre no objeta — no hay contra qué medir', () => {
     const vencido = doc({ fecha_vigencia_hasta: dia(2020, 1, 1) })
-    expect(evaluarVigencia(rDoc, vencido, null).objeta).toBe(false)
-    expect(evaluarVigencia(rDoc, vencido, undefined).objeta).toBe(false)
+    expect(evalVig(rDoc, vencido, null).objeta).toBe(false)
+    expect(evalVig(rDoc, vencido, undefined).objeta).toBe(false)
   })
 
   it('los requisitos que no son de documento_empresa no son asunto de este chequeo', () => {
     for (const t of ['documento_personal', 'indicador', 'declaracion', 'otro'] as const) {
-      const v = evaluarVigencia(req({ tipo_evidencia: t }), null, CIERRE)
+      const v = evalVig(req({ tipo_evidencia: t }), null, CIERRE)
       expect(v.objeta, t).toBe(false)
     }
   })
@@ -348,12 +361,80 @@ describe('evaluarVigencia — vence antes del cierre', () => {
   it('el orden de los vetos: ausente y archivado pesan antes que la fecha', () => {
     // Un documento archivado Y vencido se reporta como archivado: la acción
     // que desbloquea es apuntar a otro, no renovar este.
-    const v = evaluarVigencia(rDoc, doc({ activo: false, fecha_vigencia_hasta: dia(2020, 1, 1) }), CIERRE)
+    const v = evalVig(rDoc, doc({ activo: false, fecha_vigencia_hasta: dia(2020, 1, 1) }), CIERRE)
     expect(v.motivo).toBe('DOCUMENTO_INACTIVO')
   })
 
   it('cada motivo declarado tiene label', () => {
     for (const m of MOTIVOS_VIGENCIA) expect(MOTIVO_VIGENCIA_LABEL[m], m).toBeTruthy()
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════════════════
+// LA FRONTERA CON SIGP — el motor de vigencias entra por contrato
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// `utils/sigp/vigencias.ts` es PROVISIONAL: SIGP va a consolidarlo con su
+// `utils/vencimiento.ts`. Estos casos fijan que la consolidación cueste UN
+// archivo — que `cumplimiento.ts` consulte el motor QUE SE LE PASA y no uno
+// importado por detrás. Sin ellos, alguien podría volver al import directo y
+// la suite seguiría verde con el acoplamiento reconstruido.
+
+describe('inyección del motor de vigencias (contrato MotorVigencias)', () => {
+  const rDoc = req({ tipo_evidencia: 'documento_empresa', documento_empresa_id: 'doc-1' })
+  const CIERRE = dia(2026, 9, 15, 17)
+  /** Un documento que la implementación provisional daría por NO vencido. */
+  const VIGENTE = doc({ fecha_vigencia_hasta: dia(2030, 1, 1) })
+
+  it('CLAVE: se consulta el motor INYECTADO, no un import escondido', () => {
+    const llamadas: unknown[] = []
+    const stub: Pick<MotorVigencias, 'venceAntesDe'> = {
+      venceAntesDe: (d, fecha) => { llamadas.push([d, fecha]); return true },
+    }
+    // El provisional diría "no vence"; el stub dice "vence". Gana el stub.
+    expect(evaluarVigencia(rDoc, VIGENTE, CIERRE, motorVigenciasProvisional).objeta).toBe(false)
+    const v = evaluarVigencia(rDoc, VIGENTE, CIERRE, stub)
+    expect(v.objeta).toBe(true)
+    expect(v.motivo).toBe('VENCE_ANTES_DEL_CIERRE')
+    expect(llamadas).toHaveLength(1)
+  })
+
+  it('los vetos que NO son de fecha se resuelven sin tocar el motor', () => {
+    // Ausente y archivado son del checklist, no de vigencias: un motor que
+    // explote no puede romperlos.
+    const explota: Pick<MotorVigencias, 'venceAntesDe'> = {
+      venceAntesDe: () => { throw new Error('el motor no debía ser consultado') },
+    }
+    expect(evaluarVigencia(rDoc, null, CIERRE, explota).motivo).toBe('DOCUMENTO_AUSENTE')
+    expect(evaluarVigencia(rDoc, doc({ activo: false }), CIERRE, explota).motivo)
+      .toBe('DOCUMENTO_INACTIVO')
+    expect(evaluarVigencia(req({ tipo_evidencia: 'indicador' }), VIGENTE, CIERRE, explota).objeta)
+      .toBe(false)
+    expect(evaluarVigencia(rDoc, VIGENTE, null, explota).objeta).toBe(false)
+  })
+
+  it('GUARDARRAÍL: cumplimiento.ts NO importa la implementación de vigencias', () => {
+    // Patrón del guardarraíl de Ley 1581 y de rolResidente.test.ts: se lee el
+    // ARCHIVO FUENTE. Un test de comportamiento no atrapa un import de vuelta
+    // a `./vigencias` — el resultado sería idéntico mientras la provisional
+    // sea la que rige, y la frontera estaría rota en silencio hasta el día de
+    // la consolidación con SIGP.
+    const fuente = readFileSync(resolve(__dirname, '../cumplimiento.ts'), 'utf8')
+    const imports = fuente.match(/^import[sS]*?froms+'[^']+'/gm) ?? []
+    const deVigencias = imports.filter(i => /vigencias'$/.test(i))
+    expect(deVigencias, 'cumplimiento.ts no debe importar de ./vigencias').toEqual([])
+    // Y la dependencia correcta sí está: el CONTRATO, solo como tipo.
+    expect(fuente).toContain("import type { MotorVigencias } from '../../types/sigp/motorVigencias'")
+  })
+
+  it('la implementación provisional CUMPLE el contrato en runtime', () => {
+    // El `: MotorVigencias` del archivo lo fija en compilación; esto lo fija
+    // también acá, para que un `as` futuro no lo evada en silencio.
+    const motor: MotorVigencias = motorVigenciasProvisional
+    expect(typeof motor.estadoVigencia).toBe('function')
+    expect(typeof motor.venceAntesDe).toBe('function')
+    expect(Object.keys(motorVigenciasProvisional).sort())
+      .toEqual(['estadoVigencia', 'venceAntesDe'])
   })
 })
 

@@ -264,9 +264,34 @@ service cloud.firestore {
     //     `operacion_comercial` LEE el criterio (vía el read de
     //     `configuracion/{docId}`) y no lo ESCRIBE — quien es medido por el
     //     criterio no lo redefine.
+    //     `gerencia_administrativa` quedó FUERA (corrección 23-oct-2026):
+    //     el criterio con que se mide un proceso público es conocimiento del
+    //     área de licitaciones, no trabajo administrativo. Entra
+    //     `director_proyectos`, que sí lo es. Reducción de superficie sobre
+    //     un rol de otro frente — avisada, no silenciosa.
     function escribeCriterioSemaforo() {
       return isAuthed() && rolActual() in [
-        'gerencia_general', 'gerencia_administrativa', 'admin'
+        'gerencia_general', 'director_proyectos', 'admin'
+      ];
+    }
+
+    // 14-bis. Quién EDITA la plantilla de requisitos del pliego típico
+    //     (`configuracion/plantilla_requisitos`, A.2a). Misma lista que
+    //     escribeCriterioSemaforo HOY, pero helper PROPIO a propósito: son
+    //     dos preguntas distintas (quién define el criterio con que se mide
+    //     un proceso / quién define la lista de lo que un pliego suele
+    //     pedir), y si algún día una de las dos cambia, se cambia sola y no
+    //     por cirugía sobre la otra.
+    //     `operacion_comercial` TRABAJA CONTRA la plantilla y no la edita:
+    //     quien es medido por una lista no la redefine.
+    //     `gerencia_administrativa` está FUERA por la misma razón que en el
+    //     criterio: la plantilla de requisitos de pliego es conocimiento del
+    //     área de licitaciones, no trabajo administrativo.
+    //     La LECTURA la da el match genérico de `configuracion/{docId}`
+    //     (accesoSIGP) — la plantilla no tiene nada reservado.
+    function editaPlantillaRequisitos() {
+      return isAuthed() && rolActual() in [
+        'gerencia_general', 'director_proyectos', 'admin'
       ];
     }
 
@@ -1374,12 +1399,24 @@ service cloud.firestore {
     // incluye a operacion_comercial — no se re-declara aquí (patrón del match
     // `configuracion/horario`: cada bloque declara solo lo que AMPLÍA).
     // ESCRITURA: este match la extiende de [GG, admin] a
-    // escribeCriterioSemaforo() = [GG, gerencia_administrativa, admin].
+    // escribeCriterioSemaforo() = [GG, director_proyectos, admin].
     // En Firestore los matches se UNEN, así que el resultado es exactamente
     // esa lista — y `operacion_comercial` sigue fuera por ambas vías.
     // Sin delete: el historial de versiones del criterio no se borra.
     match /configuracion/semaforo_versiones {
       allow create, update: if escribeCriterioSemaforo();
+    }
+
+    // ── Plantilla de requisitos del pliego típico (A.2a) ──
+    // LECTURA: la da el match genérico de arriba (accesoSIGP) — la plantilla
+    // es la lista de lo que un pliego suele pedir, no tiene nada reservado.
+    // ESCRITURA: este match la extiende de [GG, admin] a
+    // editaPlantillaRequisitos() = [GG, director_proyectos, admin].
+    // En Firestore los matches se UNEN, así que el resultado es exactamente
+    // esa lista — y `operacion_comercial` sigue fuera por ambas vías.
+    // Sin delete: el historial de versiones de la plantilla no se borra.
+    match /configuracion/plantilla_requisitos {
+      allow create, update: if editaPlantillaRequisitos();
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -1654,6 +1691,67 @@ service cloud.firestore {
       // borra. Denegado incluso para admin.
       match /economia/{docId} {
         allow read, create, update: if veEconomiaLicitacion();
+      }
+
+      // ── REQUISITOS del pliego (subcolección, A.2a) ──
+      // El checklist de habilitación. Como `economia`, este match NO hereda
+      // del padre (un `match` de documento no cubre subcolecciones salvo con
+      // `{x=**}`, que deliberadamente no se usa) — pero a diferencia de la
+      // economía, acá SÍ entra todo el módulo: el checklist es el trabajo de
+      // quien arma la propuesta.
+      //
+      // Lo que las reglas fijan es lo que un cliente NO puede falsear; la
+      // máquina del requisito y sus cuatro invariantes las imponen los patch
+      // builders puros de `types/sigp/requisito.ts`.
+      match /requisitos/{reqId} {
+        allow read: if gestionaLicitaciones();
+
+        // NACE COMO PREGUNTA, NO COMO RESPUESTA: siempre `pendiente`, con
+        // descripción (un requisito sin texto no es verificable por nadie) y
+        // activo. `estado: 'pendiente'` en el create es la pata de reglas de
+        // la invariante 1 — ni clonando una plantilla ni por un write a mano
+        // entra un veredicto heredado.
+        // `creado_por` real no suplantable: patrón del padre, de OC y de
+        // tareas. No estaba en el pedido; se agrega porque dejar el autor
+        // falsificable en una colección nueva, cuando todas sus hermanas lo
+        // fijan, es abrir un hueco a sabiendas.
+        allow create: if gestionaLicitaciones()
+                      && request.resource.data.get('creado_por', '') == request.auth.uid
+                      && request.resource.data.get('estado', '') == 'pendiente'
+                      && request.resource.data.get('descripcion', '') != ''
+                      && request.resource.data.get('activo', false) == true;
+
+        // NADIE FIRMA UN VEREDICTO CON EL NOMBRE DE OTRO. Como
+        // `request.resource.data` es el documento RESULTANTE: si el resultado
+        // NO es `pendiente`, su `verificado_por` tiene que ser quien está
+        // escribiendo.
+        //
+        // ⚠ CONSECUENCIA DELIBERADA, que no es obvia leyendo la frase: un
+        // requisito ya verificado por Pedro NO lo puede tocar Karen sin
+        // volver a firmarlo ella. No es un bloqueo — `patchMarcarRequisito`
+        // re-firma con el actor en cada movimiento, así que el camino normal
+        // funciona y queda honesto (si Karen lo edita, Karen es la nueva
+        // verificadora). Y devolverlo a `pendiente` siempre está abierto:
+        // ahí el resultado ES pendiente y la cláusula no aplica.
+        //
+        // `actualizado_por` real y `creado_por` inmutable: mismas razones que
+        // en el padre; tampoco estaban en el pedido.
+        allow update: if gestionaLicitaciones()
+                      && request.resource.data.get('actualizado_por', '') == request.auth.uid
+                      && request.resource.data.get('creado_por', '')
+                           == resource.data.get('creado_por', '')
+                      && (
+                           request.resource.data.get('estado', '') == 'pendiente'
+                           || request.resource.data.get('verificado_por', '')
+                                == request.auth.uid
+                         );
+
+        // Sin delete — DENEGADO SIEMPRE, incluso para admin (restricción 5.1).
+        // Los dos caminos, que no son el mismo: un requisito MAL CREADO se
+        // marca `activo: false` (nunca debió estar ahí); uno que no
+        // corresponde al pliego va a `no_aplica` (alguien lo miró y decidió,
+        // y queda firmado por la invariante 2). Borrarlo perdería cuál de
+        // las dos cosas pasó.
       }
     }
 

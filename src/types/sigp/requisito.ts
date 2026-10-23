@@ -221,8 +221,36 @@ export interface Requisito {
   fuente_pliego: string | null
 
   tipo_evidencia: TipoEvidencia
-  /** Apunta a un `DocumentoEmpresa`. Solo con
-   *  `tipo_evidencia === 'documento_empresa'`. */
+  /**
+   * Apunta a un `DocumentoEmpresa`. Solo con
+   * `tipo_evidencia === 'documento_empresa'`.
+   *
+   * ── ALCANCE (resuelto el 23-oct-2026) ──────────────────────────────────
+   *
+   * **`documentos_empresa` es de SIGP y licitaciones NO la construye.** La
+   * frontera quedó decidida: los papeles de habilitación de la empresa (RUP,
+   * cámara de comercio, pólizas, parafiscales, estados financieros) son
+   * material que ya custodia otro frente — levantar una colección propia del
+   * módulo habría creado un SEGUNDO custodio que envejece solo, el mismo
+   * error que el A.1b cerró para la cédula y el que la restricción §5.10
+   * nombra: cuando ya hay un custodio, se guarda la referencia, no otra
+   * copia.
+   *
+   * Este campo es, entonces, una REFERENCIA HACIA ADELANTE a una colección
+   * de ellos: queda declarado, con su forma fijada, y se cablea cuando SIGP
+   * la publique. Mientras no exista, los requisitos con
+   * `tipo_evidencia === 'documento_empresa'` no tienen a qué apuntar y se
+   * verifican con `ref_tipo: 'adjunto_licitacion'` — el archivo adjunto al
+   * proceso, que no crea custodia porque tiene el alcance y la vida de la
+   * propuesta.
+   *
+   * Consecuencia que A.2b debe mostrar HONESTAMENTE, no disimular: un
+   * requisito de documento de empresa se verifica hoy contra un adjunto del
+   * proceso, y eso es un estado transitorio declarado — no un enlace roto ni
+   * una carpeta documental propia a medio hacer. El tipo `DocumentoEmpresa`
+   * y el motor de vigencias quedan listos y sin consumidor,
+   * deliberadamente: son el contrato con el que se leerá lo de SIGP.
+   */
   documento_empresa_id: string | null
   /** Solo con `tipo_evidencia === 'documento_personal'` o
    *  `categoria === 'personal'`. Ver invariante 3. */
@@ -241,6 +269,22 @@ export interface Requisito {
   verificado_por: string | null
   verificado_en: Timestamp | null
   observacion: string
+
+  /**
+   * Soft-delete (restricción 5.1 de la casa): nada se borra físicamente, y
+   * las reglas de `licitaciones/{id}/requisitos` DENIEGAN el delete incluso
+   * para admin.
+   *
+   * Los dos caminos, que NO son el mismo:
+   *  · `activo: false`  — el requisito estaba MAL CREADO (duplicado, typo,
+   *    se capturó del pliego equivocado). Deja de contar para el checklist.
+   *  · `estado: 'no_aplica'` — el requisito es REAL y del pliego, pero no
+   *    nos aplica. Cuenta como resuelto y exige firma (invariante 2).
+   *
+   * Confundirlos borra información: un `no_aplica` dice que alguien lo
+   * miró y decidió; un `activo: false` dice que nunca debió estar ahí.
+   */
+  activo: boolean
 
   creado_por: string
   creado_en: Timestamp
@@ -353,6 +397,7 @@ export function clonarRequisitosComoPlantilla(
     verificado_por: null,
     verificado_en: null,
     observacion: '',
+    activo: true,
 
     creado_por: actor.uid,
     creado_en: ahora,

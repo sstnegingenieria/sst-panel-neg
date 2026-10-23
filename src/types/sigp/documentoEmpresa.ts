@@ -9,15 +9,28 @@
  * vigencia, para que el checklist pueda decir "este vence antes del cierre"
  * ANTES de presentar y no después.
  *
+ * ── DE QUIÉN ES LA COLECCIÓN (frontera resuelta el 23-oct-2026) ─────────────
+ *
+ * **`documentos_empresa` es de SIGP. Licitaciones NO la construye.** Este
+ * archivo es la FORMA con la que el checklist la leerá — el contrato, no el
+ * dueño. Mismo patrón "consulta, no gestión" de la regla 7.2: el módulo
+ * consume un estado que otro frente produce. Levantar una colección propia
+ * habría creado un segundo custodio de papeles que ya tienen uno, que es
+ * exactamente lo que la restricción §5.10 prohíbe.
+ *
+ * Consecuencia: este tipo queda SIN CONSUMIDOR a propósito hasta que SIGP
+ * publique la colección.
+ *
  * ── DOS DECISIONES DE FORMA ─────────────────────────────────────────────────
  *
  * 1. EL ESTADO DE VIGENCIA NO SE PERSISTE. No existe un campo `vencido`:
  *    sería un dato que envejece solo y que habría que recalcular con un cron
- *    para que no mienta. Se DERIVA con `estadoVigencia()` de
- *    `utils/sigp/vigencias.ts`, que lee `fecha_vigencia_hasta` y
- *    `dias_alerta`. Mismo criterio que `validez_dias` en `cotizacion.ts` y
- *    que `getDocEstado` del panel SST: lo guardado es la fecha, el juicio se
- *    calcula al mirar.
+ *    para que no mienta. Se DERIVA con `estadoVigencia()` — hoy la de
+ *    `utils/sigp/vigencias.ts`, que es PROVISIONAL (SIGP la va a consolidar
+ *    con su `utils/vencimiento.ts`); el checklist la consume por el contrato
+ *    `MotorVigencias`, así que el reemplazo no toca este tipo. Mismo criterio
+ *    que `validez_dias` en `cotizacion.ts` y que `getDocEstado` del panel
+ *    SST: lo guardado es la fecha, el juicio se calcula al mirar.
  *
  * 2. LOS INDICADORES DEL RUP NO SON DATO CONFIDENCIAL. El RUP lo expide la
  *    Cámara de Comercio y cualquiera lo compra: sus indicadores son públicos
