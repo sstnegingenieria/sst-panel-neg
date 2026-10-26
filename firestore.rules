@@ -971,6 +971,53 @@ service cloud.firestore {
               || request.resource.data.get('tipo', '') == 'administracion_directa';
         }
 
+        // GATE SST en la transición hacia 'liquidada' (26-oct — cierre del
+        // hallazgo del frente SGI/SST, el cuarto de la racha «control
+        // declarado ≠ control verificado»: la rama de gerencia liquidaba sin
+        // consultar el aval — el gate "no esquivable" solo vivía en la UI).
+        // Mismo criterio que la regla del padre hacia liquidado_contratista:
+        // `verificaciones_sst/{proyectoId}.sst_gate` en 'al_dia'. Tres
+        // términos: lo que NO llega a 'liquidada' no pide gate; un doc que
+        // YA está liquidada no re-evalúa la transición (se sigue editando —
+        // p. ej. un reembolso posterior); y LLEGAR exige el aval 'al_dia'
+        // del MISMO proyecto Y rol gerencia_administrativa o admin.
+        // ESTRECHAMIENTO (26-oct, mandato: "una regla más ancha que la
+        // interfaz es una capacidad que nadie sabe que existe"): liquidar es
+        // de gerencia_administrativa (espejo de puedeLiquidarUI) + admin como
+        // respaldo de infraestructura DECLARADO aquí; gestion_integral queda
+        // fuera (escribe el gate — avalarse y pagarse rompería la
+        // segregación) y gerencia_general también (ninguna pantalla se lo
+        // ofrecía; aprobar preliquidación con salvedad sigue siendo su vía).
+        // SIN exención por `tipo`: la ADMINISTRACIÓN DIRECTA la cierran los
+        // GESTORES por su propia rama (sin gate — decisión 04-sep,
+        // RATIFICADA 26-oct: no sale dinero a terceros); eximirla aquí
+        // dejaría una etiqueta editable como único candado.
+        // Sin proyección el get() falla y la regla CIERRA — la ausencia de
+        // dato JAMÁS se interpreta como aval. Incluye `cancelada → liquidada`
+        // en un proyecto CANCELADO (sin proyección): queda CERRADA y
+        // NOMBRADA (26-oct, censo: 2 canceladas en prod, ambas con $0
+        // girado) — cuando exista el primer cancelado con incurrido real se
+        // construye su vía explícita con autorización y traza propias, no un
+        // hueco por ausencia de proyección.
+        // ⚠ LÍMITE CONOCIDO (26-oct, levantado por el frente SGI/SST): el
+        // gate es POR PROYECTO y la proyección nombra UN contratista_id,
+        // pero desde que el átomo bajó al ítem un proyecto puede tener
+        // VARIOS contratistas — este gate puede estar evaluando al que no
+        // cobra (censo 26-oct: 0 multi-contratista en el tramo, 2 en toda la
+        // base aguas arriba). INCOMPLETO mientras la proyección sea por
+        // proyecto; el rediseño (proyección por contratista) es bloque
+        // propio co-diseñado con el frente SGI/SST.
+        // RESIDUAL conocido: los nacimientos en `liquidada` por CREATE
+        // (registro histórico de gerencia / migración 'legacy') son otra vía
+        // y no cambian — mientras existan, el gate no es total.
+        function avalSstParaLiquidar() {
+          return request.resource.data.get('estado', '') != 'liquidada'
+              || resource.data.get('estado', '') == 'liquidada'
+              || (rolActual() in ['gerencia_administrativa', 'admin']
+                  && get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
+                       .data.get('sst_gate', {}).get('estado', '') == 'al_dia');
+        }
+
         // CREATE — tres nacimientos, cada uno con su guardia:
         // (a) REGISTRO HISTÓRICO retroactivo (condición Giovanny 03-sep):
         //     afirmar "se pagó por fuera del panel" es una DECLARACIÓN DE
@@ -1043,11 +1090,13 @@ service cloud.firestore {
                 || resource.data.get('tipo', '') == 'administracion_directa'))
           ||
           // GERENCIA (+ respaldo): aprueba/gira/liquida, acotada por-campo;
-          // fijar aprobación exige la titular o salvedad escrita (PR #45).
+          // fijar aprobación exige la titular o salvedad escrita (PR #45);
+          // LLEGAR a 'liquidada' exige el aval SST del proyecto (26-oct).
           (isAuthed()
             && rolActual() in ['gerencia_administrativa', 'admin', 'gerencia_general', 'gestion_integral']
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['estado', 'preliquidacion', 'liquidacion', 'compras_reembolsos', 'historial', 'fecha_actualizacion'])
+            && avalSstParaLiquidar()
             && (!fijaAprobacionPreliq()
                 || rolActual() == 'gerencia_administrativa'
                 || salvedadPreliq() != '')));
