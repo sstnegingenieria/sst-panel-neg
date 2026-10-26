@@ -1,0 +1,55 @@
+diff --git a/firestore.rules b/firestore.rules
+index 69ad640..838a509 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -890,6 +890,42 @@ service cloud.firestore {
+               || request.resource.data.get('tipo', '') == 'administracion_directa';
+         }
+ 
++        // GATE SST en la transición hacia 'liquidada' (cierre del hallazgo de
++        // la revisión de seguridad: la rama de gerencia liquidaba sin
++        // consultar el aval — el gate "no esquivable" solo vivía en la UI).
++        // Mismo criterio que la regla de `proyectos` hacia
++        // liquidado_contratista: `verificaciones_sst/{proyectoId}.sst_gate`
++        // en 'al_dia'. Dos exenciones, cada una por su razón:
++        //  · un doc que YA está liquidada no re-evalúa la transición (se
++        //    sigue editando sin pedir el aval otra vez);
++        //  · lo que no LLEGA a liquidada (cancelar, aprobar, girar…) no lo
++        //    toca.
++        // NO hay exención por tipo: la ADMINISTRACIÓN DIRECTA la cierran los
++        // GESTORES por su propia rama (sin gate — decisión 04-sep) y la
++        // gerencia no tiene función ahí; eximirla en esta rama dejaba una
++        // etiqueta (`tipo`) como único candado de una vía que admite
++        // anticipo/liquidación con saldo.
++        // `gestion_integral` NO liquida: puede escribir el gate (regla de
++        // verificaciones_sst), así que liquidar también le permitiría
++        // avalarse a sí mismo. La UI (puedeLiquidarUI) y la regla del padre
++        // ya lo excluyen; aquí se alinea. Su respaldo sigue siendo la
++        // aprobación de preliquidación.
++        // Sin proyección (proyecto fuera del tramo administrativo: la CF solo
++        // la crea desde `facturado`) el get() falla y la regla CIERRA — el
++        // mismo resultado que el builder (solo liquida con el proyecto en
++        // pagado_cliente/facturado). Incluye `cancelada → liquidada` en un
++        // proyecto CANCELADO (sin proyección): hoy cerrada también en la UI.
++        // RESIDUAL conocido: los nacimientos en `liquidada` por create
++        // (registro histórico de gerencia / migración 'legacy') son otra vía y
++        // no cambian — mientras existan, el gate no es total.
++        function avalSstParaLiquidar() {
++          return request.resource.data.get('estado', '') != 'liquidada'
++              || resource.data.get('estado', '') == 'liquidada'
++              || (rolActual() != 'gestion_integral'
++                  && get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
++                       .data.get('sst_gate', {}).get('estado', '') == 'al_dia');
++        }
++
+         // CREATE — tres nacimientos, cada uno con su guardia:
+         // (a) REGISTRO HISTÓRICO retroactivo (condición Giovanny 03-sep):
+         //     afirmar "se pagó por fuera del panel" es una DECLARACIÓN DE
+@@ -967,6 +1003,7 @@ service cloud.firestore {
+             && rolActual() in ['gerencia_administrativa', 'admin', 'gerencia_general', 'gestion_integral']
+             && request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['estado', 'preliquidacion', 'liquidacion', 'compras_reembolsos', 'historial', 'fecha_actualizacion'])
++            && avalSstParaLiquidar()
+             && (!fijaAprobacionPreliq()
+                 || rolActual() == 'gerencia_administrativa'
+                 || salvedadPreliq() != '')));
