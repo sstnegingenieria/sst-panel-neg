@@ -36,6 +36,7 @@ import { separarSenales, diasSenal, UMBRAL_SENAL_ALCANCE_DIAS } from '../../type
 import { cargarAsignaciones } from '../../utils/sigp/asignaciones'
 import { ID_TAREA_SENAL, construirTareaSenal } from '../../types/sigp/tarea'
 import type { Proyecto, MedioPago } from '../../types/sigp/proyecto'
+import { gateAgregadoDe } from '../../types/sigp/verificacionSst'
 import type { VerificacionSst } from '../../types/sigp/verificacionSst'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
@@ -177,9 +178,37 @@ export default function FacturacionPagos() {
       // informativa — el panel narra TODO el pipeline.
       setProyectos(todos.filter(p => p.snapshot &&
         (enBandejaAdministrativa(p.estado) || enCaminoAdministrativa(p.estado))))
-      // Chip del gate SST (solo lectura — el gate lo marca SST en su cola)
+      // Chip del gate SST (solo lectura — el gate lo marca SST en su cola).
+      // 28-oct (Parte A): la proyección es POR CONTRATISTA ({pid}__{cid}) —
+      // el chip del proyecto muestra el PEOR estado entre sus contratistas
+      // vivos (desglose en el tooltip); con uno solo, su doc tal cual (se
+      // conservan aval físico/observación). El doc legacy {pid} solo sirve
+      // de respaldo PRE-migración y se ignora si trae `migrada_a`.
       const gatesSnap = await getDocs(collection(db, 'verificaciones_sst'))
-      setGates(Object.fromEntries(gatesSnap.docs.map(d => [d.id, d.data() as VerificacionSst])))
+      const porProyecto: Record<string, VerificacionSst[]> = {}
+      const legacy: Record<string, VerificacionSst> = {}
+      for (const d of gatesSnap.docs) {
+        const v = d.data() as VerificacionSst
+        if (d.id.includes('__')) (porProyecto[v.proyecto_id] ??= []).push(v)
+        else legacy[d.id] = v
+      }
+      const efectivos: Record<string, VerificacionSst> = {}
+      for (const [pid, docsP] of Object.entries(porProyecto)) {
+        const vivas = docsP.filter(x => x.activa !== false)
+        if (vivas.length === 1) efectivos[pid] = vivas[0]
+        else {
+          const ag = gateAgregadoDe(docsP)
+          efectivos[pid] = {
+            ...docsP[0],
+            contratista_nombre: `${vivas.length} contratistas`,
+            sst_gate: { estado: ag.estado, observacion: ag.detalle.join(' · ') } as VerificacionSst['sst_gate'],
+          }
+        }
+      }
+      for (const [pid, v] of Object.entries(legacy)) {
+        if (!efectivos[pid] && !v.migrada_a) efectivos[pid] = v
+      }
+      setGates(efectivos)
     } catch {
       toast('Error al cargar la bandeja', 'error')
     } finally { setLoading(false) }

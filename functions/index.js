@@ -32,7 +32,7 @@ if (!admin.apps.length) {
 
 const { generarConsecutivo } = require('./consecutivos');
 const { asignarObraAlPrincipal } = require('./obraEspejo');
-const { sincronizarVerificacionSst } = require('./verificacionesSst');
+const { sincronizarVerificacionSst, sincronizarVerificacionSstAsignaciones } = require('./verificacionesSst');
 const { sincronizarComprasProyectoDesdeOC, sincronizarComprasProyectoDesdeMenores } = require('./comprasProyecto');
 const { crearProyectoAlAprobarCotizacion, crearProyectoAlAceptarPreventivo } = require('./crearProyecto');
 const { latidoJornada } = require('./jornadas');
@@ -44,6 +44,7 @@ const { censoConsecutivos } = require('./censoConsecutivos');
 exports.generarConsecutivo = generarConsecutivo;
 exports.asignarObraAlPrincipal = asignarObraAlPrincipal;
 exports.sincronizarVerificacionSst = sincronizarVerificacionSst;
+exports.sincronizarVerificacionSstAsignaciones = sincronizarVerificacionSstAsignaciones;
 exports.sincronizarComprasProyectoDesdeOC = sincronizarComprasProyectoDesdeOC;
 exports.sincronizarComprasProyectoDesdeMenores = sincronizarComprasProyectoDesdeMenores;
 exports.crearProyectoAlAprobarCotizacion = crearProyectoAlAprobarCotizacion;

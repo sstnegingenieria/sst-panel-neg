@@ -880,8 +880,18 @@ service cloud.firestore {
                             && request.resource.data.get('pago_cliente', null) != null))
                     && (request.resource.data.get('estado', '') != 'liquidado_contratista'
                         || resource.data.get('estado', '') == 'liquidado_contratista'
-                        || (get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
-                              .data.sst_gate.estado == 'al_dia'
+                        // A.4 (28-oct — "la garantía vive donde sale el dinero"): el
+                        // padre deja su propio get POR PROYECTO. O es el PUENTE del
+                        // lote (sin 'liquidacion' propia; el resumen declara todo
+                        // liquidado/cancelado — cada asignación ya pasó SU gate por
+                        // contratista en su propio update), o es la vía LEGACY
+                        // por-proyecto y el gate se consulta al doc del contratista
+                        // de SU asignación. Duplicar la verificación arriba crearía
+                        // dos verdades sobre lo mismo.
+                        || (((!request.resource.data.diff(resource.data).affectedKeys().hasAny(['liquidacion'])
+                              && request.resource.data.get('resumen_asignaciones', {}).get('por_estado', {}).keys().hasOnly(['liquidada', 'cancelada']))
+                             || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId + '__' + resource.data.get('asignacion', {}).get('contratista_id', '')))
+                                  .data.get('sst_gate', {}).get('estado', '') == 'al_dia')
                             && (resource.data.get('estado', '') == 'pagado_cliente'
                                 || (resource.data.get('estado', '') == 'facturado'
                                     && request.resource.data.get('liquidacion', {}).get('liquidacion_anticipada', false) == true
@@ -939,8 +949,13 @@ service cloud.firestore {
                     // el pago posterior) sin re-evaluar la transición.
                     && (request.resource.data.get('estado', '') != 'liquidado_contratista'
                         || resource.data.get('estado', '') == 'liquidado_contratista'
-                        || (get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
-                              .data.sst_gate.estado == 'al_dia'
+                        // A.4 (28-oct): mismo reemplazo que en la vía de gestores —
+                        // puente del lote con resumen coherente, o gate POR
+                        // CONTRATISTA de la asignación del padre (vía legacy).
+                        || (((!request.resource.data.diff(resource.data).affectedKeys().hasAny(['liquidacion'])
+                              && request.resource.data.get('resumen_asignaciones', {}).get('por_estado', {}).keys().hasOnly(['liquidada', 'cancelada']))
+                             || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId + '__' + resource.data.get('asignacion', {}).get('contratista_id', '')))
+                                  .data.get('sst_gate', {}).get('estado', '') == 'al_dia')
                             && (resource.data.get('estado', '') == 'pagado_cliente'
                                 || (resource.data.get('estado', '') == 'facturado'
                                     && request.resource.data.get('liquidacion', {}).get('liquidacion_anticipada', false) == true
@@ -1010,11 +1025,20 @@ service cloud.firestore {
         // RESIDUAL conocido: los nacimientos en `liquidada` por CREATE
         // (registro histórico de gerencia / migración 'legacy') son otra vía
         // y no cambian — mientras existan, el gate no es total.
+        // 28-oct (Parte A del bloque proyección/saldo — CIERRA el límite
+        // escrito del PR #193): el get apunta al doc POR CONTRATISTA
+        // `{proyectoId}__{contratista_id}` — SST avala al CONTRATISTA en el
+        // proyecto (sus N asignaciones), y con varios contratistas el gate
+        // ya no puede estar evaluando al que no cobra. `contratista_id` se
+        // lee del RESOURCE (el doc existente) y es INMUTABLE en el update
+        // (guard A3 abajo): no es suplantable en el mismo write. Sin doc
+        // (legacy sin migrar, directa, o contratista sin proyección) el get
+        // FALLA → DENIEGA — la ausencia jamás se lee como aval.
         function avalSstParaLiquidar() {
           return request.resource.data.get('estado', '') != 'liquidada'
               || resource.data.get('estado', '') == 'liquidada'
               || (rolActual() in ['gerencia_administrativa', 'admin']
-                  && get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId))
+                  && get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId + '__' + resource.data.get('contratista_id', '')))
                        .data.get('sst_gate', {}).get('estado', '') == 'al_dia');
         }
 
@@ -1067,6 +1091,13 @@ service cloud.firestore {
         //  · `cierre_directa` solo se toca en el tipo directa.
         allow update: if
           estadoCoherenteAsig()
+          // [A3 — 28-oct, BLOQUEA de la revisión del frente] contratista_id
+          // INMUTABLE desde la creación, en TODAS las vías: mover una
+          // asignación viva al contratista que está al día y liquidar con el
+          // aval equivocado es exactamente el bypass que el gate por
+          // contratista existe para impedir.
+          && !request.resource.data.diff(resource.data).affectedKeys()
+               .hasAny(['contratista_id'])
           && ((puedeCrearProyectos()
             && !request.resource.data.diff(resource.data).affectedKeys()
                  .hasAny(['registro_historico', 'legacy'])

@@ -14,7 +14,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  collection, getDocs, getDoc, doc, updateDoc, arrayUnion, deleteField, Timestamp,
+  collection, getDocs, getDoc, doc, updateDoc, arrayUnion, deleteField, Timestamp, query, where,
 } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
@@ -36,6 +36,8 @@ import {
   ESTADO_ASIG_LABEL, ESTADO_ASIG_COLOR,
 } from '../../../types/sigp/asignacion'
 import type { AsignacionContratista } from '../../../types/sigp/asignacion'
+import { idVerificacion } from '../../../types/sigp/verificacionSst'
+import type { VerificacionSst } from '../../../types/sigp/verificacionSst'
 import { cargarAsignaciones, asegurarMigrado, crearAsignacion, escribirAsignacion } from '../../../utils/sigp/asignaciones'
 import { autorDe, conAutor } from '../../../utils/sigp/autoria'
 import { useNombresUsuarios } from '../../../hooks/sigp/useNombresUsuarios'
@@ -840,6 +842,28 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
   const puedeLiquidar = puedeLiquidarUI(user?.rol)
   const [liquidarTarget, setLiquidarTarget] = useState<AsignacionContratista | null>(null)
   const [gateSst, setGateSst] = useState<boolean | null>(null)
+
+  // A.3 (28-oct) — gates POR CONTRATISTA para los chips de las tarjetas.
+  // Carga best-effort: los roles sin lectura de la proyección (gestores) no
+  // ven chips y la ficha jamás se rompe. Mapa cid → doc {pid}__{cid}.
+  const [gatesContratista, setGatesContratista] = useState<Record<string, VerificacionSst> | null>(null)
+  useEffect(() => {
+    let vivo = true
+    ;(async () => {
+      try {
+        const snap = await getDocs(query(collection(db, 'verificaciones_sst'), where('proyecto_id', '==', proyecto.id)))
+        if (!vivo) return
+        const mapa: Record<string, VerificacionSst> = {}
+        for (const d of snap.docs) {
+          if (!d.id.includes('__')) continue        // legacy {pid} congelado: fuera
+          const v = d.data() as VerificacionSst
+          mapa[v.contratista_id] = v
+        }
+        setGatesContratista(mapa)
+      } catch { if (vivo) setGatesContratista(null) }
+    })()
+    return () => { vivo = false }
+  }, [proyecto.id, proyecto.fecha_actualizacion])
   const [retenciones, setRetenciones] = useState<RetencionLiquidacion[]>([])
   const [retConcepto, setRetConcepto] = useState('')
   const [retValor, setRetValor] = useState<number | undefined>(undefined)
@@ -853,8 +877,10 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     setJustifAnticipada(''); setAcuerdoCon(''); setGateSst(null)
     setLiquidarTarget(a)
     try {
-      // Gate SST leído de la PROYECCIÓN (gerencia la lee; sin doc = sin aval)
-      const snap = await getDoc(doc(db, 'verificaciones_sst', proyecto.id))
+      // 28-oct (Parte A): el gate es POR CONTRATISTA — espejo exacto de la
+      // regla: `{pid}__{contratista_id}` de la asignación que se liquida.
+      // Sin doc = sin aval (la ausencia jamás se lee como aval).
+      const snap = await getDoc(doc(db, 'verificaciones_sst', idVerificacion(proyecto.id, a.contratista_id)))
       setGateSst(snap.exists() ? sstGateAlDia(snap.data() as Parameters<typeof sstGateAlDia>[0]) : false)
     } catch { setGateSst(false) }
   }
@@ -1083,6 +1109,32 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                       title="Administración directa: ejecución con personal propio — SIN ciclo de pago (ni aprobación de giro, ni anticipo, ni liquidación conciliada). La identidad la lleva el contratista real y su habilitación aplica igual.">
                       🏗 Administración directa
                     </span>
+                  )}
+                  {/* A.3 (28-oct) — el gate POR CONTRATISTA se DICE, no se
+                      infiere: tres rótulos para tres hechos distintos. Solo
+                      desde el tramo de proyección; los roles sin lectura de
+                      la proyección no ven chips (carga best-effort). */}
+                  {gatesContratista && idxRiel(proyecto.estado) >= idxRiel('enviado_a_facturacion') && (
+                    dir ? (
+                      <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600"
+                        title="Administración directa: no sale dinero a terceros — cierra por gestores sin gate (decisión 04-sep, ratificada 26-oct)">
+                        gate SST: no aplica
+                      </span>
+                    ) : gatesContratista[a.contratista_id] ? (
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                        gatesContratista[a.contratista_id].sst_gate?.estado === 'al_dia' ? 'bg-emerald-50 text-emerald-700'
+                          : gatesContratista[a.contratista_id].sst_gate?.estado === 'con_novedad' ? 'bg-red-50 text-red-700'
+                          : 'bg-amber-50 text-amber-800'}`}
+                        title={`Gate SST del contratista en este proyecto (lo marca SST en su cola)${gatesContratista[a.contratista_id].sst_gate?.observacion ? ` — ${gatesContratista[a.contratista_id].sst_gate!.observacion}` : ''}`}>
+                        gate SST: {gatesContratista[a.contratista_id].sst_gate?.estado === 'al_dia' ? '✔ al día'
+                          : gatesContratista[a.contratista_id].sst_gate?.estado === 'con_novedad' ? '⚠ con novedad' : 'pendiente'}
+                      </span>
+                    ) : (
+                      <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-800"
+                        title="Aún no existe proyección de verificación para este contratista — la ausencia DENIEGA el pago (jamás se lee como aval)">
+                        gate SST: pendiente de proyección
+                      </span>
+                    )
                   )}
                   {a.legacy && (
                     <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-500"
