@@ -2,6 +2,22 @@
  * Vigencia de los documentos de habilitación (sub-bloque A.1) — motor PURO,
  * sin Firestore, sin React.
  *
+ * ⚠ IMPLEMENTACIÓN PROVISIONAL (23-oct-2026).
+ *
+ * El frente SIGP va a consolidar su `utils/vencimiento.ts` —el que alimenta
+ * la salud documental de los técnicos en el panel SST— con este archivo, y
+ * quedará UNO SOLO. Ese reemplazo es una DECISIÓN CONJUNTA con SIGP, no de
+ * este módulo: no se consolida por iniciativa de licitaciones ni se da por
+ * definitivo lo que hay acá.
+ *
+ * Por eso el checklist NO depende de este archivo: depende del contrato
+ * `MotorVigencias` (`types/sigp/motorVigencias.ts`) y recibe el motor por
+ * parámetro. Lo que esta implementación aporta mientras tanto es
+ * `motorVigenciasProvisional` (al final del archivo) y la batería de
+ * `vigencias.test.ts`, que es el pliego de condiciones que la implementación
+ * consolidada tendrá que pasar: granularidad de día calendario local y fecha
+ * ilegible que nunca se lee como vigente.
+ *
  * El estado de vigencia NO se persiste: se deriva al mirar. Mismo criterio
  * que `estadoEfectivo`/`validez_dias` en `cotizacion.ts` y que `getDocEstado`
  * del panel SST — lo guardado es la fecha, el juicio se calcula. Un campo
@@ -22,13 +38,16 @@
 import type { Timestamp } from 'firebase/firestore'
 import { DIAS_ALERTA_DEFAULT } from '../../types/sigp/documentoEmpresa'
 import type { DocumentoEmpresa } from '../../types/sigp/documentoEmpresa'
+import { ESTADOS_VIGENCIA } from '../../types/sigp/motorVigencias'
+import type { EstadoVigencia, MotorVigencias } from '../../types/sigp/motorVigencias'
 
 const MS_DIA = 86_400_000
 
-export const ESTADOS_VIGENCIA = [
-  'vigente', 'por_vencer', 'vencido', 'sin_vencimiento',
-] as const
-export type EstadoVigencia = typeof ESTADOS_VIGENCIA[number]
+// El vocabulario vive en el CONTRATO, no en esta implementación — es lo que
+// SIGP y licitaciones tienen que compartir cuando se consolide. Se re-exporta
+// para que ningún consumidor tenga que saber de dónde salió.
+export { ESTADOS_VIGENCIA }
+export type { EstadoVigencia }
 
 export const ESTADO_VIGENCIA_LABEL: Record<EstadoVigencia, string> = {
   vigente: 'Vigente',
@@ -174,4 +193,20 @@ export function peorVigencia(
   if (estados.includes('por_vencer')) return 'por_vencer'
   if (estados.includes('vigente')) return 'vigente'
   return 'sin_vencimiento'
+}
+
+/**
+ * El motor PROVISIONAL, tipado contra el contrato.
+ *
+ * Es lo ÚNICO de este archivo que el checklist consume, y lo consume
+ * INYECTADO. El `: MotorVigencias` no es decoración: si una firma de acá se
+ * separa del contrato, esta línea NO COMPILA — la frontera se rompe en el
+ * build, no en producción.
+ *
+ * Cuando SIGP y licitaciones consoliden el motor, lo que se inyecta pasa a
+ * ser el consolidado y este objeto se va con el archivo.
+ */
+export const motorVigenciasProvisional: MotorVigencias = {
+  estadoVigencia,
+  venceAntesDe,
 }
