@@ -58,6 +58,17 @@ export interface DatosPdfPreliquidacion {
   anticipoPct: number
   anticipoValor: number
   saldoValor: number
+  /** 28-oct (anticipos múltiples): desglose de giros cuando hay MÁS de uno, o
+   *  cuando algún giro trae correcciones/anulación — la traza solo-crecer SE
+   *  VE en el documento del contratista (C3). `anticipoValor` es la Σ de los
+   *  giros vivos. Ausente ⇒ render idéntico al histórico (un solo renglón). */
+  giros?: {
+    fecha: string
+    valor: number
+    motivo?: string
+    anulado?: boolean
+    correcciones?: { fecha: string; de: number; a: number; motivo: string }[]
+  }[]
 }
 
 export async function generarPdfPreliquidacion(
@@ -226,8 +237,24 @@ export async function generarPdfPreliquidacion(
   {
     const wCard = CONTENIDO * 0.56
     const xCard = ANCHO - MARGEN - wCard
+    // 28-oct: con giros múltiples (o correcciones/anulaciones) el anticipo se
+    // DESGLOSA — el contratista ve exactamente qué recibió, cuándo y qué se
+    // corrigió; la fila "Anticipo" pasa a ser la Σ de giros vivos.
+    // ⚠ Montserrat (subset) no trae Σ ni →: etiquetas en texto plano (misma
+    // lección del U+2212 de los descuentos — no se apuesta el documento a un
+    // glifo que el font no tiene).
+    const girosFilas: [string, string][] = (datos.giros ?? []).flatMap((g, i) => {
+      const filas: [string, string][] = [[
+        `   Giro ${i + 1} · ${g.fecha}${g.anulado ? ' · ANULADO' : ''}`,
+        g.anulado ? `(${fMoneda(g.valor)})` : fMoneda(g.valor),
+      ]]
+      for (const c of g.correcciones ?? [])
+        filas.push([`      corregido ${c.fecha}: de ${fMoneda(c.de)} a ${fMoneda(c.a)}`, ''])
+      return filas
+    })
     const filas: [string, string][] = [
-      [`Anticipo (${fmtNum(datos.anticipoPct)}%)`, fMoneda(datos.anticipoValor)],
+      [`Anticipo${datos.giros?.length ? ' girado (suma de giros)' : ` (${fmtNum(datos.anticipoPct)}%)`}`, fMoneda(datos.anticipoValor)],
+      ...girosFilas,
       ['Saldo contra entrega', fMoneda(datos.saldoValor)],
     ]
     const hFila = 16.5, hTotal = 26, hCab = 10

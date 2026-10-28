@@ -137,6 +137,14 @@ export default function ComprasReembolsos({ proyecto, puedeGestionar, reload }: 
 
       {form && (
         <div className="mt-4 border border-brand-200 bg-brand-50/40 rounded-lg p-4 space-y-3">
+          {/* C.5 (28-oct): un anticipo registrado como reembolso se pagaría DOS
+              veces (como reembolso y dentro del saldo) e inflaría el costo del
+              indicador — dicho donde se registra, sin bloquear conceptos. */}
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+            ⚠ <b>Un anticipo NO se registra aquí.</b> Un reembolso SUMA al costo del proyecto y al total
+            a pagar de la liquidación — un anticipo metido como reembolso se pagaría dos veces. Los giros
+            de anticipo se registran en la sección de Preliquidación/Asignaciones.
+          </p>
           <div className="grid sm:grid-cols-2 gap-3">
             <label className="text-sm">
               <span className="font-medium text-gray-700">Concepto <span className="text-red-500">*</span></span>

@@ -239,12 +239,40 @@ export interface PermisosProyecto {
 // registra el anticipo SOLO gerencia_administrativa (quien define ≠ quien
 // desembolsa). El pago del cliente y el saldo del contratista son F2.1.d.
 
+/** Una corrección de VALOR sobre un giro registrado — traza SOLO-CRECER
+ *  (28-oct, C3 del bloque anticipos múltiples): nada se reescribe en el
+ *  lugar; cada corrección se APPENDEA aquí y SALE en el PDF del contratista. */
+export interface CorreccionGiro {
+  fecha: Timestamp
+  por: string
+  por_nombre?: string
+  valor_anterior: number
+  valor_nuevo: number
+  motivo: string
+}
+
+/** UN giro de anticipo. Desde el 28-oct (anticipos múltiples) los giros viven
+ *  en `preliquidacion.giros[]` — LISTA append-only: un giro jamás se borra
+ *  (anulación = marcador `anulado`, corrección = entrada en `correcciones`).
+ *  El campo singular `anticipo` quedó como forma LEGACY pre-migración; todo
+ *  consumidor lee por `girosDe()`/`anticipoTotalDe()` (asignacion.ts). */
 export interface AnticipoGirado {
   fecha: Timestamp
   valor: number
   evidencia_url?: string
   evidencia_nombre?: string
   registrado_por: string
+  /** Nombre denormalizado del momento del acto (patrón 19-oct). */
+  por_nombre?: string
+  /** SOLO giros ADICIONALES (C1b, 28-oct): el MOTIVO de la insuficiencia —
+   *  por qué lo ya girado no alcanzó. Obligatorio en el builder del giro
+   *  adicional; ausente en el primer giro. */
+  motivo?: string
+  /** Anulación SOFT (cero borrado físico, restricción 5.1): el giro queda en
+   *  la lista marcado y FUERA de la suma. Solo patchCorregirAnticipo. */
+  anulado?: { fecha: Timestamp; por: string; por_nombre?: string; motivo: string }
+  /** Correcciones de valor, append-only (C3). */
+  correcciones?: CorreccionGiro[]
 }
 
 // ── Modalidad de contratación (24-jul) ──

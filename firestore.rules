@@ -1086,6 +1086,14 @@ service cloud.firestore {
             // crear y anular son de gerencia (patchCorregirAnticipo).
             && (('anticipo' in resource.data.get('preliquidacion', {}).keys())
                 == ('anticipo' in request.resource.data.get('preliquidacion', {}).keys()))
+            // 28-oct (anticipos múltiples): el MISMO principio sobre la LISTA
+            // `giros` — un gestor no la toca en NINGUNA dirección (girar,
+            // corregir y anular son de gerencia; los rebuilds legítimos del
+            // mapa la conservan por spread). Igualdad exacta: presencia Y
+            // contenido — más fuerte que el guard de presencia del campo
+            // legacy, porque la lista además no debe ENCOGER ni mutar.
+            && (resource.data.get('preliquidacion', {}).get('giros', [])
+                == request.resource.data.get('preliquidacion', {}).get('giros', []))
             && (request.resource.data.get('estado', '') != 'liquidada'
                 || resource.data.get('tipo', '') == 'administracion_directa'))
           ||
@@ -1097,6 +1105,17 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['estado', 'preliquidacion', 'liquidacion', 'compras_reembolsos', 'historial', 'fecha_actualizacion'])
             && avalSstParaLiquidar()
+            // C2 (28-oct, anticipos múltiples): GIRAR, CORREGIR y ANULAR
+            // anticipos es SOLO de gerencia_administrativa + admin — quien
+            // avala no paga: gestion_integral (escribe el gate SST y aprueba
+            // preliquidaciones con salvedad) y gerencia_general quedan fuera
+            // de los giros; aprobar una preliquidación no los cambia, así que
+            // sus vías legítimas pasan por la rama de igualdad.
+            && ((resource.data.get('preliquidacion', {}).get('giros', [])
+                  == request.resource.data.get('preliquidacion', {}).get('giros', [])
+                 && resource.data.get('preliquidacion', {}).get('anticipo', {})
+                  == request.resource.data.get('preliquidacion', {}).get('anticipo', {}))
+                || rolActual() in ['gerencia_administrativa', 'admin'])
             && (!fijaAprobacionPreliq()
                 || rolActual() == 'gerencia_administrativa'
                 || salvedadPreliq() != '')));

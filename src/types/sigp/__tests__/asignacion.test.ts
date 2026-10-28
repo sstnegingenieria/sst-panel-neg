@@ -278,7 +278,10 @@ describe('ciclo económico: definir → aprobar → girar', () => {
     const aprobada = { ...definida, estado: 'preliquidacion_aprobada' as const, preliquidacion: ap.sub.preliquidacion! }
     const giro = patchGirarAnticipo(aprobada, { fecha: ts, valor: 2_000_000, registrado_por: 'm' }, 'm', ts)!
     expect(giro.sub.estado).toBe('anticipo_girado')
-    expect(giro.sub.preliquidacion!.anticipo!.valor).toBe(2_000_000)
+    // 28-oct: el giro vive en la lista canónica giros[] (anticipos múltiples)
+    expect(giro.sub.preliquidacion!.giros).toHaveLength(1)
+    expect(giro.sub.preliquidacion!.giros![0].valor).toBe(2_000_000)
+    expect(giro.sobreAcordado).toBe(false)
   })
 })
 

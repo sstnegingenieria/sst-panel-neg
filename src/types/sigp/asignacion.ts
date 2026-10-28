@@ -140,10 +140,54 @@ export interface PreliquidacionAsignacion {
   aprobada_por?: string
   fecha_aprobacion?: Timestamp
   salvedad?: string
+  /** LEGACY (pre 28-oct): giro ÚNICO. La migración de los existentes lo mueve
+   *  a `giros[0]` y retira este campo; los builders nuevos no lo escriben.
+   *  Mientras conviven, TODO consumidor lee por girosDe()/anticipoTotalDe(). */
   anticipo?: AnticipoGirado
+  /** CANÓNICO (28-oct — anticipos múltiples): la lista de giros, append-only.
+   *  Cada giro con fecha, valor, comprobante y quién lo registró; anulación
+   *  por marcador, corrección por traza solo-crecer (ver AnticipoGirado).
+   *  Los giran/corrigen SOLO gerencia_administrativa/admin (C2 — quien avala
+   *  no paga: gestion_integral fuera, guard en reglas). */
+  giros?: AnticipoGirado[]
   costo_ejecutado?: number
   ajuste_pendiente_liquidacion?: boolean
 }
+
+// ── Anticipos múltiples (28-oct — Parte C del bloque proyección/saldo) ───────
+//
+// `giros[]` es la forma canónica; `anticipo` (objeto único) es la legacy
+// pre-migración. Estos helpers toleran AMBAS: ningún consumidor del valor
+// girado lee los campos directo — la suma de giros vivos es EL valor efectivo
+// en los cuatro consumidores (saldo de liquidación, guarda de sobre-giro,
+// incurrido de cancelación, PDF del contratista).
+
+type PreConGiros = Pick<PreliquidacionAsignacion, 'giros' | 'anticipo'> | undefined | null
+
+export const girosDe = (pre: PreConGiros): AnticipoGirado[] =>
+  pre?.giros ?? (pre?.anticipo ? [pre.anticipo] : [])
+
+/** Giros NO anulados — los que suman. */
+export const girosVivosDe = (pre: PreConGiros): AnticipoGirado[] =>
+  girosDe(pre).filter(g => !g.anulado)
+
+/** Σ girado vivo. */
+export const anticipoTotalDe = (pre: PreConGiros): number =>
+  girosVivosDe(pre).reduce((s, g) => s + (g.valor || 0), 0)
+
+export const hayAnticipoGirado = (pre: PreConGiros): boolean =>
+  girosVivosDe(pre).length > 0
+
+/** Aviso C.4 (28-oct): la suma girada supera el valor ACORDADO TOTAL
+ *  (`valor_contratista`). ADVERTENCIA, jamás bloqueo — puede haber razón;
+ *  queda en el historial que se registró sabiéndolo. No existe porcentaje
+ *  pactado en la casa contra el cual avisar (C1a descartado): el acordado
+ *  total es la única cifra con dueño. */
+export const giroSobreAcordado = (valorContratista: number, sumaGirada: number): boolean =>
+  sumaGirada > valorContratista
+
+const textoSobreAcordado = (suma: number, acordado: number): string =>
+  ` · ⚠ GIRO SOBRE EL VALOR ACORDADO — Σ girado (${suma}) supera el valor acordado (${acordado}); registrado con las dos cifras a la vista`
 
 export interface LiquidacionAsignacion {
   liquidacion_anticipada?: boolean
@@ -534,7 +578,7 @@ export function resumenAsignacionesDe(
     atomos_sin_asignar: cob.sin_asignar.length,
     valor_sin_costear: cob.valor_sin_costear,
     alcance_desactualizado: asigs.filter(a => !!a.alcance_desactualizado && a.estado !== 'cancelada').length,
-    anticipos_girados: asigs.filter(a => !!a.preliquidacion?.anticipo && a.estado !== 'cancelada').length,
+    anticipos_girados: asigs.filter(a => hayAnticipoGirado(a.preliquidacion) && a.estado !== 'cancelada').length,
     costo_presupuestado: costoPresupuestadoAsignaciones(asigs),
     costo_contratistas: costoContratistasDe(asigs),
     costo_ejecutado_manual: asignacionesVivas(asigs)
@@ -984,22 +1028,67 @@ export function patchAprobarPreliquidacion(
   }
 }
 
+/** PRIMER giro (o re-giro tras anular todos): transiciona a `anticipo_girado`.
+ *  Desde el 28-oct escribe la forma CANÓNICA `giros[]` (el estado es el hito
+ *  del PRIMER giro — C.3 del bloque; los siguientes van por
+ *  patchGirarAnticipoAdicional sin mover el estado). Si venía la forma legacy
+ *  (anticipo singular — solo giros anulados pueden dejar el estado en
+ *  aprobada), pasa convertida: el giro nuevo se APPENDEA, jamás pisa. */
 export function patchGirarAnticipo(
   a: AsignacionContratista,
   anticipo: AnticipoGirado,
   uid: string,
   fecha: Timestamp,
-): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion } | null {
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; sobreAcordado: boolean } | null {
   if (a.estado !== 'preliquidacion_aprobada' || !a.preliquidacion) return null
   if (!(anticipo.valor > 0)) return null
+  const pre = a.preliquidacion
+  const giros = [...girosDe(pre), anticipo]
+  const { anticipo: _legacy, ...sinLegacy } = pre
+  const suma = giros.filter(g => !g.anulado).reduce((s, g) => s + (g.valor || 0), 0)
+  const sobreAcordado = giroSobreAcordado(pre.valor_contratista, suma)
   return {
     sub: {
       estado: 'anticipo_girado',
-      preliquidacion: { ...a.preliquidacion, anticipo },
+      preliquidacion: { ...sinLegacy, giros },
       fecha_actualizacion: fecha,
     },
+    sobreAcordado,
     entradaHistorial: entrada('preliquidacion_aprobada', 'anticipo_girado', uid, fecha,
-      `Anticipo girado — ${anticipo.valor}`),
+      `Anticipo girado — ${anticipo.valor}` +
+      (sobreAcordado ? textoSobreAcordado(suma, pre.valor_contratista) : '')),
+  }
+}
+
+/** Giro ADICIONAL (28-oct — el caso real: el contratista pide un segundo
+ *  anticipo y el modelo de campo único no tenía dónde ponerle fecha y
+ *  comprobante propios). Sobre `anticipo_girado`, SIN mover el estado (el
+ *  hito es el primer giro). C1(b): exige el MOTIVO de la insuficiencia Y el
+ *  comprobante del giro — cuando más se necesita el soporte es cuando se gira
+ *  de más. Devuelve la suma y el aviso sobre-acordado (C.4). */
+export function patchGirarAnticipoAdicional(
+  a: AsignacionContratista,
+  giro: AnticipoGirado,
+  uid: string,
+  fecha: Timestamp,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; numero: number; suma: number; sobreAcordado: boolean } | null {
+  const pre = a.preliquidacion
+  if (a.estado !== 'anticipo_girado' || !pre || !hayAnticipoGirado(pre)) return null
+  if (!(giro.valor > 0)) return null
+  if (!giro.motivo?.trim() || !giro.evidencia_url) return null
+  const giros = [...girosDe(pre), { ...giro, motivo: giro.motivo.trim() }]
+  const { anticipo: _legacy, ...sinLegacy } = pre
+  const suma = giros.filter(g => !g.anulado).reduce((s, g) => s + (g.valor || 0), 0)
+  const sobreAcordado = giroSobreAcordado(pre.valor_contratista, suma)
+  return {
+    sub: { preliquidacion: { ...sinLegacy, giros }, fecha_actualizacion: fecha },
+    numero: giros.length,
+    suma,
+    sobreAcordado,
+    entradaHistorial: entrada('anticipo_girado', 'anticipo_girado', uid, fecha,
+      `Anticipo ADICIONAL girado — ${giro.valor} (giro ${giros.length}) · Σ girado ${suma}` +
+      ` · Motivo de la insuficiencia: ${giro.motivo.trim()}` +
+      (sobreAcordado ? textoSobreAcordado(suma, pre.valor_contratista) : '')),
   }
 }
 
@@ -1019,36 +1108,68 @@ export function patchGirarAnticipo(
  *  giro ya se concilió o ya quedó congelado como incurrido). */
 export function patchCorregirAnticipo(
   a: AsignacionContratista,
-  datos: { valor?: number; anular?: boolean },
+  datos: { valor?: number; anular?: boolean; indice?: number },
   motivo: string,
   uid: string,
   fecha: Timestamp,
-): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; anula: boolean } | null {
+  porNombre?: string,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; anula: boolean; sobreAcordado: boolean } | null {
   const pre = a.preliquidacion
-  if (a.estado !== 'anticipo_girado' || !pre?.anticipo || !motivo.trim()) return null
-  const viejo = pre.anticipo.valor
+  if (a.estado !== 'anticipo_girado' || !pre || !motivo.trim()) return null
+  const giros = girosDe(pre)
+  const vivos = giros.map((g, i) => (g.anulado ? -1 : i)).filter(i => i >= 0)
+  if (vivos.length === 0) return null
+  // Con UN solo giro vivo el índice es implícito (compat con la UI de siempre);
+  // con varios, la UI lo elige — corregir "el anticipo" a secas ya no existe.
+  const idx = datos.indice ?? (vivos.length === 1 ? vivos[0] : undefined)
+  if (idx == null || !giros[idx] || giros[idx].anulado) return null
+  const viejo = giros[idx].valor
+  const { anticipo: _legacy, ...sinLegacy } = pre
+  const quien = porNombre?.trim() ? { por_nombre: porNombre.trim() } : {}
+
   if (datos.anular) {
-    const { anticipo: _a, ...sinAnticipo } = pre
+    // Anulación SOFT (28-oct — antes se RETIRABA el objeto; la lista no borra:
+    // marcador `anulado`, el giro queda como hecho registrado fuera de la suma).
+    const girosN = giros.map((g, i) => i === idx
+      ? { ...g, anulado: { fecha, por: uid, ...quien, motivo: motivo.trim() } } : g)
+    const quedanVivos = girosN.some(g => !g.anulado)
+    const suma = girosN.filter(g => !g.anulado).reduce((s, g) => s + (g.valor || 0), 0)
     return {
       sub: {
-        estado: 'preliquidacion_aprobada',
-        preliquidacion: sinAnticipo as PreliquidacionAsignacion,
+        ...(quedanVivos ? {} : { estado: 'preliquidacion_aprobada' as EstadoAsignacion }),
+        preliquidacion: { ...sinLegacy, giros: girosN },
         fecha_actualizacion: fecha,
       },
       anula: true,
-      entradaHistorial: entrada('anticipo_girado', 'preliquidacion_aprobada', uid, fecha,
-        `ANULACIÓN de anticipo — ${viejo} → $0 (el giro registrado no ocurrió) · Motivo: ${motivo.trim()}`),
+      sobreAcordado: false,
+      entradaHistorial: entrada('anticipo_girado', quedanVivos ? 'anticipo_girado' : 'preliquidacion_aprobada', uid, fecha,
+        `ANULACIÓN de anticipo — giro ${idx + 1}: ${viejo} → $0 (el giro registrado no ocurrió) · Motivo: ${motivo.trim()}` +
+        (quedanVivos ? ` · Σ girado vigente ${suma}` : ' · sin giros vivos: la asignación revierte a preliquidación aprobada')),
     }
   }
   if (!(datos.valor != null && datos.valor > 0) || datos.valor === viejo) return null
+  // Corrección con traza SOLO-CRECER (C3): el valor cambia y la corrección se
+  // APPENDEA al giro — visible en la ficha y en el PDF del contratista.
+  const girosN = giros.map((g, i) => i === idx
+    ? {
+        ...g, valor: datos.valor!,
+        correcciones: [...(g.correcciones ?? []), {
+          fecha, por: uid, ...quien, valor_anterior: viejo, valor_nuevo: datos.valor!, motivo: motivo.trim(),
+        }],
+      }
+    : g)
+  const suma = girosN.filter(g => !g.anulado).reduce((s, g) => s + (g.valor || 0), 0)
+  const sobreAcordado = giroSobreAcordado(pre.valor_contratista, suma)
   return {
     sub: {
-      preliquidacion: { ...pre, anticipo: { ...pre.anticipo, valor: datos.valor } },
+      preliquidacion: { ...sinLegacy, giros: girosN },
       fecha_actualizacion: fecha,
     },
     anula: false,
+    sobreAcordado,
     entradaHistorial: entrada('anticipo_girado', 'anticipo_girado', uid, fecha,
-      `Corrección de anticipo — ${viejo} → ${datos.valor} · Motivo: ${motivo.trim()}`),
+      `Corrección de anticipo — giro ${idx + 1}: ${viejo} → ${datos.valor} · Σ girado ${suma} · Motivo: ${motivo.trim()}` +
+      (sobreAcordado ? textoSobreAcordado(suma, pre.valor_contratista) : '')),
   }
 }
 
@@ -1136,7 +1257,9 @@ export function patchLiquidarAsignacion(
   const compras = a.compras_reembolsos ?? []
   const diferencia = totalComprasReembolsos(compras)
   const totalFinal = manoObra + diferencia
-  const anticipoGirado = pre.anticipo?.valor ?? (esCancelacion ? 0 : anticipoValorDe(pre))
+  // 28-oct: el anticipo descontado es la SUMA de giros vivos (anticipos
+  // múltiples) — con uno solo es el mismo número de siempre.
+  const anticipoGirado = hayAnticipoGirado(pre) ? anticipoTotalDe(pre) : (esCancelacion ? 0 : anticipoValorDe(pre))
   const retenciones = datos.retenciones ?? []
   const totalRet = retenciones.reduce((s, r) => s + (r.valor || 0), 0)
   const saldoFinal = totalFinal - anticipoGirado - totalRet
@@ -1276,7 +1399,7 @@ export function patchCancelarAsignacion(
 ): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; incurrido: CancelacionAsignacion['incurrido'] } | null {
   if (!motivo.trim()) return null
   if (a.estado === 'liquidada' || a.estado === 'cancelada') return null
-  const anticipo = a.preliquidacion?.anticipo?.valor ?? 0
+  const anticipo = anticipoTotalDe(a.preliquidacion)   // 28-oct: Σ giros vivos
   const reembolsos = totalComprasReembolsos(a.compras_reembolsos)
   const incurrido = { anticipo, reembolsos, total: anticipo + reembolsos }
   return {
@@ -1344,7 +1467,7 @@ export function patchAjustarAtomos(
   // el giro pasa a SOBREPAGO a recuperar del contratista. NO bloquea (puede
   // ser legítimo y resolverse en la liquidación) pero queda DICHO en el
   // momento y en el historial — no como descubrimiento tres meses después.
-  const girado = pre?.anticipo?.valor ?? 0
+  const girado = anticipoTotalDe(pre)   // 28-oct: contra la SUMA de giros vivos
   const sobreGiro = !!pre && girado > 0 && valorConfirmado! < girado
 
   let preNueva: PreliquidacionAsignacion | undefined
@@ -1451,7 +1574,7 @@ export function estadoAsignacionLegacyDe(p: Pick<Proyecto, 'preliquidacion' | 'l
   if (p.liquidacion) return 'liquidada'
   const pre = p.preliquidacion
   if (!pre) return 'asignada'
-  if (pre.anticipo) return 'anticipo_girado'
+  if (hayAnticipoGirado(pre)) return 'anticipo_girado'
   if (pre.aprobada_por) return 'preliquidacion_aprobada'
   return 'preliquidacion_definida'
 }
@@ -1660,7 +1783,7 @@ export function patchCancelarProyecto(
   // asignaciones no liquidadas + TODO lo comprado por NEG (compras_proyecto,
   // CF de C3) — sin ese término el incurrido mentiría por omisión.
   const noLiquidadas = asigs.filter(a => a.estado !== 'liquidada')
-  const anticipos = noLiquidadas.reduce((s, a) => s + (a.preliquidacion?.anticipo?.valor ?? 0), 0)
+  const anticipos = noLiquidadas.reduce((s, a) => s + anticipoTotalDe(a.preliquidacion), 0)
   const reembolsos = noLiquidadas.reduce((s, a) => s + totalComprasReembolsos(a.compras_reembolsos), 0)
   const compras_cf = comprasCf > 0 ? comprasCf : 0
   const incurrido = { anticipos, reembolsos, compras_cf, total: anticipos + reembolsos + compras_cf }
