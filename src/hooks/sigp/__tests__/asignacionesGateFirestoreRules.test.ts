@@ -450,24 +450,186 @@ describe('F. Actores de control (anti-falso-403)', () => {
   }, TIMEOUT)
 })
 
-// ═══════════════ G. FUERA del cierre mínimo — se fija el comportamiento vigente ═══════════════
+// ═══════════════ G. [F1 — 28-oct] los creates que nacen en `liquidada` ═══════════════
+//
+// El residual G1/G2 del PR #193 DEJA de ser residual: histórico solo
+// GA/admin, con motivo, SOLO proyectos anteriores al 26-oct-2026 (la fecha en
+// que el gate existe); la vía legacy NO nace liquidada.
 
-describe('G. Nacimiento en `liquidada` (create) — RESIDUAL conocido, SIN cambios (declaración de gerencia / migración)', () => {
-  it('G1. registro_historico (retroactivo con motivo): nace liquidada sin gate — decisión 03-sep', async () => {
-    await assertSucceeds(setDoc(doc(db('marcela'), ASIG(P1, 'hist1')), {
-      tipo: 'contratista', estado: 'liquidada', contratista_id: 'c1', contratista_nombre: 'Héctor', atomos: ['g1'],
-      registro_historico: { motivo: 'pagado por fuera del panel', fecha: ts(), por: 'marcela' },
-      historial: [], fecha_actualizacion: ts(),
-    }))
+describe('G. [F1] Nacimiento en `liquidada` acotado', () => {
+  const histDoc = () => ({
+    tipo: 'contratista', estado: 'liquidada', contratista_id: 'c1', contratista_nombre: 'Héctor', atomos: ['g1'],
+    registro_historico: { motivo: 'pagado por fuera del panel', fecha: ts(), por: 'marcela' },
+    historial: [], fecha_actualizacion: ts(),
+  })
+  const sembrarFechaProyecto = (iso: string) =>
+    env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'proyectos', P1),
+        { estado: 'pagado_cliente', consecutivo: 'PRY-2026-001', historial: [], fecha_creacion: Timestamp.fromDate(new Date(iso)) })
+    })
+
+  it('G1. histórico de GA sobre proyecto ANTERIOR al 26-oct → permitido (con motivo)', async () => {
+    await sembrarFechaProyecto('2026-09-01T12:00:00Z')
+    await assertSucceeds(setDoc(doc(db('marcela'), ASIG(P1, 'hist1')), histDoc()))
   }, TIMEOUT)
 
-  it('G2. migración id fijo `legacy`: nace liquidada sin gate — también residual; seguimiento: pedir el aval o prohibir saldo en estos creates', async () => {
-    await assertSucceeds(setDoc(doc(db('marcela'), ASIG(P1, 'legacy')), {
+  it('G1b. el MISMO histórico sobre un proyecto POSTERIOR al 26-oct → denegado ("histórico" nuevo = bypass con otro nombre)', async () => {
+    await sembrarFechaProyecto('2026-11-02T12:00:00Z')
+    await assertFails(setDoc(doc(db('marcela'), ASIG(P1, 'hist1')), histDoc()))
+  }, TIMEOUT)
+
+  it('G1c. gerencia_general y gestion_integral YA NO crean históricos (salen de la vía)', async () => {
+    await sembrarFechaProyecto('2026-09-01T12:00:00Z')
+    await assertFails(setDoc(doc(db('giovanny'), ASIG(P1, 'hist1')), histDoc()))
+    await assertFails(setDoc(doc(db('ingrid'), ASIG(P1, 'hist2')), histDoc()))
+  }, TIMEOUT)
+
+  it('G1d. proyecto SIN fecha_creacion → denegado (falla cerrado: sin el dato no hay excepción)', async () => {
+    // beforeEach siembra P1 sin fecha_creacion
+    await assertFails(setDoc(doc(db('marcela'), ASIG(P1, 'hist1')), histDoc()))
+  }, TIMEOUT)
+
+  it('G2. la vía legacy YA NO nace liquidada → denegado; nacer en otro estado sigue vivo', async () => {
+    await assertFails(setDoc(doc(db('marcela'), ASIG(P1, 'legacy')), {
       tipo: 'contratista', estado: 'liquidada', legacy: true,
       contratista_id: 'c1', contratista_nombre: 'Héctor', atomos: ['g1'],
       liquidacion: liquidarPatch('marcela').liquidacion,
       historial: [], fecha_actualizacion: ts(),
     }))
+    await assertSucceeds(setDoc(doc(db('marcela'), ASIG(P1, 'legacy')), {
+      tipo: 'contratista', estado: 'anticipo_girado', legacy: true,
+      contratista_id: 'c1', contratista_nombre: 'Héctor', atomos: ['g1'],
+      preliquidacion: preliq(),
+      historial: [], fecha_actualizacion: ts(),
+    }))
+  }, TIMEOUT)
+})
+
+// ═══════════════ I. Parte B (28-oct) — PAGOS del saldo ═══════════════
+
+describe('I. pagos_saldo: lista append-only, impuestos por regla, B5', () => {
+  const pagoValido = (uid: string, extra: Record<string, unknown> = {}) => ({
+    fecha: Timestamp.now(), valor: 350_000, medio: 'transferencia',
+    comprobante_url: 'https://x/c.pdf', registrado_por: uid,
+    fecha_registro: Timestamp.now(), ...extra,
+  })
+  const liquidadaDoc = (pagos: Record<string, unknown>[] = []) => asigContratista({
+    estado: 'liquidada', liquidacion: liquidarPatch('marcela').liquidacion,
+    ...(pagos.length ? { pagos_saldo: pagos } : {}),
+  })
+  const sembrarLiquidada = (pagos: Record<string, unknown>[] = []) =>
+    env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), ASIG(P1)), liquidadaDoc(pagos))
+    })
+
+  it('I1. GA registra un pago válido sobre liquidada → permitido; admin también', async () => {
+    await sembrarLiquidada()
+    await assertSucceeds(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      pagos_saldo: [pagoValido('marcela')], fecha_actualizacion: ts(),
+      historial: arrayUnion({ de: 'liquidada', a: 'liquidada', por: 'marcela', fecha: ts(), motivo: 'pago' }),
+    }))
+    await sembrarLiquidada()
+    await assertSucceeds(updateDoc(doc(db('root'), ASIG(P1)), {
+      pagos_saldo: [pagoValido('root')], fecha_actualizacion: ts(),
+    }))
+  }, TIMEOUT)
+
+  it('I2. [B3] nadie firma un pago con el nombre de OTRO: registrado_por ajeno → denegado', async () => {
+    await sembrarLiquidada()
+    await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      pagos_saldo: [pagoValido('diego')], fecha_actualizacion: ts(),
+    }))
+  }, TIMEOUT)
+
+  it('I3. [B3] un pago FUTURO no se registra; fecha_registro inventada (vieja) tampoco', async () => {
+    await sembrarLiquidada()
+    await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      pagos_saldo: [pagoValido('marcela', { fecha: Timestamp.fromMillis(Date.now() + 86_400_000) })],
+      fecha_actualizacion: ts(),
+    }))
+    await sembrarLiquidada()
+    await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      pagos_saldo: [pagoValido('marcela', { fecha_registro: Timestamp.fromMillis(Date.now() - 3_600_000) })],
+      fecha_actualizacion: ts(),
+    }))
+  }, TIMEOUT)
+
+  it('I4. [B3] fecha real VIEJA sin registro_posterior → denegado (no se oculta); declarado → permitido', async () => {
+    await sembrarLiquidada()
+    const viejo = Timestamp.fromMillis(Date.now() - 3 * 86_400_000)
+    await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      pagos_saldo: [pagoValido('marcela', { fecha: viejo })], fecha_actualizacion: ts(),
+    }))
+    await assertSucceeds(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      pagos_saldo: [pagoValido('marcela', { fecha: viejo, registro_posterior: true })], fecha_actualizacion: ts(),
+    }))
+  }, TIMEOUT)
+
+  it('I5. [B2] sin comprobante o valor 0 → denegado; ENCOGER la lista → denegado', async () => {
+    await sembrarLiquidada()
+    await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      pagos_saldo: [pagoValido('marcela', { comprobante_url: '' })], fecha_actualizacion: ts(),
+    }))
+    await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      pagos_saldo: [pagoValido('marcela', { valor: 0 })], fecha_actualizacion: ts(),
+    }))
+    const p1 = pagoValido('marcela')
+    await sembrarLiquidada([p1, pagoValido('marcela', { valor: 100 })])
+    await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      pagos_saldo: [p1], fecha_actualizacion: ts(),
+    }))
+  }, TIMEOUT)
+
+  it('I6. [B5/C2] GI y GG no tocan pagos ni editan la liquidada', async () => {
+    await sembrarLiquidada()
+    for (const a of ['ingrid', 'giovanny'] as Actor[]) {
+      await assertFails(updateDoc(doc(db(a), ASIG(P1)), {
+        pagos_saldo: [pagoValido(a)], fecha_actualizacion: ts(),
+      }))
+      await assertFails(updateDoc(doc(db(a), ASIG(P1)), {
+        historial: arrayUnion({ de: 'liquidada', a: 'liquidada', por: a, fecha: ts(), motivo: 'nota' }),
+        fecha_actualizacion: ts(),
+      }))
+    }
+  }, TIMEOUT)
+
+  it('I7. [B5] gestor (diego) no edita una liquidada en absoluto', async () => {
+    await sembrarLiquidada()
+    await assertFails(updateDoc(doc(db('diego'), ASIG(P1)), { fecha_actualizacion: ts() }))
+  }, TIMEOUT)
+
+  it('I8. [B5] saldo FIJO con pago existente: GA edita `liquidacion` sin pagos → permitido; con un pago → denegado', async () => {
+    await sembrarLiquidada()
+    await assertSucceeds(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      liquidacion: { ...liquidarPatch('marcela').liquidacion, observaciones: 'nota' },
+      fecha_actualizacion: ts(),
+    }))
+    await sembrarLiquidada([pagoValido('marcela')])
+    await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      liquidacion: { ...liquidarPatch('marcela').liquidacion, saldo_final: 1 },
+      fecha_actualizacion: ts(),
+    }))
+  }, TIMEOUT)
+
+  it('I9. el CIERRE del padre exige saldos_pendientes == 0 en el resumen', async () => {
+    const padre = (saldos: number) =>
+      env.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), 'proyectos', P1), {
+          estado: 'liquidado_contratista', consecutivo: 'PRY-2026-001', historial: [],
+          pago_cliente: { fecha: ts(), valor: 1, medio: 'transferencia', registrado_por: 'marcela', fecha_registro: ts() },
+          resumen_asignaciones: { por_estado: { liquidada: 1 }, total: 1, saldos_pendientes: saldos },
+        })
+      })
+    const cerrar = () => ({
+      estado: 'cerrado',
+      cierre: { fecha: ts(), cerrado_por: 'marcela' },
+      fecha_actualizacion: ts(),
+      historial: arrayUnion({ de: 'liquidado_contratista', a: 'cerrado', por: 'marcela', fecha: ts(), motivo: 'cierre' }),
+    })
+    await padre(1)
+    await assertFails(updateDoc(doc(db('marcela'), 'proyectos', P1), cerrar()))
+    await padre(0)
+    await assertSucceeds(updateDoc(doc(db('marcela'), 'proyectos', P1), cerrar()))
   }, TIMEOUT)
 })
 
