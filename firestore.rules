@@ -877,7 +877,12 @@ service cloud.firestore {
                             && salvedadPreliq() != ''))
                     && (request.resource.data.get('estado', '') != 'cerrado'
                         || (resource.data.get('estado', '') == 'liquidado_contratista'
-                            && request.resource.data.get('pago_cliente', null) != null))
+                            && request.resource.data.get('pago_cliente', null) != null
+                            // [B — 28-oct] ni con un SALDO DE CONTRATISTA sin
+                            // pagar: el contador lo mantiene el resumen
+                            // (ausente = 0; censo 26-oct: cero liquidadas
+                            // históricas — toda liquidada futura lo trae).
+                            && resource.data.get('resumen_asignaciones', {}).get('saldos_pendientes', 0) == 0))
                     && (request.resource.data.get('estado', '') != 'liquidado_contratista'
                         || resource.data.get('estado', '') == 'liquidado_contratista'
                         // A.4 (28-oct — "la garantía vive donde sale el dinero"): el
@@ -945,7 +950,12 @@ service cloud.firestore {
                              .hasOnly(['resumen_asignaciones', 'fecha_actualizacion']))
                     && (request.resource.data.get('estado', '') != 'cerrado'
                         || (resource.data.get('estado', '') == 'liquidado_contratista'
-                            && request.resource.data.get('pago_cliente', null) != null))
+                            && request.resource.data.get('pago_cliente', null) != null
+                            // [B — 28-oct] ni con un SALDO DE CONTRATISTA sin
+                            // pagar: el contador lo mantiene el resumen
+                            // (ausente = 0; censo 26-oct: cero liquidadas
+                            // históricas — toda liquidada futura lo trae).
+                            && resource.data.get('resumen_asignaciones', {}).get('saldos_pendientes', 0) == 0))
                     // Bloque 3a/3b + anticipada (23-jul): liquidar exige el
                     // aval SST SIEMPRE; origen solo pagado_cliente (normal) o
                     // facturado (anticipada: marca + justificación). Un doc
@@ -1066,13 +1076,25 @@ service cloud.firestore {
         //     permitido al nacer; si viene, con valor conocido).
         allow create: if
           estadoCoherenteAsig()
+          // [F1 — 28-oct, cierra el residual G1/G2 del PR #193] el CREATE que
+          // nace en `liquidada` (registro histórico) queda acotado a
+          // gerencia_administrativa + admin (GG y GI salen), con motivo, y
+          // SOLO para proyectos ANTERIORES al 26-oct-2026 — la fecha en que
+          // el gate existe: un "histórico" de un proyecto posterior sería un
+          // bypass con otro nombre.
           && ((request.resource.data.keys().hasAny(['registro_historico'])
             && isAuthed()
-            && rolActual() in ['gerencia_administrativa', 'admin', 'gerencia_general', 'gestion_integral']
+            && rolActual() in ['gerencia_administrativa', 'admin']
             && request.resource.data.get('registro_historico', {}).get('motivo', '') != ''
-            && request.resource.data.get('estado', '') == 'liquidada')
+            && request.resource.data.get('estado', '') == 'liquidada'
+            && get(/databases/$(database)/documents/proyectos/$(proyectoId))
+                 .data.get('fecha_creacion', request.time) < timestamp.date(2026, 10, 26))
+          // [F1] la vía legacy NO nace liquidada (la migración siembra el
+          // estado real por piezas; una liquidada de la nada es la misma
+          // puerta del histórico sin su control).
           || (asignacionId == 'legacy'
             && request.resource.data.get('legacy', false) == true
+            && request.resource.data.get('estado', '') != 'liquidada'
             && (puedeCrearProyectos()
                 || (isAuthed() && rolActual() == 'gerencia_administrativa')))
           || (puedeCrearProyectos()
@@ -1133,6 +1155,13 @@ service cloud.firestore {
             // legacy, porque la lista además no debe ENCOGER ni mutar.
             && (resource.data.get('preliquidacion', {}).get('giros', [])
                 == request.resource.data.get('preliquidacion', {}).get('giros', []))
+            // Parte B (28-oct): los pagos del saldo tampoco los toca un
+            // gestor — misma igualdad exacta que los giros.
+            && (resource.data.get('pagos_saldo', [])
+                == request.resource.data.get('pagos_saldo', []))
+            // [B5] tras liquidada, los gestores no editan NADA (la vía
+            // post-liquidación es de gerencia y solo reembolsos + pagos).
+            && resource.data.get('estado', '') != 'liquidada'
             && (request.resource.data.get('estado', '') != 'liquidada'
                 || resource.data.get('tipo', '') == 'administracion_directa'))
           ||
@@ -1142,8 +1171,44 @@ service cloud.firestore {
           (isAuthed()
             && rolActual() in ['gerencia_administrativa', 'admin', 'gerencia_general', 'gestion_integral']
             && request.resource.data.diff(resource.data).affectedKeys()
-                 .hasOnly(['estado', 'preliquidacion', 'liquidacion', 'compras_reembolsos', 'historial', 'fecha_actualizacion'])
+                 .hasOnly(['estado', 'preliquidacion', 'liquidacion', 'pagos_saldo', 'compras_reembolsos', 'historial', 'fecha_actualizacion'])
             && avalSstParaLiquidar()
+            // [B5 — 28-oct] TRAS liquidada: solo gerencia_administrativa y
+            // admin (GI y GG salen de esa rama — hoy podían reescribirla),
+            // SOLO reembolsos y pagos (la conciliación no se reabre), y el
+            // `saldo_final` queda FIJO una vez exista un pago (la
+            // `liquidacion` solo es editable mientras pagos_saldo esté
+            // vacío — pagar contra un saldo y recalcularlo después dejaría
+            // el pago sin base).
+            && (resource.data.get('estado', '') != 'liquidada'
+                || (rolActual() in ['gerencia_administrativa', 'admin']
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['pagos_saldo', 'liquidacion', 'compras_reembolsos', 'historial', 'fecha_actualizacion'])
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['liquidacion'])
+                        || resource.data.get('pagos_saldo', []).size() == 0)))
+            // [B1–B4 — 28-oct] la LISTA de pagos del saldo: solo GA/admin,
+            // solo sobre liquidada, append-only (jamás encoge), y el pago
+            // NUEVO llega con los impuestos DE REGLA [B3]: firmado por quien
+            // escribe, fecha_registro pegada al reloj del servidor (±5 min —
+            // un elemento de array no admite serverTimestamp()), la fecha
+            // real jamás futura, comprobante y valor obligatorios [B2], y si
+            // la fecha real es vieja (>24 h) el registro_posterior NO se
+            // puede ocultar. Correcciones/anulaciones (tamaño igual) quedan
+            // acotadas por rol+estado; su traza la imponen los builders.
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['pagos_saldo'])
+                || (rolActual() in ['gerencia_administrativa', 'admin']
+                    && resource.data.get('estado', '') == 'liquidada'
+                    && request.resource.data.get('pagos_saldo', []).size() >= resource.data.get('pagos_saldo', []).size()
+                    && (request.resource.data.get('pagos_saldo', []).size() == resource.data.get('pagos_saldo', []).size()
+                        || (request.resource.data.get('pagos_saldo', []).size() == resource.data.get('pagos_saldo', []).size() + 1
+                            && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('registrado_por', '') == request.auth.uid
+                            && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('fecha_registro', timestamp.date(2000, 1, 1)) <= request.time
+                            && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('fecha_registro', timestamp.date(2000, 1, 1)) > request.time - duration.value(5, 'm')
+                            && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('fecha', request.time) <= request.time
+                            && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('comprobante_url', '') != ''
+                            && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('valor', 0) > 0
+                            && (request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('fecha', request.time) > request.time - duration.value(24, 'h')
+                                || request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('registro_posterior', false) == true)))))
             // C2 (28-oct, anticipos múltiples): GIRAR, CORREGIR y ANULAR
             // anticipos es SOLO de gerencia_administrativa + admin — quien
             // avala no paga: gestion_integral (escribe el gate SST y aprueba

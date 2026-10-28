@@ -28,7 +28,7 @@
 import type { Timestamp } from 'firebase/firestore'
 import type {
   AlcanceGrupo, CompraReembolso, RetencionLiquidacion, ModalidadContratista,
-  Proyecto, EstadoProyecto, AnticipoGirado, ResumenAsignaciones,
+  Proyecto, EstadoProyecto, AnticipoGirado, CorreccionGiro, ResumenAsignaciones,
   EvaluacionContratista, CriterioEvaluacion, AsignacionProyecto,
   CierreAnticipado, TipoCierreAnticipado,
 } from './proyecto'
@@ -154,6 +154,9 @@ export interface PreliquidacionAsignacion {
   ajuste_pendiente_liquidacion?: boolean
 }
 
+// (los pagos del saldo viven en la ASIGNACIÓN, no en la preliquidación —
+//  son el hecho final de la liquidación; ver PagoSaldo más abajo)
+
 // ── Anticipos múltiples (28-oct — Parte C del bloque proyección/saldo) ───────
 //
 // `giros[]` es la forma canónica; `anticipo` (objeto único) es la legacy
@@ -188,6 +191,167 @@ export const giroSobreAcordado = (valorContratista: number, sumaGirada: number):
 
 const textoSobreAcordado = (suma: number, acordado: number): string =>
   ` · ⚠ GIRO SOBRE EL VALOR ACORDADO — Σ girado (${suma}) supera el valor acordado (${acordado}); registrado con las dos cifras a la vista`
+
+// ── Parte B del bloque (28-oct): pagos del SALDO — el eslabón final ─────────
+//
+// `liquidada` registra la CONCILIACIÓN (cuánto se debe); esto registra el
+// HECHO de que el dinero salió. LISTA desde el día uno [B1] — el saldo hoy se
+// paga de una, pero acabamos de pagar el error del campo único con el
+// anticipo. Mismo tratamiento que los giros [B4]: append-only, anulación por
+// marcador, corrección con traza solo-crecer. Los impuestos de quién/cuándo
+// son DE REGLA [B3]: registrado_por == auth.uid, fecha_registro pegada al
+// reloj del servidor, jamás un pago futuro, y `registro_posterior` DERIVADO.
+
+export const MEDIOS_PAGO_SALDO = ['transferencia', 'consignacion', 'cheque', 'otro'] as const
+export type MedioPagoSaldo = (typeof MEDIOS_PAGO_SALDO)[number]
+
+export interface PagoSaldo {
+  /** Fecha REAL del pago [R8] — puede ser pasada (registro posterior). */
+  fecha: Timestamp
+  valor: number
+  medio: MedioPagoSaldo
+  /** [B2] OBLIGATORIO — y en el registro posterior es cuando MÁS se necesita. */
+  comprobante_url: string
+  comprobante_nombre?: string
+  registrado_por: string
+  por_nombre?: string
+  /** Momento del registro — la regla la pega al reloj del servidor [B3]. */
+  fecha_registro: Timestamp
+  /** DERIVADO [B3/R8]: la fecha real es anterior al día del registro — chip
+   *  "registrado después" (rótulo honesto, no castigo). Jamás lo decide el
+   *  usuario: lo deriva el builder y la regla exige la coherencia. */
+  registro_posterior?: boolean
+  /** Anulación SOFT [B4] — el pago queda en la lista fuera de la suma. */
+  anulado?: { fecha: Timestamp; por: string; por_nombre?: string; motivo: string }
+  /** Correcciones de valor, append-only [B4] (mismo shape que los giros). */
+  correcciones?: CorreccionGiro[]
+}
+
+export const pagosSaldoDe = (a: Pick<AsignacionContratista, 'pagos_saldo'> | undefined | null): PagoSaldo[] =>
+  a?.pagos_saldo ?? []
+
+export const pagosSaldoVivosDe = (a: Pick<AsignacionContratista, 'pagos_saldo'> | undefined | null): PagoSaldo[] =>
+  pagosSaldoDe(a).filter(p => !p.anulado)
+
+/** Σ pagado vivo del saldo. */
+export const totalPagadoSaldoDe = (a: Pick<AsignacionContratista, 'pagos_saldo'> | undefined | null): number =>
+  pagosSaldoVivosDe(a).reduce((s, p) => s + (p.valor || 0), 0)
+
+/** "Saldo pagado" [B1] = Σ pagos vivos >= saldo_final de la liquidación.
+ *  Saldo ≤ 0 (nada que pagar / sobre-giro a favor de NEG) cuenta pagado. */
+export const saldoPagadoDe = (
+  a: Pick<AsignacionContratista, 'pagos_saldo' | 'liquidacion'>,
+): boolean => {
+  const saldo = a.liquidacion?.saldo_final ?? 0
+  return saldo <= 0 || totalPagadoSaldoDe(a) >= saldo
+}
+
+/** Lo que falta (puede ser negativo si se pagó de más — visible, jamás
+ *  recortado). */
+export const saldoRestanteDe = (
+  a: Pick<AsignacionContratista, 'pagos_saldo' | 'liquidacion'>,
+): number => (a.liquidacion?.saldo_final ?? 0) - totalPagadoSaldoDe(a)
+
+/** [B3] registro posterior = la fecha REAL es de un día ANTERIOR al del
+ *  registro (día calendario local — la hora no convierte en "posterior" un
+ *  pago de esta mañana). */
+export const esRegistroPosterior = (fecha: Timestamp, fechaRegistro: Timestamp): boolean => {
+  const dia = (t: Timestamp) => {
+    const d = t.toDate()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  return dia(fecha) < dia(fechaRegistro)
+}
+
+/** Registrar UN pago del saldo [B1][B2][R8] — SOLO sobre `liquidada` de
+ *  contratista, con comprobante y valor > 0. No cambia estados: el pago es
+ *  el hecho final DENTRO de `liquidada`. */
+export function patchRegistrarPagoSaldo(
+  a: AsignacionContratista,
+  datos: { fecha: Timestamp; valor: number; medio: MedioPagoSaldo; comprobante_url: string; comprobante_nombre?: string },
+  uid: string,
+  fechaRegistro: Timestamp,
+  porNombre?: string,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; totalPagado: number; restante: number; completo: boolean; posterior: boolean } | null {
+  if (a.estado !== 'liquidada' || !a.liquidacion) return null
+  if (!(a.liquidacion.saldo_final > 0)) return null   // sin saldo no hay qué pagar (incluye sobre-giro a favor de NEG)
+  if (tipoDe(a) === 'administracion_directa') return null
+  if (!(datos.valor > 0) || !datos.comprobante_url || !MEDIOS_PAGO_SALDO.includes(datos.medio)) return null
+  if (datos.fecha.toMillis() > fechaRegistro.toMillis()) return null   // jamás un pago futuro [B3]
+  const posterior = esRegistroPosterior(datos.fecha, fechaRegistro)
+  const pago: PagoSaldo = {
+    fecha: datos.fecha, valor: datos.valor, medio: datos.medio,
+    comprobante_url: datos.comprobante_url,
+    ...(datos.comprobante_nombre ? { comprobante_nombre: datos.comprobante_nombre } : {}),
+    registrado_por: uid,
+    ...(porNombre?.trim() ? { por_nombre: porNombre.trim() } : {}),
+    fecha_registro: fechaRegistro,
+    ...(posterior ? { registro_posterior: true } : {}),
+  }
+  const pagos = [...pagosSaldoDe(a), pago]
+  const totalPagado = pagos.filter(p => !p.anulado).reduce((s, p) => s + (p.valor || 0), 0)
+  const saldo = a.liquidacion.saldo_final
+  const restante = saldo - totalPagado
+  const completo = restante <= 0
+  return {
+    sub: { pagos_saldo: pagos, fecha_actualizacion: fechaRegistro },
+    totalPagado, restante, completo, posterior,
+    entradaHistorial: entrada('liquidada', 'liquidada', uid, fechaRegistro,
+      `Pago del saldo registrado — ${datos.valor} (${datos.medio}) · pagado ${totalPagado} de ${saldo}` +
+      (completo ? ' · SALDO PAGADO' : ` · restante ${restante}`) +
+      (totalPagado > saldo ? ' · ⚠ pagado POR ENCIMA del saldo — visible, se reconcilia' : '') +
+      (posterior ? ' · registro POSTERIOR (el pago ocurrió antes y el panel se entera después)' : '')),
+  }
+}
+
+/** Corregir/anular UN pago del saldo [B4] — espejo de patchCorregirAnticipo:
+ *  índice (implícito con un solo vivo), corrección con traza solo-crecer,
+ *  anulación por marcador. No cambia estados. */
+export function patchCorregirPagoSaldo(
+  a: AsignacionContratista,
+  datos: { valor?: number; anular?: boolean; indice?: number },
+  motivo: string,
+  uid: string,
+  fecha: Timestamp,
+  porNombre?: string,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; anula: boolean } | null {
+  if (a.estado !== 'liquidada' || !motivo.trim()) return null
+  const pagos = pagosSaldoDe(a)
+  const vivos = pagos.map((p, i) => (p.anulado ? -1 : i)).filter(i => i >= 0)
+  if (vivos.length === 0) return null
+  const idx = datos.indice ?? (vivos.length === 1 ? vivos[0] : undefined)
+  if (idx == null || !pagos[idx] || pagos[idx].anulado) return null
+  const viejo = pagos[idx].valor
+  const quien = porNombre?.trim() ? { por_nombre: porNombre.trim() } : {}
+  const saldo = a.liquidacion?.saldo_final ?? 0
+  if (datos.anular) {
+    const pagosN = pagos.map((p, i) => i === idx
+      ? { ...p, anulado: { fecha, por: uid, ...quien, motivo: motivo.trim() } } : p)
+    const total = pagosN.filter(p => !p.anulado).reduce((s, p) => s + (p.valor || 0), 0)
+    return {
+      sub: { pagos_saldo: pagosN, fecha_actualizacion: fecha },
+      anula: true,
+      entradaHistorial: entrada('liquidada', 'liquidada', uid, fecha,
+        `ANULACIÓN de pago del saldo — pago ${idx + 1}: ${viejo} → $0 (el pago registrado no ocurrió) · Motivo: ${motivo.trim()} · pagado vigente ${total} de ${saldo}`),
+    }
+  }
+  if (!(datos.valor != null && datos.valor > 0) || datos.valor === viejo) return null
+  const pagosN = pagos.map((p, i) => i === idx
+    ? {
+        ...p, valor: datos.valor!,
+        correcciones: [...(p.correcciones ?? []), {
+          fecha, por: uid, ...quien, valor_anterior: viejo, valor_nuevo: datos.valor!, motivo: motivo.trim(),
+        }],
+      }
+    : p)
+  const total = pagosN.filter(p => !p.anulado).reduce((s, p) => s + (p.valor || 0), 0)
+  return {
+    sub: { pagos_saldo: pagosN, fecha_actualizacion: fecha },
+    anula: false,
+    entradaHistorial: entrada('liquidada', 'liquidada', uid, fecha,
+      `Corrección de pago del saldo — pago ${idx + 1}: ${viejo} → ${datos.valor} · pagado ${total} de ${saldo} · Motivo: ${motivo.trim()}`),
+  }
+}
 
 export interface LiquidacionAsignacion {
   liquidacion_anticipada?: boolean
@@ -296,6 +460,12 @@ export interface AsignacionContratista {
   estado: EstadoAsignacion
   preliquidacion?: PreliquidacionAsignacion
   liquidacion?: LiquidacionAsignacion
+  /** Parte B (28-oct): los PAGOS del saldo — LISTA append-only [B1], el
+   *  eslabón final de la cadena (giros → ajustes → saldo → pago). Solo
+   *  gerencia_administrativa/admin la escriben [B5]; registrado_por y
+   *  fecha_registro los impone la regla [B3]; un pago no se sobrescribe
+   *  [B4]. Ver PagoSaldo. */
+  pagos_saldo?: PagoSaldo[]
   compras_reembolsos: CompraReembolso[]
   /** 21-sep (3a fuera de P2-3): evaluación ISO de reevaluación de proveedores
    *  POR CONTRATISTA — bajó del campo singular del padre al sub-doc. Directas
@@ -595,6 +765,11 @@ export function resumenAsignacionesDe(
       .filter(a => tipoDe(a) !== 'administracion_directa').length,
     contratistas_evaluados: asignacionesVivas(asigs)
       .filter(a => tipoDe(a) !== 'administracion_directa' && !!a.evaluacion_contratista).length,
+    // Parte B (28-oct): liquidadas de contratista con saldo > 0 sin pagar —
+    // alimenta la cola "Saldos por pagar" y el gate del CIERRE.
+    saldos_pendientes: asigs.filter(a =>
+      a.estado === 'liquidada' && tipoDe(a) !== 'administracion_directa'
+      && (a.liquidacion?.saldo_final ?? 0) > 0 && !saldoPagadoDe(a)).length,
   }
 }
 

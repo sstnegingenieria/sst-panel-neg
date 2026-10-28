@@ -506,6 +506,30 @@ export default function FacturacionPagos() {
         </div>
       )}
 
+      {/* Parte B (28-oct) — SALDOS POR PAGAR: la liquidación concilió cuánto
+          se debe; esto lista a quién todavía no le SALIÓ el dinero. Patrón
+          "Por facturar" (#145): listar no alcanza, tiene que verse. */}
+      {proyectos.some(p => (p.resumen_asignaciones?.saldos_pendientes ?? 0) > 0) && (
+        <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-900">
+          <p className="font-semibold">
+            💵 Saldos de contratista por pagar — {proyectos.filter(p => (p.resumen_asignaciones?.saldos_pendientes ?? 0) > 0).length} proyecto(s):
+            el pago se registra en la ficha, tarjeta del contratista («Registrar pago del saldo»).
+          </p>
+          <ul className="mt-1 text-xs space-y-0.5">
+            {proyectos.filter(p => (p.resumen_asignaciones?.saldos_pendientes ?? 0) > 0).map(p => (
+              <li key={p.id}>
+                <Link to={`/sigp/proyectos/${p.id}`} className="underline underline-offset-2 font-mono">{p.consecutivo}</Link>
+                {' '}· {p.snapshot.cliente} · {p.resumen_asignaciones!.saldos_pendientes} saldo(s) pendiente(s)
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-[11px] text-emerald-700">
+            El CIERRE del proyecto exige los saldos pagados — cerrar con un saldo sin pagar sería
+            cerrar sobre una mentira.
+          </p>
+        </div>
+      )}
+
       {/* Las 7 secciones del ciclo, con contador. 'Todo el ciclo' = todo lo
           vivo (acción + en camino); 'En camino' = informativa. */}
       <div className="flex items-center gap-1.5 flex-wrap">
