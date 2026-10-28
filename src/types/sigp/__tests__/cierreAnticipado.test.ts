@@ -86,11 +86,18 @@ describe('patchCancelarProyecto — el caso general con ceros', () => {
 })
 
 describe('patchCorregirAnticipo — la pieza que faltaba (caso 056)', () => {
-  it('corrige el valor con traza; fecha y registrado_por se conservan', () => {
+  it('corrige el valor con traza SOLO-CRECER; fecha y registrado_por se conservan (28-oct: canónico giros[])', () => {
     const r = patchCorregirAnticipo(asig({}), { valor: 100_000 }, 'giro real de agosto', 'g', ahora)!
     expect(r.anula).toBe(false)
-    expect(r.sub.preliquidacion?.anticipo?.valor).toBe(100_000)
-    expect(r.sub.preliquidacion?.anticipo?.registrado_por).toBe('u2')
+    const giro = r.sub.preliquidacion?.giros?.[0]
+    expect(giro?.valor).toBe(100_000)
+    expect(giro?.registrado_por).toBe('u2')
+    // la corrección se APPENDEA al giro (C3) — nada se reescribe en el lugar
+    expect(giro?.correcciones).toHaveLength(1)
+    expect(giro?.correcciones?.[0]).toMatchObject({ valor_anterior: 125_000, valor_nuevo: 100_000, por: 'g' })
+    // el legacy `anticipo` se retira al convertir (la lista es la forma canónica)
+    expect(r.sub.preliquidacion && 'anticipo' in r.sub.preliquidacion
+      ? r.sub.preliquidacion.anticipo : undefined).toBeUndefined()
     expect(r.sub.estado).toBeUndefined()   // el estado no cambia al corregir
     expect(r.entradaHistorial.motivo).toContain('125000 → 100000')
   })

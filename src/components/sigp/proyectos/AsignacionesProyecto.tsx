@@ -26,7 +26,8 @@ import {
   asignacionesDe, coberturaDe, detectarDesincronizacion, resumenAsignacionesDe,
   construirAsignacionMulti, construirAsignacionHistorica,
   patchCancelarAsignacion, patchAjustarAtomos, patchResolverSenal,
-  patchDefinirPreliquidacion, patchAprobarPreliquidacion, patchGirarAnticipo,
+  patchDefinirPreliquidacion, patchAprobarPreliquidacion, patchGirarAnticipo, patchGirarAnticipoAdicional,
+  girosDe, girosVivosDe, anticipoTotalDe, hayAnticipoGirado,
   patchCorregirPreliquidacion, patchCorregirAnticipo, patchLiquidarAsignacion, patchAgregarReembolso, valorAlcanceDe,
   tipoDe, patchMarcarAdministracionDirecta, patchEstimarDirecta, patchCerrarDirecta,
   puenteLiquidadoContratista, elegirSingular, construirSingularDesde,
@@ -417,26 +418,78 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const r = patchGirarAnticipo(target, {
         fecha: Timestamp.fromDate(new Date(`${girarFecha}T12:00:00`)),
         valor: girarValor, registrado_por: user?.uid ?? '',
+        ...(user?.nombre ? { por_nombre: user.nombre } : {}),
       }, user?.uid ?? '', ahora)
       if (!r) { toast('El anticipo se registra sobre una preliquidación aprobada', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
-      toast(`Anticipo registrado — ${fmtMoney(girarValor)}`)
+      toast(`Anticipo registrado — ${fmtMoney(girarValor)}`
+        + (r.sobreAcordado ? ' · ⚠ quedó POR ENCIMA del valor acordado (registrado con las dos cifras a la vista)' : ''))
       setGirarTarget(null)
       await recargarTodo()
     } catch { toast('Error al registrar el anticipo', 'error') } finally { setAplicando(false) }
   }
 
+  // ── 28-oct: giro ADICIONAL (anticipos múltiples — C1b: motivo y soporte
+  //    de la insuficiencia obligatorios; el estado NO se mueve, el hito es
+  //    el primer giro) ──
+  const [adicTarget, setAdicTarget] = useState<AsignacionContratista | null>(null)
+  const [adicValor, setAdicValor] = useState<number | undefined>(undefined)
+  const [adicFecha, setAdicFecha] = useState('')
+  const [adicMotivo, setAdicMotivo] = useState('')
+  const [adicSoporte, setAdicSoporte] = useState<File | null>(null)
+  const abrirAdicional = (a: AsignacionContratista) => {
+    setAdicValor(undefined)
+    setAdicFecha(new Date().toISOString().slice(0, 10))
+    setAdicMotivo('')
+    setAdicSoporte(null)
+    setAdicTarget(a)
+  }
+  const girarAdicional = async () => {
+    const t = adicTarget
+    if (!t || !(adicValor !== undefined && adicValor > 0) || !adicFecha || !adicMotivo.trim() || !adicSoporte) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      const vigentes = await asegurarMigrado(proyecto, subdocs)
+      const target = vigentes.find(x => x.id === t.id) ?? t
+      const nombre = `${Date.now()}-${adicSoporte.name}`.replace(/[^\w.\-]/g, '_')
+      const snap = await uploadBytes(ref(storage, `proyectos/${proyecto.id}/anticipo/${nombre}`), adicSoporte)
+      const r = patchGirarAnticipoAdicional(target, {
+        fecha: Timestamp.fromDate(new Date(`${adicFecha}T12:00:00`)),
+        valor: adicValor, registrado_por: user?.uid ?? '',
+        ...(user?.nombre ? { por_nombre: user.nombre } : {}),
+        motivo: adicMotivo.trim(),
+        evidencia_url: await getDownloadURL(snap.ref), evidencia_nombre: adicSoporte.name,
+      }, user?.uid ?? '', ahora)
+      if (!r) { toast('El giro adicional exige un anticipo vigente, motivo y comprobante', 'error'); return }
+      const trasPatch = vigentes.map(x => x.id === target.id
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
+      toast(`Anticipo adicional registrado — ${fmtMoney(adicValor)} (giro ${r.numero}) · Σ girado ${fmtMoney(r.suma)}`
+        + (r.sobreAcordado ? ' · ⚠ la suma supera el valor acordado' : ''))
+      setAdicTarget(null)
+      await recargarTodo()
+    } catch { toast('Error al registrar el anticipo adicional', 'error') } finally { setAplicando(false) }
+  }
+
   // ── 28-sep: corrección del ANTICIPO registrado (valor o anulación) ──
+  // 28-oct: POR GIRO — con varios giros vivos la UI elige cuál (índice).
   const [corrAnticipoTarget, setCorrAnticipoTarget] = useState<AsignacionContratista | null>(null)
+  const [corrAnticipoIndice, setCorrAnticipoIndice] = useState<number | undefined>(undefined)
   const [corrAnticipoValor, setCorrAnticipoValor] = useState<number | undefined>(undefined)
   const [corrAnticipoAnular, setCorrAnticipoAnular] = useState(false)
   const [corrAnticipoMotivo, setCorrAnticipoMotivo] = useState('')
 
   const abrirCorregirAnticipo = (a: AsignacionContratista) => {
-    setCorrAnticipoValor(a.preliquidacion?.anticipo?.valor)
+    const giros = girosDe(a.preliquidacion)
+    const vivos = giros.map((g, i) => (g.anulado ? -1 : i)).filter(i => i >= 0)
+    const idx = vivos.length === 1 ? vivos[0] : undefined
+    setCorrAnticipoIndice(idx)
+    setCorrAnticipoValor(idx != null ? giros[idx]?.valor : undefined)
     setCorrAnticipoAnular(false)
     setCorrAnticipoMotivo('')
     setCorrAnticipoTarget(a)
@@ -446,17 +499,21 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
     const target = corrAnticipoTarget
     if (!target) return
     const r = patchCorregirAnticipo(target,
-      corrAnticipoAnular ? { anular: true } : { valor: corrAnticipoValor },
-      corrAnticipoMotivo, user?.uid ?? '', Timestamp.now())
-    if (!r) { toast('Corrección inválida — revisa valor y motivo', 'error'); return }
+      corrAnticipoAnular
+        ? { anular: true, ...(corrAnticipoIndice != null ? { indice: corrAnticipoIndice } : {}) }
+        : { valor: corrAnticipoValor, ...(corrAnticipoIndice != null ? { indice: corrAnticipoIndice } : {}) },
+      corrAnticipoMotivo, user?.uid ?? '', Timestamp.now(), user?.nombre)
+    if (!r) { toast('Corrección inválida — revisa el giro elegido, el valor y el motivo', 'error'); return }
     setAplicando(true)
     try {
       const tras = asigs.map(x => x.id === target.id ? { ...x, ...r.sub } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, tras)
       toast(r.anula
-        ? 'Anticipo ANULADO — la asignación vuelve a preliquidación aprobada'
-        : 'Anticipo corregido')
+        ? (r.sub.estado === 'preliquidacion_aprobada'
+            ? 'Giro ANULADO — sin giros vivos: la asignación vuelve a preliquidación aprobada'
+            : 'Giro ANULADO — los demás giros siguen vigentes')
+        : 'Anticipo corregido' + (r.sobreAcordado ? ' · ⚠ la suma supera el valor acordado' : ''))
       setCorrAnticipoTarget(null)
       await recargarTodo()
     } catch { toast('Error al corregir el anticipo', 'error') } finally { setAplicando(false) }
@@ -553,7 +610,10 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
           })
         })
       }
-      const anticipoVal = pre.anticipo?.valor ?? anticipoValorDe(pre)
+      // 28-oct: el anticipo del documento es la SUMA de giros vivos; con giros
+      // múltiples (o correcciones/anulaciones) el desglose SALE en el PDF (C3).
+      const girosPdf = girosDe(pre)
+      const anticipoVal = hayAnticipoGirado(pre) ? anticipoTotalDe(pre) : anticipoValorDe(pre)
       const pdf = await generarPdfPreliquidacion({
         proyectoConsecutivo: proyecto.consecutivo,
         contratistaNombre: a.contratista_nombre,
@@ -567,6 +627,22 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         anticipoValor: anticipoVal,
         // saldo contra el GIRO real cuando existe (hecho consumado — Bloque 4)
         saldoValor: pre.valor_contratista - anticipoVal,
+        ...(girosPdf.length > 1 || girosPdf.some(g => g.anulado || (g.correcciones?.length ?? 0) > 0)
+          ? {
+              giros: girosPdf.map(g => ({
+                fecha: g.fecha?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—',
+                valor: g.valor,
+                ...(g.motivo ? { motivo: g.motivo } : {}),
+                ...(g.anulado ? { anulado: true } : {}),
+                ...(g.correcciones?.length
+                  ? { correcciones: g.correcciones.map(c => ({
+                      fecha: c.fecha?.toDate?.()?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) ?? '—',
+                      de: c.valor_anterior, a: c.valor_nuevo, motivo: c.motivo,
+                    })) }
+                  : {}),
+              })),
+            }
+          : {}),
       }, await cargarAssetsPdf())
       const url = URL.createObjectURL(new Blob([pdf as BlobPart], { type: 'application/pdf' }))
       const el = document.createElement('a')
@@ -1060,7 +1136,20 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                   <p className="text-xs text-gray-500">
                     Contratista <span className="font-mono font-semibold">{fmtMoney(a.preliquidacion.valor_contratista)}</span>
                     {' · '}{MODALIDAD_CONTRATISTA_LABEL[a.modalidad]}
-                    {a.preliquidacion.anticipo && <> · anticipo girado <span className="font-mono">{fmtMoney(a.preliquidacion.anticipo.valor)}</span></>}
+                    {hayAnticipoGirado(a.preliquidacion) && (
+                      girosVivosDe(a.preliquidacion).length === 1
+                        ? <> · anticipo girado <span className="font-mono">{fmtMoney(anticipoTotalDe(a.preliquidacion))}</span></>
+                        : <> · <span title={girosDe(a.preliquidacion).map((g, i) =>
+                              `giro ${i + 1}: ${fmtMoney(g.valor)}${g.anulado ? ' (ANULADO)' : ''}${g.motivo ? ` — ${g.motivo}` : ''}`).join(' · ')}>
+                            Σ anticipos girados <span className="font-mono font-semibold">{fmtMoney(anticipoTotalDe(a.preliquidacion))}</span>
+                            {' '}({girosVivosDe(a.preliquidacion).length} giros)
+                          </span></>
+                    )}
+                    {anticipoTotalDe(a.preliquidacion) > a.preliquidacion.valor_contratista && (
+                      <span className="text-amber-700" title="La suma girada supera el valor acordado total — registrado con las dos cifras a la vista; se reconcilia en la liquidación">
+                        {' '}· ⚠ girado sobre el acordado
+                      </span>
+                    )}
                     {!a.liquidacion && totalComprasReembolsos(a.compras_reembolsos) > 0 && (
                       <> · reembolsos <span className="font-mono">{fmtMoney(totalComprasReembolsos(a.compras_reembolsos))}</span> ({(a.compras_reembolsos ?? []).length})</>
                     )}
@@ -1185,9 +1274,20 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                     {/* 28-sep — corrección del GIRO registrado (solo gerencia,
                         paridad "Corregir compra" C3): valor equivocado o giro
                         que nunca ocurrió (anular). */}
-                    {puedeAprobar && a.estado === 'anticipo_girado' && a.preliquidacion?.anticipo && (
+                    {/* 28-oct — giro ADICIONAL (anticipos múltiples): el caso
+                        real del contratista que pide un segundo anticipo.
+                        Motivo de la insuficiencia + comprobante OBLIGATORIOS
+                        (C1b); el estado no se mueve (hito = primer giro). */}
+                    {puedeAprobar && a.estado === 'anticipo_girado' && hayAnticipoGirado(a.preliquidacion) && (
+                      <button onClick={() => abrirAdicional(a)} disabled={aplicando}
+                        title="Registra un giro ADICIONAL de anticipo con su propia fecha, comprobante y motivo de la insuficiencia — la suma es el anticipo efectivo"
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-emerald-500 text-emerald-700 hover:bg-emerald-50 font-medium disabled:opacity-50">
+                        ➕ Anticipo adicional
+                      </button>
+                    )}
+                    {puedeAprobar && a.estado === 'anticipo_girado' && hayAnticipoGirado(a.preliquidacion) && (
                       <button onClick={() => abrirCorregirAnticipo(a)} disabled={aplicando}
-                        title="Corrige el VALOR del anticipo registrado o lo anula si el giro nunca ocurrió — con motivo y traza"
+                        title="Corrige el VALOR de un giro registrado o lo anula si nunca ocurrió — con motivo y traza solo-crecer"
                         className="text-[11px] px-2.5 py-1 rounded-lg border border-amber-400 text-amber-800 hover:bg-amber-50 font-medium disabled:opacity-50">
                         ✎ Corregir anticipo
                       </button>
@@ -1429,7 +1529,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         ]}>
         <div className="space-y-3">
           {cancelarTarget && (() => {
-            const anticipo = cancelarTarget.preliquidacion?.anticipo?.valor ?? 0
+            const anticipo = anticipoTotalDe(cancelarTarget.preliquidacion)
             const reemb = (cancelarTarget.compras_reembolsos ?? []).reduce((s, c) => s + (c.valor || 0), 0)
             const total = anticipo + reemb
             return (
@@ -1494,12 +1594,12 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
               )}
               {/* Guarda 29-sep: sobre-giro dicho EN EL MOMENTO, no descubierto
                   en la liquidación tres meses después. Advierte, no bloquea. */}
-              {(ajustarTarget.preliquidacion.anticipo?.valor ?? 0) > 0
-                && ajustarValor != null && ajustarValor < ajustarTarget.preliquidacion.anticipo!.valor && (
+              {anticipoTotalDe(ajustarTarget.preliquidacion) > 0
+                && ajustarValor != null && ajustarValor < anticipoTotalDe(ajustarTarget.preliquidacion) && (
                 <p className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
-                  ⚠ El valor confirmado ({fmtMoney(ajustarValor)}) queda POR DEBAJO del anticipo ya
-                  girado ({fmtMoney(ajustarTarget.preliquidacion.anticipo!.valor)}): el giro pasa a ser un
-                  SOBREPAGO de {fmtMoney(ajustarTarget.preliquidacion.anticipo!.valor - ajustarValor)} a
+                  ⚠ El valor confirmado ({fmtMoney(ajustarValor)}) queda POR DEBAJO de lo ya
+                  girado ({fmtMoney(anticipoTotalDe(ajustarTarget.preliquidacion))} — Σ de giros vivos): el giro pasa a ser un
+                  SOBREPAGO de {fmtMoney(anticipoTotalDe(ajustarTarget.preliquidacion) - ajustarValor)} a
                   recuperar del contratista. Se puede aplicar igual — quedará en el historial y se
                   reconcilia en la liquidación.
                 </p>
@@ -1590,24 +1690,50 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         actions={[
           { label: 'Volver', onClick: () => setCorrAnticipoTarget(null), variant: 'secondary' },
           {
-            label: aplicando ? 'Guardando…' : corrAnticipoAnular ? 'Anular el anticipo' : 'Guardar corrección',
+            label: aplicando ? 'Guardando…' : corrAnticipoAnular ? 'Anular el giro' : 'Guardar corrección',
             onClick: guardarCorreccionAnticipo, variant: 'primary', loading: aplicando,
             disabled: !corrAnticipoMotivo.trim()
+              || corrAnticipoIndice == null
               || (!corrAnticipoAnular && !(corrAnticipoValor != null && corrAnticipoValor > 0
-                  && corrAnticipoValor !== corrAnticipoTarget?.preliquidacion?.anticipo?.valor)),
+                  && corrAnticipoValor !== girosDe(corrAnticipoTarget?.preliquidacion)[corrAnticipoIndice]?.valor)),
           },
         ]}>
         {corrAnticipoTarget && (
           <div className="space-y-3">
+            {girosVivosDe(corrAnticipoTarget.preliquidacion).length > 1 ? (
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Giro a corregir <span className="text-red-500">*</span></span>
+                <select value={corrAnticipoIndice ?? ''} onChange={e => {
+                    const i = e.target.value === '' ? undefined : Number(e.target.value)
+                    setCorrAnticipoIndice(i)
+                    setCorrAnticipoValor(i != null ? girosDe(corrAnticipoTarget.preliquidacion)[i]?.valor : undefined)
+                  }}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300">
+                  <option value="">— elige el giro —</option>
+                  {girosDe(corrAnticipoTarget.preliquidacion).map((g, i) => g.anulado ? null : (
+                    <option key={i} value={i}>
+                      Giro {i + 1} · {fmtMoney(g.valor)} · {fFecha(g.fecha)}{g.motivo ? ` · ${g.motivo.slice(0, 40)}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <p className="text-sm text-gray-600">
+                Registrado: <b className="font-mono">{fmtMoney(corrAnticipoIndice != null ? (girosDe(corrAnticipoTarget.preliquidacion)[corrAnticipoIndice]?.valor ?? 0) : 0)}</b>
+                {' '}el {fFecha(corrAnticipoIndice != null ? girosDe(corrAnticipoTarget.preliquidacion)[corrAnticipoIndice]?.fecha : undefined)}.
+              </p>
+            )}
             <p className="text-sm text-gray-600">
-              Registrado: <b className="font-mono">{fmtMoney(corrAnticipoTarget.preliquidacion?.anticipo?.valor ?? 0)}</b>
-              {' '}el {fFecha(corrAnticipoTarget.preliquidacion?.anticipo?.fecha)}. La corrección deja
-              traza (valor viejo → nuevo + motivo); la fecha y quién lo registró se conservan.
+              La corrección deja traza <b>solo-crecer</b> en el giro (viejo → nuevo + motivo) y SALE en el
+              documento del contratista; la fecha y quién lo registró se conservan.
             </p>
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={corrAnticipoAnular}
                 onChange={e => setCorrAnticipoAnular(e.target.checked)} className="w-4 h-4 accent-rose-600" />
-              El giro <b>nunca ocurrió</b> — anularlo (la asignación vuelve a «Preliquidación aprobada»)
+              El giro <b>nunca ocurrió</b> — anularlo
+              {girosVivosDe(corrAnticipoTarget.preliquidacion).length === 1
+                ? <> (sin giros vivos, la asignación vuelve a «Preliquidación aprobada»)</>
+                : <> (los demás giros siguen vigentes)</>}
             </label>
             {!corrAnticipoAnular && (
               <label className="block text-sm">
@@ -1616,7 +1742,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                   className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-right focus:outline-none focus:ring-2 focus:ring-brand-300" />
               </label>
             )}
-            {corrAnticipoAnular && proyectoEnEjecucion && (
+            {corrAnticipoAnular && proyectoEnEjecucion && girosVivosDe(corrAnticipoTarget.preliquidacion).length === 1 && (
               <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
                 ⚠ Este proyecto ya está en ejecución y quedará <b>sin ningún anticipo girado</b>. La
                 ejecución ocurrida es un hecho — el gate de anticipo era para ENTRAR, no para quedarse —
@@ -1658,7 +1784,74 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
             </label>
           </div>
+          {/* Aviso C.4 (28-oct): giro por encima del valor acordado total — las
+              dos cifras a la vista, jamás bloqueo; queda en el historial. */}
+          {girarTarget?.preliquidacion && girarValor != null
+            && girarValor + anticipoTotalDe(girarTarget.preliquidacion) > girarTarget.preliquidacion.valor_contratista && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+              ⚠ El giro ({fmtMoney(girarValor)}) queda <b>por encima del valor acordado total</b>
+              {' '}({fmtMoney(girarTarget.preliquidacion.valor_contratista)}). No se bloquea — puede haber
+              razón — pero el historial dejará constancia de que se registró sabiéndolo.
+            </p>
+          )}
         </div>
+      </Modal>
+
+      {/* ── Modal: giro ADICIONAL de anticipo (28-oct — anticipos múltiples) ── */}
+      <Modal isOpen={adicTarget !== null} onClose={() => setAdicTarget(null)}
+        title={`Anticipo adicional — ${adicTarget?.contratista_nombre ?? ''}`}
+        actions={[
+          { label: 'Volver', onClick: () => setAdicTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Registrando…' : 'Registrar giro adicional', onClick: girarAdicional, variant: 'primary',
+            loading: aplicando,
+            disabled: !(adicValor !== undefined && adicValor > 0) || !adicFecha || !adicMotivo.trim() || !adicSoporte,
+          },
+        ]}>
+        {adicTarget && (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              Ya girado: <b className="font-mono">{fmtMoney(anticipoTotalDe(adicTarget.preliquidacion))}</b>
+              {' '}({girosVivosDe(adicTarget.preliquidacion).length} giro{girosVivosDe(adicTarget.preliquidacion).length === 1 ? '' : 's'})
+              {' '}· valor acordado <b className="font-mono">{fmtMoney(adicTarget.preliquidacion?.valor_contratista ?? 0)}</b>.
+              El giro adicional lleva su propia fecha y comprobante; la <b>suma</b> es el anticipo
+              efectivo en la liquidación y el saldo.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Valor del giro <span className="text-red-500">*</span></span>
+                <InputExpresion valor={adicValor} onValor={setAdicValor}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Fecha del giro <span className="text-red-500">*</span></span>
+                <input type="date" value={adicFecha} onChange={e => setAdicFecha(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+              </label>
+            </div>
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Motivo de la insuficiencia <span className="text-red-500">*</span></span>
+              <textarea value={adicMotivo} onChange={e => setAdicMotivo(e.target.value)} rows={2}
+                placeholder="Por qué lo ya girado no alcanzó (queda en el giro y en el historial)…"
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Comprobante del giro <span className="text-red-500">*</span></span>
+              <input type="file" accept="application/pdf,image/*"
+                onChange={e => setAdicSoporte(e.target.files?.[0] ?? null)}
+                className="mt-1 w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-sm" />
+            </label>
+            {adicValor != null && adicTarget.preliquidacion
+              && adicValor + anticipoTotalDe(adicTarget.preliquidacion) > adicTarget.preliquidacion.valor_contratista && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                ⚠ Con este giro la suma ({fmtMoney(adicValor + anticipoTotalDe(adicTarget.preliquidacion))}) queda
+                {' '}<b>por encima del valor acordado total</b> ({fmtMoney(adicTarget.preliquidacion.valor_contratista)}).
+                No se bloquea — puede haber razón — pero el historial dejará constancia de que se
+                registró sabiéndolo, y la diferencia se reconcilia en la liquidación.
+              </p>
+            )}
+          </div>
+        )}
       </Modal>
 
       {/* ── Modal: reembolso CON DUEÑO (17-sep) — titulado con el contratista:
@@ -1678,6 +1871,14 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
             Compra que hizo <strong>{reembTarget?.contratista_nombre}</strong> y NEG le reconoce —
             línea separada de su mano de obra; se paga en <strong>su</strong> liquidación
             (y entra al indicador presupuestal de inmediato).
+          </p>
+          {/* C.5 (28-oct): el camino del reembolso NO es un anticipo — dicho
+              donde se registra, no descubierto en la liquidación. */}
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+            ⚠ <b>Un anticipo NO se registra aquí.</b> Un reembolso SUMA al costo del proyecto y al
+            total a pagar de la liquidación; un anticipo registrado como reembolso se pagaría DOS
+            veces e inflaría el indicador. Los giros de anticipo van en «💸 Registrar anticipo» /
+            «➕ Anticipo adicional» de la misma tarjeta.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block text-sm">
@@ -1846,7 +2047,8 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
             const esCanc = a.estado === 'cancelada'
             const manoObra = esCanc ? (a.cancelacion?.incurrido.anticipo ?? 0) : (a.preliquidacion?.valor_contratista ?? 0)
             const reemb = totalComprasReembolsos(a.compras_reembolsos)
-            const giro = a.preliquidacion?.anticipo?.valor ?? 0
+            // 28-oct: Σ giros vivos — espejo exacto de patchLiquidarAsignacion
+            const giro = anticipoTotalDe(a.preliquidacion)
             const totRet = retenciones.reduce((s, r) => s + r.valor, 0)
             const saldo = manoObra + reemb - giro - totRet
             return (

@@ -20,6 +20,7 @@ import {
   estadoSstGate, sstGateAlDia, SST_GATE_LABEL, SST_GATE_COLOR,
 } from '../../types/sigp/proyecto'
 import type { Proyecto, RetencionLiquidacion, LiquidacionProyecto } from '../../types/sigp/proyecto'
+import { anticipoTotalDe, hayAnticipoGirado } from '../../types/sigp/asignacion'
 import type { VerificacionSst } from '../../types/sigp/verificacionSst'
 
 interface Props {
@@ -52,7 +53,9 @@ export default function LiquidacionModal({ proyecto, verificacion, onClose, onDo
   const gateOk = sstGateAlDia(verificacion ?? {})
 
   const manoObra = pre?.valor_contratista ?? 0
-  const anticipoGirado = pre ? (pre.anticipo?.valor ?? anticipoValorDe(pre)) : 0
+  // 28-oct (anticipos múltiples): Σ de giros vivos — espejo exacto del
+  // builder patchLiquidarAsignacion.
+  const anticipoGirado = pre ? (hayAnticipoGirado(pre) ? anticipoTotalDe(pre) : anticipoValorDe(pre)) : 0
   const totalFinal = totalContratistaFinal(manoObra, compras)
   const diferencia = totalComprasReembolsos(compras)
   const saldoFinal = saldoFinalLiquidacion(totalFinal, anticipoGirado, retenciones)
