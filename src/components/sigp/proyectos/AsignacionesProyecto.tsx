@@ -1613,10 +1613,12 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
             </div>
           )}
           {esDirectaNueva && (
-            <p className="text-xs text-gray-500 bg-gray-50 rounded px-2.5 py-1.5">
-              Sin aprobación de giro, sin anticipo y sin liquidación conciliada — el costo del equipo
-              propio se ESTIMA después desde la tarjeta y se cierra con el costo real. El material
-              entra por órdenes de compra y compras menores, como siempre.
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+              ⚠ <strong>Administración directa = ejecutar con personal propio de NEG</strong>: no habrá
+              contratista a pagar — ni preliquidación, ni anticipo, ni liquidación conciliada — y la marca
+              <strong> no se deshace</strong>: si fue un error, la asignación se cancela con motivo y se crea
+              de nuevo. El costo del equipo propio se ESTIMA después desde la tarjeta y se cierra con el
+              costo real; el material entra por órdenes de compra y compras menores, como siempre.
             </p>
           )}
           {/* Registro histórico: DECLARACIÓN DE GERENCIA (condición 03-sep) —
