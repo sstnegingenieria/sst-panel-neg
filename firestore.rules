@@ -889,7 +889,11 @@ service cloud.firestore {
                         // de SU asignación. Duplicar la verificación arriba crearía
                         // dos verdades sobre lo mismo.
                         || (((!request.resource.data.diff(resource.data).affectedKeys().hasAny(['liquidacion'])
-                              && request.resource.data.get('resumen_asignaciones', {}).get('por_estado', {}).keys().hasOnly(['liquidada', 'cancelada']))
+                              && request.resource.data.get('resumen_asignaciones', {}).get('por_estado', {}).keys().hasOnly(['liquidada', 'cancelada'])
+                              // ≥1 liquidada REAL: un resumen ausente/vacío no es un lote
+                              // coherente (hasOnly sobre conjunto vacío daría true — lo
+                              // atrapó la batería del aval físico del frente).
+                              && request.resource.data.get('resumen_asignaciones', {}).get('por_estado', {}).get('liquidada', 0) >= 1)
                              || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId + '__' + resource.data.get('asignacion', {}).get('contratista_id', '')))
                                   .data.get('sst_gate', {}).get('estado', '') == 'al_dia')
                             && (resource.data.get('estado', '') == 'pagado_cliente'
@@ -953,7 +957,11 @@ service cloud.firestore {
                         // puente del lote con resumen coherente, o gate POR
                         // CONTRATISTA de la asignación del padre (vía legacy).
                         || (((!request.resource.data.diff(resource.data).affectedKeys().hasAny(['liquidacion'])
-                              && request.resource.data.get('resumen_asignaciones', {}).get('por_estado', {}).keys().hasOnly(['liquidada', 'cancelada']))
+                              && request.resource.data.get('resumen_asignaciones', {}).get('por_estado', {}).keys().hasOnly(['liquidada', 'cancelada'])
+                              // ≥1 liquidada REAL: un resumen ausente/vacío no es un lote
+                              // coherente (hasOnly sobre conjunto vacío daría true — lo
+                              // atrapó la batería del aval físico del frente).
+                              && request.resource.data.get('resumen_asignaciones', {}).get('por_estado', {}).get('liquidada', 0) >= 1)
                              || get(/databases/$(database)/documents/verificaciones_sst/$(proyectoId + '__' + resource.data.get('asignacion', {}).get('contratista_id', '')))
                                   .data.get('sst_gate', {}).get('estado', '') == 'al_dia')
                             && (resource.data.get('estado', '') == 'pagado_cliente'
