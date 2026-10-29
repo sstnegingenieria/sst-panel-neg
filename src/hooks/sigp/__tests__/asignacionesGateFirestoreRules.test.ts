@@ -544,12 +544,21 @@ describe('I. pagos_saldo: lista append-only, impuestos por regla, B5', () => {
   it('I3. [B3] un pago FUTURO no se registra; fecha_registro inventada (vieja) tampoco', async () => {
     await sembrarLiquidada()
     await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), {
-      pagos_saldo: [pagoValido('marcela', { fecha: Timestamp.fromMillis(Date.now() + 86_400_000) })],
+      // +3 días: la regla da 1 día de holgura (la UI ancla la fecha a las
+      // 12:00 del día — un pago de HOY en la mañana no es futuro)
+      pagos_saldo: [pagoValido('marcela', { fecha: Timestamp.fromMillis(Date.now() + 3 * 86_400_000) })],
       fecha_actualizacion: ts(),
     }))
     await sembrarLiquidada()
     await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), {
       pagos_saldo: [pagoValido('marcela', { fecha_registro: Timestamp.fromMillis(Date.now() - 3_600_000) })],
+      fecha_actualizacion: ts(),
+    }))
+    // dentro de la holgura de 1 día (fecha HOY a mediodía, registro en la
+    // mañana — el caso de las 8 AM del E2E): PERMITIDO
+    await sembrarLiquidada()
+    await assertSucceeds(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      pagos_saldo: [pagoValido('marcela', { fecha: Timestamp.fromMillis(Date.now() + 4 * 3_600_000) })],
       fecha_actualizacion: ts(),
     }))
   }, TIMEOUT)

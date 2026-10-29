@@ -89,6 +89,11 @@ describe('patchRegistrarPagoSaldo [B1][B2]', () => {
     expect(r.sub.pagos_saldo![0].registro_posterior).toBe(true)
     expect(r.entradaHistorial.motivo).toContain('registro POSTERIOR')
   })
+  it('[B3] fecha de HOY anclada a mediodía con registro en la MAÑANA → NO es futura (caso 8 AM del E2E)', () => {
+    const r = patchRegistrarPagoSaldo(liquidada(), { ...datos, fecha: ts('2026-10-28T12:00:00') }, 'marcela', ts('2026-10-28T08:00:00'))
+    expect(r).not.toBeNull()
+    expect(r!.posterior).toBe(false)
+  })
   it('rehúsa: sin comprobante [B2], valor ≤ 0, fecha FUTURA [B3], no-liquidada, directa, saldo ≤ 0', () => {
     expect(patchRegistrarPagoSaldo(liquidada(), { ...datos, comprobante_url: '' }, 'm', HOY)).toBeNull()
     expect(patchRegistrarPagoSaldo(liquidada(), { ...datos, valor: 0 }, 'm', HOY)).toBeNull()
