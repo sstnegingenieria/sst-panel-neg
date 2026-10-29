@@ -133,6 +133,91 @@ El pago del saldo (`pago_saldo`, B) y los giros (C) son los dos extremos de la m
 
 El residual G1/G2 del PR #193 deja de ser residual: **el CREATE directo en `liquidada` (registro histórico) queda acotado a `gerencia_administrativa`/`admin`, con MOTIVO obligatorio, y SOLO para proyectos anteriores al 26-oct-2026** (la fecha en que el gate existe — un "histórico" de un proyecto posterior sería un bypass con otro nombre); **la vía `legacy` NO nace liquidada**. Va en la misma ventana de reglas del bloque.
 
+---
+
+## Parte D — SOLICITUD de anticipo adicional (DISEÑADA 28-oct, EN PAUSA — entra después de A y B)
+
+**El cambio**: el giro adicional pasa de UN paso (quien registra decide y gira) a DOS, con dos
+personas — **Proyectos solicita, Marcela evalúa y gira o devuelve**. Sin paso de aprobación
+intermedio (decisión explícita de Giovanny: la evaluación de Marcela ES el segundo par de ojos;
+una aprobación formal sería trámite sin control nuevo). Calca el flujo de órdenes de compra, que
+ya funciona. **Solo aplica al giro ADICIONAL** — el primer anticipo viene pactado desde la
+preliquidación y se queda exactamente como está.
+
+### D.1 Modelo — en la asignación, lista append-only (misma doctrina que giros y pagos)
+
+```ts
+asignacion.solicitudes_anticipo?: SolicitudAnticipo[]
+
+interface SolicitudAnticipo {
+  estado: 'solicitada' | 'devuelta' | 'girada'
+  monto_propuesto: number
+  /** El motivo de la insuficiencia (C1b) — por qué lo girado no alcanza. */
+  motivo: string
+  /** SOPORTE 1 — del CONTRATISTA: prueba POR QUÉ hace falta (obligatorio).
+   *  Storage proyectos/{pid}/solicitudes_anticipo/{aid}/{uuid}.
+   *  ⚠ DISTINTO y SEPARADO del comprobante del giro (soporte 2, que prueba
+   *  que SE PAGÓ y vive en giros[].evidencia_url) — jamás un campo compartido. */
+  soporte_contratista_url: string
+  soporte_contratista_nombre?: string
+  solicitado_por: string
+  por_nombre?: string
+  fecha_solicitud: Timestamp
+  /** Devolución NO terminal (patrón OC rechazada): vuelve a quien la hizo con
+   *  el motivo VISIBLE; editable y reenviable — cada vuelta queda en el
+   *  historial de la asignación. */
+  devolucion?: { fecha: Timestamp; por: string; por_nombre?: string; motivo: string }
+  /** Al girar: puntero al giro RESULTANTE en giros[] (la solicitud no guarda
+   *  el dinero — lo guarda la lista de giros, con la maquinaria de la Parte C
+   *  tal cual: fecha real + comprobante de la transferencia + suma + aviso
+   *  sobre-acordado). */
+  giro_indice?: number
+  girada?: { fecha: Timestamp; por: string; por_nombre?: string }
+}
+```
+
+### D.2 El flujo
+
+1. **Proyectos solicita** (roles que gestionan proyectos, botón en la tarjeta del contratista,
+   estado `anticipo_girado`): monto propuesto + motivo de la insuficiencia + soporte del
+   contratista → `solicitada`. Builder puro `patchSolicitarAnticipo` (valida y ejecuta — monto > 0,
+   motivo, soporte obligatorios).
+2. **Marcela evalúa desde su bandeja** (cola nueva "Solicitudes de anticipo" en Gestión
+   Administrativa, patrón de la cola de revisión de OCs — contador + lo que se evalúa a la vista:
+   monto propuesto, motivo, soporte del contratista, Σ ya girada y valor acordado):
+   - **Gira**: registra con la FECHA REAL y el COMPROBANTE de la transferencia →
+     `patchGirarDesdeSolicitud` ejecuta el giro por la maquinaria de la Parte C
+     (`giros[]` append, aviso sobre-acordado, historial) Y marca la solicitud `girada` con
+     `giro_indice` — un solo writeBatch. El monto girado puede diferir del propuesto (gira lo
+     que giró tesorería); si difiere, queda dicho en el historial con las dos cifras.
+   - **Devuelve con motivo** (como devuelve una OC): `devuelta`, no terminal — el solicitante la
+     ve con el motivo, la edita y la reenvía (`solicitada` otra vez, historial encadenado).
+3. **"Nadie solicita y gira"**: el builder de girar rehúsa si `girada_por == solicitado_por`
+   (cubre también a admin, que está en los dos lados por respaldo); los roles ya separan el caso
+   normal (gestores no giran — C2; gerencia no gestiona proyectos).
+4. **El giro adicional DIRECTO (un paso) se retira de la UI** al entrar este flujo — el botón
+   "➕ Anticipo adicional" de gerencia se reemplaza por la cola; `patchGirarAnticipoAdicional`
+   queda como la maquinaria interna que `patchGirarDesdeSolicitud` invoca. Como con la OC: el
+   camino de dos pasos ES el camino.
+
+### D.3 Reglas — UNA palabra, y en LA MISMA ventana única
+
+- `'solicitudes_anticipo'` entra al hasOnly de la rama de GERENCIA de asignaciones **ya en la
+  ventana única del bloque** (aditiva e INERTE hasta que exista el flujo) — así la Parte D
+  posterior NO abre otra ventana sobre el archivo. Los gestores escriben la solicitud por su
+  rama (campo nuevo, sin hasOnly de gestores); el guard de que un gestor no toque `giros` sigue
+  intacto — solicitar no es girar.
+- La máquina de la solicitud (solicitada/devuelta/girada, quién-no-gira-lo-suyo) la imponen los
+  builders + UI, como la máquina de cotizaciones y la de OCs — las reglas no la codifican.
+
+### D.4 Lo que NO cambia
+
+- El primer anticipo (pactado en la preliquidación): flujo actual intacto, sin solicitud.
+- Los giros YA registrados: este flujo entra después y no toca lo registrado.
+- El caso real de hoy se resolvió con el giro directo que ya está en producción.
+
+**Estado: DISEÑO EN PAUSA — se construye con OK, después de las Partes A y B.**
+
 ## Fuera de alcance (nombrado)
 
 - La app Flutter no se toca; `verificaciones_sst` no la lee.
@@ -143,6 +228,7 @@ El residual G1/G2 del PR #193 deja de ser residual: **el CREATE directo en `liqu
 1. **PR C-1 — anticipos múltiples** (PRIORIDAD: hay un contratista esperando el segundo giro): motor + consumidores + aviso + guard de reembolsos + UI; migración de los 74 con bundle tolerante primero; reglas del guard de presencia + `[C2]` en la ventana coordinada.
 2. **PR A — proyección por contratista**: CF → migración → regla → bundle (`[A2]`, falla cerrada; Ingrid sin marcar gates en la ventana).
 3. **PR B — pagos del saldo** + `[B5]` estrechamiento post-liquidada + `[F1]` creates en liquidada (misma ventana de reglas).
-4. **Coordinación**: la reunificación de Licitaciones va PRIMERO que cualquier deploy de reglas nuestro; ventanas avisadas a los dos frentes; enmienda del 26-oct en vigor en cada deploy.
+4. **PR D — solicitud de anticipo adicional** (diseñada 28-oct, EN PAUSA — se construye con OK de Giovanny después de A y B). Su única palabra de reglas ('solicitudes_anticipo' al hasOnly de gerencia, aditiva e inerte) entra YA en la ventana única del bloque para no abrir otra ventana sobre el archivo.
+5. **Coordinación**: la reunificación de Licitaciones va PRIMERO que cualquier deploy de reglas nuestro; ventanas avisadas a los dos frentes; enmienda del 26-oct en vigor en cada deploy.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
