@@ -10,6 +10,8 @@
 
   Pasos (cualquier fallo aborta SIN desplegar):
     1. Rama = main, sin cambios sin commit, HEAD == origin/main tras git fetch.
+       Una bitacora con lineas SIN COMMITEAR de un deploy anterior tambien
+       aborta (el registro no puede quedar en el aire).
     2. Baja el ruleset vigente de prod (cloud.firestore) por la API de reglas.
     3. Normaliza CRLF/LF y compara. Si prod contiene algo que main NUNCA tuvo
        (prod "va adelante"), ABORTA y muestra las lineas.
@@ -19,7 +21,9 @@
        deploy "sin explicacion" no corre) y exige escribir DESPLEGAR.
     5. firebase deploy --only firestore:rules --project neg-sst-app
     6. Vuelve a bajar prod y verifica byte-identico (normalizado) al local.
-    7. Escribe una linea en docs/bitacora-deploys.md (incluye el/los PR).
+    7. Escribe una linea en docs/bitacora-deploys.md (incluye el/los PR) y
+       la COMMITEA Y EMPUJA el mismo script — el registro de quien desplego
+       que no depende de la memoria de nadie.
   -Simulacro hace 1 a 4 y se detiene (solo lectura).
 
   Regla del paso 3: prod debe ser una VERSION ANTERIOR de main (el ruleset
@@ -84,9 +88,19 @@ Paso '1/8' 'Rama, cambios sin commit y HEAD == origin/main'
 $rama = (Git-Salida @('branch', '--show-current') | Out-String).Trim()
 if ($rama -ne 'main') { Abortar "la rama actual es '$rama'; solo se despliega desde main." }
 
+# El registro del deploy anterior no puede quedar en el aire: si la bitacora
+# tiene lineas sin commitear (o el archivo quedo sin rastrear), el paso 7 de
+# ese deploy no termino — se resuelve ANTES de volver a desplegar. SIN -uno:
+# un archivo nuevo sin commitear tambien cuenta.
+$bitacoraSucia = Git-Salida @('status', '--porcelain', '--', 'docs/bitacora-deploys.md')
+if ($bitacoraSucia) {
+  Abortar ("docs/bitacora-deploys.md tiene cambios SIN COMMITEAR de un deploy anterior.`n" +
+    "El registro de quien desplego que no depende de la memoria de nadie: commitea y empuja esa linea`n" +
+    "(git add docs/bitacora-deploys.md && git commit && git push) y vuelve a correr.")
+}
+
 # Solo archivos RASTREADOS (un archivo sin rastrear no cambia firestore.rules).
-# docs/bitacora-deploys.md se exime: el propio script lo modifica tras cada deploy.
-$sucios = Git-Salida @('status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)docs/bitacora-deploys.md')
+$sucios = Git-Salida @('status', '--porcelain', '--untracked-files=no')
 if ($sucios) { Abortar ("hay cambios sin commit:`n" + ($sucios -join "`n")) }
 
 Write-Host 'git fetch origin ...'
@@ -316,10 +330,28 @@ $estado = if ($verificado) { 'byte-identica' } else { 'FALLIDA' }
 $fila = "| $fechaUtc | $commitCorto | $prDeploy | $($prodDespues.id) | $($prodAntes.id) | $quien | $estado |"
 [System.IO.File]::AppendAllText($bitacora, $fila + "`n", (New-Object System.Text.UTF8Encoding($false)))
 Write-Host $fila
-Write-Host 'Linea agregada. Commitea docs/bitacora-deploys.md con tu proximo cambio (el chequeo de "arbol limpio" la exime).'
+
+# El registro se commitea y empuja AQUI MISMO — no "con el proximo cambio":
+# un control cuyo cumplimiento depende de la memoria de una persona no es un
+# control. Si esto falla, el proximo arranque ABORTA (chequeo del paso 1)
+# hasta que la linea quede commiteada y main == origin/main.
+$msgCommit = "docs: bitacora deploy de reglas $($prodDespues.id) ($prDeploy)"
+& git add -- docs/bitacora-deploys.md
+$okBitacora = ($LASTEXITCODE -eq 0)
+if ($okBitacora) { & git commit --quiet -m $msgCommit; $okBitacora = ($LASTEXITCODE -eq 0) }
+if ($okBitacora) { & git push --quiet origin main; $okBitacora = ($LASTEXITCODE -eq 0) }
+if ($okBitacora) {
+  Write-Host "Bitacora commiteada y empujada a origin/main: $msgCommit" -ForegroundColor Green
+} else {
+  Write-Host '*** LA BITACORA NO QUEDO COMMITEADA/EMPUJADA (fallo git add, commit o push). ***' -ForegroundColor Red
+  Write-Host '    El deploy SI se hizo. Empuja la linea a mano:' -ForegroundColor Red
+  Write-Host '      git add docs/bitacora-deploys.md && git commit && git push' -ForegroundColor Red
+  Write-Host '    El proximo deploy ABORTARA en el arranque hasta resolverlo.' -ForegroundColor Red
+}
 
 Paso '8/8' 'Fin'
 Remove-Item $tmp -Recurse -Force
 if (-not $verificado) { exit 2 }
-Write-Host 'Deploy de reglas completo y verificado.' -ForegroundColor Green
+if (-not $okBitacora) { exit 3 }
+Write-Host 'Deploy de reglas completo, verificado y registrado.' -ForegroundColor Green
 exit 0
