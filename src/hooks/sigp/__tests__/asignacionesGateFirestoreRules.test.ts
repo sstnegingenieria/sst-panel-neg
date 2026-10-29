@@ -285,7 +285,9 @@ describe('B. REGRESIÓN: el flujo normal de liquidación sigue vivo', () => {
     const b = writeBatch(fs)
     b.update(doc(fs, ASIG(P1)), liquidarPatch('marcela'))
     b.update(doc(fs, 'proyectos', P1), {
-      resumen_asignaciones: { liquidadas: 1 }, fecha_actualizacion: ts(),
+      // El puente real escribe el resumen RECOMPUTADO del lote (A.4: la
+      // coherencia — por_estado solo liquidada/cancelada, ≥1 liquidada).
+      resumen_asignaciones: { por_estado: { liquidada: 1 }, total: 1 }, fecha_actualizacion: ts(),
       estado: 'liquidado_contratista',
       historial: arrayUnion({ de: 'pagado_cliente', a: 'liquidado_contratista', por: 'marcela', fecha: ts(), motivo: 'puente' }),
     })
