@@ -1204,7 +1204,11 @@ service cloud.firestore {
                             && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('registrado_por', '') == request.auth.uid
                             && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('fecha_registro', timestamp.date(2000, 1, 1)) <= request.time
                             && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('fecha_registro', timestamp.date(2000, 1, 1)) > request.time - duration.value(5, 'm')
-                            && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('fecha', request.time) <= request.time
+                            // "jamás un pago futuro" con holgura de 1 día: la UI ancla la
+                            // fecha a las 12:00 LOCALES del día — un pago de HOY registrado
+                            // en la mañana no es futuro (lo atrapó el E2E a las 8 AM); el
+                            // día exacto lo impone el builder, esto es el tope duro.
+                            && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('fecha', request.time) < request.time + duration.value(1, 'd')
                             && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('comprobante_url', '') != ''
                             && request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('valor', 0) > 0
                             && (request.resource.data.get('pagos_saldo', [])[request.resource.data.get('pagos_saldo', []).size() - 1].get('fecha', request.time) > request.time - duration.value(24, 'h')

@@ -95,6 +95,16 @@ export default function FacturacionPagos() {
     try { localStorage.setItem(ORDEN_KEY, v) } catch { /* preferencia no persistida */ }
   }
 
+  // El cierre tiene DOS gates duros (pago del cliente y saldos de contratista
+  // en cero) — el texto de bloqueo dice CUÁL es el que aplica, no siempre el
+  // primero (lo atrapó el E2E de la Parte B: decía "pago pendiente" con el
+  // pago registrado y un saldo sin pagar).
+  const razonCierreBloqueado = (p: Proyecto): string | null => {
+    if (puedeCerrarseProyecto(p)) return null
+    if (!p.pago_cliente) return 'el pago del cliente sigue pendiente (liquidación anticipada) — regístralo primero'
+    return 'hay saldos de contratista sin pagar — regístralos en la ficha, tarjeta del contratista («Registrar pago del saldo»)'
+  }
+
   const cerrarProyecto = async () => {
     // INTEGRIDAD (anticipada, 23-jul): no se cierra con cuenta por cobrar
     // abierta — la regla de Firestore también lo exige.
@@ -795,7 +805,7 @@ export default function FacturacionPagos() {
                       {p.estado === 'liquidado_contratista' && puedeCerrar && (
                         <button onClick={() => { setCierreTarget(p); setNotasCierre('') }}
                           disabled={!puedeCerrarseProyecto(p)}
-                          title={puedeCerrarseProyecto(p) ? undefined : 'Bloqueado: el pago del cliente sigue pendiente (liquidación anticipada) — regístralo primero'}
+                          title={razonCierreBloqueado(p) ? `Bloqueado: ${razonCierreBloqueado(p)}` : undefined}
                           className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50 disabled:opacity-40 disabled:cursor-not-allowed">
                           🏁 Cerrar proyecto
                         </button>
@@ -1009,7 +1019,7 @@ export default function FacturacionPagos() {
           {
             label: aplicando ? 'Cerrando…'
               : cierreTarget && !puedeCerrarseProyecto(cierreTarget)
-                ? 'Bloqueado: cobro del cliente pendiente'
+                ? (cierreTarget.pago_cliente ? 'Bloqueado: saldos de contratista sin pagar' : 'Bloqueado: cobro del cliente pendiente')
                 : 'Cerrar proyecto (queda de solo lectura)',
             onClick: cerrarProyecto, variant: 'primary', loading: aplicando,
           },
@@ -1019,13 +1029,15 @@ export default function FacturacionPagos() {
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
               Cierre formal del ciclo. El resumen es <strong>informativo</strong> — un pendiente
-              no bloquea el cierre, <strong>excepto el pago del cliente</strong>: no se cierra
-              con cuenta por cobrar abierta.
+              no bloquea el cierre, <strong>excepto el pago del cliente y los saldos de
+              contratista</strong>: no se cierra con cuenta por cobrar abierta ni con un
+              saldo sin pagar.
             </p>
             {!puedeCerrarseProyecto(cierreTarget) && (
               <p className="text-xs text-red-700 bg-red-50 rounded px-2 py-1.5">
-                ⛔ Este proyecto se liquidó ANTICIPADAMENTE y el cobro al cliente sigue
-                pendiente — registra el pago (sección "Por cobrar") y vuelve a cerrar.
+                ⛔ {cierreTarget.pago_cliente
+                  ? 'Hay saldos de contratista sin pagar — regístralos en la ficha, tarjeta del contratista («Registrar pago del saldo»), y vuelve a cerrar.'
+                  : 'Este proyecto se liquidó ANTICIPADAMENTE y el cobro al cliente sigue pendiente — registra el pago (sección "Por cobrar") y vuelve a cerrar.'}
               </p>
             )}
             <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">

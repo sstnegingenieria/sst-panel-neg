@@ -255,13 +255,12 @@ export const saldoRestanteDe = (
 /** [B3] registro posterior = la fecha REAL es de un día ANTERIOR al del
  *  registro (día calendario local — la hora no convierte en "posterior" un
  *  pago de esta mañana). */
-export const esRegistroPosterior = (fecha: Timestamp, fechaRegistro: Timestamp): boolean => {
-  const dia = (t: Timestamp) => {
-    const d = t.toDate()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
-  return dia(fecha) < dia(fechaRegistro)
+const diaLocal = (t: Timestamp): string => {
+  const d = t.toDate()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+export const esRegistroPosterior = (fecha: Timestamp, fechaRegistro: Timestamp): boolean =>
+  diaLocal(fecha) < diaLocal(fechaRegistro)
 
 /** Registrar UN pago del saldo [B1][B2][R8] — SOLO sobre `liquidada` de
  *  contratista, con comprobante y valor > 0. No cambia estados: el pago es
@@ -277,7 +276,10 @@ export function patchRegistrarPagoSaldo(
   if (!(a.liquidacion.saldo_final > 0)) return null   // sin saldo no hay qué pagar (incluye sobre-giro a favor de NEG)
   if (tipoDe(a) === 'administracion_directa') return null
   if (!(datos.valor > 0) || !datos.comprobante_url || !MEDIOS_PAGO_SALDO.includes(datos.medio)) return null
-  if (datos.fecha.toMillis() > fechaRegistro.toMillis()) return null   // jamás un pago futuro [B3]
+  // Jamás un pago futuro [B3] — por DÍA calendario, como esRegistroPosterior:
+  // la UI ancla la fecha a las 12:00 del día, así que un pago de HOY
+  // registrado en la mañana NO es futuro (lo atrapó el E2E a las 8 AM).
+  if (diaLocal(datos.fecha) > diaLocal(fechaRegistro)) return null
   const posterior = esRegistroPosterior(datos.fecha, fechaRegistro)
   const pago: PagoSaldo = {
     fecha: datos.fecha, valor: datos.valor, medio: datos.medio,
