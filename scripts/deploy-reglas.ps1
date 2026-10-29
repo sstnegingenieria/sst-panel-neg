@@ -13,10 +13,13 @@
     2. Baja el ruleset vigente de prod (cloud.firestore) por la API de reglas.
     3. Normaliza CRLF/LF y compara. Si prod contiene algo que main NUNCA tuvo
        (prod "va adelante"), ABORTA y muestra las lineas.
-    4. Muestra el diff local vs prod y exige escribir DESPLEGAR.
+    4. Lista los commits de reglas MERGEADOS Y SIN DESPLEGAR (lo que va a
+       salir en este deploy), muestra el diff local vs prod, exige el numero
+       del PR que se despliega (queda en la bitacora; vacio = ABORTA — un
+       deploy "sin explicacion" no corre) y exige escribir DESPLEGAR.
     5. firebase deploy --only firestore:rules --project neg-sst-app
     6. Vuelve a bajar prod y verifica byte-identico (normalizado) al local.
-    7. Escribe una linea en docs/bitacora-deploys.md.
+    7. Escribe una linea en docs/bitacora-deploys.md (incluye el/los PR).
   -Simulacro hace 1 a 4 y se detiene (solo lectura).
 
   Regla del paso 3: prod debe ser una VERSION ANTERIOR de main (el ruleset
@@ -218,6 +221,18 @@ $infoCommit = (Git-Salida @('log', '-1', '--format=%h %cI %s', $coincide) | Out-
 Write-Host "OK: el ruleset vigente es el firestore.rules de main en el commit: $infoCommit" -ForegroundColor Green
 Write-Host '(prod esta ATRAS de main; desplegar solo agrega lo que main ya tiene)' -ForegroundColor Green
 
+# ¿QUE va a salir? Los commits de reglas mergeados y sin desplegar. Si hay mas
+# de uno, probablemente otro frente mergeo y no desplego: este deploy se lleva
+# SUS bloques tambien — el operador tiene que reconocer cada linea o cancelar.
+$pendientes = @(Git-Salida @('log', '--format=%h %cI %an %s', "$coincide..HEAD", '--', 'firestore.rules'))
+Write-Host ''
+Write-Host ("Commits de reglas mergeados y SIN desplegar (van TODOS en este deploy): {0}" -f $pendientes.Count) -ForegroundColor Yellow
+$pendientes | ForEach-Object { Write-Host "  $_" }
+if ($pendientes.Count -gt 1) {
+  Write-Host 'ATENCION: hay MAS de un cambio de reglas pendiente — alguien mergeo y no desplego.' -ForegroundColor Red
+  Write-Host 'Si alguno de esos commits no es tuyo, cancela y coordina con ese frente antes de desplegar.' -ForegroundColor Red
+}
+
 # ═══ 4. Diff y confirmacion ═════════════════════════════════════════════════
 Paso '4/8' 'Diff local (main) vs prod'
 $pn = Join-Path $tmp 'prod.norm.rules'; $ln = Join-Path $tmp 'local.norm.rules'
@@ -235,12 +250,22 @@ foreach ($linea in $diff) {
 if ($Simulacro) {
   Write-Host ''
   Write-Host 'SIMULACRO TERMINADO (pasos 1 a 4). No se desplego nada.' -ForegroundColor Yellow
+  Write-Host '(en un deploy real aqui se pide el numero del PR — vacio aborta — y la palabra DESPLEGAR)' -ForegroundColor Yellow
   Remove-Item $tmp -Recurse -Force
   exit 0
 }
 
+# La explicacion del deploy: el/los PR cuyas reglas salen. Sin PR no hay deploy
+# — asi un "prod va atras" nunca se despliega sin que alguien lo reconozca por
+# escrito, y la bitacora enlaza cada ruleset con su revision.
 Write-Host ''
-Write-Host "Se va a REEMPLAZAR el ruleset vigente ($($prodAntes.id)) por el de main $commitCorto en el proyecto $Proyecto." -ForegroundColor Yellow
+$prDeploy = (Read-Host 'PR(s) que se despliegan — numero(s), ej. 198 o "199, 201" (vacio ABORTA)').Trim()
+if (-not $prDeploy) { Remove-Item $tmp -Recurse -Force; Abortar 'deploy sin PR declarado. Indica que PR(s) traen estas reglas y vuelve a correr.' }
+if ($prDeploy -notmatch '^[#0-9,\s]+$') { Remove-Item $tmp -Recurse -Force; Abortar "'$prDeploy' no parece una lista de numeros de PR." }
+$prDeploy = (($prDeploy -split '[,\s]+' | Where-Object { $_ } | ForEach-Object { '#' + ($_ -replace '^#', '') }) -join ' ')
+
+Write-Host ''
+Write-Host "Se va a REEMPLAZAR el ruleset vigente ($($prodAntes.id)) por el de main $commitCorto ($prDeploy) en el proyecto $Proyecto." -ForegroundColor Yellow
 $resp = Read-Host 'Escribe DESPLEGAR para continuar (cualquier otra cosa cancela)'
 if ($resp -cne 'DESPLEGAR') { Remove-Item $tmp -Recurse -Force; Abortar 'cancelado por el usuario.' }
 
@@ -281,14 +306,14 @@ Paso '7/8' 'Bitacora docs/bitacora-deploys.md'
 $bitacora = Join-Path $RepoRoot 'docs\bitacora-deploys.md'
 if (-not (Test-Path $bitacora)) {
   New-Item -ItemType Directory -Force -Path (Split-Path $bitacora) | Out-Null
-  $enc = "# Bitacora de despliegues de firestore.rules`n`nUna linea por deploy, escrita por scripts/deploy-reglas.ps1.`n`n| Fecha (UTC) | Commit | Ruleset nuevo | Ruleset anterior | Quien | Post-verificacion |`n|---|---|---|---|---|---|`n"
+  $enc = "# Bitacora de despliegues de firestore.rules`n`nUna linea por deploy, escrita por scripts/deploy-reglas.ps1.`n`n| Fecha (UTC) | Commit | PR(s) | Ruleset nuevo | Ruleset anterior | Quien | Post-verificacion |`n|---|---|---|---|---|---|---|`n"
   [System.IO.File]::WriteAllText($bitacora, $enc, (New-Object System.Text.UTF8Encoding($false)))
 }
 $quien = (& git config user.name | Out-String).Trim()
 if (-not $quien) { $quien = '(git config user.name vacio)' }
 $fechaUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 $estado = if ($verificado) { 'byte-identica' } else { 'FALLIDA' }
-$fila = "| $fechaUtc | $commitCorto | $($prodDespues.id) | $($prodAntes.id) | $quien | $estado |"
+$fila = "| $fechaUtc | $commitCorto | $prDeploy | $($prodDespues.id) | $($prodAntes.id) | $quien | $estado |"
 [System.IO.File]::AppendAllText($bitacora, $fila + "`n", (New-Object System.Text.UTF8Encoding($false)))
 Write-Host $fila
 Write-Host 'Linea agregada. Commitea docs/bitacora-deploys.md con tu proximo cambio (el chequeo de "arbol limpio" la exime).'
