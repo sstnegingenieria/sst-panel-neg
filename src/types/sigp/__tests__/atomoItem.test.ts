@@ -34,6 +34,21 @@ const asigItem = (id: string, atomos: string[], over: Partial<AsignacionContrati
 } as AsignacionContratista)
 
 describe('universoDe — dual', () => {
+  it('la etiqueta lleva código — DESCRIPCIÓN (el ítem necesita nombre, 30-oct) y titulo completo para tooltip', () => {
+    const u = universoDe(SNAP)
+    const i1 = u.unidades.find(x => x.clave === 'i1')!
+    expect(i1.etiqueta).toBe('TOP-1 — Estudio topográfico frente A')
+    expect(i1.titulo).toBe('TOP-1 — Estudio topográfico frente A')
+    // sin código: la descripción sola (como antes, ahora a 60)
+    const i4 = u.unidades.find(x => x.clave === 'i4')!
+    expect(i4.etiqueta).toBe('Demolición y retiro')
+    // descripción larga: etiqueta recortada, titulo COMPLETO
+    const largo = universoDe({
+      items_alcance: [{ clave: 'x', codigo: 'C-1', descripcion: 'D'.repeat(80), grupo: 'G', valor_total: 1 }],
+    }).unidades[0]
+    expect(largo.etiqueta).toBe(`C-1 — ${'D'.repeat(60)}…`)
+    expect(largo.titulo).toBe(`C-1 — ${'D'.repeat(80)}`)
+  })
   it('con items_alcance el universo es de ÍTEMS; sin él, de grupos (legacy intacto)', () => {
     expect(universoDe(SNAP).modo).toBe('item')
     expect(universoDe(SNAP).unidades).toHaveLength(4)
