@@ -561,6 +561,57 @@ export function requiereRevisionCobertura(
   return m != null && m >= UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT
 }
 
+// ── Parte E (30-oct): el margen EN VIVO, donde se decide ────────────────────
+// La palanca del F2.1.c (PR #21) no sobrevivió a la reconstrucción de
+// asignaciones (PR #104): el modal nuevo nació sin el cálculo y el control
+// quedó solo como señal POSTERIOR (margenImplicitoDe en tarjeta/tablero).
+// Esta pieza lo devuelve al momento del tecleo, más exacta que la original:
+// la venta es la de los átomos de ESA asignación, al peso desde el
+// átomo-por-ítem (#127). Lección de bitácora: lo que no se nombra al
+// reconstruir, se pierde en silencio.
+
+export interface MargenEnVivo {
+  venta: number
+  costo: number
+  utilidad: number
+  /** % de utilidad sobre la venta; null sin base (venta ≤ 0). */
+  margen_pct: number | null
+  /** costo > venta: se asigna MÁS de lo que se le cobra al cliente por esos
+   *  mismos ítems. Advertencia, jamás bloqueo (puede haber razón). */
+  negativo: boolean
+  /** margen ≥ umbral de implausibilidad — la MISMA señal del tablero
+   *  (probablemente el costo no cubre todo el alcance asignado). */
+  implausible: boolean
+}
+
+/** Puro: la UI lo recalcula a cada cambio; los builders lo usan para dejar
+ *  constancia. `costo` es la canasta completa de la modalidad (contratista
+ *  + materiales NEG en solo_mano_obra). */
+export function margenEnVivoDe(venta: number, costo: number): MargenEnVivo {
+  const utilidad = venta - costo
+  const margen_pct = venta > 0 ? (utilidad / venta) * 100 : null
+  return {
+    venta, costo, utilidad, margen_pct,
+    negativo: costo > venta,
+    implausible: margen_pct != null && margen_pct >= UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT,
+  }
+}
+
+/** Constancia para el historial — SOLO cuando hubo aviso (sin ruido en el
+ *  caso normal). El que decide lo hizo con las dos cifras a la vista. */
+export function constanciaMargen(m: MargenEnVivo): string {
+  const pct = m.margen_pct != null ? `${Math.round(m.margen_pct * 10) / 10}%` : 'sin base'
+  if (m.negativo) {
+    return ` · ⚠ MARGEN NEGATIVO a la vista al registrar: costo ${m.costo} sobre venta ${m.venta}` +
+      ` de sus actividades (${pct}) — se registró sabiéndolo`
+  }
+  if (m.implausible) {
+    return ` · ⚠ margen ${pct} ≥ ${UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT}% a la vista al registrar` +
+      ' — probablemente el costo no cubre todo el alcance asignado'
+  }
+  return ''
+}
+
 export function resumenAsignacionesDe(
   asigs: AsignacionContratista[], alcance: ContextoAlcance,
 ): ResumenAsignaciones {
@@ -914,7 +965,7 @@ export function patchEstimarDirecta(
   uid: string,
   fecha: Timestamp,
   motivo?: string,
-): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; resuelveSenal: boolean } | null {
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; resuelveSenal: boolean; margen: MargenEnVivo } | null {
   if (tipoDe(a) !== 'administracion_directa') return null
   if (a.estado !== 'asignada' && a.estado !== 'estimada') return null
   if (!(costoEstimado > 0)) return null
@@ -928,6 +979,7 @@ export function patchEstimarDirecta(
     definida_por: uid,
     fecha_definicion: fecha,
   }
+  const margen = margenEnVivoDe(pre.valor_alcance, costoEstimado)
   return {
     sub: {
       estado: 'estimada', preliquidacion: pre,
@@ -935,13 +987,15 @@ export function patchEstimarDirecta(
       fecha_actualizacion: fecha,
     },
     resuelveSenal: !!a.alcance_desactualizado,
+    margen,
     entradaHistorial: entrada(a.estado, 'estimada', uid, fecha,
       (reEstima
         ? `RE-estimación del costo propio — ${a.preliquidacion?.valor_contratista ?? '—'} → ${costoEstimado} · Motivo: ${motivo!.trim()}`
         : `Costo propio ESTIMADO: ${costoEstimado}`) +
       (diasEquipo ? ` · ${diasEquipo} días del equipo (referencia)` : '') +
       (a.alcance_desactualizado ? ' · resuelve la señal de alcance desactualizado' : '') +
-      ' · sin aprobación por diseño: el control es la señal de implausibilidad + esta traza'),
+      ' · sin aprobación por diseño: el control es la señal de implausibilidad + esta traza' +
+      constanciaMargen(margen)),
   }
 }
 
@@ -987,7 +1041,7 @@ export function patchDefinirPreliquidacion(
   alcance: ContextoAlcance,
   uid: string,
   fecha: Timestamp,
-): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion } | null {
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; margen: MargenEnVivo } | null {
   // P2-4: una administración directa no lleva el ciclo de pago — su economía
   // entra por patchEstimarDirecta (los builders de cada tipo no se cruzan).
   if (tipoDe(a) === 'administracion_directa') return null
@@ -1003,10 +1057,16 @@ export function patchDefinirPreliquidacion(
     // conserva costo/ajuste si redefinen (no aplica antes de aprobar, defensivo)
     ...(a.preliquidacion?.costo_ejecutado ? { costo_ejecutado: a.preliquidacion.costo_ejecutado } : {}),
   }
+  // Parte E: el margen que el gestor tenía A LA VISTA al definir — constancia
+  // solo si hubo aviso (negativo o implausible); el flag lo deriva el builder.
+  const margen = margenEnVivoDe(pre.valor_alcance,
+    datos.valor_contratista + (a.modalidad === 'solo_mano_obra' ? (a.valor_materiales ?? 0) : 0))
   return {
     sub: { estado: 'preliquidacion_definida', preliquidacion: pre, fecha_actualizacion: fecha },
+    margen,
     entradaHistorial: entrada(a.estado, 'preliquidacion_definida', uid, fecha,
-      `Preliquidación definida — contratista ${datos.valor_contratista} · alcance (CD) ${pre.valor_alcance}`),
+      `Preliquidación definida — contratista ${datos.valor_contratista} · alcance (CD) ${pre.valor_alcance}` +
+      constanciaMargen(margen)),
   }
 }
 
@@ -1187,12 +1247,18 @@ export function patchCorregirPreliquidacion(
   motivo: string,
   uid: string,
   fecha: Timestamp,
-): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; revierte: boolean; ajuste: boolean; resuelveSenal: boolean } | null {
+  /** Parte E: con el contexto, el margen se calcula sobre el CD VIVO de sus
+   *  átomos; sin él, sobre el valor_alcance congelado (retrocompatible). */
+  alcance?: ContextoAlcance,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; revierte: boolean; ajuste: boolean; resuelveSenal: boolean; margen: MargenEnVivo } | null {
   const pre = a.preliquidacion
   if (!pre || !motivo.trim()) return null
   if (a.estado === 'liquidada' || a.estado === 'cancelada') return null
   const sinCambio = pre.valor_contratista === datos.valor_contratista && pre.anticipo_pct === datos.anticipo_pct
   if (sinCambio) return null
+  const margen = margenEnVivoDe(
+    alcance ? valorAlcanceDe(a.atomos, alcance, a.atomos_nivel) : pre.valor_alcance,
+    datos.valor_contratista + (a.modalidad === 'solo_mano_obra' ? (a.valor_materiales ?? 0) : 0))
   const revierte = !proyectoEnEjecucion && (a.estado === 'preliquidacion_aprobada' || a.estado === 'anticipo_girado')
   const ajuste = proyectoEnEjecucion
   const { aprobada_por: _ap, fecha_aprobacion: _fa, ...base } = pre
@@ -1207,7 +1273,7 @@ export function patchCorregirPreliquidacion(
     estado: estadoNuevo, preliquidacion: nueva, fecha_actualizacion: fecha,
   }
   return {
-    sub, revierte, ajuste,
+    sub, revierte, ajuste, margen,
     // corregir ES revisar: si había señal de alcance, el caller la borra
     // (deleteField) en el mismo write — indicado por este flag.
     resuelveSenal: !!a.alcance_desactualizado,
@@ -1215,7 +1281,8 @@ export function patchCorregirPreliquidacion(
       `Corrección de preliquidación — ${pre.valor_contratista} → ${datos.valor_contratista} · Motivo: ${motivo.trim()}` +
       (revierte ? ' · REVIERTE la aprobación: requiere re-aprobación' : '') +
       (ajuste ? ' · AJUSTE en ejecución — pendiente de reconocer en la liquidación' : '') +
-      (a.alcance_desactualizado ? ' · resuelve la señal de alcance desactualizado' : '')),
+      (a.alcance_desactualizado ? ' · resuelve la señal de alcance desactualizado' : '') +
+      constanciaMargen(margen)),
   }
 }
 
