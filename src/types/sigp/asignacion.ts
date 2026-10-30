@@ -351,7 +351,12 @@ export const atomosTomados = (asigs: AsignacionContratista[]): Set<string> => {
 /** Unidad asignable del universo: un ítem (modo 'item') o un grupo (legacy). */
 export interface UnidadAlcance {
   clave: string
+  /** Para listas e historial: `código — descripción` (recortada). El ítem
+   *  necesita NOMBRE — el código solo obligaba a abrir la cotización en otra
+   *  ventana para saber de qué actividad se trata (ajuste 30-oct). */
   etiqueta: string
+  /** Texto COMPLETO para tooltips — descripción sin recortar. */
+  titulo?: string
   grupo: string
   valor: number
 }
@@ -367,12 +372,18 @@ export function universoDe(ctx: ContextoAlcance): { modo: 'item' | 'grupo'; unid
   if (c.items_alcance && c.items_alcance.length > 0) {
     return {
       modo: 'item',
-      unidades: c.items_alcance.map(it => ({
-        clave: it.clave,
-        etiqueta: it.codigo?.trim() || (it.descripcion.length > 48 ? it.descripcion.slice(0, 48) + '…' : it.descripcion),
-        grupo: it.grupo,
-        valor: it.valor_total || 0,
-      })),
+      unidades: c.items_alcance.map(it => {
+        const codigo = it.codigo?.trim() ?? ''
+        const desc = it.descripcion?.trim() ?? ''
+        const corta = desc.length > 60 ? desc.slice(0, 60) + '…' : desc
+        return {
+          clave: it.clave,
+          etiqueta: codigo ? (corta ? `${codigo} — ${corta}` : codigo) : (corta || it.clave),
+          ...(desc ? { titulo: codigo ? `${codigo} — ${desc}` : desc } : {}),
+          grupo: it.grupo,
+          valor: it.valor_total || 0,
+        }
+      }),
     }
   }
   return {
@@ -1560,7 +1571,7 @@ export function patchAjustarAtomos(
     resuelveSenal: !!a.alcance_desactualizado,
     sobreGiro,
     entradaHistorial: entrada(a.estado, revierte ? 'preliquidacion_definida' : a.estado, uid, fecha,
-      `Átomos ajustados — quedan: ${v.etiquetas.join(' · ')} · Motivo: ${motivo.trim()}` +
+      `Actividades asignadas ajustadas — quedan: ${v.etiquetas.join(' · ')} · Motivo: ${motivo.trim()}` +
       (pre ? ` · valor contratista ${valorViejo} → ${valorConfirmado} (${valorViejo === valorConfirmado ? 'CONFIRMADO igual' : 'CAMBIADO'})` : '') +
       (sobreGiro ? ` · ⚠ SOBRE-GIRO: el anticipo girado (${girado}) supera el valor confirmado (${valorConfirmado}) — sobrepago a recuperar del contratista, reconciliar en la liquidación` : '') +
       (revierte ? ' · REVIERTE la aprobación: requiere re-aprobación de Gerencia' : '') +

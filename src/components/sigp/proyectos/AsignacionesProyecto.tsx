@@ -78,7 +78,7 @@ function PanelMargenVivo({ venta, costo }: { venta: number; costo: number }) {
   return (
     <div className="space-y-1.5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-        <div><span className="text-gray-500 block">Venta de sus átomos</span><span className="font-mono font-semibold">{fmtMoney(m.venta)}</span></div>
+        <div><span className="text-gray-500 block">Venta de sus actividades</span><span className="font-mono font-semibold">{fmtMoney(m.venta)}</span></div>
         <div><span className="text-gray-500 block">Costo asignado</span><span className="font-mono font-semibold">{fmtMoney(m.costo)}</span></div>
         <div><span className="text-gray-500 block">Utilidad NEG</span><span className={`font-mono font-semibold ${m.utilidad < 0 ? 'text-red-700' : 'text-brand-700'}`}>{fmtMoney(m.utilidad)}</span></div>
         <div><span className="text-gray-500 block">Margen</span><span className={`font-mono font-semibold ${m.negativo ? 'text-red-700' : m.implausible ? 'text-amber-700' : 'text-brand-700'}`}>{pct != null ? `${fmtNum(pct)} %` : '—'}</span></div>
@@ -94,7 +94,7 @@ function PanelMargenVivo({ venta, costo }: { venta: number; costo: number }) {
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
           ⚠ Margen del {fmtNum(pct!)} % — sobre el umbral de implausibilidad
           ({UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT} %): probablemente este costo no cubre todo el
-          alcance asignado. Revisá los átomos (✂) antes de registrar.
+          alcance asignado. Revisá las actividades asignadas (✂) antes de registrar.
         </p>
       )}
     </div>
@@ -1036,7 +1036,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                           if (e.target.checked) s.add(x.clave); else s.delete(x.clave)
                           setSel(s)
                         }} />
-                      <span className="text-gray-700 truncate" title={x.etiqueta}>{x.etiqueta}</span>
+                      <span className="text-gray-700 truncate" title={x.titulo ?? x.etiqueta}>{x.etiqueta}</span>
                       {ocupado && <span className="text-[11px] text-gray-400 flex-shrink-0">→ {duenoDe(x.clave)}</span>}
                       {ofreceQuitar && (
                         <button type="button"
@@ -1134,13 +1134,13 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                   {/* Condición: el badge DICE POR QUÉ — el número que lo disparó */}
                   {revisar && margen != null && (
                     <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800"
-                      title={`El costo pactado con este contratista deja un margen implícito del ${fmtNum(margen)}% sobre el CD de las actividades que tiene atribuidas (umbral: ${UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT}%). Revisa sus átomos con ✂ — no se excluye del indicador hasta que un humano decida.`}>
+                      title={`El costo pactado con este contratista deja un margen implícito del ${fmtNum(margen)}% sobre el CD de las actividades que tiene atribuidas (umbral: ${UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT}%). Revisa sus actividades asignadas con ✂ — no se excluye del indicador hasta que un humano decida.`}>
                       ⚠ Revisar cobertura — margen implícito {fmtNum(margen)}%: probablemente no cubre todo el alcance asignado
                     </span>
                   )}
                   {a.alcance_desactualizado && (
                     <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800"
-                      title={`El alcance cambió (${a.alcance_desactualizado.version === 0 ? 'ajuste manual de átomos' : `versión v${a.alcance_desactualizado.version}`}) — revisar la preliquidación`}>
+                      title={`El alcance cambió (${a.alcance_desactualizado.version === 0 ? 'ajuste manual de actividades' : `versión v${a.alcance_desactualizado.version}`}) — revisar la preliquidación`}>
                       ⚠ Preliquidación pendiente de revisar
                     </span>
                   )}
@@ -1148,9 +1148,19 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                 {/* Bloque átomo-ítem: rollup por grupo — "entero o partido"
                     de un golpe (adenda): "Ensayos · completo" vs "· 4 de 6" */}
                 <p className="text-xs text-gray-500">
-                  {resumenAtomosPorGrupo(a, proyecto.snapshot).map(g =>
-                    `${g.grupo}${g.completo ? (g.total > 1 ? ' · completo' : '') : ` · ${g.tomados} de ${g.total}`}`,
-                  ).join('  ·  ')}{' · '}
+                  {/* Cada grupo con tooltip de SUS actividades (código — nombre):
+                      saber de qué se trata sin abrir la cotización (30-oct). */}
+                  {(() => {
+                    const efectivos = new Set(atomosEfectivosDe(a, proyecto.snapshot))
+                    return resumenAtomosPorGrupo(a, proyecto.snapshot).map((g, i) => (
+                      <span key={g.grupo}
+                        title={universo.unidades.filter(x => x.grupo === g.grupo && efectivos.has(x.clave))
+                          .map(x => x.titulo ?? x.etiqueta).join('\n')}>
+                        {i > 0 && '  ·  '}
+                        {g.grupo}{g.completo ? (g.total > 1 ? ' · completo' : '') : ` · ${g.tomados} de ${g.total}`}
+                      </span>
+                    ))
+                  })()}{' · '}
                   <span className="font-mono">CD {fmtMoney(valorAlcanceDe(a.atomos, proyecto.snapshot, a.atomos_nivel))}</span>
                 </p>
                 {a.preliquidacion && dir && (
@@ -1349,7 +1359,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                       <>
                         <button onClick={() => abrirAjustar(a)} disabled={aplicando}
                           className="text-[11px] px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50">
-                          ✂ Ajustar átomos
+                          ✂ Ajustar actividades asignadas
                         </button>
                         <button onClick={() => { setCancelarTarget(a); setCancelarMotivo('') }} disabled={aplicando}
                           className="text-[11px] px-2.5 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-medium disabled:opacity-50">
@@ -1587,7 +1597,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       {/* ── Modal: ajustar átomos (29-sep: partir un grupo vivo + revisar
           el valor EN EL MISMO ACTO — caso Triara) ── */}
       <Modal isOpen={ajustarTarget !== null} onClose={() => { setAjustarTarget(null); setItemResaltado(null) }}
-        title={`Ajustar átomos — ${ajustarTarget?.contratista_nombre ?? ''}`} size="lg"
+        title={`Ajustar actividades asignadas — ${ajustarTarget?.contratista_nombre ?? ''}`} size="lg"
         actions={[
           { label: 'Volver', onClick: () => { setAjustarTarget(null); setItemResaltado(null) }, variant: 'secondary' },
           {
