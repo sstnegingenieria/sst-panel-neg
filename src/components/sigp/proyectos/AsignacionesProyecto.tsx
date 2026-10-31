@@ -72,28 +72,36 @@ const fFecha = (t?: { toDate?: () => Date }) =>
  *  que el PR #104 dejó atrás al reconstruir las asignaciones, ahora exacta
  *  al peso (la venta es la de los átomos de ESTA asignación, #127).
  *  Advertencia, jamás bloqueo; la constancia la deja el builder. */
-function PanelMargenVivo({ venta, costo }: { venta: number; costo: number }) {
+function PanelMargenVivo({ venta, costo, anterior }: { venta: number; costo: number; anterior?: { venta: number; costo: number } }) {
   const m = margenEnVivoDe(venta, costo)
+  const ant = anterior ? margenEnVivoDe(anterior.venta, anterior.costo) : null
   const pct = m.margen_pct != null ? Math.round(m.margen_pct * 10) / 10 : null
+  const pctA = ant?.margen_pct != null ? Math.round(ant.margen_pct * 10) / 10 : null
+  // "pasó de 35% a −10%", no solo el número final — informar vs. advertir (30-oct)
+  const venia = ant ? ` Venía del ${pctA != null ? `${fmtNum(pctA)} %` : '— (sin base)'}.` : ''
   return (
     <div className="space-y-1.5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
         <div><span className="text-gray-500 block">Venta de sus actividades</span><span className="font-mono font-semibold">{fmtMoney(m.venta)}</span></div>
         <div><span className="text-gray-500 block">Costo asignado</span><span className="font-mono font-semibold">{fmtMoney(m.costo)}</span></div>
         <div><span className="text-gray-500 block">Utilidad NEG</span><span className={`font-mono font-semibold ${m.utilidad < 0 ? 'text-red-700' : 'text-brand-700'}`}>{fmtMoney(m.utilidad)}</span></div>
-        <div><span className="text-gray-500 block">Margen</span><span className={`font-mono font-semibold ${m.negativo ? 'text-red-700' : m.implausible ? 'text-amber-700' : 'text-brand-700'}`}>{pct != null ? `${fmtNum(pct)} %` : '—'}</span></div>
+        <div>
+          <span className="text-gray-500 block">{ant ? 'Margen (antes → ahora)' : 'Margen'}</span>
+          {ant && <span className="font-mono text-gray-400">{pctA != null ? `${fmtNum(pctA)} %` : '—'} → </span>}
+          <span className={`font-mono font-semibold ${m.negativo ? 'text-red-700' : m.implausible ? 'text-amber-700' : 'text-brand-700'}`}>{pct != null ? `${fmtNum(pct)} %` : '—'}</span>
+        </div>
       </div>
       {m.negativo && (
         <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
           ⚠ <strong>Margen negativo</strong>: se asigna {fmtMoney(m.costo)} y al cliente se le cobran{' '}
-          {fmtMoney(m.venta)} por esos mismos ítems. No se bloquea — puede haber razón — pero queda
-          constancia en el historial de que se registró sabiéndolo.
+          {fmtMoney(m.venta)} por esos mismos ítems.{venia} No se bloquea — puede haber razón — pero
+          queda constancia en el historial de que se registró sabiéndolo.
         </p>
       )}
       {!m.negativo && m.implausible && (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
           ⚠ Margen del {fmtNum(pct!)} % — sobre el umbral de implausibilidad
-          ({UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT} %): probablemente este costo no cubre todo el
+          ({UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT} %).{venia} Probablemente este costo no cubre todo el
           alcance asignado. Revisá las actividades asignadas (✂) antes de registrar.
         </p>
       )}
@@ -332,8 +340,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         ? { ...a, ...r.sub, ...(r.resuelveSenal ? { alcance_desactualizado: undefined } : {}), historial: [...a.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : a)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, ...(r.resuelveSenal ? { alcance_desactualizado: deleteField() } : {}), historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
-      toast('Átomos ajustados — valor del contratista ' +
+      toast('Actividades ajustadas — valor del contratista ' +
         (target.preliquidacion?.valor_contratista === ajustarValor ? 'confirmado' : 'actualizado') +
+        (r.margen?.negativo ? ' · ⚠ margen NEGATIVO — constancia en el historial' : '') +
         (r.sobreGiro ? ' · ⚠ SOBRE-GIRO registrado (anticipo > valor)' : '') +
         (r.revierte ? ' · REVIERTE la aprobación (re-aprobar en Gerencia)' : '') +
         (proyectoEnEjecucion && target.preliquidacion?.aprobada_por ? ' · ajuste pendiente de reconocer en la liquidación' : ''))
@@ -1632,6 +1641,20 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                     className="w-36 px-2 py-1.5 border border-gray-300 rounded-lg text-sm font-mono text-right focus:outline-none focus:ring-2 focus:ring-brand-300" />
                 </label>
               </div>
+              {/* Margen en vivo también AQUÍ (30-oct): el ajuste es donde cambia
+                  la VENTA — antes se confirmaba el valor sin ver contra qué. */}
+              {ajustarValor != null && ajustarValor > 0 && (() => {
+                const materiales = ajustarTarget.modalidad === 'solo_mano_obra' ? (ajustarTarget.valor_materiales ?? 0) : 0
+                return (
+                  <PanelMargenVivo
+                    venta={universo.unidades.filter(x => ajustarSel.has(x.clave)).reduce((s, x) => s + x.valor, 0)}
+                    costo={ajustarValor + materiales}
+                    anterior={{
+                      venta: valorAlcanceDe(ajustarTarget.atomos, proyecto.snapshot, ajustarTarget.atomos_nivel),
+                      costo: ajustarTarget.preliquidacion!.valor_contratista + materiales,
+                    }} />
+                )
+              })()}
               {ajustarTarget.preliquidacion.aprobada_por && (
                 <p className="text-[11px] text-amber-700">
                   {proyectoEnEjecucion

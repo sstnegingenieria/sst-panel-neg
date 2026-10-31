@@ -609,15 +609,19 @@ export function margenEnVivoDe(venta: number, costo: number): MargenEnVivo {
 }
 
 /** Constancia para el historial — SOLO cuando hubo aviso (sin ruido en el
- *  caso normal). El que decide lo hizo con las dos cifras a la vista. */
-export function constanciaMargen(m: MargenEnVivo): string {
-  const pct = m.margen_pct != null ? `${Math.round(m.margen_pct * 10) / 10}%` : 'sin base'
+ *  caso normal). El que decide lo hizo con las dos cifras a la vista.
+ *  Con `anterior` (ajuste de actividades, 30-oct) la constancia dice de
+ *  dónde VENÍA el margen — la diferencia entre informar y advertir. */
+export function constanciaMargen(m: MargenEnVivo, anterior?: MargenEnVivo): string {
+  const fmtPct = (x: MargenEnVivo) => x.margen_pct != null ? `${Math.round(x.margen_pct * 10) / 10}%` : 'sin base'
+  const pct = fmtPct(m)
+  const venia = anterior ? ` — venía del ${fmtPct(anterior)}` : ''
   if (m.negativo) {
     return ` · ⚠ MARGEN NEGATIVO a la vista al registrar: costo ${m.costo} sobre venta ${m.venta}` +
-      ` de sus actividades (${pct}) — se registró sabiéndolo`
+      ` de sus actividades (${pct}${venia}) — se registró sabiéndolo`
   }
   if (m.implausible) {
-    return ` · ⚠ margen ${pct} ≥ ${UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT}% a la vista al registrar` +
+    return ` · ⚠ margen ${pct}${venia} ≥ ${UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT}% a la vista al registrar` +
       ' — probablemente el costo no cubre todo el alcance asignado'
   }
   return ''
@@ -1519,7 +1523,7 @@ export function patchAjustarAtomos(
   fecha: Timestamp,
   valorConfirmado?: number,
   proyectoEnEjecucion?: boolean,
-): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; revierte: boolean; resuelveSenal: boolean; sobreGiro: boolean } | null {
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; revierte: boolean; resuelveSenal: boolean; sobreGiro: boolean; margen?: MargenEnVivo; margen_anterior?: MargenEnVivo } | null {
   if (!motivo.trim()) return null
   if (a.estado === 'liquidada' || a.estado === 'cancelada') return null
   if (atomosNuevos.length === 0) return null
@@ -1547,6 +1551,16 @@ export function patchAjustarAtomos(
   // momento y en el historial — no como descubrimiento tres meses después.
   const girado = anticipoTotalDe(pre)   // 28-oct: contra la SUMA de giros vivos
   const sobreGiro = !!pre && girado > 0 && valorConfirmado! < girado
+  // Margen en vivo también AQUÍ (30-oct): el ajuste es justo donde cambia la
+  // VENTA — al soltar ítems baja lo que este contratista cubre, y el valor se
+  // confirmaba sin mostrar contra qué. Anterior al lado del nuevo.
+  const materialesNeg = a.modalidad === 'solo_mano_obra' ? (a.valor_materiales ?? 0) : 0
+  const margen_anterior = pre
+    ? margenEnVivoDe(valorAlcanceDe(a.atomos, alcance, a.atomos_nivel), pre.valor_contratista + materialesNeg)
+    : undefined
+  const margen = pre
+    ? margenEnVivoDe(valorAlcanceDe(atomosNuevos, alcance, v.nivel), valorConfirmado! + materialesNeg)
+    : undefined
 
   let preNueva: PreliquidacionAsignacion | undefined
   if (pre) {
@@ -1570,13 +1584,16 @@ export function patchAjustarAtomos(
     revierte,
     resuelveSenal: !!a.alcance_desactualizado,
     sobreGiro,
+    ...(margen ? { margen } : {}),
+    ...(margen_anterior ? { margen_anterior } : {}),
     entradaHistorial: entrada(a.estado, revierte ? 'preliquidacion_definida' : a.estado, uid, fecha,
       `Actividades asignadas ajustadas — quedan: ${v.etiquetas.join(' · ')} · Motivo: ${motivo.trim()}` +
       (pre ? ` · valor contratista ${valorViejo} → ${valorConfirmado} (${valorViejo === valorConfirmado ? 'CONFIRMADO igual' : 'CAMBIADO'})` : '') +
       (sobreGiro ? ` · ⚠ SOBRE-GIRO: el anticipo girado (${girado}) supera el valor confirmado (${valorConfirmado}) — sobrepago a recuperar del contratista, reconciliar en la liquidación` : '') +
       (revierte ? ' · REVIERTE la aprobación: requiere re-aprobación de Gerencia' : '') +
       (ajusteEnEjecucion && estabaAprobada ? ' · AJUSTE en ejecución — pendiente de reconocer en la liquidación' : '') +
-      (a.alcance_desactualizado ? ' · resuelve la señal de alcance desactualizado' : '')),
+      (a.alcance_desactualizado ? ' · resuelve la señal de alcance desactualizado' : '') +
+      (margen ? constanciaMargen(margen, margen_anterior) : '')),
   }
 }
 
