@@ -33,6 +33,33 @@ const asigItem = (id: string, atomos: string[], over: Partial<AsignacionContrati
   habilitacion_snapshot: { estado: 'activo', fecha_consulta: ts, fuente: 't' }, historial: [], ...over,
 } as AsignacionContratista)
 
+describe('margen en vivo también en el AJUSTE (30-oct) — donde cambia la VENTA', () => {
+  const conPre = (atomos: string[]) => asigItem('a1', atomos, {
+    estado: 'preliquidacion_definida',
+    preliquidacion: { valor_alcance: 6_000_000, valor_contratista: 3_000_000, anticipo_pct: 50, definida_por: 'u', fecha_definicion: ts },
+  })
+  it('soltar ítems con el mismo costo → margen NEGATIVO con constancia "venía del 50%"', () => {
+    // antes: venta i1+i2+i3 = $6M, costo $3M → 50%; quedan solo i1 ($1M) → −200%
+    const r = patchAjustarAtomos(conPre(['i1', 'i2', 'i3']), ['i1'], SNAP, [], 'recorte', 'u', ts, 3_000_000)!
+    expect(r.margen!.negativo).toBe(true)
+    expect(r.margen!.venta).toBe(1_000_000)
+    expect(r.margen_anterior!.margen_pct).toBe(50)
+    expect(r.entradaHistorial.motivo).toContain('MARGEN NEGATIVO')
+    expect(r.entradaHistorial.motivo).toContain('venía del 50%')
+  })
+  it('ajuste con margen sano → sin constancia (sin ruido); el margen igual se devuelve', () => {
+    const r = patchAjustarAtomos(conPre(['i1', 'i2', 'i3']), ['i1'], SNAP, [], 'recorte', 'u', ts, 500_000)!
+    expect(r.margen!.margen_pct).toBe(50)
+    expect(r.entradaHistorial.motivo).not.toContain('⚠ MARGEN')
+    expect(r.entradaHistorial.motivo).not.toContain('venía del')
+  })
+  it('sin preliquidación no hay costo que comparar — sin margen y sin constancia', () => {
+    const r = patchAjustarAtomos(asigItem('a1', ['i1', 'i2']), ['i1'], SNAP, [], 'recorte', 'u', ts)!
+    expect(r.margen).toBeUndefined()
+    expect(r.entradaHistorial.motivo).not.toContain('⚠ MARGEN')
+  })
+})
+
 describe('universoDe — dual', () => {
   it('la etiqueta lleva código — DESCRIPCIÓN (el ítem necesita nombre, 30-oct) y titulo completo para tooltip', () => {
     const u = universoDe(SNAP)
