@@ -53,7 +53,10 @@ type Actor = keyof typeof ROLES
 const P1 = 'p1'
 const P2 = 'p2'
 const ASIG = (p: string, a = 'a1') => `proyectos/${p}/asignaciones/${a}`
-const GATE = (p: string) => `verificaciones_sst/${p}`
+// 28-oct (Parte A del bloque proyección/saldo): el gate es POR CONTRATISTA —
+// la regla lee `{pid}__{contratista_id del resource}`. Los fixtures usan
+// contratista_id 'c1'; sembrar el gate en el doc compuesto ES el contrato.
+const GATE = (p: string, cid = 'c1') => `verificaciones_sst/${p}__${cid}`
 
 let env: RulesTestEnvironment
 const db = (a: Actor) => env.authenticatedContext(a).firestore()
@@ -282,7 +285,9 @@ describe('B. REGRESIÓN: el flujo normal de liquidación sigue vivo', () => {
     const b = writeBatch(fs)
     b.update(doc(fs, ASIG(P1)), liquidarPatch('marcela'))
     b.update(doc(fs, 'proyectos', P1), {
-      resumen_asignaciones: { liquidadas: 1 }, fecha_actualizacion: ts(),
+      // El puente real escribe el resumen RECOMPUTADO del lote (A.4: la
+      // coherencia — por_estado solo liquidada/cancelada, ≥1 liquidada).
+      resumen_asignaciones: { por_estado: { liquidada: 1 }, total: 1 }, fecha_actualizacion: ts(),
       estado: 'liquidado_contratista',
       historial: arrayUnion({ de: 'pagado_cliente', a: 'liquidado_contratista', por: 'marcela', fecha: ts(), motivo: 'puente' }),
     })
@@ -462,6 +467,100 @@ describe('G. Nacimiento en `liquidada` (create) — RESIDUAL conocido, SIN cambi
       contratista_id: 'c1', contratista_nombre: 'Héctor', atomos: ['g1'],
       liquidacion: liquidarPatch('marcela').liquidacion,
       historial: [], fecha_actualizacion: ts(),
+    }))
+  }, TIMEOUT)
+})
+
+// ═══════════════ H. Parte A (28-oct) — gate POR CONTRATISTA ═══════════════
+
+describe('H. A3: contratista_id INMUTABLE en la asignación (todas las vías)', () => {
+  it('H1. gestor cambia contratista_id hacia el contratista al día → denegado (el bypass que A3 cierra)', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'verificaciones_sst/p1__c2'), { ...gate('al_dia'), contratista_id: 'c2' })
+    })
+    await assertFails(updateDoc(doc(db('diego'), ASIG(P1)), {
+      contratista_id: 'c2', contratista_nombre: 'Otro', fecha_actualizacion: ts(),
+    }))
+  }, TIMEOUT)
+
+  it('H2. gerencia tampoco — ni junto con la liquidación en el mismo write', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'verificaciones_sst/p1__c2'), { ...gate('al_dia'), contratista_id: 'c2' })
+    })
+    await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), {
+      ...liquidarPatch('marcela'), contratista_id: 'c2',
+    }))
+    await assertFails(updateDoc(doc(db('root'), ASIG(P1)), { contratista_id: 'c2', fecha_actualizacion: ts() }))
+  }, TIMEOUT)
+})
+
+describe('H. El gate es DEL CONTRATISTA: el doc compuesto manda', () => {
+  it('H3. gate al_dia de OTRO contratista del MISMO proyecto no sirve: {p1}__c2 al_dia, {p1}__c1 pendiente → liquidar la de c1 denegado', async () => {
+    await sembrarGate(P1, gate('pendiente'))
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'verificaciones_sst/p1__c2'), { ...gate('al_dia'), contratista_id: 'c2' })
+    })
+    await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), liquidarPatch('marcela')))
+  }, TIMEOUT)
+
+  it('H4. el doc LEGACY {pid} con al_dia ya NO autoriza (congelado por la migración) → denegado sin el compuesto', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `verificaciones_sst/${P1}`), { ...gate('al_dia'), migrada_a: [`${P1}__c1`] })
+    })
+    await assertFails(updateDoc(doc(db('marcela'), ASIG(P1)), liquidarPatch('marcela')))
+  }, TIMEOUT)
+})
+
+describe('H. A.4 — el PADRE deja su propio get: puente coherente o gate del contratista de SU asignación', () => {
+  const sembrarPadreConAsignacion = (estado: string) =>
+    env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'proyectos', P1), {
+        estado, consecutivo: 'PRY-2026-001', historial: [],
+        asignacion: { contratista_id: 'c1', contratista_nombre: 'Héctor' },
+      })
+    })
+
+  it('H5. vía LEGACY por-proyecto (write CON `liquidacion`): gate del contratista al_dia → permitido', async () => {
+    await sembrarPadreConAsignacion('pagado_cliente')
+    await sembrarGate(P1, gate('al_dia'))
+    await assertSucceeds(updateDoc(doc(db('marcela'), 'proyectos', P1), {
+      estado: 'liquidado_contratista',
+      liquidacion: { mano_obra: 700_000, total_final: 700_000, saldo_final: 350_000, liquidada_por: 'marcela', fecha: ts() },
+      fecha_actualizacion: ts(),
+      historial: arrayUnion({ de: 'pagado_cliente', a: 'liquidado_contratista', por: 'marcela', fecha: ts(), motivo: 'liquidación' }),
+    }))
+  }, TIMEOUT)
+
+  it('H6. vía LEGACY sin gate del contratista (solo el {pid} congelado al_dia) → denegado', async () => {
+    await sembrarPadreConAsignacion('pagado_cliente')
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `verificaciones_sst/${P1}`), { ...gate('al_dia'), migrada_a: [`${P1}__c1`] })
+    })
+    await assertFails(updateDoc(doc(db('marcela'), 'proyectos', P1), {
+      estado: 'liquidado_contratista',
+      liquidacion: { mano_obra: 700_000, total_final: 700_000, saldo_final: 350_000, liquidada_por: 'marcela', fecha: ts() },
+      fecha_actualizacion: ts(),
+      historial: arrayUnion({ de: 'pagado_cliente', a: 'liquidado_contratista', por: 'marcela', fecha: ts(), motivo: 'liquidación' }),
+    }))
+  }, TIMEOUT)
+
+  it('H7. PUENTE del lote (sin `liquidacion` propia): resumen todo liquidado/cancelado → permitido SIN get del padre', async () => {
+    await sembrarPadreConAsignacion('pagado_cliente')
+    await assertSucceeds(updateDoc(doc(db('marcela'), 'proyectos', P1), {
+      estado: 'liquidado_contratista',
+      resumen_asignaciones: { por_estado: { liquidada: 2, cancelada: 1 }, total: 3 },
+      fecha_actualizacion: ts(),
+      historial: arrayUnion({ de: 'pagado_cliente', a: 'liquidado_contratista', por: 'marcela', fecha: ts(), motivo: 'puente' }),
+    }))
+  }, TIMEOUT)
+
+  it('H8. PUENTE con el lote INCOHERENTE (queda una anticipo_girado) → denegado', async () => {
+    await sembrarPadreConAsignacion('pagado_cliente')
+    await assertFails(updateDoc(doc(db('marcela'), 'proyectos', P1), {
+      estado: 'liquidado_contratista',
+      resumen_asignaciones: { por_estado: { liquidada: 2, anticipo_girado: 1 }, total: 3 },
+      fecha_actualizacion: ts(),
+      historial: arrayUnion({ de: 'pagado_cliente', a: 'liquidado_contratista', por: 'marcela', fecha: ts(), motivo: 'puente' }),
     }))
   }, TIMEOUT)
 })

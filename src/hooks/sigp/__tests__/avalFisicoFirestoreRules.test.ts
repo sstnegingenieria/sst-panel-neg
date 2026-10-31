@@ -610,42 +610,63 @@ describe('lo que no cambia', () => {
 
 // ───────────────────────── integración con la liquidación ─────────────────────────
 
+// 28-oct (Parte A del bloque proyección/saldo — ADAPTADO al contrato nuevo,
+// como F3/A9 se adaptaron al del #154): el gate es POR CONTRATISTA — la vía
+// legacy del padre (write con `liquidacion` propia) consulta el doc
+// `{pid}__{contratista_id de proyecto.asignacion}`. Los avales de estos casos
+// se marcan sobre ese doc compuesto; la mecánica del aval físico (lo que esta
+// batería fija) no cambia en nada — el match de verificaciones_sst es
+// wildcard y cubre ambos ids.
 describe('integración — el aval físico libera la liquidación (y sin aval no)', () => {
   const PROY = 'pry_001'
+  const GATE_CID = `${PROY}__c1`
   const sembrarProyecto = async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(doc(ctx.firestore(), `proyectos/${PROY}`), {
+      const f = ctx.firestore()
+      await setDoc(doc(f, `proyectos/${PROY}`), {
         consecutivo: 'PRY-2026-040', estado: 'pagado_cliente', historial: [], pago_cliente: { valor: 1000 },
+        asignacion: { contratista_id: 'c1', contratista_nombre: 'Contratista' },
       })
+      await setDoc(doc(f, `verificaciones_sst/${GATE_CID}`), proyeccion({ proyecto_id: PROY }))
     })
   }
-  const liquidar = () => updateDoc(doc(db('diego'), `proyectos/${PROY}`), { estado: 'liquidado_contratista' })
+  // Vía LEGACY por-proyecto: el write trae `liquidacion` propia (A.4 — sin
+  // ella sería el puente del lote, que exige el resumen coherente).
+  const liquidar = () => updateDoc(doc(db('diego'), `proyectos/${PROY}`), {
+    estado: 'liquidado_contratista',
+    liquidacion: { mano_obra: 1000, total_final: 1000, saldo_final: 500, liquidada_por: 'diego', fecha: Timestamp.now() },
+  })
 
   it('115. RECHAZO: sin aval del gate no se liquida (actor: director_proyectos, que SÍ gestiona proyectos)', async () => {
     await sembrarProyecto()
     await assertFails(liquidar())
   }, TIMEOUT)
 
+  it('115b. [A.4] tampoco por la rama del PUENTE sin lote coherente: padre sin `liquidacion` y sin resumen → denegado', async () => {
+    await sembrarProyecto()
+    await assertFails(updateDoc(doc(db('diego'), `proyectos/${PROY}`), { estado: 'liquidado_contratista' }))
+  }, TIMEOUT)
+
   it('116. con el aval FÍSICO de gestion_integral → se liquida', async () => {
     await sembrarProyecto()
-    await assertSucceeds(upd('ingrid', avalFisico('ingrid')))
+    await assertSucceeds(upd('ingrid', avalFisico('ingrid'), GATE_CID))
     await assertSucceeds(liquidar())
   }, TIMEOUT)
 
   it('117. con una NOVEDAD vigente no se liquida', async () => {
     await sembrarProyecto()
-    await assertSucceeds(upd('ingrid', avalFisico('ingrid')))
-    await assertSucceeds(upd('sofia', avalApp('sofia', 'con_novedad', { observacion: 'el registro de custodia está incompleto' })))
+    await assertSucceeds(upd('ingrid', avalFisico('ingrid'), GATE_CID))
+    await assertSucceeds(upd('sofia', avalApp('sofia', 'con_novedad', { observacion: 'el registro de custodia está incompleto' }), GATE_CID))
     await assertFails(liquidar())
   }, TIMEOUT)
 
   it('118. tras un aval físico, borrar sst_gate y luego intentar liquidar → denegado', async () => {
     await sembrarProyecto()
-    await assertSucceeds(upd('ingrid', avalFisico('ingrid')))
+    await assertSucceeds(upd('ingrid', avalFisico('ingrid'), GATE_CID))
     await assertSucceeds(upd('sofia', {
       sst_gate: deleteField(), fecha_actualizacion: Timestamp.now(),
       historial: arrayUnion({ de: 'al_dia', a: 'pendiente', por: 'sofia', fecha: Timestamp.now(), motivo: 'gate retirado' }),
-    }))
+    }, GATE_CID))
     await assertFails(liquidar())
   }, TIMEOUT)
 })
