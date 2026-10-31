@@ -493,10 +493,16 @@ export const pagoClientePendiente = (
   (p.estado === 'liquidado_contratista' && !p.pago_cliente)
 
 /** INTEGRIDAD del cierre: no se cierra con cuenta por cobrar abierta — un
- *  liquidado anticipadamente exige el pago del cliente registrado. */
+ *  liquidado anticipadamente exige el pago del cliente registrado.
+ *  Parte B (28-oct): tampoco con un SALDO DE CONTRATISTA sin pagar —
+ *  "cerrar un proyecto con un saldo sin pagar sería cerrar sobre una
+ *  mentira". El contador `saldos_pendientes` lo mantiene el resumen
+ *  (ausente = 0: censo 26-oct, cero liquidadas históricas — toda liquidada
+ *  futura nace con el contador del bundle B). */
 export const puedeCerrarseProyecto = (
-  p: Pick<Proyecto, 'estado' | 'pago_cliente'>,
+  p: Pick<Proyecto, 'estado' | 'pago_cliente'> & { resumen_asignaciones?: Pick<ResumenAsignaciones, 'saldos_pendientes'> },
 ): boolean => p.estado === 'liquidado_contratista' && !!p.pago_cliente
+  && (p.resumen_asignaciones?.saldos_pendientes ?? 0) === 0
 
 // ── Facturas: anular y reemplazar, nunca editar (08-oct) ────────────────────
 
@@ -1326,6 +1332,13 @@ export interface ResumenAsignaciones {
    *  los traen (el siguiente write económico los materializa). */
   contratistas_evaluables?: number
   contratistas_evaluados?: number
+  /** Parte B del bloque proyección/saldo (28-oct): liquidadas de contratista
+   *  con `saldo_final > 0` cuyo saldo AÚN no está pagado (Σ pagos_saldo
+   *  vivos < saldo_final). Alimenta la cola "Saldos por pagar" y el gate del
+   *  CIERRE (no se cierra con un saldo de contratista sin pagar). Opcional:
+   *  resúmenes previos no lo traen — censo 26-oct: CERO liquidaciones en la
+   *  historia de prod, así que toda liquidada futura nace con el contador. */
+  saldos_pendientes?: number
 }
 
 export interface Proyecto {

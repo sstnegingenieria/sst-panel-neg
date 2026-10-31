@@ -28,6 +28,8 @@ import {
   patchCancelarAsignacion, patchAjustarAtomos, patchResolverSenal,
   patchDefinirPreliquidacion, patchAprobarPreliquidacion, patchGirarAnticipo, patchGirarAnticipoAdicional,
   girosDe, girosVivosDe, anticipoTotalDe, hayAnticipoGirado,
+  patchRegistrarPagoSaldo, patchCorregirPagoSaldo, pagosSaldoDe,
+  totalPagadoSaldoDe, saldoPagadoDe, saldoRestanteDe,
   patchCorregirPreliquidacion, patchCorregirAnticipo, patchLiquidarAsignacion, patchAgregarReembolso, valorAlcanceDe,
   tipoDe, patchMarcarAdministracionDirecta, patchEstimarDirecta, patchCerrarDirecta,
   puenteLiquidadoContratista, elegirSingular, construirSingularDesde,
@@ -36,7 +38,7 @@ import {
   baseMargenDe, ETIQUETA_BASE_MARGEN, universoDe, atomosEfectivosDe, resumenAtomosPorGrupo,
   ESTADO_ASIG_LABEL, ESTADO_ASIG_COLOR,
 } from '../../../types/sigp/asignacion'
-import type { AsignacionContratista } from '../../../types/sigp/asignacion'
+import type { AsignacionContratista, MedioPagoSaldo } from '../../../types/sigp/asignacion'
 import { idVerificacion } from '../../../types/sigp/verificacionSst'
 import type { VerificacionSst } from '../../../types/sigp/verificacionSst'
 import { cargarAsignaciones, asegurarMigrado, crearAsignacion, escribirAsignacion } from '../../../utils/sigp/asignaciones'
@@ -520,6 +522,82 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       setAdicTarget(null)
       await recargarTodo()
     } catch { toast('Error al registrar el anticipo adicional', 'error') } finally { setAplicando(false) }
+  }
+
+  // ── Parte B (28-oct): PAGOS del saldo sobre liquidadas — registrar /
+  //    corregir / anular (solo gerencia; comprobante obligatorio B2) ──
+  const [pagoTarget, setPagoTarget] = useState<AsignacionContratista | null>(null)
+  const [pagoValor, setPagoValor] = useState<number | undefined>(undefined)
+  const [pagoFecha, setPagoFecha] = useState('')
+  const [pagoMedio, setPagoMedio] = useState<MedioPagoSaldo>('transferencia')
+  const [pagoSoporte, setPagoSoporte] = useState<File | null>(null)
+  const abrirPago = (a: AsignacionContratista) => {
+    setPagoValor(Math.max(0, Math.round(saldoRestanteDe(a))) || undefined)
+    setPagoFecha(new Date().toISOString().slice(0, 10))
+    setPagoMedio('transferencia')
+    setPagoSoporte(null)
+    setPagoTarget(a)
+  }
+  const registrarPago = async () => {
+    const t = pagoTarget
+    if (!t || !(pagoValor !== undefined && pagoValor > 0) || !pagoFecha || !pagoSoporte) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      const vigentes = await asegurarMigrado(proyecto, subdocs)
+      const target = vigentes.find(x => x.id === t.id) ?? t
+      const nombre = `${Date.now()}-${pagoSoporte.name}`.replace(/[^\w.\-]/g, '_')
+      const snap = await uploadBytes(ref(storage, `proyectos/${proyecto.id}/pagos_saldo/${target.id}/${nombre}`), pagoSoporte)
+      const r = patchRegistrarPagoSaldo(target, {
+        fecha: Timestamp.fromDate(new Date(`${pagoFecha}T12:00:00`)),
+        valor: pagoValor, medio: pagoMedio,
+        comprobante_url: await getDownloadURL(snap.ref), comprobante_nombre: pagoSoporte.name,
+      }, user?.uid ?? '', ahora, user?.nombre)
+      if (!r) { toast('El pago se registra sobre una liquidación con saldo, con comprobante y sin fecha futura', 'error'); return }
+      const trasPatch = vigentes.map(x => x.id === target.id
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
+      toast(`Pago del saldo registrado — ${fmtMoney(pagoValor)} · pagado ${fmtMoney(r.totalPagado)} de ${fmtMoney(t.liquidacion?.saldo_final ?? 0)}`
+        + (r.completo ? ' · SALDO PAGADO ✓' : '') + (r.posterior ? ' · registrado después' : ''))
+      setPagoTarget(null)
+      await recargarTodo()
+    } catch { toast('Error al registrar el pago del saldo', 'error') } finally { setAplicando(false) }
+  }
+
+  const [corrPagoTarget, setCorrPagoTarget] = useState<AsignacionContratista | null>(null)
+  const [corrPagoIndice, setCorrPagoIndice] = useState<number | undefined>(undefined)
+  const [corrPagoValor, setCorrPagoValor] = useState<number | undefined>(undefined)
+  const [corrPagoAnular, setCorrPagoAnular] = useState(false)
+  const [corrPagoMotivo, setCorrPagoMotivo] = useState('')
+  const abrirCorregirPago = (a: AsignacionContratista) => {
+    const pagos = pagosSaldoDe(a)
+    const vivos = pagos.map((p, i) => (p.anulado ? -1 : i)).filter(i => i >= 0)
+    const idx = vivos.length === 1 ? vivos[0] : undefined
+    setCorrPagoIndice(idx)
+    setCorrPagoValor(idx != null ? pagos[idx]?.valor : undefined)
+    setCorrPagoAnular(false)
+    setCorrPagoMotivo('')
+    setCorrPagoTarget(a)
+  }
+  const guardarCorreccionPago = async () => {
+    const target = corrPagoTarget
+    if (!target) return
+    const r = patchCorregirPagoSaldo(target,
+      corrPagoAnular
+        ? { anular: true, ...(corrPagoIndice != null ? { indice: corrPagoIndice } : {}) }
+        : { valor: corrPagoValor, ...(corrPagoIndice != null ? { indice: corrPagoIndice } : {}) },
+      corrPagoMotivo, user?.uid ?? '', Timestamp.now(), user?.nombre)
+    if (!r) { toast('Corrección inválida — revisa el pago elegido, el valor y el motivo', 'error'); return }
+    setAplicando(true)
+    try {
+      const tras = asigs.map(x => x.id === target.id ? { ...x, ...r.sub } as AsignacionContratista : x)
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, tras)
+      toast(r.anula ? 'Pago ANULADO — los demás pagos siguen vigentes' : 'Pago corregido')
+      setCorrPagoTarget(null)
+      await recargarTodo()
+    } catch { toast('Error al corregir el pago', 'error') } finally { setAplicando(false) }
   }
 
   // ── 28-sep: corrección del ANTICIPO registrado (valor o anulación) ──
@@ -1287,15 +1365,55 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                     {a.liquidacion.saldo_final < 0 && ' (pagado de más — sobre-giro visible, jamás recortado)'}
                   </p>
                 )}
+                {/* Parte B (28-oct): el HECHO del pago del saldo — el eslabón
+                    final de la cadena. Chip de estado + pagos con fechas. */}
+                {a.liquidacion && !dir && a.liquidacion.saldo_final > 0 && (
+                  <p className="text-xs">
+                    {saldoPagadoDe(a) ? (
+                      <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700"
+                        title={pagosSaldoDe(a).map((p, i) => `pago ${i + 1}: ${fmtMoney(p.valor)} · ${fFecha(p.fecha)}${p.anulado ? ' (ANULADO)' : ''}${p.registro_posterior ? ' · registrado después' : ''}`).join(' · ')}>
+                        💵 saldo pagado ✓ ({fmtMoney(totalPagadoSaldoDe(a))})
+                      </span>
+                    ) : (
+                      <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800"
+                        title="La liquidación concilió cuánto se debe; esto registra que el dinero SALIÓ — fecha, medio y comprobante">
+                        💵 saldo por pagar — restante {fmtMoney(saldoRestanteDe(a))}
+                        {totalPagadoSaldoDe(a) > 0 && <> (pagado {fmtMoney(totalPagadoSaldoDe(a))})</>}
+                      </span>
+                    )}
+                    {pagosSaldoDe(a).some(p => p.registro_posterior && !p.anulado) && (
+                      <span className="ml-1 inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600"
+                        title="El pago ocurrió antes y el panel se enteró después — el panel refleja lo que pasó [R8]">
+                        registrado después
+                      </span>
+                    )}
+                  </p>
+                )}
                 {/* 17-sep (arreglo #4): el entregable de la liquidación
                     (CM-FT-LQ-26) por asignación — directas no lo generan */}
                 {a.liquidacion && !dir && (puedeGestionar || puedeAprobar || puedeLiquidar) && (
-                  <div className="pt-0.5">
+                  <div className="pt-0.5 flex flex-wrap gap-2">
                     <button onClick={() => docLiquidacion(a)} disabled={aplicando}
                       title="El documento de liquidación que se le entrega al contratista: SU alcance + conciliación (mano de obra + reembolsos − anticipo − retenciones = saldo) — jamás venta ni utilidad"
                       className="text-[11px] px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-50">
                       📄 Liquidación (doc del contratista)
                     </button>
+                    {/* Parte B (28-oct): registrar el PAGO del saldo — mismo
+                        espejo de la regla que liquidar (GA titular). */}
+                    {puedeLiquidar && a.liquidacion.saldo_final > 0 && !saldoPagadoDe(a) && (
+                      <button onClick={() => abrirPago(a)} disabled={aplicando}
+                        title="Registra que el dinero del saldo SALIÓ — fecha real, medio y comprobante obligatorios; admite pagos parciales y registro posterior"
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-emerald-500 text-emerald-700 hover:bg-emerald-50 font-semibold disabled:opacity-50">
+                        💵 Registrar pago del saldo
+                      </button>
+                    )}
+                    {puedeLiquidar && pagosSaldoDe(a).some(p => !p.anulado) && (
+                      <button onClick={() => abrirCorregirPago(a)} disabled={aplicando}
+                        title="Corrige el VALOR de un pago registrado o lo anula si nunca ocurrió — con motivo y traza solo-crecer; un pago no se sobrescribe"
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-amber-400 text-amber-800 hover:bg-amber-50 font-medium disabled:opacity-50">
+                        ✎ Corregir pago
+                      </button>
+                    )}
                   </div>
                 )}
                 {/* P2-4: el doc del contratista NO aplica a la administración
@@ -1991,6 +2109,136 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                 registró sabiéndolo, y la diferencia se reconcilia en la liquidación.
               </p>
             )}
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Parte B (28-oct): registrar el PAGO del saldo ── */}
+      <Modal isOpen={pagoTarget !== null} onClose={() => setPagoTarget(null)}
+        title={`Pago del saldo — ${pagoTarget?.contratista_nombre ?? ''}`}
+        actions={[
+          { label: 'Volver', onClick: () => setPagoTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Registrando…' : 'Registrar pago', onClick: registrarPago, variant: 'primary',
+            loading: aplicando,
+            disabled: !(pagoValor !== undefined && pagoValor > 0) || !pagoFecha || !pagoSoporte,
+          },
+        ]}>
+        {pagoTarget && (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              Saldo de la liquidación: <b className="font-mono">{fmtMoney(pagoTarget.liquidacion?.saldo_final ?? 0)}</b>
+              {totalPagadoSaldoDe(pagoTarget) > 0 && <> · ya pagado <b className="font-mono">{fmtMoney(totalPagadoSaldoDe(pagoTarget))}</b></>}
+              {' '}· restante <b className="font-mono">{fmtMoney(saldoRestanteDe(pagoTarget))}</b>.
+              El pago ya ocurrió por tesorería — aquí se REGISTRA el hecho con su fecha real
+              (si fue antes y el panel se entera hoy, queda como «registrado después» — lo que no
+              puede es faltar).
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Valor <span className="text-red-500">*</span></span>
+                <InputExpresion valor={pagoValor} onValor={setPagoValor}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Fecha REAL del pago <span className="text-red-500">*</span></span>
+                <input type="date" value={pagoFecha} max={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setPagoFecha(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Medio <span className="text-red-500">*</span></span>
+                <select value={pagoMedio} onChange={e => setPagoMedio(e.target.value as MedioPagoSaldo)}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300">
+                  <option value="transferencia">Transferencia</option>
+                  <option value="consignacion">Consignación</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="otro">Otro</option>
+                </select>
+              </label>
+            </div>
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Comprobante del pago <span className="text-red-500">*</span></span>
+              <input type="file" accept="application/pdf,image/*"
+                onChange={e => setPagoSoporte(e.target.files?.[0] ?? null)}
+                className="mt-1 w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-sm" />
+            </label>
+            {pagoValor != null && pagoTarget.liquidacion
+              && pagoValor !== Math.round(saldoRestanteDe(pagoTarget)) && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                ⚠ El valor difiere del restante ({fmtMoney(saldoRestanteDe(pagoTarget))}) — un pago
+                parcial es válido; si lo pagado supera el saldo, queda visible y se reconcilia.
+              </p>
+            )}
+            {pagoFecha && pagoFecha < new Date().toISOString().slice(0, 10) && (
+              <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded px-2 py-1.5">
+                Registro POSTERIOR: la fecha real es anterior a hoy — quedará marcado «registrado
+                después» (rótulo honesto, no castigo).
+              </p>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Parte B: corregir/anular un pago del saldo ── */}
+      <Modal isOpen={corrPagoTarget !== null} onClose={() => setCorrPagoTarget(null)}
+        title={`Corregir pago del saldo — ${corrPagoTarget?.contratista_nombre ?? ''}`}
+        actions={[
+          { label: 'Volver', onClick: () => setCorrPagoTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Guardando…' : corrPagoAnular ? 'Anular el pago' : 'Guardar corrección',
+            onClick: guardarCorreccionPago, variant: 'primary', loading: aplicando,
+            disabled: !corrPagoMotivo.trim()
+              || corrPagoIndice == null
+              || (!corrPagoAnular && !(corrPagoValor != null && corrPagoValor > 0
+                  && corrPagoValor !== pagosSaldoDe(corrPagoTarget)[corrPagoIndice]?.valor)),
+          },
+        ]}>
+        {corrPagoTarget && (
+          <div className="space-y-3">
+            {pagosSaldoDe(corrPagoTarget).filter(p => !p.anulado).length > 1 ? (
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Pago a corregir <span className="text-red-500">*</span></span>
+                <select value={corrPagoIndice ?? ''} onChange={e => {
+                    const i = e.target.value === '' ? undefined : Number(e.target.value)
+                    setCorrPagoIndice(i)
+                    setCorrPagoValor(i != null ? pagosSaldoDe(corrPagoTarget)[i]?.valor : undefined)
+                  }}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300">
+                  <option value="">— elige el pago —</option>
+                  {pagosSaldoDe(corrPagoTarget).map((p, i) => p.anulado ? null : (
+                    <option key={i} value={i}>Pago {i + 1} · {fmtMoney(p.valor)} · {fFecha(p.fecha)}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <p className="text-sm text-gray-600">
+                Registrado: <b className="font-mono">{fmtMoney(corrPagoIndice != null ? (pagosSaldoDe(corrPagoTarget)[corrPagoIndice]?.valor ?? 0) : 0)}</b>
+                {' '}el {fFecha(corrPagoIndice != null ? pagosSaldoDe(corrPagoTarget)[corrPagoIndice]?.fecha : undefined)}.
+              </p>
+            )}
+            <p className="text-sm text-gray-600">
+              Un pago registrado <b>no se sobrescribe</b>: la corrección deja traza solo-crecer y la
+              anulación lo marca sin borrarlo — mismo tratamiento que los giros de anticipo.
+            </p>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={corrPagoAnular}
+                onChange={e => setCorrPagoAnular(e.target.checked)} className="w-4 h-4 accent-rose-600" />
+              El pago <b>nunca ocurrió</b> — anularlo
+            </label>
+            {!corrPagoAnular && (
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Valor real pagado <span className="text-red-500">*</span></span>
+                <InputExpresion valor={corrPagoValor} onValor={setCorrPagoValor}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-right focus:outline-none focus:ring-2 focus:ring-brand-300" />
+              </label>
+            )}
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Motivo <span className="text-red-500">*</span></span>
+              <textarea value={corrPagoMotivo} onChange={e => setCorrPagoMotivo(e.target.value)} rows={2} autoFocus
+                placeholder="Por qué se corrige o anula el pago registrado…"
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
           </div>
         )}
       </Modal>
