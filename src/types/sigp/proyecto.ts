@@ -1339,6 +1339,11 @@ export interface ResumenAsignaciones {
    *  resúmenes previos no lo traen — censo 26-oct: CERO liquidaciones en la
    *  historia de prod, así que toda liquidada futura nace con el contador. */
   saldos_pendientes?: number
+  /** Parte D (31-oct): solicitudes de anticipo adicional EN EVALUACIÓN de
+   *  Gerencia (estado 'solicitada'). Alimenta la cola de la bandeja
+   *  administrativa; las devueltas no cuentan (la pelota está en Proyectos).
+   *  Opcional: resúmenes previos no lo traen. */
+  solicitudes_anticipo_pendientes?: number
 }
 
 export interface Proyecto {

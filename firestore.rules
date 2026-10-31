@@ -1193,10 +1193,13 @@ service cloud.firestore {
           // GERENCIA (+ respaldo): aprueba/gira/liquida, acotada por-campo;
           // fijar aprobación exige la titular o salvedad escrita (PR #45);
           // LLEGAR a 'liquidada' exige el aval SST del proyecto (26-oct).
+          // 'solicitudes_anticipo' (Parte D, 31-oct): gerencia EVALÚA la
+          // solicitud — gira o devuelve; girar sigue atado al C2 de giros.
+          // La máquina del elemento la imponen los builders + UI (D.3).
           (isAuthed()
             && rolActual() in ['gerencia_administrativa', 'admin', 'gerencia_general', 'gestion_integral']
             && request.resource.data.diff(resource.data).affectedKeys()
-                 .hasOnly(['estado', 'preliquidacion', 'liquidacion', 'pagos_saldo', 'compras_reembolsos', 'historial', 'fecha_actualizacion'])
+                 .hasOnly(['estado', 'preliquidacion', 'liquidacion', 'pagos_saldo', 'compras_reembolsos', 'solicitudes_anticipo', 'historial', 'fecha_actualizacion'])
             && avalSstParaLiquidar()
             // [B5 — 28-oct] TRAS liquidada: solo gerencia_administrativa y
             // admin (GI y GG salen de esa rama — hoy podían reescribirla),
