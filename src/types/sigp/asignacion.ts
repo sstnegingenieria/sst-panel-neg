@@ -468,6 +468,15 @@ export interface AsignacionContratista {
    *  fecha_registro los impone la regla [B3]; un pago no se sobrescribe
    *  [B4]. Ver PagoSaldo. */
   pagos_saldo?: PagoSaldo[]
+  /** Parte D (31-oct): SOLICITUDES de anticipo adicional — el giro adicional
+   *  pasa a DOS pasos con dos personas: Proyectos SOLICITA (monto propuesto,
+   *  motivo de la insuficiencia y el soporte DEL CONTRATISTA) y Gerencia
+   *  evalúa: GIRA con fecha real y comprobante por la maquinaria de la
+   *  Parte C, o DEVUELVE con motivo (no terminal — editable y reenviable,
+   *  patrón OC). Sin aprobación intermedia: la evaluación de Marcela es el
+   *  segundo par de ojos. Lista append-only; la máquina del elemento la
+   *  imponen los builders + UI (D.3). */
+  solicitudes_anticipo?: SolicitudAnticipo[]
   compras_reembolsos: CompraReembolso[]
   /** 21-sep (3a fuera de P2-3): evaluación ISO de reevaluación de proveedores
    *  POR CONTRATISTA — bajó del campo singular del padre al sub-doc. Directas
@@ -838,6 +847,11 @@ export function resumenAsignacionesDe(
     saldos_pendientes: asigs.filter(a =>
       a.estado === 'liquidada' && tipoDe(a) !== 'administracion_directa'
       && (a.liquidacion?.saldo_final ?? 0) > 0 && !saldoPagadoDe(a)).length,
+    // Parte D (31-oct): solicitudes de anticipo EN EVALUACIÓN — alimenta la
+    // cola de Gerencia en la bandeja (las devueltas no cuentan: la pelota
+    // está del lado de Proyectos).
+    solicitudes_anticipo_pendientes: asignacionesVivas(asigs).filter(a =>
+      solicitudesAnticipoDe(a).some(s => s.estado === 'solicitada')).length,
   }
 }
 
@@ -1341,6 +1355,170 @@ export function patchGirarAnticipoAdicional(
       `Anticipo ADICIONAL girado — ${giro.valor} (giro ${giros.length}) · Σ girado ${suma}` +
       ` · Motivo de la insuficiencia: ${giro.motivo.trim()}` +
       (sobreAcordado ? textoSobreAcordado(suma, pre.valor_contratista) : '')),
+  }
+}
+
+// ── Parte D (31-oct): SOLICITUD de anticipo adicional — dos pasos, dos
+//    personas (calca el flujo de OC). Solo aplica al giro ADICIONAL: el
+//    primer anticipo viene pactado desde la preliquidación y no se toca. ───
+
+export interface SolicitudAnticipo {
+  estado: 'solicitada' | 'devuelta' | 'girada'
+  monto_propuesto: number
+  /** El motivo de la insuficiencia (C1b) — por qué lo girado no alcanza. */
+  motivo: string
+  /** SOPORTE 1 — del CONTRATISTA: prueba POR QUÉ hace falta (obligatorio).
+   *  DISTINTO y SEPARADO del comprobante del giro (soporte 2, que prueba que
+   *  SE PAGÓ y vive en giros[].evidencia_url) — jamás un campo compartido. */
+  soporte_contratista_url: string
+  soporte_contratista_nombre?: string
+  solicitado_por: string
+  por_nombre?: string
+  fecha_solicitud: Timestamp
+  /** Devolución NO terminal (patrón OC rechazada): vuelve con el motivo
+   *  VISIBLE; editable y reenviable. Conserva la ÚLTIMA; la cadena completa
+   *  vive en el historial de la asignación. */
+  devolucion?: { fecha: Timestamp; por: string; por_nombre?: string; motivo: string }
+  /** Al girar: puntero al giro RESULTANTE en giros[] (la solicitud no guarda
+   *  el dinero — lo guarda la lista de giros, con la maquinaria de la C). */
+  giro_indice?: number
+  girada?: { fecha: Timestamp; por: string; por_nombre?: string }
+}
+
+export const solicitudesAnticipoDe = (
+  a: Pick<AsignacionContratista, 'solicitudes_anticipo'>,
+): SolicitudAnticipo[] => a.solicitudes_anticipo ?? []
+
+/** Índice de la solicitud EN VUELO (solicitada o devuelta) — a lo sumo una. */
+export const solicitudAnticipoVivaDe = (
+  a: Pick<AsignacionContratista, 'solicitudes_anticipo'>,
+): number => solicitudesAnticipoDe(a).findIndex(s => s.estado === 'solicitada' || s.estado === 'devuelta')
+
+/** PASO 1 — Proyectos SOLICITA (roles que gestionan; la regla no lo acota:
+ *  quien no puede escribir giros tampoco puede convertir esto en plata).
+ *  Solo sobre `anticipo_girado` con giro vigente (es el ADICIONAL), con
+ *  monto > 0, motivo y soporte del contratista OBLIGATORIOS, y a lo sumo
+ *  UNA solicitud en vuelo. */
+export function patchSolicitarAnticipo(
+  a: AsignacionContratista,
+  datos: { monto_propuesto: number; motivo: string; soporte_url: string; soporte_nombre?: string },
+  uid: string,
+  fecha: Timestamp,
+  porNombre?: string,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion } | null {
+  if (tipoDe(a) === 'administracion_directa') return null
+  if (a.estado !== 'anticipo_girado' || !a.preliquidacion || !hayAnticipoGirado(a.preliquidacion)) return null
+  if (!(datos.monto_propuesto > 0) || !datos.motivo.trim() || !datos.soporte_url) return null
+  if (solicitudAnticipoVivaDe(a) >= 0) return null   // una a la vez
+  const solicitud: SolicitudAnticipo = {
+    estado: 'solicitada',
+    monto_propuesto: datos.monto_propuesto,
+    motivo: datos.motivo.trim(),
+    soporte_contratista_url: datos.soporte_url,
+    ...(datos.soporte_nombre ? { soporte_contratista_nombre: datos.soporte_nombre } : {}),
+    solicitado_por: uid,
+    ...(porNombre?.trim() ? { por_nombre: porNombre.trim() } : {}),
+    fecha_solicitud: fecha,
+  }
+  return {
+    sub: { solicitudes_anticipo: [...solicitudesAnticipoDe(a), solicitud], fecha_actualizacion: fecha },
+    entradaHistorial: entrada(a.estado, a.estado, uid, fecha,
+      `SOLICITUD de anticipo adicional — ${datos.monto_propuesto} · Motivo de la insuficiencia: ${datos.motivo.trim()}` +
+      ' · con soporte del contratista · queda en evaluación de Gerencia Administrativa'),
+  }
+}
+
+/** Gerencia DEVUELVE con motivo (como devuelve una OC) — NO terminal. */
+export function patchDevolverSolicitudAnticipo(
+  a: AsignacionContratista,
+  motivo: string,
+  uid: string,
+  fecha: Timestamp,
+  porNombre?: string,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion } | null {
+  if (!motivo.trim()) return null
+  const i = solicitudAnticipoVivaDe(a)
+  const s = solicitudesAnticipoDe(a)[i]
+  if (!s || s.estado !== 'solicitada') return null
+  const lista = [...solicitudesAnticipoDe(a)]
+  lista[i] = {
+    ...s, estado: 'devuelta',
+    devolucion: { fecha, por: uid, ...(porNombre?.trim() ? { por_nombre: porNombre.trim() } : {}), motivo: motivo.trim() },
+  }
+  return {
+    sub: { solicitudes_anticipo: lista, fecha_actualizacion: fecha },
+    entradaHistorial: entrada(a.estado, a.estado, uid, fecha,
+      `Solicitud de anticipo DEVUELTA — ${s.monto_propuesto} · Motivo de la devolución: ${motivo.trim()}` +
+      ' · vuelve a quien la pidió: editable y reenviable'),
+  }
+}
+
+/** El solicitante corrige y REENVÍA una devuelta (historial encadenado).
+ *  Quien reenvía pasa a ser el solicitante (el guard de "nadie solicita y
+ *  gira" se evalúa contra ÉL). */
+export function patchReenviarSolicitudAnticipo(
+  a: AsignacionContratista,
+  datos: { monto_propuesto: number; motivo: string; soporte_url: string; soporte_nombre?: string },
+  uid: string,
+  fecha: Timestamp,
+  porNombre?: string,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion } | null {
+  if (!(datos.monto_propuesto > 0) || !datos.motivo.trim() || !datos.soporte_url) return null
+  const i = solicitudAnticipoVivaDe(a)
+  const s = solicitudesAnticipoDe(a)[i]
+  if (!s || s.estado !== 'devuelta') return null
+  const lista = [...solicitudesAnticipoDe(a)]
+  lista[i] = {
+    ...s, estado: 'solicitada',
+    monto_propuesto: datos.monto_propuesto,
+    motivo: datos.motivo.trim(),
+    soporte_contratista_url: datos.soporte_url,
+    ...(datos.soporte_nombre ? { soporte_contratista_nombre: datos.soporte_nombre } : {}),
+    solicitado_por: uid,
+    ...(porNombre?.trim() ? { por_nombre: porNombre.trim() } : {}),
+    fecha_solicitud: fecha,
+  }
+  return {
+    sub: { solicitudes_anticipo: lista, fecha_actualizacion: fecha },
+    entradaHistorial: entrada(a.estado, a.estado, uid, fecha,
+      `Solicitud de anticipo REENVIADA — ${datos.monto_propuesto} · Motivo: ${datos.motivo.trim()}` +
+      ` · responde a la devolución: ${s.devolucion?.motivo ?? '—'}`),
+  }
+}
+
+/** PASO 2 — Gerencia GIRA desde la solicitud: registra la fecha REAL y el
+ *  COMPROBANTE de la transferencia por la maquinaria de la Parte C
+ *  (patchGirarAnticipoAdicional: C1b, suma, aviso sobre-acordado) y marca la
+ *  solicitud `girada` con el puntero al giro — UN solo write.
+ *  "Nadie solicita y gira": rehúsa si quien gira ES el solicitante (cubre
+ *  también a admin, que está en los dos lados por respaldo). El monto girado
+ *  puede diferir del propuesto (gira lo que giró tesorería); si difiere,
+ *  queda dicho en el historial con las dos cifras. */
+export function patchGirarDesdeSolicitud(
+  a: AsignacionContratista,
+  giro: AnticipoGirado,
+  uid: string,
+  fecha: Timestamp,
+): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; numero: number; suma: number; sobreAcordado: boolean } | null {
+  const i = solicitudAnticipoVivaDe(a)
+  const s = solicitudesAnticipoDe(a)[i]
+  if (!s || s.estado !== 'solicitada') return null
+  if (uid === s.solicitado_por) return null          // nadie solicita Y gira
+  const r = patchGirarAnticipoAdicional(a, { ...giro, motivo: giro.motivo?.trim() || s.motivo }, uid, fecha)
+  if (!r) return null
+  const lista = [...solicitudesAnticipoDe(a)]
+  lista[i] = {
+    ...s, estado: 'girada', giro_indice: r.numero - 1,
+    girada: { fecha, por: uid, ...(giro.por_nombre ? { por_nombre: giro.por_nombre } : {}) },
+  }
+  const difiere = giro.valor !== s.monto_propuesto
+  return {
+    ...r,
+    sub: { ...r.sub, solicitudes_anticipo: lista },
+    entradaHistorial: { ...r.entradaHistorial,
+      motivo: r.entradaHistorial.motivo +
+        ` · desde la SOLICITUD de ${s.por_nombre ?? s.solicitado_por}` +
+        (difiere ? ` — propuesto ${s.monto_propuesto}, girado ${giro.valor} (lo giró tesorería)` : '') },
   }
 }
 

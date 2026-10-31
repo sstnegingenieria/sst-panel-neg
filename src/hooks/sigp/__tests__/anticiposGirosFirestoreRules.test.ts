@@ -237,3 +237,48 @@ describe('C2. girar/corregir/anular: gerencia_administrativa + admin; GI y GG fu
     }))
   }, TIMEOUT)
 })
+
+// ═══ D. Parte D (31-oct) — la palabra 'solicitudes_anticipo' en el hasOnly
+//     de gerencia: evaluar (girar/devolver) pasa; el C2 de giros sigue vivo ═══
+
+describe('D. solicitudes de anticipo — la palabra aditiva de la Parte D', () => {
+  const SOLICITUD = {
+    estado: 'solicitada', monto_propuesto: 150_000, motivo: 'faltó material',
+    soporte_contratista_url: 'https://x/soporte.pdf', solicitado_por: 'diego',
+    fecha_solicitud: T0,
+  }
+
+  it('D1. GESTOR solicita (campo nuevo + historial) → permitido (su rama no tiene hasOnly)', async () => {
+    await assertSucceeds(updateDoc(doc(db('diego'), ASIG), {
+      solicitudes_anticipo: [SOLICITUD],
+      fecha_actualizacion: T1, historial: hist('diego'),
+    }))
+  }, TIMEOUT)
+
+  it('D2. GERENCIA gira DESDE la solicitud (giros + solicitudes_anticipo en el MISMO write) → permitido', async () => {
+    await sembrarAsig(asigGirada({ solicitudes_anticipo: [SOLICITUD] }))
+    await assertSucceeds(updateDoc(doc(db('marcela'), ASIG), {
+      preliquidacion: preliqGiros([GIRO1, GIRO2]),
+      solicitudes_anticipo: [{ ...SOLICITUD, estado: 'girada', giro_indice: 1, girada: { fecha: T1, por: 'marcela' } }],
+      fecha_actualizacion: T1, historial: hist('marcela'),
+    }))
+  }, TIMEOUT)
+
+  it('D3. GERENCIA devuelve con motivo (solo solicitudes_anticipo + historial) → permitido', async () => {
+    await sembrarAsig(asigGirada({ solicitudes_anticipo: [SOLICITUD] }))
+    await assertSucceeds(updateDoc(doc(db('marcela'), ASIG), {
+      solicitudes_anticipo: [{ ...SOLICITUD, estado: 'devuelta', devolucion: { fecha: T1, por: 'marcela', motivo: 'falta detalle' } }],
+      fecha_actualizacion: T1, historial: hist('marcela'),
+    }))
+  }, TIMEOUT)
+
+  it('D4. REGRESIÓN C2: marcar girada SIN poder tocar giros sigue cerrado para GI/GG', async () => {
+    await sembrarAsig(asigGirada({ solicitudes_anticipo: [SOLICITUD] }))
+    // GI intenta "girar" (giros cambian) → el C2 lo corta aunque la palabra exista
+    await assertFails(updateDoc(doc(db('ingrid'), ASIG), {
+      preliquidacion: preliqGiros([GIRO1, GIRO2]),
+      solicitudes_anticipo: [{ ...SOLICITUD, estado: 'girada', giro_indice: 1 }],
+      fecha_actualizacion: T1, historial: hist('ingrid'),
+    }))
+  }, TIMEOUT)
+})
