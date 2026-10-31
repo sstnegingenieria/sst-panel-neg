@@ -11,6 +11,42 @@ el histórico, y nadie ve nada.
 
 ---
 
+## Cómo se usa este documento
+
+**Este documento dice QUÉ verificar. Nunca dice que algo YA se verificó.**
+
+No lleva ni un resultado precalculado: ningún conteo de líneas de diff, ningún
+id de ruleset, ningún hash de bundle, ninguna línea base. Todos esos números
+se **miden en el momento de ejecutar** y se anotan en el reporte de la sesión
+que ejecuta, no acá.
+
+La razón es un incidente real (26-oct-2026). Una verificación byte-idéntica se
+corrió tres días antes del despliegue; en el intervalo otro frente mergeó y
+desplegó su propio bloque de reglas, y el deploy — hecho con un archivo que no
+lo contenía — **borró de producción un control de seguridad vivo**. La
+verificación había sido correcta y era verdadera cuando se corrió. El problema
+no fue la verificación: fue la **distancia entre la verificación y el acto**.
+
+Un número escrito acá es una verificación congelada: parece un chequeo y es un
+recuerdo. La primera versión de este documento traía los diffs esperados
+anotados; si el código hubiera cambiado, quien ejecutara habría comparado
+contra una expectativa vieja y el «coincide» habría sido falso.
+
+### Enmienda al protocolo — obligatoria
+
+1. **La pre-verificación byte-idéntica se corre EN EL MISMO ACTO que el
+   comando de despliegue.** Si entre una y otro hay una espera —una
+   autorización, un aviso pendiente, un café—, **se repite**. Sin excepción.
+2. **Antes de cada pre-verificación, `git fetch` en fresco** y comparar
+   contra `origin/main`, no contra la base local ni contra un `HEAD`
+   que pueda haber quedado atrás.
+3. **Si `origin/main` se movió desde el último rebase, se rebasa y se
+   vuelven a correr las baterías antes de desplegar.** Un archivo de reglas que
+   no contiene lo que ya está vivo no es un despliegue incompleto: es un
+   borrado.
+
+---
+
 ## Por qué este orden
 
 El orden no es arbitrario. Cada paso deja lista una precondición del
@@ -25,7 +61,7 @@ siguiente:
    no queman número), pero el primer proceso nuevo sí.
 3. **Las dos siembras antes de la importación** porque el importador estampa
    `semaforo_version` en cada registro: si el registro del criterio no existe,
-   quedan ~350 documentos apuntando a una versión que no se puede leer, y la
+   queda el histórico entero apuntando a una versión que no se puede leer, y la
    pantalla del *rojo informado* no tendría qué mostrar.
 4. **La verificación antes del flag** porque es la última oportunidad de
    detectar que lo desplegado no es lo revisado.
@@ -37,29 +73,50 @@ siguiente:
 
 ## Paso 1 — Reglas de Firestore y Storage
 
-**Precondición.** Verificar que producción está en el mismo punto que `main`
-**antes** de tocar nada:
+**Precondición — se corre PEGADA al comando de despliegue, no antes.** Si
+después de esta verificación hay cualquier espera, **se repite completa**.
+
+Para LEER las reglas vivas se usa un endpoint de LECTURA. Nunca un
+`deploy --dry-run`: un comando de despliegue con bandera no es una forma
+de leer.
 
 ```bash
 npx firebase firestore:rules:get --project neg-sst-app
 ```
 
-Comparar contra el archivo del repo **normalizando saltos de línea**. El
-working tree de Windows produce CRLF y el ruleset de producción LF: comparar
-en crudo da falsos negativos. Ver el gotcha del PR #37.
+(o la Rules API: `GET /v1/projects/{p}/releases` para saber qué ruleset
+sirve cada release, y `GET /v1/projects/{p}/rulesets/{id}` para su
+contenido.)
 
-- [ ] `firestore.rules` de producción == HEAD, byte-idéntico (CRLF/LF
-      normalizado)
-- [ ] `storage.rules` de producción == HEAD, byte-idéntico (ídem)
-- [ ] `git diff` del despliegue revisado línea a línea: debe contener
-      **exactamente** los bloques de licitaciones y **ninguna línea** de los
-      helpers o colecciones existentes. Los diffs esperados son **+137 / −0**
-      en `firestore.rules` y **+54 / −0** en `storage.rules`. **Cero
-      supresiones**: si aparece una sola línea borrada, parar.
+Comparar **normalizando saltos de línea**: el working tree de Windows produce
+CRLF y el ruleset de producción LF, así que comparar en crudo da falsos
+negativos. Ver el gotcha del PR #37.
 
-> Este chequeo no es ceremonia. En el C3 (PR #65) una sesión paralela
-> sobrescribió `firestore.rules` entre el E2E y el commit, y el PR mergeado
-> perdió sus bloques. Lo atrapó exactamente esta verificación.
+- [ ] `git fetch` en fresco, **en este mismo acto**
+- [ ] `origin/main` no se movió desde el último rebase de la rama. Si se
+      movió: rebasar, resolver, **volver a correr las baterías** y empezar
+      este paso de nuevo
+- [ ] `firestore.rules` de producción == `origin/main`,
+      byte-idéntico (CRLF/LF normalizado)
+- [ ] `storage.rules` de producción == `origin/main`, byte-idéntico
+      (ídem)
+- [ ] El diff a desplegar revisado **línea a línea**: contiene exactamente los
+      bloques de licitaciones y **ninguna línea** de helpers o colecciones
+      ajenas. Los conteos se leen del `git diff` del momento y se anotan
+      en el reporte — no hay número esperado escrito acá
+- [ ] **Toda supresión justificada una por una.** El caso normal de este
+      módulo es cero; si hay alguna, cada línea borrada tiene que ser una
+      decisión tomada y anunciada, no un hallazgo del diff
+- [ ] El archivo que se va a desplegar **contiene todo lo que ya está vivo**:
+      los bloques de los otros frentes presentes y completos
+
+> Este chequeo no es ceremonia, y los dos incidentes lo prueban desde los dos
+> lados. En el C3 (PR #65) una sesión paralela sobrescribió
+> `firestore.rules` en el working tree y el PR mergeado perdió sus
+> bloques: lo atrapó esta verificación. El 26-oct-2026 un despliegue nuestro
+> borró de producción el gate de otro frente: **no lo atrapó, porque la
+> verificación era de tres días antes**. El mismo chequeo, corrido tarde, no
+> protege nada.
 
 **Despliegue:**
 
@@ -67,10 +124,14 @@ en crudo da falsos negativos. Ver el gotcha del PR #37.
 npx firebase deploy --only firestore:rules,storage --project neg-sst-app
 ```
 
-- [ ] Post-verificación: volver a leer ambos rulesets → **byte-idénticos** al
-      repo
+- [ ] Post-verificación: volver a leer ambos rulesets por el endpoint de
+      lectura → **byte-idénticos** al archivo desplegado
 - [ ] Diff producción-antes → producción-después = solo los bloques de
-      licitaciones
+      licitaciones, con los conteos leídos en el momento
+- [ ] **Los bloques de los otros frentes siguen presentes y completos** en el
+      ruleset vivo. Presente no es lo mismo que funcionando: para un control
+      de otro frente, correr **su** batería contra el archivo que quedó
+      desplegado
 - [ ] Denegación anónima comprobada: lectura de `licitaciones` y de la
       subcolección de economía → 403
 
@@ -86,8 +147,10 @@ datos posible.
 PRY, ACT, LIQ, FAC, NC, CAT y PEA. Un despliegue torpe aquí rompe el flujo
 comercial en producción.
 
-- [ ] `git diff` de `functions/consecutivos.js` verificado. Debe contener
-      **exactamente** esto y nada más:
+- [ ] `git diff` de `functions/consecutivos.js` leído **en el
+      momento**. Lo que sigue es **lo que se aprobó en revisión**, no una
+      medición: si el diff del momento no coincide con esta lista, **parar** —
+      o el código cambió desde la revisión, o se está desplegando otra cosa:
       - `'LIC'` agregado a `PREFIJOS_VALIDOS`
       - el mapa nuevo `PADDING_MINIMO_ANUAL = { LIC: 4 }`
       - **una sola línea de comportamiento**: la del `padding`
@@ -166,7 +229,10 @@ tiene script propio y no lo necesita:
 
 ## Paso 5 — Importación del histórico
 
-~350 registros de 2022 a 2026 desde los tres archivos del área comercial.
+Los registros históricos de 2022 a 2026, desde los tres archivos del área
+comercial. **El conteo autoritativo es el que imprime el dry-run del momento**,
+no una cifra escrita acá: los archivos fuente viven fuera del repo y pueden
+haber cambiado.
 
 ⚠ Los archivos fuente están **fuera del repo** (contienen precios y datos
 comerciales) y su carpeta está en `.gitignore`. Hay que copiarlos antes de
@@ -210,15 +276,19 @@ mejor revisar el dry-run dos veces que borrar después.
 
 Antes de que nadie vea el módulo:
 
-- [ ] `firestore.rules` de producción **byte-idéntico** a HEAD (CRLF/LF
-      normalizado)
-- [ ] `storage.rules` de producción **byte-idéntico** a HEAD (ídem)
+- [ ] `git fetch` en fresco y `firestore.rules` de producción
+      **byte-idéntico** a `origin/main` (CRLF/LF normalizado)
+- [ ] `storage.rules` de producción **byte-idéntico** a
+      `origin/main` (ídem)
+- [ ] Los bloques de los otros frentes presentes y completos en el ruleset
+      vivo
 - [ ] `functions:list` → las funciones existentes intactas, `generarConsecutivo`
       con el prefijo `LIC` vivo
-- [ ] Bundle de Vercel servido == el del merge (hash de bundle capturado
-      **antes** del merge como línea base — el despliegue de Vercel puede
-      completar en ~1 min y un "baseline" tomado después ya es el bundle
-      nuevo; lección del PR #89)
+- [ ] Bundle de Vercel servido distinto de la línea base. La línea base se
+      **captura antes del merge, en el mismo acto** — el despliegue de Vercel
+      puede completar en ~1 min y un «baseline» tomado después ya es el bundle
+      nuevo (lección del PR #89). El hash no se escribe acá: se anota en el
+      reporte de la sesión que ejecuta
 - [ ] Los dos documentos de configuración leíbles con un token de un rol que
       gestiona licitaciones
 
