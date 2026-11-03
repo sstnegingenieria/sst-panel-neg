@@ -26,8 +26,10 @@ import {
   asignacionesDe, coberturaDe, detectarDesincronizacion, resumenAsignacionesDe,
   construirAsignacionMulti, construirAsignacionHistorica,
   patchCancelarAsignacion, patchAjustarAtomos, patchResolverSenal,
-  patchDefinirPreliquidacion, patchAprobarPreliquidacion, patchGirarAnticipo, patchGirarAnticipoAdicional,
+  patchDefinirPreliquidacion, patchAprobarPreliquidacion, patchGirarAnticipo,
   girosDe, girosVivosDe, anticipoTotalDe, hayAnticipoGirado,
+  patchSolicitarAnticipo, patchDevolverSolicitudAnticipo, patchReenviarSolicitudAnticipo,
+  patchGirarDesdeSolicitud, solicitudesAnticipoDe, solicitudAnticipoVivaDe,
   patchRegistrarPagoSaldo, patchCorregirPagoSaldo, pagosSaldoDe,
   totalPagadoSaldoDe, saldoPagadoDe, saldoRestanteDe,
   patchCorregirPreliquidacion, patchCorregirAnticipo, patchLiquidarAsignacion, patchAgregarReembolso, valorAlcanceDe,
@@ -483,21 +485,69 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
   // ── 28-oct: giro ADICIONAL (anticipos múltiples — C1b: motivo y soporte
   //    de la insuficiencia obligatorios; el estado NO se mueve, el hito es
   //    el primer giro) ──
-  const [adicTarget, setAdicTarget] = useState<AsignacionContratista | null>(null)
+  // ── Parte D (31-oct): SOLICITUD de anticipo adicional — dos pasos, dos
+  //    personas. El giro directo de un paso SALIÓ de la UI (D.2.4): como con
+  //    la OC, el camino de dos pasos ES el camino. ──────────────────────────
+
+  // PASO 1 — Proyectos solicita (o corrige y reenvía una devuelta)
+  const [solTarget, setSolTarget] = useState<AsignacionContratista | null>(null)
+  const [solMonto, setSolMonto] = useState<number | undefined>(undefined)
+  const [solMotivo, setSolMotivo] = useState('')
+  const [solSoporte, setSolSoporte] = useState<File | null>(null)
+  const solReenvio = solTarget ? solicitudesAnticipoDe(solTarget)[solicitudAnticipoVivaDe(solTarget)]?.estado === 'devuelta' : false
+  const abrirSolicitar = (a: AsignacionContratista) => {
+    const viva = solicitudesAnticipoDe(a)[solicitudAnticipoVivaDe(a)]
+    setSolMonto(viva?.estado === 'devuelta' ? viva.monto_propuesto : undefined)
+    setSolMotivo(viva?.estado === 'devuelta' ? viva.motivo : '')
+    setSolSoporte(null)
+    setSolTarget(a)
+  }
+  const solicitar = async () => {
+    const t = solTarget
+    if (!t || !(solMonto !== undefined && solMonto > 0) || !solMotivo.trim() || !solSoporte) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      const vigentes = await asegurarMigrado(proyecto, subdocs)
+      const target = vigentes.find(x => x.id === t.id) ?? t
+      const nombre = `${Date.now()}-${solSoporte.name}`.replace(/[^\w.\-]/g, '_')
+      const snap = await uploadBytes(ref(storage, `proyectos/${proyecto.id}/solicitudes_anticipo/${target.id}/${nombre}`), solSoporte)
+      const datos = {
+        monto_propuesto: solMonto, motivo: solMotivo.trim(),
+        soporte_url: await getDownloadURL(snap.ref), soporte_nombre: solSoporte.name,
+      }
+      const r = solReenvio
+        ? patchReenviarSolicitudAnticipo(target, datos, user?.uid ?? '', ahora, user?.nombre)
+        : patchSolicitarAnticipo(target, datos, user?.uid ?? '', ahora, user?.nombre)
+      if (!r) { toast('La solicitud exige anticipo vigente, monto, motivo y soporte del contratista — y una sola en vuelo', 'error'); return }
+      const trasPatch = vigentes.map(x => x.id === target.id
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
+      toast(`Solicitud ${solReenvio ? 'reenviada' : 'enviada'} — ${fmtMoney(solMonto)} · queda en evaluación de Gerencia Administrativa`)
+      setSolTarget(null)
+      await recargarTodo()
+    } catch { toast('Error al registrar la solicitud', 'error') } finally { setAplicando(false) }
+  }
+
+  // PASO 2 — Gerencia EVALÚA: gira (fecha real + comprobante, maquinaria de
+  // la Parte C) o devuelve con motivo. Nadie solicita y gira (builder).
+  const [evalTarget, setEvalTarget] = useState<AsignacionContratista | null>(null)
   const [adicValor, setAdicValor] = useState<number | undefined>(undefined)
   const [adicFecha, setAdicFecha] = useState('')
-  const [adicMotivo, setAdicMotivo] = useState('')
   const [adicSoporte, setAdicSoporte] = useState<File | null>(null)
-  const abrirAdicional = (a: AsignacionContratista) => {
-    setAdicValor(undefined)
+  const [devMotivo, setDevMotivo] = useState('')
+  const abrirEvaluar = (a: AsignacionContratista) => {
+    const viva = solicitudesAnticipoDe(a)[solicitudAnticipoVivaDe(a)]
+    setAdicValor(viva?.monto_propuesto)
     setAdicFecha(new Date().toISOString().slice(0, 10))
-    setAdicMotivo('')
     setAdicSoporte(null)
-    setAdicTarget(a)
+    setDevMotivo('')
+    setEvalTarget(a)
   }
-  const girarAdicional = async () => {
-    const t = adicTarget
-    if (!t || !(adicValor !== undefined && adicValor > 0) || !adicFecha || !adicMotivo.trim() || !adicSoporte) return
+  const girarDesdeSol = async () => {
+    const t = evalTarget
+    if (!t || !(adicValor !== undefined && adicValor > 0) || !adicFecha || !adicSoporte) return
     setAplicando(true)
     try {
       const ahora = Timestamp.now()
@@ -505,23 +555,41 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const target = vigentes.find(x => x.id === t.id) ?? t
       const nombre = `${Date.now()}-${adicSoporte.name}`.replace(/[^\w.\-]/g, '_')
       const snap = await uploadBytes(ref(storage, `proyectos/${proyecto.id}/anticipo/${nombre}`), adicSoporte)
-      const r = patchGirarAnticipoAdicional(target, {
+      const r = patchGirarDesdeSolicitud(target, {
         fecha: Timestamp.fromDate(new Date(`${adicFecha}T12:00:00`)),
         valor: adicValor, registrado_por: user?.uid ?? '',
         ...(user?.nombre ? { por_nombre: user.nombre } : {}),
-        motivo: adicMotivo.trim(),
         evidencia_url: await getDownloadURL(snap.ref), evidencia_nombre: adicSoporte.name,
       }, user?.uid ?? '', ahora)
-      if (!r) { toast('El giro adicional exige un anticipo vigente, motivo y comprobante', 'error'); return }
+      if (!r) { toast('No se pudo girar: la solicitud debe estar en evaluación, con comprobante — y quien solicita no gira', 'error'); return }
       const trasPatch = vigentes.map(x => x.id === target.id
         ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
       await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
         { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
-      toast(`Anticipo adicional registrado — ${fmtMoney(adicValor)} (giro ${r.numero}) · Σ girado ${fmtMoney(r.suma)}`
+      toast(`Anticipo adicional girado desde la solicitud — ${fmtMoney(adicValor)} (giro ${r.numero}) · Σ girado ${fmtMoney(r.suma)}`
         + (r.sobreAcordado ? ' · ⚠ la suma supera el valor acordado' : ''))
-      setAdicTarget(null)
+      setEvalTarget(null)
       await recargarTodo()
-    } catch { toast('Error al registrar el anticipo adicional', 'error') } finally { setAplicando(false) }
+    } catch { toast('Error al girar desde la solicitud', 'error') } finally { setAplicando(false) }
+  }
+  const devolverSol = async () => {
+    const t = evalTarget
+    if (!t || !devMotivo.trim()) return
+    setAplicando(true)
+    try {
+      const ahora = Timestamp.now()
+      const vigentes = await asegurarMigrado(proyecto, subdocs)
+      const target = vigentes.find(x => x.id === t.id) ?? t
+      const r = patchDevolverSolicitudAnticipo(target, devMotivo, user?.uid ?? '', ahora, user?.nombre)
+      if (!r) { toast('Solo se devuelve una solicitud en evaluación, con motivo', 'error'); return }
+      const trasPatch = vigentes.map(x => x.id === target.id
+        ? { ...x, ...r.sub, historial: [...x.historial, conAutor(r.entradaHistorial, user?.uid, user?.nombre)] } as AsignacionContratista : x)
+      await escribirAsignacion(proyecto.id, proyecto.snapshot, target.id,
+        { ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)) }, trasPatch)
+      toast('Solicitud devuelta con motivo — vuelve a quien la pidió, editable y reenviable')
+      setEvalTarget(null)
+      await recargarTodo()
+    } catch { toast('Error al devolver la solicitud', 'error') } finally { setAplicando(false) }
   }
 
   // ── Parte B (28-oct): PAGOS del saldo sobre liquidadas — registrar /
@@ -1348,6 +1416,22 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                     )}
                   </p>
                 )}
+                {/* Parte D: estado de la solicitud de anticipo EN VUELO */}
+                {(() => {
+                  const s = solicitudesAnticipoDe(a)[solicitudAnticipoVivaDe(a)]
+                  if (!s) return null
+                  return s.estado === 'solicitada' ? (
+                    <p className="text-xs text-brand-700">
+                      ✉ Solicitud de anticipo adicional por <span className="font-mono font-semibold">{fmtMoney(s.monto_propuesto)}</span>
+                      {' '}— en evaluación de Gerencia Administrativa ·{' '}
+                      <a href={s.soporte_contratista_url} target="_blank" rel="noreferrer" className="underline underline-offset-2">soporte del contratista</a>
+                    </p>
+                  ) : (
+                    <p className="text-xs text-amber-800">
+                      ↩ Solicitud de anticipo DEVUELTA — {s.devolucion?.motivo ?? 'sin motivo registrado'} · corregila y reenviala
+                    </p>
+                  )
+                })()}
                 {a.cancelacion && (
                   <p className="text-xs text-rose-700">
                     Cancelada el {fFecha(a.cancelacion.fecha)} — {a.cancelacion.motivo} · incurrido {fmtMoney(a.cancelacion.incurrido.total)}
@@ -1498,15 +1582,33 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                     {/* 28-sep — corrección del GIRO registrado (solo gerencia,
                         paridad "Corregir compra" C3): valor equivocado o giro
                         que nunca ocurrió (anular). */}
-                    {/* 28-oct — giro ADICIONAL (anticipos múltiples): el caso
-                        real del contratista que pide un segundo anticipo.
-                        Motivo de la insuficiencia + comprobante OBLIGATORIOS
-                        (C1b); el estado no se mueve (hito = primer giro). */}
-                    {puedeAprobar && a.estado === 'anticipo_girado' && hayAnticipoGirado(a.preliquidacion) && (
-                      <button onClick={() => abrirAdicional(a)} disabled={aplicando}
-                        title="Registra un giro ADICIONAL de anticipo con su propia fecha, comprobante y motivo de la insuficiencia — la suma es el anticipo efectivo"
-                        className="text-[11px] px-2.5 py-1 rounded-lg border border-emerald-500 text-emerald-700 hover:bg-emerald-50 font-medium disabled:opacity-50">
-                        ➕ Anticipo adicional
+                    {/* Parte D (31-oct) — el giro ADICIONAL pasa a DOS pasos:
+                        Proyectos SOLICITA (monto + motivo + soporte del
+                        contratista) y Gerencia EVALÚA (gira con fecha real y
+                        comprobante, o devuelve con motivo). El botón directo
+                        de un paso salió de la UI (D.2.4). */}
+                    {puedeGestionar && !dir && a.estado === 'anticipo_girado' && hayAnticipoGirado(a.preliquidacion)
+                      && solicitudAnticipoVivaDe(a) < 0 && (
+                      <button onClick={() => abrirSolicitar(a)} disabled={aplicando}
+                        title="Pide un giro ADICIONAL de anticipo: monto propuesto, motivo de la insuficiencia y soporte del contratista — lo evalúa Gerencia Administrativa"
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-brand-600 text-brand-700 hover:bg-brand-50 font-medium disabled:opacity-50">
+                        ✉ Solicitar anticipo adicional
+                      </button>
+                    )}
+                    {puedeGestionar && !dir
+                      && solicitudesAnticipoDe(a)[solicitudAnticipoVivaDe(a)]?.estado === 'devuelta' && (
+                      <button onClick={() => abrirSolicitar(a)} disabled={aplicando}
+                        title={`Devuelta por Gerencia: ${solicitudesAnticipoDe(a)[solicitudAnticipoVivaDe(a)]?.devolucion?.motivo ?? ''} — corrige y reenvía`}
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-amber-400 text-amber-800 hover:bg-amber-50 font-medium disabled:opacity-50">
+                        ↩ Corregir y reenviar solicitud
+                      </button>
+                    )}
+                    {puedeLiquidar
+                      && solicitudesAnticipoDe(a)[solicitudAnticipoVivaDe(a)]?.estado === 'solicitada' && (
+                      <button onClick={() => abrirEvaluar(a)} disabled={aplicando}
+                        title="Evalúa la solicitud: gira con fecha real y comprobante de la transferencia, o devuélvela con motivo"
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-emerald-500 text-emerald-700 hover:bg-emerald-50 font-semibold disabled:opacity-50">
+                        💸 Evaluar solicitud de anticipo
                       </button>
                     )}
                     {puedeAprobar && a.estado === 'anticipo_girado' && hayAnticipoGirado(a.preliquidacion) && (
@@ -2056,61 +2158,131 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         </div>
       </Modal>
 
-      {/* ── Modal: giro ADICIONAL de anticipo (28-oct — anticipos múltiples) ── */}
-      <Modal isOpen={adicTarget !== null} onClose={() => setAdicTarget(null)}
-        title={`Anticipo adicional — ${adicTarget?.contratista_nombre ?? ''}`}
+      {/* ── Parte D: SOLICITAR (o corregir y reenviar) anticipo adicional ── */}
+      <Modal isOpen={solTarget !== null} onClose={() => setSolTarget(null)}
+        title={`${solReenvio ? 'Corregir y reenviar solicitud' : 'Solicitar anticipo adicional'} — ${solTarget?.contratista_nombre ?? ''}`}
         actions={[
-          { label: 'Volver', onClick: () => setAdicTarget(null), variant: 'secondary' },
+          { label: 'Volver', onClick: () => setSolTarget(null), variant: 'secondary' },
           {
-            label: aplicando ? 'Registrando…' : 'Registrar giro adicional', onClick: girarAdicional, variant: 'primary',
+            label: aplicando ? 'Enviando…' : (solReenvio ? 'Reenviar solicitud' : 'Enviar solicitud'), onClick: solicitar, variant: 'primary',
             loading: aplicando,
-            disabled: !(adicValor !== undefined && adicValor > 0) || !adicFecha || !adicMotivo.trim() || !adicSoporte,
+            disabled: !(solMonto !== undefined && solMonto > 0) || !solMotivo.trim() || !solSoporte,
           },
         ]}>
-        {adicTarget && (
+        {solTarget && (
           <div className="space-y-3">
+            {solReenvio && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+                ↩ Devuelta por Gerencia: <b>{solicitudesAnticipoDe(solTarget)[solicitudAnticipoVivaDe(solTarget)]?.devolucion?.motivo ?? '—'}</b>
+              </p>
+            )}
             <p className="text-sm text-gray-600">
-              Ya girado: <b className="font-mono">{fmtMoney(anticipoTotalDe(adicTarget.preliquidacion))}</b>
-              {' '}({girosVivosDe(adicTarget.preliquidacion).length} giro{girosVivosDe(adicTarget.preliquidacion).length === 1 ? '' : 's'})
-              {' '}· valor acordado <b className="font-mono">{fmtMoney(adicTarget.preliquidacion?.valor_contratista ?? 0)}</b>.
-              El giro adicional lleva su propia fecha y comprobante; la <b>suma</b> es el anticipo
-              efectivo en la liquidación y el saldo.
+              Ya girado: <b className="font-mono">{fmtMoney(anticipoTotalDe(solTarget.preliquidacion))}</b>
+              {' '}({girosVivosDe(solTarget.preliquidacion).length} giro{girosVivosDe(solTarget.preliquidacion).length === 1 ? '' : 's'})
+              {' '}· valor acordado <b className="font-mono">{fmtMoney(solTarget.preliquidacion?.valor_contratista ?? 0)}</b>.
+              La solicitud la evalúa Gerencia Administrativa: gira con el comprobante de la
+              transferencia, o la devuelve con motivo (editable y reenviable).
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="block text-sm">
-                <span className="font-medium text-gray-700">Valor del giro <span className="text-red-500">*</span></span>
-                <InputExpresion valor={adicValor} onValor={setAdicValor}
-                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
-              </label>
-              <label className="block text-sm">
-                <span className="font-medium text-gray-700">Fecha del giro <span className="text-red-500">*</span></span>
-                <input type="date" value={adicFecha} onChange={e => setAdicFecha(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
-              </label>
-            </div>
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">Monto propuesto <span className="text-red-500">*</span></span>
+              <InputExpresion valor={solMonto} onValor={setSolMonto}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
             <label className="block text-sm">
               <span className="font-medium text-gray-700">Motivo de la insuficiencia <span className="text-red-500">*</span></span>
-              <textarea value={adicMotivo} onChange={e => setAdicMotivo(e.target.value)} rows={2}
-                placeholder="Por qué lo ya girado no alcanzó (queda en el giro y en el historial)…"
+              <textarea value={solMotivo} onChange={e => setSolMotivo(e.target.value)} rows={2}
+                placeholder="Por qué lo ya girado no alcanza (queda en la solicitud, en el giro y en el historial)…"
                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
             </label>
             <label className="block text-sm">
-              <span className="font-medium text-gray-700">Comprobante del giro <span className="text-red-500">*</span></span>
+              <span className="font-medium text-gray-700">Soporte del contratista <span className="text-red-500">*</span></span>
               <input type="file" accept="application/pdf,image/*"
-                onChange={e => setAdicSoporte(e.target.files?.[0] ?? null)}
+                onChange={e => setSolSoporte(e.target.files?.[0] ?? null)}
                 className="mt-1 w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-sm" />
+              <span className="text-[11px] text-gray-500">
+                Prueba POR QUÉ hace falta (del contratista). Es DISTINTO del comprobante del giro,
+                que lo adjunta Gerencia al girar — nunca un campo compartido.
+              </span>
             </label>
-            {adicValor != null && adicTarget.preliquidacion
-              && adicValor + anticipoTotalDe(adicTarget.preliquidacion) > adicTarget.preliquidacion.valor_contratista && (
-              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-                ⚠ Con este giro la suma ({fmtMoney(adicValor + anticipoTotalDe(adicTarget.preliquidacion))}) queda
-                {' '}<b>por encima del valor acordado total</b> ({fmtMoney(adicTarget.preliquidacion.valor_contratista)}).
-                No se bloquea — puede haber razón — pero el historial dejará constancia de que se
-                registró sabiéndolo, y la diferencia se reconcilia en la liquidación.
-              </p>
-            )}
           </div>
         )}
+      </Modal>
+
+      {/* ── Parte D: Gerencia EVALÚA la solicitud — gira o devuelve ── */}
+      <Modal isOpen={evalTarget !== null} onClose={() => setEvalTarget(null)}
+        title={`Evaluar solicitud de anticipo — ${evalTarget?.contratista_nombre ?? ''}`} size="lg"
+        actions={[
+          { label: 'Volver', onClick: () => setEvalTarget(null), variant: 'secondary' },
+          {
+            label: aplicando ? 'Devolviendo…' : 'Devolver con motivo', onClick: devolverSol, variant: 'secondary',
+            loading: aplicando, disabled: !devMotivo.trim(),
+          },
+          {
+            label: aplicando ? 'Girando…' : 'Girar anticipo', onClick: girarDesdeSol, variant: 'primary',
+            loading: aplicando,
+            disabled: !(adicValor !== undefined && adicValor > 0) || !adicFecha || !adicSoporte,
+          },
+        ]}>
+        {evalTarget && (() => {
+          const s = solicitudesAnticipoDe(evalTarget)[solicitudAnticipoVivaDe(evalTarget)]
+          if (!s) return null
+          const materiales = evalTarget.modalidad === 'solo_mano_obra' ? (evalTarget.valor_materiales ?? 0) : 0
+          return (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm space-y-1">
+                <p>
+                  <b className="font-mono">{fmtMoney(s.monto_propuesto)}</b> propuestos por {s.por_nombre ?? s.solicitado_por}
+                  {' '}· <a href={s.soporte_contratista_url} target="_blank" rel="noreferrer" className="text-brand-700 underline underline-offset-2">soporte del contratista</a>
+                </p>
+                <p className="text-gray-600">Motivo de la insuficiencia: {s.motivo}</p>
+                <p className="text-gray-600">
+                  Σ ya girada <b className="font-mono">{fmtMoney(anticipoTotalDe(evalTarget.preliquidacion))}</b>
+                  {' '}({girosVivosDe(evalTarget.preliquidacion).length} giro{girosVivosDe(evalTarget.preliquidacion).length === 1 ? '' : 's'})
+                  {' '}· valor acordado <b className="font-mono">{fmtMoney(evalTarget.preliquidacion?.valor_contratista ?? 0)}</b>
+                </p>
+              </div>
+              {/* El margen donde se decide (Parte E): girar más plata a un
+                  contratista se evalúa viendo contra qué venta y qué margen. */}
+              <PanelMargenVivo
+                venta={valorAlcanceDe(evalTarget.atomos, proyecto.snapshot, evalTarget.atomos_nivel)}
+                costo={(evalTarget.preliquidacion?.valor_contratista ?? 0) + materiales} />
+              {adicValor != null && evalTarget.preliquidacion
+                && adicValor + anticipoTotalDe(evalTarget.preliquidacion) > evalTarget.preliquidacion.valor_contratista && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                  ⚠ Con este giro la suma ({fmtMoney(adicValor + anticipoTotalDe(evalTarget.preliquidacion))}) queda
+                  {' '}<b>por encima del valor acordado total</b> ({fmtMoney(evalTarget.preliquidacion.valor_contratista)}).
+                  No se bloquea — puede haber razón — pero el historial dejará constancia y la
+                  diferencia se reconcilia en la liquidación.
+                </p>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="block text-sm">
+                  <span className="font-medium text-gray-700">Valor a girar <span className="text-red-500">*</span></span>
+                  <InputExpresion valor={adicValor} onValor={setAdicValor}
+                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                  <span className="text-[11px] text-gray-500">Puede diferir del propuesto — se gira lo que giró tesorería; si difiere, queda dicho con las dos cifras.</span>
+                </label>
+                <label className="block text-sm">
+                  <span className="font-medium text-gray-700">Fecha REAL del giro <span className="text-red-500">*</span></span>
+                  <input type="date" value={adicFecha} onChange={e => setAdicFecha(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                </label>
+              </div>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Comprobante de la transferencia <span className="text-red-500">*</span></span>
+                <input type="file" accept="application/pdf,image/*"
+                  onChange={e => setAdicSoporte(e.target.files?.[0] ?? null)}
+                  className="mt-1 w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-sm" />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">O devolver con motivo</span>
+                <input value={devMotivo} onChange={e => setDevMotivo(e.target.value)}
+                  placeholder="Motivo de la devolución (vuelve al solicitante, editable y reenviable)…"
+                  className="mt-1 w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+              </label>
+            </div>
+          )
+        })()}
       </Modal>
 
       {/* ── Parte B (28-oct): registrar el PAGO del saldo ── */}

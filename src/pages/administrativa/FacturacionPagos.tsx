@@ -540,6 +540,25 @@ export default function FacturacionPagos() {
         </div>
       )}
 
+      {/* Parte D (31-oct): solicitudes de anticipo adicional en evaluación —
+          la cola de Marcela; se evalúan en la ficha, tarjeta del contratista. */}
+      {proyectos.some(p => (p.resumen_asignaciones?.solicitudes_anticipo_pendientes ?? 0) > 0) && (
+        <div className="rounded-lg border border-brand-300 bg-brand-50 px-4 py-2.5 text-sm text-brand-800">
+          <p className="font-semibold">
+            ✉ Solicitudes de anticipo por evaluar — {proyectos.filter(p => (p.resumen_asignaciones?.solicitudes_anticipo_pendientes ?? 0) > 0).length} proyecto(s):
+            se evalúan en la ficha, tarjeta del contratista («Evaluar solicitud de anticipo») — girar con comprobante, o devolver con motivo.
+          </p>
+          <ul className="mt-1 text-xs space-y-0.5">
+            {proyectos.filter(p => (p.resumen_asignaciones?.solicitudes_anticipo_pendientes ?? 0) > 0).map(p => (
+              <li key={p.id}>
+                <Link to={`/sigp/proyectos/${p.id}`} className="underline underline-offset-2 font-mono">{p.consecutivo}</Link>
+                {' '}· {p.snapshot.cliente} · {p.resumen_asignaciones!.solicitudes_anticipo_pendientes} solicitud(es) en evaluación
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Las 7 secciones del ciclo, con contador. 'Todo el ciclo' = todo lo
           vivo (acción + en camino); 'En camino' = informativa. */}
       <div className="flex items-center gap-1.5 flex-wrap">
