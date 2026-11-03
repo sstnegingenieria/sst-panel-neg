@@ -2438,8 +2438,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
           <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
             ⚠ <b>Un anticipo NO se registra aquí.</b> Un reembolso SUMA al costo del proyecto y al
             total a pagar de la liquidación; un anticipo registrado como reembolso se pagaría DOS
-            veces e inflaría el indicador. Los giros de anticipo van en «💸 Registrar anticipo» /
-            «➕ Anticipo adicional» de la misma tarjeta.
+            veces e inflaría el indicador. Los giros de anticipo van en «💸 Registrar anticipo» de
+            la misma tarjeta, o — si lo girado no alcanza — por «✉ Solicitar anticipo adicional»
+            (lo evalúa y gira Gerencia Administrativa).
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block text-sm">
