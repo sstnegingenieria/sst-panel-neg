@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import Modal from '../../shared/Modal'
 import TextField from '../../shared/TextField'
 import SelectField from '../../shared/SelectField'
+import { useFirestore } from '../../../hooks/useFirestore'
 import type { Cliente, Contacto, CondicionesComerciales } from '../../../types/sigp/cliente'
-import { validarDvNit } from '../../../types/sigp/cliente'
+import { validarDvNit, clientePorNit, nitSoloDigitos } from '../../../types/sigp/cliente'
 
 /** Datos que el formulario entrega al guardar (sin id ni sellos de fecha). */
 export interface ClienteFormData {
@@ -133,11 +135,34 @@ export default function ClientesForm({ isOpen, onClose, onSave, initial }: Clien
   const [form, setForm] = useState<FormState>(toFormState(null))
   const [errors, setErrors] = useState<Errors>({})
   const [saving, setSaving] = useState(false)
+  // 04-nov (caso Edificio Universal ×2): clientes existentes para avisar el
+  // NIT duplicado MIENTRAS se escribe, no solo al guardar. Best-effort: si la
+  // carga falla no se bloquea el formulario (el chequeo queda sin datos).
+  const [existentes, setExistentes] = useState<Cliente[]>([])
+  const { getAll } = useFirestore()
 
   useEffect(() => {
     setForm(toFormState(initial))
     setErrors({})
   }, [initial, isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    let vivo = true
+    getAll('clientes')
+      .then(d => { if (vivo) setExistentes(d as Cliente[]) })
+      .catch(() => { /* sin datos no hay chequeo — el resto del form sigue */ })
+    return () => { vivo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
+
+  // En EDICIÓN con el NIT intacto no se chequea (IHS/Vertis comparten NIT
+  // legítimamente — misma entidad); solo si el NIT se está cambiando.
+  const duplicado = useMemo(() => {
+    const nitOriginal = initial ? nitSoloDigitos(initial.nit) : null
+    if (nitOriginal && nitSoloDigitos(form.nit) === nitOriginal) return null
+    return clientePorNit(form.nit, existentes, initial?.id)
+  }, [form.nit, existentes, initial])
 
   const set = <K extends keyof FormState>(key: K, val: FormState[K]) => {
     setForm(f => ({ ...f, [key]: val }))
@@ -174,6 +199,9 @@ export default function ClientesForm({ isOpen, onClose, onSave, initial }: Clien
       // el DV atrapa typos, no inventos.)
       const dv = validarDvNit(form.nit.trim())
       if (!dv.ok) e.nit = `El dígito de verificación no corresponde${dv.dv !== null ? ` — para esa base el DV es ${dv.dv}` : ''}`
+      // NIT único: si ya existe, NO se crea otro (el aviso bajo el campo
+      // dice cuál es y ofrece abrirlo).
+      else if (duplicado) e.nit = `Ya existe un cliente con este NIT: ${duplicado.nombre}`
     }
 
     const contactErrs = form.contactos.map(c => {
@@ -237,6 +265,27 @@ export default function ClientesForm({ isOpen, onClose, onSave, initial }: Clien
           hint="Formato: 900.123.456-8"
           required
         />
+
+        {duplicado && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 space-y-1 -mt-2">
+            <p>
+              ⚠ Este NIT ya está registrado: <strong>{duplicado.nombre}</strong>
+              {duplicado.estado === 'inactivo' && <span className="font-medium"> (inactivo)</span>}.
+            </p>
+            <p className="text-xs text-amber-800">
+              {duplicado.estado === 'inactivo'
+                ? 'El cliente ya existe pero está dado de baja — reactivalo en vez de crear un duplicado.'
+                : 'No se va a crear un duplicado — abrí el existente y trabajá sobre él.'}
+            </p>
+            <Link
+              to={`/sigp/clientes/${duplicado.id}`}
+              onClick={onClose}
+              className="inline-block text-xs font-semibold text-amber-900 underline hover:text-amber-950"
+            >
+              Abrir {duplicado.nombre} →
+            </Link>
+          </div>
+        )}
 
         {/* ── Contactos ─────────────────────────────────────────────────── */}
         <div className="space-y-2">
