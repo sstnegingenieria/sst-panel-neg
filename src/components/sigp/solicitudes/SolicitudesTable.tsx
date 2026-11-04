@@ -78,9 +78,15 @@ export default function SolicitudesTable({
                 </td>
                 <td className="py-3 px-4 font-medium text-gray-800">{origen(s, clienteNombres)}</td>
                 {/* Identificador interno principal de NEG (Bloque 1) — "—" en
-                    solicitudes previas a la captura */}
-                <td className="py-3 px-4 text-gray-700 max-w-[11rem] truncate" title={s.nombre_sitio || undefined}>
+                    solicitudes previas a la captura. El CÓDIGO acompaña al
+                    nombre (caso SIMITÍ 04-nov: cinco sitios distintos con el
+                    mismo nombre — solo el código los distingue). */}
+                <td className="py-3 px-4 text-gray-700 max-w-[13rem] truncate"
+                  title={[s.nombre_sitio, s.codigo_sitio_cliente].filter(Boolean).join(' · ') || undefined}>
                   {s.nombre_sitio || '—'}
+                  {s.codigo_sitio_cliente && s.codigo_sitio_cliente !== 'N/A' && (
+                    <span className="ml-1.5 text-[11px] font-mono text-gray-400">{s.codigo_sitio_cliente}</span>
+                  )}
                 </td>
                 <td className="py-3 px-4 text-gray-600">{CANAL_LABEL[s.canal] ?? s.canal}</td>
                 <td className="py-3 px-4 text-gray-600 max-w-[14rem] truncate" title={s.descripcion}>{s.descripcion}</td>
