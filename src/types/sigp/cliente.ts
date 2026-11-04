@@ -92,3 +92,33 @@ export function clientePreventivosDe(clientes: Cliente[]): Cliente | null {
 
 export const CLIENTE_ESTADOS = ['activo', 'inactivo'] as const
 export const ESQUEMAS_IMPUESTOS = ['iva_pleno', 'aiu'] as const
+
+// ── NIT: dígito de verificación DIAN (04-nov) ───────────────────────────────
+// El caso que lo motivó: IHS/Vertis vivieron meses con el placeholder
+// 900.123.456-8 del alta. El DV no detecta rellenos (000.000.000-0 es
+// DV-válido) pero sí typos — y desde hoy un NIT con DV errado no se guarda.
+/** Pesos oficiales DIAN, del dígito MENOS significativo al más. */
+const PESOS_DV = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71]
+
+/** DV de la base del NIT (solo dígitos, sin DV). null si no es numérica. */
+export function dvNit(base: string): number | null {
+  const d = base.replace(/\D/g, '')
+  if (!d || d !== base.replace(/[.\s]/g, '')) return null
+  let suma = 0
+  for (let i = 0; i < d.length; i++) {
+    const peso = PESOS_DV[d.length - 1 - i]
+    if (peso === undefined) return null
+    suma += Number(d[i]) * peso
+  }
+  const resto = suma % 11
+  return resto <= 1 ? resto : 11 - resto
+}
+
+/** Valida el DV de un NIT con forma `NNN.NNN.NNN-D` (la que exige el form).
+ *  ok=true si el DV cuadra; si no, `dv` trae el correcto para el mensaje. */
+export function validarDvNit(nit: string): { ok: boolean; dv: number | null } {
+  const m = nit.trim().match(/^([\d.]+)-(\d)$/)
+  if (!m) return { ok: false, dv: null }
+  const dv = dvNit(m[1])
+  return { ok: dv !== null && dv === Number(m[2]), dv }
+}
