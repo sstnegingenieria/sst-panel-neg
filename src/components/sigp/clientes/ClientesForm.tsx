@@ -3,6 +3,7 @@ import Modal from '../../shared/Modal'
 import TextField from '../../shared/TextField'
 import SelectField from '../../shared/SelectField'
 import type { Cliente, Contacto, CondicionesComerciales } from '../../../types/sigp/cliente'
+import { validarDvNit } from '../../../types/sigp/cliente'
 
 /** Datos que el formulario entrega al guardar (sin id ni sellos de fecha). */
 export interface ClienteFormData {
@@ -166,7 +167,14 @@ export default function ClientesForm({ isOpen, onClose, onSave, initial }: Clien
     if (!form.nombre.trim() || form.nombre.trim().length < 3)
       e.nombre = 'Mínimo 3 caracteres'
     if (!form.nit.trim()) e.nit = 'El NIT es requerido'
-    else if (!NIT_RE.test(form.nit.trim())) e.nit = 'Formato: 900.123.456-8'
+    else if (!NIT_RE.test(form.nit.trim())) e.nit = 'Formato: 123.456.789-6'
+    else {
+      // 04-nov (caso IHS/Vertis): el dígito de verificación DIAN se valida
+      // al guardar — un DV errado no entra. (Un relleno DV-válido sí pasa:
+      // el DV atrapa typos, no inventos.)
+      const dv = validarDvNit(form.nit.trim())
+      if (!dv.ok) e.nit = `El dígito de verificación no corresponde${dv.dv !== null ? ` — para esa base el DV es ${dv.dv}` : ''}`
+    }
 
     const contactErrs = form.contactos.map(c => {
       const algo = c.nombre.trim() || c.cargo.trim() || c.email.trim() || c.telefono.trim()
