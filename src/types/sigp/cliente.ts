@@ -122,3 +122,26 @@ export function validarDvNit(nit: string): { ok: boolean; dv: number | null } {
   const dv = dvNit(m[1])
   return { ok: dv !== null && dv === Number(m[2]), dv }
 }
+
+// ── NIT único (04-nov, caso Edificio Universal duplicado) ────────────────────
+// El NIT identifica al cliente; el nombre NO bloquea (dos clientes pueden
+// llamarse parecido legítimamente). La comparación es solo por dígitos, para
+// que una variación de puntuación no esquive el chequeo.
+
+/** Solo los dígitos del NIT (base + DV). '' si no hay ninguno. */
+export const nitSoloDigitos = (nit: string) => (nit ?? '').replace(/\D/g, '')
+
+/** Cliente ya registrado con ese NIT (comparación por dígitos), excluyendo
+ *  al que se está editando. Null si el NIT aún no tiene base completa (<9
+ *  dígitos + DV) o no hay coincidencia. Prefiere el ACTIVO si hubiera más de
+ *  uno (duplicados históricos). */
+export function clientePorNit(
+  nit: string,
+  clientes: Pick<Cliente, 'id' | 'nombre' | 'nit' | 'estado'>[],
+  excluirId?: string,
+): Pick<Cliente, 'id' | 'nombre' | 'nit' | 'estado'> | null {
+  const d = nitSoloDigitos(nit)
+  if (d.length < 10) return null
+  const matches = clientes.filter(c => c.id !== excluirId && nitSoloDigitos(c.nit) === d)
+  return matches.find(c => c.estado === 'activo') ?? matches[0] ?? null
+}
