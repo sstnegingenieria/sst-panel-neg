@@ -8,7 +8,7 @@ import { useFirestore } from '../../hooks/useFirestore'
 import { useFeatureFlag } from '../../hooks/useFeatureFlag'
 import { toast } from '../../components/shared/Toast'
 import { fmtMoney } from '../../utils/sigp/formato'
-import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR } from '../../types/sigp/proyecto'
+import { ESTADOS_PROYECTO, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, asignacionesPorAprobar } from '../../types/sigp/proyecto'
 import {
   cambioEnVuelo, proyectoVivoDe, diasCambioEnVuelo, UMBRAL_CAMBIO_EN_VUELO_DIAS,
 } from '../../types/sigp/cotizacion'
@@ -316,6 +316,15 @@ export default function ProyectosSigp() {
                           <span className="block mt-0.5 text-[11px] text-gray-400">{SUB_ETAPA_LABEL[se]}</span>
                         ) : null
                       })()}
+                      {/* 04-nov — la señal viaja con el OBJETO, no con la pantalla:
+                          una preliquidación sin (re)aprobar se dice en la fila
+                          esté donde esté parado el proyecto. */}
+                      {asignacionesPorAprobar(p) > 0 && (
+                        <span className="block mt-0.5 text-[11px] font-medium text-amber-700"
+                          title="Hay preliquidación(es) de contratista definidas y SIN aprobar — la aprobación es de Gerencia Administrativa; mientras tanto esa asignación no puede girar anticipo ni liquidarse.">
+                          ✋ {asignacionesPorAprobar(p)} preliquidación(es) sin aprobar
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-gray-500">
                       {p.fecha_creacion?.toDate?.().toLocaleDateString('es-CO') ?? '—'}

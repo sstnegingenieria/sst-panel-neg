@@ -2133,6 +2133,18 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
           <p className="text-sm text-gray-600">
             El giro ya ocurrió por tesorería — aquí se REGISTRA (el SIGP no ejecuta dinero).
           </p>
+          {/* 04-nov — la señal viaja con el objeto: tras una reversión
+              re-aprobada la asignación puede volver acá CON giros vivos; este
+              registro AÑADE otro giro, no reemplaza (caso 056). */}
+          {girarTarget?.preliquidacion && hayAnticipoGirado(girarTarget.preliquidacion) && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+              ⚠ Σ ya girada a este contratista:{' '}
+              <b className="font-mono">{fmtMoney(anticipoTotalDe(girarTarget.preliquidacion))}</b>
+              {' '}({girosVivosDe(girarTarget.preliquidacion).length} giro{girosVivosDe(girarTarget.preliquidacion).length === 1 ? '' : 's'} vivo{girosVivosDe(girarTarget.preliquidacion).length === 1 ? '' : 's'}).
+              Registrar aquí <strong>AÑADE otro giro</strong> — si solo venís de re-aprobar una
+              corrección y el dinero ya salió una vez, no registres de nuevo.
+            </p>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block text-sm">
               <span className="font-medium text-gray-700">Valor girado <span className="text-red-500">*</span></span>

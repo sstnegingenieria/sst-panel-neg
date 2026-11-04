@@ -25,7 +25,7 @@ import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { cambioEnVuelo, diasCambioEnVuelo, UMBRAL_CAMBIO_EN_VUELO_DIAS } from '../../types/sigp/cotizacion'
 import type { Cotizacion } from '../../types/sigp/cotizacion'
 import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
-import { ESTADOS_PROYECTO, idxRiel, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO, costoEjecutadoDe, TIPO_CIERRE_LABEL } from '../../types/sigp/proyecto'
+import { ESTADOS_PROYECTO, idxRiel, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO, costoEjecutadoDe, TIPO_CIERRE_LABEL, asignacionesPorAprobar } from '../../types/sigp/proyecto'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import { autorEntradaProyecto } from '../../utils/sigp/autoria'
 import { useNombresUsuarios } from '../../hooks/sigp/useNombresUsuarios'
@@ -163,6 +163,16 @@ export default function ProyectoDetalleSigp() {
         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${ESTADO_PRY_COLOR[proyecto.estado]}`}>
           {ESTADO_PRY_LABEL[proyecto.estado]}
         </span>
+        {/* 04-nov — la señal viaja con el OBJETO: una preliquidación definida
+            y sin (re)aprobar se dice ARRIBA, no solo en la tarjeta del
+            contratista (el caso 056: la corrección revirtió la aprobación y
+            el padre siguió avanzando con la señal enterrada). */}
+        {asignacionesPorAprobar(proyecto) > 0 && (
+          <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300"
+            title="Preliquidación(es) de contratista definidas y SIN aprobar — la aprobación es de Gerencia Administrativa; esa asignación no puede girar anticipo ni liquidarse hasta aprobarse. Detalle en la sección Contratistas y cobertura.">
+            ✋ {asignacionesPorAprobar(proyecto)} preliquidación(es) sin aprobar
+          </span>
+        )}
         {/* Bloque D — reintento del espejo SST (upsert idempotente: no duplica) */}
         {puedeGestionar && idxEstado >= ESTADOS_PROYECTO.indexOf('en_ejecucion') && (
           <button
