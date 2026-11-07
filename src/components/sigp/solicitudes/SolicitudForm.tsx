@@ -55,12 +55,14 @@ interface FormState {
   fechaRecepcion: string
   // Comercial #1 — decisión de rumbo al registrar (solo tipo === 'comercial')
   decision: DecisionRegistro | ''
-  // F2.2 — preventivo IHS
+  // F2.2 — preventivo IHS. Rediseño 07-nov: lo que mueve el precio arranca
+  // SIN valor ('' / null = no tocado) — la pantalla distingue elegido de
+  // no tocado, que hoy producían el mismo dato.
   sitioId: string
   sitioNombre: string
-  tipoSitio: TipoSitio
-  intensidad: IntensidadPreventivo
-  esJungle: boolean
+  tipoSitio: TipoSitio | ''
+  intensidad: IntensidadPreventivo | ''
+  esJungle: boolean | null
   departamento: string
   fechaAsignacion: string
 }
@@ -71,9 +73,22 @@ const inicial = (): FormState => ({
   contactoNombre: '', contactoCargo: '', contactoEmail: '', contactoTelefono: '',
   canal: 'correo', asunto: '', descripcion: '', sitio: '', nombreSitio: '', codigoSitio: '', fechaRecepcion: hoyISO(),
   decision: '',
-  sitioId: '', sitioNombre: '', tipoSitio: 'greenfield', intensidad: 'pesado',
-  esJungle: false, departamento: '', fechaAsignacion: hoyISO(),
+  sitioId: '', sitioNombre: '', tipoSitio: '', intensidad: '',
+  esJungle: null, departamento: '', fechaAsignacion: hoyISO(),
 })
+
+/** Lo elegido en el preventivo anterior del MISMO lote (la forma real de uso:
+ *  once seguidas del mismo formulario). Se MUESTRA, jamás se hereda en
+ *  silencio — aplicarlo es un clic explícito. */
+interface SeleccionPreventivo {
+  tipoSitio: TipoSitio
+  intensidad: IntensidadPreventivo
+  esJungle: boolean
+  departamento: string
+}
+
+const resumenSeleccion = (s: SeleccionPreventivo) =>
+  `${TIPO_SITIO_LABEL[s.tipoSitio]} · ${INTENSIDAD_LABEL[s.intensidad]} · ${s.esJungle ? 'Jungle' : 'No jungle'} · ${s.departamento}`
 
 /** Datos de un intento previo cuyo consecutivo ya se generó (para reintentar sin quemar otro). */
 interface Pendiente {
@@ -169,18 +184,44 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
   }, [esPreventivo, clientePreventivos?.id])
   const zona = esPreventivo && form.departamento ? zonaDeDepartamento(form.departamento) : null
   const esSai = esPreventivo && esSanAndres(form.departamento)
-  const precio = esPreventivo && zona
+  // Lo que FALTA por elegir — el precio solo aparece con todo decidido, y el
+  // desglose dice qué falta (un total solo siempre parece plausible).
+  const faltantes: string[] = esPreventivo
+    ? [
+        ...(form.tipoSitio === '' ? ['tipo de sitio'] : []),
+        ...(form.intensidad === '' ? ['intensidad'] : []),
+        ...(form.esJungle === null ? ['jungle sí/no'] : []),
+        ...(!zona ? ['departamento'] : []),
+      ]
+    : []
+  const seleccionCompleta = esPreventivo && faltantes.length === 0
+  const precio = seleccionCompleta && zona && form.tipoSitio !== '' && form.intensidad !== '' && form.esJungle !== null
     ? precioPreventivo({ zona, tipo: form.tipoSitio, intensidad: form.intensidad, es_jungle: form.esJungle, es_sai: esSai })
     : null
+
+  // Lote: lo elegido en el preventivo anterior de ESTA sesión del panel.
+  // Sobrevive al cierre del modal (el componente queda montado) y se ofrece
+  // como chip con botón — mostrar, no heredar.
+  const [anterior, setAnterior] = useState<SeleccionPreventivo | null>(null)
+  const aplicarAnterior = () => {
+    if (!anterior) return
+    setForm(f => ({ ...f, tipoSitio: anterior.tipoSitio, intensidad: anterior.intensidad, esJungle: anterior.esJungle, departamento: anterior.departamento }))
+    setErrores(e => ({ ...e, tipoSitio: '', intensidad: '', esJungle: '', departamento: '' }))
+  }
 
   const validar = (): boolean => {
     const e: Record<string, string> = {}
     if (esPreventivo) {
       if (!form.clienteId) e.origen = 'No hay un cliente de preventivos activo — marcá el flag en Clientes'
       if (!form.sitioNombre.trim()) e.sitioNombre = 'Requerido'
+      // Rediseño 07-nov: lo que mueve el precio se ELIGE — sin default, no se
+      // puede continuar sin decidirlo (elegido ≠ no tocado).
+      if (form.tipoSitio === '') e.tipoSitio = 'Elegí el tipo de sitio'
+      if (form.intensidad === '') e.intensidad = 'Elegí la intensidad'
+      if (form.esJungle === null) e.esJungle = 'Indicá si el sitio es jungle — cambia el valor y el transporte'
       if (!form.departamento) e.departamento = 'Requerido'
       else if (!zona) e.departamento = 'Departamento fuera de las zonas del contrato'
-      if (zona && !precio) e.intensidad = 'Combinación no disponible en la matriz (rooftop solo pesado)'
+      if (seleccionCompleta && !precio) e.intensidad = 'Combinación no disponible en la matriz (rooftop solo pesado)'
     } else {
       if (!form.clienteId && !form.prospectoNombre.trim())
         e.origen = 'Indica un cliente o el nombre del prospecto'
@@ -243,7 +284,7 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
     // F2.2 — preventivo: tipo + datos del sitio con zona/SAI denormalizados.
     // Ruta B: se denormaliza el NOMBRE del cliente resuelto — elimina el
     // fallback 'IHS' literal del builder del snapshot (§16 staging).
-    if (esPreventivo && zona) {
+    if (esPreventivo && zona && form.tipoSitio !== '' && form.intensidad !== '' && form.esJungle !== null) {
       doc_.tipo = 'preventivo'
       if (clientePreventivos) doc_.cliente_nombre = clientePreventivos.nombre
       doc_.descripcion = form.descripcion.trim() ||
@@ -325,6 +366,11 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
       }
 
       setPendiente(null)
+      // Lote de preventivos: lo elegido queda disponible para MOSTRARSE en
+      // la siguiente (chip + botón) — jamás se precarga en silencio.
+      if (esPreventivo && form.tipoSitio !== '' && form.intensidad !== '' && form.esJungle !== null) {
+        setAnterior({ tipoSitio: form.tipoSitio, intensidad: form.intensidad, esJungle: form.esJungle, departamento: form.departamento })
+      }
       toast(`Solicitud registrada — ${consecutivo}`)
       onGuardado()
       onClose()
@@ -521,44 +567,87 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
           </div>
         )}
 
-        {/* ── Preventivo IHS (F2.2): sitio + matriz con precio en vivo ── */}
+        {/* ── Preventivo IHS (F2.2) — rediseño 07-nov: lo que mueve el precio
+            se ELIGE (sin defaults), jungle es una decisión de precio como las
+            demás, y el precio se DESGLOSA (zona · renglón · jungle ·
+            transporte como línea propia). La pantalla hace visible la
+            diferencia entre elegido y no tocado. ── */}
         {esPreventivo && (
           <div className="rounded-lg border border-brand-200 bg-brand-50/30 p-3 space-y-3">
             <p className="text-sm font-semibold text-brand-700">Sitio del preventivo</p>
+
+            {/* Lote: lo elegido en la anterior se MUESTRA — aplicarlo es un
+                clic explícito, nunca un arrastre silencioso. */}
+            {anterior && (
+              <div className="flex items-center gap-2 flex-wrap rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
+                <span>Anterior del lote: <span className="font-medium text-gray-800">{resumenSeleccion(anterior)}</span></span>
+                <button type="button" onClick={aplicarAnterior}
+                  className="ml-auto px-2 py-1 rounded border border-brand-300 text-brand-700 font-medium hover:bg-brand-50 transition">
+                  Usar estos valores
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <TextField label="Nombre del sitio" value={form.sitioNombre} onChange={v => set('sitioNombre', v)}
                 error={errores.sitioNombre} placeholder="Ej: EB La Ceja" required />
               <TextField label="ID del sitio (del cliente)" value={form.sitioId} onChange={v => set('sitioId', v)} placeholder="Opcional" />
-              <SelectField label="Tipo de sitio" value={form.tipoSitio} onChange={v => set('tipoSitio', v as TipoSitio)}
-                options={(['greenfield', 'rooftop'] as TipoSitio[]).map(t => ({ value: t, label: TIPO_SITIO_LABEL[t] }))} required />
-              <SelectField label="Intensidad" value={form.intensidad} onChange={v => set('intensidad', v as IntensidadPreventivo)}
-                options={(['liviano', 'pesado'] as IntensidadPreventivo[]).map(i => ({ value: i, label: INTENSIDAD_LABEL[i] }))} required />
+              <SelectField label="Tipo de sitio" value={form.tipoSitio} onChange={v => set('tipoSitio', v as TipoSitio | '')}
+                options={[{ value: '', label: '— Elegir —' }, ...(['greenfield', 'rooftop'] as TipoSitio[]).map(t => ({ value: t, label: TIPO_SITIO_LABEL[t] }))]}
+                error={errores.tipoSitio} required />
+              <SelectField label="Intensidad" value={form.intensidad} onChange={v => set('intensidad', v as IntensidadPreventivo | '')}
+                options={[{ value: '', label: '— Elegir —' }, ...(['liviano', 'pesado'] as IntensidadPreventivo[]).map(i => ({ value: i, label: INTENSIDAD_LABEL[i] }))]}
+                error={errores.intensidad} required />
               <SelectField label="Departamento" value={form.departamento} onChange={v => set('departamento', v)}
-                options={[{ value: '', label: '— Selecciona —' }, ...DEPARTAMENTOS_PREVENTIVO.map(d => ({ value: d, label: d }))]}
+                options={[{ value: '', label: '— Elegir —' }, ...DEPARTAMENTOS_PREVENTIVO.map(d => ({ value: d, label: d }))]}
                 error={errores.departamento} required />
+              {/* Jungle: modificador de PRECIO (valor base + $1.080.000 de
+                  transporte) — vive junto a las otras decisiones y exige
+                  respuesta como ellas. */}
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">¿Sitio jungle? <span className="text-red-500">*</span></label>
+                <div className="flex items-center gap-4 px-3 py-2 border rounded-lg border-gray-300 bg-white">
+                  {([['si', 'Sí', true], ['no', 'No', false]] as const).map(([k, lbl, val]) => (
+                    <label key={k} className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
+                      <input type="radio" name="es-jungle" className="accent-brand-700"
+                        checked={form.esJungle === val} onChange={() => set('esJungle', val)} />
+                      {lbl}
+                    </label>
+                  ))}
+                </div>
+                <p className="text-[11px] text-gray-400">Cambia el valor base y suma {fmtMoney(1_080_000)} de transporte</p>
+                {errores.esJungle && <p className="text-xs text-red-600">{errores.esJungle}</p>}
+              </div>
               <TextField label="Fecha de asignación" type="date" value={form.fechaAsignacion} onChange={v => set('fechaAsignacion', v)} />
             </div>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input type="checkbox" checked={form.esJungle} onChange={e => set('esJungle', e.target.checked)} />
-              Sitio jungle (aplica valor jungle + transporte)
-            </label>
-            {errores.intensidad && <p className="text-xs text-red-600">{errores.intensidad}</p>}
-            {zona && (
-              <div className="bg-white rounded-lg border border-gray-200 p-3 text-sm space-y-1">
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>Zona {zona}{esSai ? ' · San Andrés (transporte)' : ''}</span>
-                </div>
-                {precio ? (
-                  <>
-                    <div className="flex justify-between"><span className="text-gray-500">Valor de matriz{form.esJungle ? ' (jungle)' : ''}</span><span className="font-mono">{fmtMoney(precio.base)}</span></div>
-                    {precio.transporte > 0 && <div className="flex justify-between"><span className="text-gray-500">Transporte</span><span className="font-mono">{fmtMoney(precio.transporte)}</span></div>}
-                    <div className="flex justify-between font-semibold"><span>Precio del preventivo</span><span className="font-mono">{fmtMoney(precio.total)}</span></div>
-                  </>
-                ) : (
-                  <p className="text-xs text-red-600 font-medium">⚠ Combinación no disponible (rooftop solo pesado).</p>
-                )}
+
+            {/* Desglose SIEMPRE visible: qué compone el precio y qué falta.
+                Un número solo siempre parece plausible; el desglose no. */}
+            <div className="bg-white rounded-lg border border-gray-200 p-3 text-sm space-y-1">
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>Zona {zona ?? '—'}{esSai ? ' · San Andrés (transporte)' : ''}</span>
+                <span>
+                  {[
+                    form.tipoSitio !== '' ? TIPO_SITIO_LABEL[form.tipoSitio] : null,
+                    form.intensidad !== '' ? INTENSIDAD_LABEL[form.intensidad] : null,
+                    form.esJungle === null ? null : form.esJungle ? 'Jungle' : 'No jungle',
+                  ].filter(Boolean).join(' · ') || 'sin elegir'}
+                </span>
               </div>
-            )}
+              {!seleccionCompleta ? (
+                <p className="text-xs text-amber-700 font-medium">
+                  El precio aparece cuando todo esté elegido — falta: {faltantes.join(', ')}.
+                </p>
+              ) : precio ? (
+                <>
+                  <div className="flex justify-between"><span className="text-gray-500">Valor de matriz ({form.esJungle ? 'jungle' : 'normal'})</span><span className="font-mono">{fmtMoney(precio.base)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Transporte {precio.transporte > 0 ? (esSai ? '(San Andrés)' : '(jungle)') : '(no aplica)'}</span><span className="font-mono">{fmtMoney(precio.transporte)}</span></div>
+                  <div className="flex justify-between font-semibold border-t border-gray-100 pt-1"><span>Precio del preventivo</span><span className="font-mono">{fmtMoney(precio.total)}</span></div>
+                </>
+              ) : (
+                <p className="text-xs text-red-600 font-medium">⚠ Combinación no disponible (rooftop solo pesado).</p>
+              )}
+            </div>
           </div>
         )}
 
