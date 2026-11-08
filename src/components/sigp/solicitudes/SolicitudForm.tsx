@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { collection, doc, setDoc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
+import { collection, doc, getDoc, setDoc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
 import Modal from '../../shared/Modal'
@@ -15,6 +15,10 @@ import { esCoordenadaValida } from '../../../utils/geo'
 import type { CoordenadasSitio } from '../../../utils/geo'
 import { CANALES, CANAL_LABEL, historialRegistroCon } from '../../../types/sigp/solicitud'
 import { crearBorradorVisita, crearBorradorCotizacion } from '../../../utils/sigp/pipeline'
+import {
+  normalizarCodigoSitio, contradiccionesConMaestro, construirSitioDesdeSolicitud,
+  resumenClasificacion, type SitioPreventivo,
+} from '../../../types/sigp/sitioPreventivo'
 import {
   DEPARTAMENTOS_PREVENTIVO, zonaDeDepartamento, esSanAndres, precioPreventivo,
   TIPO_SITIO_LABEL, INTENSIDAD_LABEL,
@@ -199,6 +203,44 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
     ? precioPreventivo({ zona, tipo: form.tipoSitio, intensidad: form.intensidad, es_jungle: form.esJungle, es_sai: esSai })
     : null
 
+  // Maestro de sitios (07-nov): la condición jungle es del SITIO. Si el
+  // código ya está en el maestro, la clasificación se HEREDA (prellenado con
+  // chip visible, jamás en silencio) y elegir distinto se CONTRADICE en
+  // pantalla — cambiar el hecho del maestro es de gerencia, no de la captura.
+  const [maestro, setMaestro] = useState<SitioPreventivo | null>(null)
+  useEffect(() => {
+    const codigo = normalizarCodigoSitio(form.sitioId)
+    if (!esPreventivo || codigo.length < 4) { setMaestro(null); return }
+    let vivo = true
+    const t = setTimeout(async () => {
+      try {
+        const snap = await getDoc(doc(db, 'sitios_preventivos', codigo))
+        if (!vivo) return
+        const m = snap.exists() ? (snap.data() as SitioPreventivo) : null
+        setMaestro(m)
+        if (m) {
+          // Herencia VISIBLE: solo rellena lo NO tocado (elegido ≠ heredado
+          // queda distinguible por el chip; el usuario puede cambiar y verá
+          // la contradicción).
+          setForm(f => ({
+            ...f,
+            tipoSitio: f.tipoSitio === '' ? m.clasificacion.tipo_sitio : f.tipoSitio,
+            intensidad: f.intensidad === '' ? m.clasificacion.intensidad : f.intensidad,
+            esJungle: f.esJungle === null ? m.clasificacion.es_jungle : f.esJungle,
+            departamento: f.departamento === '' ? m.departamento : f.departamento,
+            sitioNombre: f.sitioNombre.trim() === '' ? m.nombre : f.sitioNombre,
+          }))
+        }
+      } catch { if (vivo) setMaestro(null) }
+    }, 400)
+    return () => { vivo = false; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [esPreventivo, form.sitioId])
+
+  const contradicciones = maestro && form.tipoSitio !== '' && form.intensidad !== '' && form.esJungle !== null
+    ? contradiccionesConMaestro(maestro, { tipo_sitio: form.tipoSitio, intensidad: form.intensidad, es_jungle: form.esJungle })
+    : []
+
   // Lote: lo elegido en el preventivo anterior de ESTA sesión del panel.
   // Sobrevive al cierre del modal (el componente queda montado) y se ofrece
   // como chip con botón — mostrar, no heredar.
@@ -250,7 +292,17 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
     // Los comerciales nacen en_estudio y, si hay decisión, transicionan en
     // el mismo acto (historial con los dos eslabones).
     const { estadoFinal, historial } = esPreventivo
-      ? { estadoFinal: 'recibida' as const, historial: [{ de: null, a: 'recibida' as const, por: uid, fecha: ahora }] }
+      ? {
+          estadoFinal: 'recibida' as const,
+          historial: [{
+            de: null, a: 'recibida' as const, por: uid, fecha: ahora,
+            // Maestro (07-nov): registrar DISTINTO al maestro no se bloquea,
+            // pero la contradicción queda ESCRITA — nada pasa en silencio.
+            ...(contradicciones.length > 0 && maestro
+              ? { motivo: `⚠ Registrada contradiciendo el maestro del sitio ${maestro.codigo} (${contradicciones.join('; ')})` }
+              : {}),
+          }],
+        }
       : historialRegistroCon(form.decision as DecisionRegistro, uid, ahora)
     const doc_: Record<string, unknown> = {
       consecutivo,
@@ -370,6 +422,19 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
       // la siguiente (chip + botón) — jamás se precarga en silencio.
       if (esPreventivo && form.tipoSitio !== '' && form.intensidad !== '' && form.esJungle !== null) {
         setAnterior({ tipoSitio: form.tipoSitio, intensidad: form.intensidad, esJungle: form.esJungle, departamento: form.departamento })
+        // Maestro (07-nov): código NUEVO → el primer hecho del sitio lo trae
+        // la captura (alta best-effort; cambiar el hecho luego es de gerencia).
+        const codigo = normalizarCodigoSitio(form.sitioId)
+        if (!maestro && codigo.length >= 4 && zona) {
+          try {
+            await setDoc(doc(db, 'sitios_preventivos', codigo), construirSitioDesdeSolicitud({
+              codigo, nombre: form.sitioNombre, departamento: form.departamento, zona,
+              clasificacion: { tipo_sitio: form.tipoSitio, intensidad: form.intensidad, es_jungle: form.esJungle },
+              uid: user?.uid ?? '', nombreUsuario: user?.nombre,
+              solicitudConsecutivo: consecutivo, fecha: Timestamp.now(),
+            }))
+          } catch { /* best-effort: el maestro no frena el registro */ }
+        }
       }
       toast(`Solicitud registrada — ${consecutivo}`)
       onGuardado()
@@ -575,6 +640,25 @@ export default function SolicitudForm({ isOpen, onClose, onGuardado, clientes }:
         {esPreventivo && (
           <div className="rounded-lg border border-brand-200 bg-brand-50/30 p-3 space-y-3">
             <p className="text-sm font-semibold text-brand-700">Sitio del preventivo</p>
+
+            {/* Maestro del sitio: el código ya tiene clasificación conocida —
+                se hereda A LA VISTA, y elegir distinto se contradice. */}
+            {maestro && (
+              <div className="rounded-lg border border-brand-200 bg-white px-3 py-2 text-xs text-gray-700">
+                📌 Maestro del sitio <span className="font-mono font-semibold">{maestro.codigo}</span> ({maestro.nombre}):{' '}
+                <span className="font-medium">{resumenClasificacion(maestro.clasificacion)}</span> · {maestro.departamento} ({maestro.zona})
+                <span className="block text-[11px] text-gray-400 mt-0.5">
+                  Establecida por {maestro.establecida_por_nombre ?? 'el histórico'} — la clasificación se heredó; si este sitio cambió, la corrige gerencia.
+                </span>
+              </div>
+            )}
+            {contradicciones.length > 0 && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                ⚠ <b>Lo elegido contradice el maestro del sitio:</b> {contradicciones.join('; ')}.
+                Podés registrar igual — la contradicción quedará escrita en el historial — pero si el sitio
+                cambió de verdad, lo correcto es que gerencia corrija el maestro.
+              </div>
+            )}
 
             {/* Lote: lo elegido en la anterior se MUESTRA — aplicarlo es un
                 clic explícito, nunca un arrastre silencioso. */}
