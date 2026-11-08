@@ -10,3 +10,4 @@ Una linea por deploy, escrita por scripts/deploy-reglas.ps1 (unico camino para d
 | 2026-11-08T02:13:20Z | 411f846 | #215 | 50ea8a91-36a1-482f-8d96-a151e4ea473d | 0b2687f0-67bc-4b76-93a9-e84d23874552 | NEG Ingenieria | byte-identica |
 | 2026-11-08T04:19:46Z | 633edf0 | #216 | 5ce591ba-8c47-40ca-b54a-2e6da27ea112 | 50ea8a91-36a1-482f-8d96-a151e4ea473d | NEG Ingenieria | byte-identica |
 | 2026-11-08T05:21:55Z | 7bfad92 | #217 | f583d1c2-f3de-408e-9509-7eb0a098d1a2 | 5ce591ba-8c47-40ca-b54a-2e6da27ea112 | NEG Ingenieria | byte-identica |
+| 2026-11-08T20:53:10Z | 1dd3fb6 | #219 | 198a6d9f-85de-4e03-8406-422ec32c53f3 | f583d1c2-f3de-408e-9509-7eb0a098d1a2 | NEG Ingenieria | byte-identica |
