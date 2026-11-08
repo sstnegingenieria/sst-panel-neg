@@ -11,6 +11,7 @@ import { partir, cargarAssetsPdf } from './cotizacionPdf'
 import { CORTE_OBRA as ISO } from './isoControl'
 import { fmtNum } from './formato'
 import type { CorteObra } from '../../types/sigp/corteObra'
+import { ESTADO_ITEM_LABEL as ESTADO_LBL } from '../../types/sigp/corteObra'
 
 export { cargarAssetsPdf }
 
@@ -111,14 +112,48 @@ export async function generarPdfCorte(
   reglaMarca(y)
   y -= 34
   {
+    // Forma SENA: el NÚMERO DEL CORTE en grande arriba a la derecha, con la
+    // referencia a la cotización y su versión DEBAJO — el corte dice contra
+    // qué alcance mide, en la cara del documento.
     const wC = fB.widthOfTextAtSize(corte.consecutivo, 17)
     page.drawText(corte.consecutivo, { x: ANCHO - MARGEN - wC, y, size: 17, font: fB, color: VERDE })
     page.drawText(`Corte de avance de obra N° ${corte.numero_corte}`, { x: MARGEN, y, size: 14, font: fB, color: TINTA })
+    if (corte.cotizacion_consecutivo || corte.cotizacion_version_medida != null) {
+      const ref = `Ref. ${corte.cotizacion_consecutivo ?? corte.proyecto_consecutivo}${corte.cotizacion_version_medida != null ? ` · v${corte.cotizacion_version_medida}` : ''}`
+      textoDer(ref, ANCHO - MARGEN, y - 12, 8, fS, GRIS_MEDIO)
+    }
     y -= 14
-    page.drawText(`${corte.proyecto_consecutivo} · ${corte.cliente}${corte.nombre_sitio ? ' · ' + corte.nombre_sitio : ''}`, { x: MARGEN, y, size: 8.5, font: fS, color: GRIS_MEDIO })
-    y -= 12
-    page.drawText(`Fecha de emisión: ${fFechaLarga(corte.fechaJs)}${corte.cotizacion_version_medida != null ? ` · mide contra la versión v${corte.cotizacion_version_medida} del alcance aprobado` : ''}`, { x: MARGEN, y, size: 7.5, font: fR, color: GRIS })
-    y -= 18
+    page.drawText(`${corte.proyecto_consecutivo}${corte.nombre_sitio ? ' · ' + corte.nombre_sitio : ''}`, { x: MARGEN, y, size: 8.5, font: fS, color: GRIS_MEDIO })
+    y -= 20
+
+    // ── Tarjeta de datos: SEIS campos en fila (2 × 3) ──
+    const campos: [string, string][] = [
+      ['CLIENTE', corte.cliente],
+      ['NIT', corte.cliente_nit ?? '—'],
+      ['CONTACTO', corte.contacto ?? '—'],
+      ['FECHA DE CORTE', fFechaLarga(corte.fechaJs)],
+      ['CONTRATO', (corte.contrato_referencias ?? []).join(' · ') || '—'],
+      ['MONEDA', corte.moneda ?? 'COP'],
+    ]
+    const wCol = CONTENIDO / 3
+    let maxLineas = 1
+    const valoresPartidos = campos.map(([, v]) => partir(v, fR, 8, wCol - 16))
+    campos.forEach((_, i) => { if (i >= 3) maxLineas = Math.max(maxLineas, valoresPartidos[i].length) })
+    const hFilaCampos = (lineasMax: number) => 10 + lineasMax * 10
+    const h1 = hFilaCampos(Math.max(...valoresPartidos.slice(0, 3).map(l => l.length)))
+    const h2 = hFilaCampos(Math.max(...valoresPartidos.slice(3).map(l => l.length)))
+    const hCard = h1 + h2 + 14
+    page.drawRectangle({ x: MARGEN, y: y - hCard, width: CONTENIDO, height: hCard, borderColor: BORDE, borderWidth: 1 })
+    campos.forEach(([k], i) => {
+      const col = i % 3, filaIdx = Math.floor(i / 3)
+      const x = MARGEN + col * wCol + 10
+      const yy = y - 12 - (filaIdx === 0 ? 0 : h1)
+      page.drawText(k, { x, y: yy, size: 5.6, font: fS, color: GRIS_MEDIO })
+      valoresPartidos[i].forEach((l, j) =>
+        page.drawText(l, { x, y: yy - 10 - j * 10, size: 8, font: fR, color: TINTA }))
+    })
+    y -= hCard + 10
+
     if (corte.nota_version_cambio) {
       const lineas = partir(corte.nota_version_cambio, fS, 7.5, CONTENIDO - 12)
       lineas.forEach(l => { page.drawText('(!) ' + l, { x: MARGEN, y, size: 7.5, font: fS, color: AMBAR }); y -= 10 })
@@ -157,26 +192,39 @@ export async function generarPdfCorte(
     asegurar(44)
     y -= primero ? 0 : 12
     primero = false
-    const gLineas = partir(g.toUpperCase(), fB, 7.4, CONTENIDO - 150)
-    page.drawText(gLineas[0] + (gLineas.length > 1 ? '…' : ''), { x: MARGEN + 2, y: y - 8, size: 7.4, font: fB, color: GRIS })
-    page.drawLine({ start: { x: MARGEN, y: y - 14 }, end: { x: MARGEN + CONTENIDO, y: y - 14 }, color: BORDE, thickness: 1.1 })
-    y -= 20
+    // Capítulo = encabezado de ANCHO COMPLETO (forma SENA: «SEDE · CAPÍTULO»
+    // — las sedes ya viven en el nombre del grupo). Banda gris clara.
+    const gLineas = partir(g.toUpperCase(), fB, 7.4, CONTENIDO - 16)
+    page.drawRectangle({ x: MARGEN, y: y - 16, width: CONTENIDO, height: 18, color: ZEBRA })
+    page.drawText(gLineas[0] + (gLineas.length > 1 ? '…' : ''), { x: MARGEN + 8, y: y - 9, size: 7.4, font: fB, color: GRIS })
+    y -= 22
     let fila = 0
     for (const it of items) {
+      // Forma SENA: el ESTADO va como texto bajo la descripción, y el % en
+      // una PASTILLA (no suelto).
       const lineas = partir(it.descripcion, fR, 6.8, wDesc)
-      const hFila = Math.max(1, lineas.length) * 9 + 8
+      const hFila = (Math.max(1, lineas.length) + 1) * 9 + 8   // +1: línea de estado
       asegurar(hFila + 4)
       if (fila % 2 === 1)
         page.drawRectangle({ x: MARGEN, y: y - hFila + 3, width: CONTENIDO, height: hFila, color: ZEBRA })
       const yTop = y - 8
       if (it.codigo) page.drawText(it.codigo.slice(0, 8), { x: MARGEN + 2, y: yTop, size: 6.2, font: fS, color: GRIS_MEDIO })
       lineas.forEach((l, i) => page.drawText(l, { x: xDesc, y: yTop - i * 9, size: 6.8, font: fR, color: TINTA }))
+      const colorEstado = it.estado === 'ejecutado' ? VERDE : it.estado === 'en_ejecucion' ? AMBAR : GRIS_MEDIO
+      page.drawText(ESTADO_LBL[it.estado], { x: xDesc, y: yTop - lineas.length * 9, size: 5.8, font: fS, color: colorEstado })
       page.drawText(it.unidad || '—', { x: xUnd, y: yTop, size: 6.8, font: fR, color: GRIS })
       textoDer(fmtNum(it.cantidad_contratada), xCantDer, yTop, 6.8, fR, GRIS)
       textoDer(fmtNum(it.valor_unitario), xVuDer, yTop, 6.8, fR, GRIS)
       textoDer(fmtNum(it.valor_contratado), xVcDer, yTop, 6.8, fR, GRIS)
-      const colorPct = it.estado === 'ejecutado' ? VERDE : it.estado === 'en_ejecucion' ? AMBAR : GRIS_MEDIO
-      textoDer(fmtNum(it.pct) + '%', xPctDer, yTop, 6.8, fS, colorPct)
+      // Pastilla del %: fondo suave + texto en el color del estado
+      {
+        const txt = fmtNum(it.pct) + '%'
+        const wTxt = fS.widthOfTextAtSize(txt, 6.4)
+        const wPill = wTxt + 8, hPill = 10
+        const xPill = xPctDer - wPill
+        page.drawRectangle({ x: xPill, y: yTop - 2.5, width: wPill, height: hPill, color: it.estado === 'ejecutado' ? rgb(0.90, 0.96, 0.90) : it.estado === 'en_ejecucion' ? rgb(0.99, 0.95, 0.85) : rgb(0.94, 0.94, 0.95) })
+        page.drawText(txt, { x: xPill + 4, y: yTop, size: 6.4, font: fS, color: colorEstado })
+      }
       textoDer(fmtNum(it.cantidad_acum), xCejDer, yTop, 6.8, fR, TINTA)
       textoDer(fmtNum(it.valor_acum), xVejDer, yTop, 6.8, fS, TINTA)
       y -= hFila
@@ -194,12 +242,17 @@ export async function generarPdfCorte(
   page.drawLine({ start: { x: MARGEN, y: y + 2 }, end: { x: MARGEN + CONTENIDO, y: y + 2 }, color: BORDE, thickness: 1.1 })
   y -= 8
 
-  // ── CD global + leyenda de estados ──
+  // ── Fila de CIERRE de la tabla (forma SENA): contratado · % global ·
+  //    ejecutado, en la MISMA línea, sobre banda propia ──
   asegurar(34)
-  page.drawText('Estados: % en verde = ejecutado · ámbar = en ejecución · gris = sin avance', { x: MARGEN, y: y - 7, size: 6.5, font: fR, color: GRIS_MEDIO })
-  textoDer(`COSTO DIRECTO — contratado ${fMoneda(corte.cd_contratado)} · ejecutado acumulado ${fMoneda(corte.cd_acum)} (${fmtNum(corte.pct_global)}%)`,
-    ANCHO - MARGEN, y - 7, 7.5, fB, TINTA)
-  y -= 24
+  page.drawRectangle({ x: MARGEN, y: y - 16, width: CONTENIDO, height: 19, color: ZEBRA })
+  page.drawText(`COSTO DIRECTO CONTRATADO  ${fMoneda(corte.cd_contratado)}`, { x: MARGEN + 8, y: y - 9, size: 7.5, font: fB, color: TINTA })
+  {
+    const centro = `AVANCE GLOBAL  ${fmtNum(corte.pct_global)}%`
+    page.drawText(centro, { x: MARGEN + CONTENIDO / 2 - fB.widthOfTextAtSize(centro, 7.5) / 2, y: y - 9, size: 7.5, font: fB, color: VERDE })
+  }
+  textoDer(`COSTO DIRECTO EJECUTADO  ${fMoneda(corte.cd_acum)}`, ANCHO - MARGEN - 8, y - 9, 7.5, fB, TINTA)
+  y -= 26
 
   if (corte.items_fuera_de_alcance?.length) {
     asegurar(20 + corte.items_fuera_de_alcance.length * 9)
@@ -252,16 +305,37 @@ export async function generarPdfCorte(
   }
 
   if (corte.observaciones) {
-    const lineas = partir(corte.observaciones, fR, 8, CONTENIDO - 10)
-    asegurar(18 + lineas.length * 10.5)
+    // Una viñeta POR LÍNEA (forma SENA): los saltos del texto se respetan;
+    // cada línea envuelve con sangría colgante.
+    const parrafos = corte.observaciones.split('\n').filter(l => l.trim())
+    const bloques = parrafos.map(par => partir(par.trim(), fR, 8, CONTENIDO - 18))
+    const altoTotal = bloques.reduce((s3, b) => s3 + b.length * 10.5 + 2, 0)
+    asegurar(22 + altoTotal)
     page.drawText('OBSERVACIONES', { x: MARGEN, y: y - 8, size: 7, font: fB, color: GRIS })
     y -= 20
-    lineas.forEach(l => { page.drawText(l, { x: MARGEN, y: y - 2, size: 8, font: fR, color: TINTA }); y -= 10.5 })
-    y -= 6
+    for (const b of bloques) {
+      b.forEach((l, i) => { page.drawText(l, { x: MARGEN + (i === 0 ? 0 : 8), y: y - 2, size: 8, font: fR, color: TINTA }); y -= 10.5 })
+      y -= 2
+    }
+    y -= 4
   }
 
-  asegurar(26)
-  page.drawText(`Documento generado por el SIGP y congelado al emitir — un corte entregado es un hecho, no una vista. Emitido por ${corte.emitido_por_nombre ?? corte.emitido_por}.`,
+  // ── Firma del emisor (forma SENA): nombre, área, correo y teléfono ──
+  {
+    const e = corte.emisor
+    // Firma + línea de cierre viajan JUNTAS (sin esto, la línea final podía
+    // quedar huérfana en una página casi vacía — visto en el render E2E).
+    asegurar(84)
+    y -= 6
+    page.drawText('EMITIDO POR', { x: MARGEN, y: y - 8, size: 6.5, font: fB, color: GRIS })
+    page.drawLine({ start: { x: MARGEN, y: y - 12 }, end: { x: MARGEN + 190, y: y - 12 }, color: BORDE, thickness: 0.8 })
+    page.drawText(e?.nombre ?? corte.emitido_por_nombre ?? corte.emitido_por, { x: MARGEN, y: y - 24, size: 9, font: fB, color: TINTA })
+    page.drawText(e?.area ?? 'GESTIÓN ADMINISTRATIVA', { x: MARGEN, y: y - 35, size: 7, font: fR, color: GRIS })
+    const contacto = [e?.correo, e?.telefono].filter(Boolean).join(' · ')
+    if (contacto) page.drawText(contacto, { x: MARGEN, y: y - 45, size: 7, font: fR, color: GRIS })
+    y -= 58
+  }
+  page.drawText('Documento generado por el SIGP y congelado al emitir — un corte entregado es un hecho, no una vista.',
     { x: MARGEN, y: y - 8, size: 6.8, font: fR, color: GRIS_MEDIO })
 
   // ── Pie institucional (todas las páginas) ──

@@ -130,10 +130,23 @@ export interface CorteObra {
   proyecto_id: string
   proyecto_consecutivo: string
   cliente: string
+  // Forma del modelo SENA (08-nov): cabecera de 6 campos + referencia a la
+  // cotización + firma del emisor — el documento sale a un cliente del
+  // Estado y la forma importa.
+  cliente_nit?: string
+  /** Persona nombrada del lado del cliente (contacto del snapshot/cliente). */
+  contacto?: string
+  /** Referencias de CONTRATO del cliente (p. ej. SENA: CO1.PCCNTR.9961018 ·
+   *  MC-RDC-CFAFC-0011-2026) — salen de `clientes.contratos` al emitir. */
+  contrato_referencias?: string[]
+  moneda?: string              // 'COP'
+  cotizacion_consecutivo?: string
   nombre_sitio?: string
   fecha_emision: Timestamp
   emitido_por: string
   emitido_por_nombre?: string
+  /** Firma de quien emite: nombre, área, correo y teléfono. */
+  emisor?: { nombre: string; area: string; correo?: string; telefono?: string }
   /** Contra qué alcance mide (la versión aprobada vigente al emitir). */
   cotizacion_version_medida?: number
   /** Si difiere de la del corte anterior: la nota VISIBLE del cambio. */
@@ -181,11 +194,13 @@ export type ResultadoCorte =
  *  EMITIDO (congelado allá): corregir el avance después de emitir jamás
  *  cambia el delta de lo ya entregado. */
 export function construirCorte(args: {
-  proyecto: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot' | 'avance_items' | 'cotizacion_version'>
+  proyecto: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot' | 'avance_items' | 'cotizacion_version' | 'cotizacion_consecutivo'>
   cortesPrevios: Pick<CorteObra, 'numero_corte' | 'cd_acum' | 'cotizacion_version_medida'>[]
   esquema: EsquemaTributario
   aiu?: ConfigAIU
   observaciones?: string
+  /** Forma SENA: referencias de contrato del cliente (clientes.contratos). */
+  contratoReferencias?: string[]
 }): ResultadoCorte {
   const { proyecto, cortesPrevios } = args
   const items_alcance = proyecto.snapshot.items_alcance ?? []
@@ -232,6 +247,11 @@ export function construirCorte(args: {
       proyecto_id: proyecto.id,
       proyecto_consecutivo: proyecto.consecutivo,
       cliente: proyecto.snapshot.cliente,
+      ...(proyecto.snapshot.cliente_nit ? { cliente_nit: proyecto.snapshot.cliente_nit } : {}),
+      ...(proyecto.snapshot.contacto ? { contacto: proyecto.snapshot.contacto } : {}),
+      ...(args.contratoReferencias?.length ? { contrato_referencias: args.contratoReferencias } : {}),
+      moneda: 'COP',
+      ...(proyecto.cotizacion_consecutivo ? { cotizacion_consecutivo: proyecto.cotizacion_consecutivo } : {}),
       ...(proyecto.snapshot.nombre_sitio ? { nombre_sitio: proyecto.snapshot.nombre_sitio } : {}),
       ...(versionMedida != null ? { cotizacion_version_medida: versionMedida } : {}),
       ...(notaCambio ? { nota_version_cambio: notaCambio } : {}),
@@ -254,3 +274,28 @@ export const entradaHistorialCorte = (
   ...(nombre ? { por_nombre: nombre } : {}),
   motivo: `Corte de obra ${consecutivo} (corte ${numero}) EMITIDO — facturable del corte ${total} (congelado con hash; el avance posterior solo afecta los cortes siguientes)`,
 } as EntradaHistorialProyecto)
+
+/** PLANTILLA de observaciones (forma SENA, 08-nov): el campo INVITA en vez
+ *  de quedar vacío — un primer punto con el avance global, los ítems que se
+ *  salen de lo típico (100%, ≥80%, en cero) y la nota de adicionales en
+ *  trámite. Generada del dato, editable por quien emite. */
+export function plantillaObservacionesCorte(
+  c: Pick<CorteObra, 'items' | 'pct_global' | 'cd_acum' | 'cd_contratado' | 'numero_corte'>,
+): string {
+  // es-CO: coma decimal (el PDF y la banda global ya la usan via fmtNum)
+  const pct = (n: number) => `${(Math.round(n * 10) / 10).toLocaleString('es-CO')}%`
+  const lineas: string[] = [
+    `• Avance global de la obra: ${pct(c.pct_global)} del costo directo contratado al corte ${c.numero_corte}.`,
+  ]
+  const ejecutados = c.items.filter(i => i.estado === 'ejecutado')
+  const avanzados = c.items.filter(i => i.estado === 'en_ejecucion' && i.pct >= 80)
+  const enCero = c.items.filter(i => i.estado === 'sin_avance')
+  if (ejecutados.length)
+    lineas.push(`• Ejecutados al 100%: ${ejecutados.map(i => i.codigo ?? i.descripcion.slice(0, 40)).join(', ')}.`)
+  for (const i of avanzados)
+    lineas.push(`• ${i.codigo ?? i.descripcion.slice(0, 40)} presenta un avance del ${pct(i.pct)}.`)
+  if (enCero.length)
+    lineas.push(`• Sin avance a la fecha: ${enCero.map(i => i.codigo ?? i.descripcion.slice(0, 40)).join(', ')} (programados para el siguiente periodo).`)
+  lineas.push('• Adicionales en trámite: [no se incluyen en este corte — indicar la cotización donde se tramitan, o retirar este punto].')
+  return lineas.join('\n')
+}
