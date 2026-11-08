@@ -37,7 +37,7 @@ import {
   puenteLiquidadoContratista, elegirSingular, construirSingularDesde,
   margenImplicitoDe, requiereRevisionCobertura, UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT,
   margenEnVivoDe,
-  baseMargenDe, ETIQUETA_BASE_MARGEN, universoDe, atomosEfectivosDe, resumenAtomosPorGrupo,
+  baseMargenDe, ETIQUETA_BASE_MARGEN, universoDe, atomosEfectivosDe, atomosHuerfanosDe, resumenAtomosPorGrupo,
   ESTADO_ASIG_LABEL, ESTADO_ASIG_COLOR,
 } from '../../../types/sigp/asignacion'
 import type { AsignacionContratista, MedioPagoSaldo } from '../../../types/sigp/asignacion'
@@ -321,16 +321,51 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
   // 29-sep (caso Triara): el valor acordado se REVISA en el mismo acto —
   // obligatorio cuando hay preliquidación, con el anterior a la vista.
   const [ajustarValor, setAjustarValor] = useState<number | undefined>(undefined)
+  // 08-nov (caso PRY-2026-058): átomos de una versión ANTERIOR del alcance —
+  // se listan APARTE (patrón corte de obra), jamás dentro de la selección
+  // (preseleccionados e invisibles bloqueaban el ajuste con un uuid).
+  const [ajustarHuerfanos, setAjustarHuerfanos] = useState<string[]>([])
+  const [huerfanoEtiquetas, setHuerfanoEtiquetas] = useState<Record<string, string>>({})
 
   const abrirAjustar = (a: AsignacionContratista) => {
     setItemResaltado(null)
     setAjustarTarget(a)
+    const huerfanos = atomosHuerfanosDe(a, proyecto.snapshot)
+    setAjustarHuerfanos(huerfanos)
+    setHuerfanoEtiquetas({})
     // Siembra en el UNIVERSO vigente: una asignación de nivel grupo en un
     // proyecto con ítems se abre con SUS ÍTEMS expandidos — quitar uno es
-    // exactamente el caso "partir el grupo vivo".
-    setAjustarSel(new Set(atomosEfectivosDe(a, proyecto.snapshot)))
+    // exactamente el caso "partir el grupo vivo". Los huérfanos quedan FUERA
+    // de la selección: aplicar el ajuste los suelta.
+    const h = new Set(huerfanos)
+    setAjustarSel(new Set(atomosEfectivosDe(a, proyecto.snapshot).filter(at => !h.has(at))))
     setAjustarMotivo('')
     setAjustarValor(a.preliquidacion?.valor_contratista)
+    // Best-effort: el NOMBRE del huérfano vive en la versión de cotización
+    // donde existió — se busca hacia atrás desde la anterior a la vigente.
+    // Si falla, el modal dice cuántos son y de qué versión venían, no un uuid.
+    if (huerfanos.length > 0 && proyecto.origen !== 'preventivo') {
+      ;(async () => {
+        try {
+          const cotId = proyecto.cotizacion_id ?? proyecto.id
+          const pendientes = new Set(huerfanos)
+          const encontradas: Record<string, string> = {}
+          for (let v = (proyecto.cotizacion_version ?? 1) - 1; v >= 1 && pendientes.size > 0; v--) {
+            const snap = await getDoc(doc(db, 'cotizaciones', cotId, 'versiones', String(v)))
+            const items = (snap.data()?.items ?? []) as { instancia_id?: string; codigo?: string; descripcion?: string }[]
+            for (const it of items) {
+              if (it.instancia_id && pendientes.has(it.instancia_id)) {
+                const desc = (it.descripcion ?? '').trim()
+                const corta = desc.length > 90 ? desc.slice(0, 90) + '…' : desc
+                encontradas[it.instancia_id] = `${it.codigo ? `${it.codigo} — ` : ''}${corta || '(sin descripción)'} · venía de la v${v}`
+                pendientes.delete(it.instancia_id)
+              }
+            }
+          }
+          if (Object.keys(encontradas).length > 0) setHuerfanoEtiquetas(encontradas)
+        } catch { /* sin nombres: el conteo + versión bastan */ }
+      })()
+    }
   }
   const ajustar = async () => {
     if (!ajustarTarget) return
@@ -1351,6 +1386,18 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                       ⚠ Preliquidación pendiente de revisar
                     </span>
                   )}
+                  {/* 08-nov: la explicación VISIBLE de por qué la cobertura se
+                      ve incompleta — átomos de una versión anterior (caso
+                      PRY-2026-058: asignado contra la v1 de 1 ítem global). */}
+                  {(() => {
+                    const h = atomosHuerfanosDe(a, proyecto.snapshot)
+                    return h.length > 0 && (
+                      <span className="inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-semibold"
+                        title="Entró un cambio de alcance y estas actividades ya no existen en el vigente — abre «Ajustar actividades asignadas»: se listan aparte y aplicar las suelta">
+                        ⚠ {h.length} actividad(es) de una versión anterior del alcance
+                      </span>
+                    )
+                  })()}
                 </div>
                 {/* Bloque átomo-ítem: rollup por grupo — "entero o partido"
                     de un golpe (adenda): "Ensayos · completo" vs "· 4 de 6" */}
@@ -1894,6 +1941,26 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
             <b> libres al instante</b> para asignarlos a otro contratista.
             {itemResaltado && <> El ítem <b>resaltado en ámbar</b> es el que venías a quitarle — desmárcalo y aplica.</>}
           </p>
+          {/* 08-nov (caso PRY-2026-058): huérfanos de versiones anteriores —
+              APARTE, con nombre si se sabe, y aplicar los suelta (el mismo
+              trato que los ítems fuera de alcance en el corte de obra). */}
+          {ajustarHuerfanos.length > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-1">
+              <p className="font-semibold">
+                ⚠ {ajustarHuerfanos.length} actividad(es) de esta asignación ya no está(n) en el alcance vigente
+              </p>
+              <ul className="list-disc ml-4 space-y-0.5">
+                {ajustarHuerfanos.map(clave => (
+                  <li key={clave}>{huerfanoEtiquetas[clave] ?? 'actividad de una versión anterior del alcance (nombre no disponible)'}</li>
+                ))}
+              </ul>
+              <p>
+                Entró un cambio de alcance (hoy rige la {proyecto.cotizacion_version != null ? `v${proyecto.cotizacion_version}` : 'versión vigente'}) y
+                estas actividades salieron. No se pueden conservar ni re-asignar: <b>al aplicar el ajuste se sueltan</b>,
+                con constancia en el historial. Marca abajo lo que este contratista ejecuta del alcance NUEVO.
+              </p>
+            </div>
+          )}
           {ajustarTarget && selectorAtomos(ajustarSel, setAjustarSel, ajustarTarget.id)}
           {ajustarTarget?.preliquidacion && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2">

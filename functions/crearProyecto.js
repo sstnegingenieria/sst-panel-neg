@@ -100,12 +100,27 @@ function diffAlcance(alcanceViejo, alcanceNuevo) {
  * afectados (las demás no tienen nada que revisar). Devuelve, por asignación
  * a señalar, sus átomos afectados. Puro — testeado con el patrón claims.
  */
-function asignacionesASenalar(asigs, gruposAfectados) {
+function asignacionesASenalar(asigs, gruposAfectados, clavesNuevas) {
   const afectados = new Set(gruposAfectados || []);
+  const claves = Array.isArray(clavesNuevas) ? new Set(clavesNuevas) : null;
   const res = [];
   for (const a of asigs || []) {
     if (!a || a.estado === 'cancelada' || !a.preliquidacion) continue;
-    const inter = (a.atomos || []).filter((at) => afectados.has(at));
+    let inter;
+    if (a.atomos_nivel === 'item' && claves) {
+      // 08-nov (caso PRY-2026-058): los átomos de nivel ÍTEM son CLAVES, no
+      // nombres de grupo — intersectarlos con grupos daba SIEMPRE vacío y las
+      // asignaciones por ítem jamás recibían la señal aunque sus claves
+      // hubieran DESAPARECIDO del alcance nuevo. La señal apunta primero a
+      // las claves huérfanas; si todas sobreviven, a los grupos tocados
+      // (atomos_grupos) cuyo contenido cambió.
+      const huerfanas = (a.atomos || []).filter((at) => !claves.has(at));
+      inter = huerfanas.length > 0
+        ? huerfanas
+        : (a.atomos_grupos || []).filter((g) => afectados.has(g));
+    } else {
+      inter = (a.atomos || []).filter((at) => afectados.has(at));
+    }
     if (inter.length > 0) res.push({ id: a.id, atomos_afectados: inter });
   }
   return res;
@@ -244,7 +259,8 @@ async function nacerProyecto(origen, docId, data) {
         // quedar desfasada frente al alcance NUEVO — eso lo atrapa el
         // detector de desincronización de la ficha (control aceptado: la
         // utilidad ya está en "pendiente de revisar" mientras tanto).
-        const senalar = asignacionesASenalar(asigs, componentes.map((c) => c.grupo));
+        const senalar = asignacionesASenalar(asigs, componentes.map((c) => c.grupo),
+          (snapshot.items_alcance || []).map((i) => i.clave));
         if (senalar.length > 0 && proyecto.resumen_asignaciones) {
           const yaSenaladas = asigs.filter((a) =>
             a.estado !== 'cancelada' && a.alcance_desactualizado

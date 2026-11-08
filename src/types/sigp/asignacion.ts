@@ -587,6 +587,26 @@ export function atomosEfectivosDe(
   return u.unidades.filter(x => grupos.has(x.grupo)).map(x => x.clave)
 }
 
+/** Átomos HUÉRFANOS de una asignación: los que ya NO existen en el alcance
+ *  vigente (entró una versión de cambio y el ítem salió — caso PRY-2026-058:
+ *  la asignación nació contra la v1 de un solo ítem global y la v2/v3 lo
+ *  desglosó en 40). Mismo trato que en el corte de obra: se LISTAN aparte,
+ *  ni se silencian ni rompen nada, y el ajuste los suelta. */
+export const atomosHuerfanosDe = (
+  a: Pick<AsignacionContratista, 'atomos' | 'atomos_nivel'>,
+  ctx: ContextoAlcance,
+): string[] => {
+  const u = universoDe(ctx)
+  if (u.modo === 'item' && a.atomos_nivel !== 'item') {
+    // nivel grupo sobre universo de ítems: huérfano = grupo cuyo NOMBRE ya
+    // no existe (sus claves se expanden por grupo, no por clave).
+    const grupos = new Set(u.unidades.map(x => x.grupo))
+    return a.atomos.filter(g => !grupos.has(g))
+  }
+  const claves = new Set(u.unidades.map(x => x.clave))
+  return a.atomos.filter(at => !claves.has(at))
+}
+
 /** Rollup por GRUPO de los átomos de una asignación — la lectura de la
  *  adenda: "¿el subconjunto quedó entero o partido?" de un golpe.
  *  completo = la asignación tiene TODOS los ítems del grupo. En modo grupo
@@ -983,9 +1003,11 @@ function validarAtomos(
 ): { nivel?: 'item'; grupos?: string[]; etiquetas: string[] } {
   const u = universoDe(ctx)
   const porClave = new Map(u.unidades.map(x => [x.clave, x]))
-  for (const at of atomos) {
-    if (!porClave.has(at)) throw new Error(`La actividad «${at}» no existe en el alcance vigente`)
-  }
+  // 08-nov (caso PRY-2026-058): las claves son identificadores internos — un
+  // uuid en un error no le sirve a nadie. Se agregan y se dice QUÉ HACER.
+  const faltantes = atomos.filter(at => !porClave.has(at))
+  if (faltantes.length > 0)
+    throw new Error(`${faltantes.length} actividad(es) seleccionada(s) ya no existe(n) en el alcance vigente (entró un cambio de alcance posterior) — usa «Ajustar actividades asignadas» para soltarlas y tomar las del alcance nuevo`)
   const tomados = new Set<string>()
   for (const a of asignacionesVivas(existentes)) for (const at of atomosEfectivosDe(a, ctx)) tomados.add(at)
   for (const at of atomos) {
@@ -1893,6 +1915,10 @@ export function patchAjustarAtomos(
     ...atomosNuevos.filter(at => !viejos.has(at)),
   ]
   if (afectados.length === 0) return null
+  // Huérfanos que este ajuste SUELTA (claves de una versión anterior que ya
+  // no existen en el vigente) — constancia explícita, patrón corte de obra.
+  const huerfanosPrevios = new Set(atomosHuerfanosDe(a, alcance))
+  const huerfanosSoltados = a.atomos.filter(at => huerfanosPrevios.has(at) && !nuevos.has(at))
 
   const pre = a.preliquidacion
   if (pre && !(valorConfirmado != null && valorConfirmado > 0)) return null
@@ -1943,6 +1969,7 @@ export function patchAjustarAtomos(
     ...(margen_anterior ? { margen_anterior } : {}),
     entradaHistorial: entrada(a.estado, revierte ? 'preliquidacion_definida' : a.estado, uid, fecha,
       `Actividades asignadas ajustadas — quedan: ${v.etiquetas.join(' · ')} · Motivo: ${motivo.trim()}` +
+      (huerfanosSoltados.length > 0 ? ` · SUELTA ${huerfanosSoltados.length} actividad(es) de una versión ANTERIOR del alcance que ya no existen en el vigente (cambio de alcance — se listaron aparte en el ajuste)` : '') +
       (pre ? ` · valor contratista ${valorViejo} → ${valorConfirmado} (${valorViejo === valorConfirmado ? 'CONFIRMADO igual' : 'CAMBIADO'})` : '') +
       (sobreGiro ? ` · ⚠ SOBRE-GIRO: el anticipo girado (${girado}) supera el valor confirmado (${valorConfirmado}) — sobrepago a recuperar del contratista, reconciliar en la liquidación` : '') +
       (revierte ? ' · REVIERTE la aprobación: requiere re-aprobación de Gerencia' : '') +

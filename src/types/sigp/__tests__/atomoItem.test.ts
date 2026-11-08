@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
 import {
-  universoDe, atomosEfectivosDe, valorAlcanceDe, coberturaDe,
+  universoDe, atomosEfectivosDe, atomosHuerfanosDe, valorAlcanceDe, coberturaDe,
   resumenAtomosPorGrupo, construirAsignacionMulti, patchAjustarAtomos,
 } from '../asignacion'
 import type { AsignacionContratista } from '../asignacion'
@@ -153,6 +153,47 @@ describe('patchAjustarAtomos eleva a nivel ítem', () => {
     expect(r.sub.atomos).toEqual(['i1'])
     expect(r.sub.atomos_nivel).toBe('item')
     expect(r.sub.atomos_grupos).toEqual(['Ensayos y diagnóstico estructural'])
+  })
+})
+
+// 08-nov — caso PRY-2026-058: la asignación nació contra la v1 (1 ítem global)
+// y la versión de cambio la dejó con su ÚNICO átomo huérfano: el ajuste
+// bloqueaba con un uuid y la cobertura se veía vacía sin explicación.
+describe('átomos huérfanos — versiones de cambio que retiran ítems asignados', () => {
+  it('atomosHuerfanosDe: claves que ya no existen en el universo vigente (nivel ítem y nivel grupo)', () => {
+    expect(atomosHuerfanosDe(asigItem('a', ['uuid-v1-global', 'i1']), SNAP)).toEqual(['uuid-v1-global'])
+    expect(atomosHuerfanosDe(asigItem('a', ['i1', 'i4']), SNAP)).toEqual([])
+    // nivel grupo sobre universo de ítems: huérfano = GRUPO que desapareció
+    expect(atomosHuerfanosDe({ atomos: ['Obra civil', 'Grupo retirado'] }, SNAP)).toEqual(['Grupo retirado'])
+  })
+  it('validarAtomos jamás imprime un uuid: agrega el conteo y dice QUÉ HACER', () => {
+    expect(() => construirAsignacionMulti(topografo, ['uuid-v1-global', 'otro-uuid'], 'todo_costo', undefined, SNAP, [], 'u', ts))
+      .toThrowError(/2 actividad\(es\).*alcance vigente.*Ajustar actividades asignadas/)
+    expect(() => construirAsignacionMulti(topografo, ['uuid-v1-global'], 'todo_costo', undefined, SNAP, [], 'u', ts))
+      .not.toThrowError(/uuid-v1-global/)
+  })
+  it('patchAjustarAtomos SUELTA huérfanos: el caso del 058 — único átomo huérfano → tomar el alcance nuevo', () => {
+    const a = asigItem('jersson', ['uuid-v1-global'], {
+      estado: 'anticipo_girado',
+      preliquidacion: {
+        valor_alcance: 62_910_177, valor_contratista: 45_880_000, anticipo_pct: 65,
+        definida_por: 'u', fecha_definicion: ts, aprobada_por: 'ga', fecha_aprobacion: ts,
+      },
+    })
+    // Proyecto EN EJECUCIÓN: conserva aprobación + ajuste pendiente de liquidación
+    const r = patchAjustarAtomos(a, ['i1', 'i2', 'i3', 'i4'], SNAP, [a], 'el cambio de alcance desglosó el ítem global', 'u', ts, 45_880_000, true)!
+    expect(r).not.toBeNull()
+    expect(r.sub.atomos).toEqual(['i1', 'i2', 'i3', 'i4'])
+    expect(r.sub.preliquidacion!.valor_alcance).toBe(10_000_000)   // CD del alcance nuevo
+    expect(r.entradaHistorial.motivo).toContain('SUELTA 1 actividad(es) de una versión ANTERIOR')
+    expect(r.entradaHistorial.motivo).not.toContain('uuid-v1-global')  // jamás el identificador interno
+    expect(r.sub.estado).toBeUndefined()                           // en ejecución: no revierte
+    expect(r.sub.preliquidacion!.ajuste_pendiente_liquidacion).toBe(true)
+  })
+  it('sin huérfanos el ajuste no agrega la constancia de SUELTA', () => {
+    const a = asigItem('a1', ['i1', 'i2'])
+    const r = patchAjustarAtomos(a, ['i1'], SNAP, [a], 'recorte', 'u', ts)!
+    expect(r.entradaHistorial.motivo).not.toContain('SUELTA')
   })
 })
 
