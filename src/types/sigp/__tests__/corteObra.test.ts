@@ -139,10 +139,16 @@ describe('construirCorte — generado del avance, congelado al emitir', () => {
     expect(info.corte.resumen.total).toBe(0)
     expect(info.corte.cd_acum).toBe(4_000_000)           // congela igual
   })
-  it('DELTA NEGATIVO (acumulado bajo la base facturable): inconsistencia, ni informativo la documenta', () => {
-    const previos = [{ numero_corte: 1, cd_acum: 8_000_000, cotizacion_version_medida: 3 }]
+  it('DELTA NEGATIVO (acumulado bajo la base facturable): inconsistencia que resolver, NOMBRANDO el corte que choca — ni informativo la documenta', () => {
+    const previos = [{ numero_corte: 1, consecutivo: 'CRT-2026-001', cd_acum: 8_000_000, cotizacion_version_medida: 3 }]
     const r = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: previos, esquema: 'iva_pleno', tipo: 'informativo' })
-    expect(!r.ok && r.error).toContain('POR DEBAJO')
+    if (r.ok) throw new Error('debió fallar')
+    expect(r.error).toContain('POR DEBAJO')
+    expect(r.error).toContain('CRT-2026-001')              // nombra el corte contra el que choca
+    expect(r.error).toContain('inconsistencia que alguien tiene que resolver')
+    // Sin consecutivo (objetos mínimos): nombra por número
+    const r2 = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: [{ numero_corte: 1, cd_acum: 8_000_000, cotizacion_version_medida: 3 }], esquema: 'iva_pleno' })
+    expect(!r2.ok && r2.error).toContain('N° 1')
   })
   it('versión de cambio entre cortes → el corte lo DICE; avance huérfano → listado, no silenciado', () => {
     const corte1 = { numero_corte: 1, cd_acum: 1_000_000, cotizacion_version_medida: 3 }

@@ -214,7 +214,7 @@ export type ResultadoCorte =
  *  ya entregado. El número de corte sí es correlativo sobre TODOS. */
 export function construirCorte(args: {
   proyecto: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot' | 'avance_items' | 'cotizacion_version' | 'cotizacion_consecutivo'>
-  cortesPrevios: Pick<CorteObra, 'numero_corte' | 'cd_acum' | 'cotizacion_version_medida' | 'tipo'>[]
+  cortesPrevios: (Pick<CorteObra, 'numero_corte' | 'cd_acum' | 'cotizacion_version_medida' | 'tipo'> & { consecutivo?: string })[]
   esquema: EsquemaTributario
   aiu?: ConfigAIU
   /** Default 'facturable'. Informativo: mismo snapshot/resumen, delta
@@ -256,7 +256,15 @@ export function construirCorte(args: {
   const cd_acum = items.reduce((s, i) => s + i.valor_acum, 0)
   const cd_acum_anterior = previoFacturable?.cd_acum ?? 0
   const deltaCd = cd_acum - cd_acum_anterior
-  if (deltaCd < 0) return { ok: false, error: `El acumulado (${cd_acum}) quedó POR DEBAJO de la base del último corte facturable (${cd_acum_anterior}) — hay una inconsistencia que resolver (avance corregido a la baja o cambio de alcance), no un corte que emitir` }
+  if (deltaCd < 0) {
+    // Nombra el corte contra el que choca: un acumulado por debajo de lo ya
+    // cobrado no es un hecho que documentar — es una inconsistencia que
+    // alguien tiene que resolver (decisión Giovanny 08-nov).
+    const nombrePrevio = previoFacturable
+      ? (previoFacturable.consecutivo ?? `N° ${previoFacturable.numero_corte}`)
+      : 'anterior'
+    return { ok: false, error: `El acumulado (${cd_acum}) quedó POR DEBAJO de lo ya cobrado en el corte facturable ${nombrePrevio} (${cd_acum_anterior}). Eso no es un hecho que documentar — es una inconsistencia que alguien tiene que resolver (avance corregido a la baja o cambio de alcance) antes de emitir cualquier corte, informativo incluido` }
+  }
   if (deltaCd === 0 && tipo === 'facturable') return { ok: false, error: `El acumulado (${cd_acum}) no supera la base del último corte facturable (${cd_acum_anterior}) — no hay avance nuevo que cobrar. Si lo que se necesita es una constancia fechada del estado de la obra, emite un corte INFORMATIVO` }
 
   // Huérfanos: avance de claves que YA no están en el alcance vigente
