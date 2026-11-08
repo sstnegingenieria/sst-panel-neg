@@ -13,7 +13,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
 import { useAuth } from '../../../contexts/AuthContext'
 import { toast } from '../../shared/Toast'
-import { TIPOS_SOPORTE, TIPO_SOPORTE_LABEL, entregablesIhsFaltantes } from '../../../types/sigp/proyecto'
+import { TIPOS_SOPORTE, TIPO_SOPORTE_LABEL, entregablesIhsFaltantes, estadoHandoffConFacturas } from '../../../types/sigp/proyecto'
 import { habilitaEjecucionDe } from '../../../types/sigp/asignacion'
 import type { Proyecto, TipoSoporte, FotoEvidencia, EstadoProyecto } from '../../../types/sigp/proyecto'
 import { sincronizarObraEspejo } from '../../../utils/sigp/obraEspejo'
@@ -75,7 +75,7 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
     // ejecución y pasa a inactiva en el handoff a facturación. Un fallo aquí
     // NO revierte la transición del proyecto: se avisa y se reintenta desde
     // la ficha ("Sincronizar obra SST").
-    if (a === 'en_ejecucion' || a === 'enviado_a_facturacion') {
+    if (a === 'en_ejecucion' || a === 'enviado_a_facturacion' || a === 'facturado') {
       const ok = await sincronizarObraEspejo({ ...proyecto, estado: a })
       if (!ok) toast('El proyecto avanzó, pero la obra SST no se pudo sincronizar — reintenta desde la ficha', 'error')
     }
@@ -184,8 +184,15 @@ export default function EjecucionProyecto({ proyecto, puedeGestionar, reload }: 
     if (!window.confirm('¿Enviar a facturación? El proyecto pasa a manos de Gerencia Administrativa (factura, pago del cliente y saldo del contratista).')) return
     setAplicando(true)
     try {
-      await transicion('soporte_recibido', 'enviado_a_facturacion', 'Enviado a facturación — handoff a Gerencia Administrativa')
-      toast('Enviado a facturación')
+      // Facturación parcial (07-nov): si las parciales registradas durante la
+      // ejecución YA completan el valor, el handoff aterriza DIRECTO en
+      // `facturado` — nadie va a registrar más (sin esto quedaría varado en
+      // "Por facturar" con la facturación completa).
+      const destino = estadoHandoffConFacturas(proyecto)
+      await transicion('soporte_recibido', destino,
+        'Enviado a facturación — handoff a Gerencia Administrativa' +
+        (destino === 'facturado' ? ' · la facturación ya estaba COMPLETA al handoff (parciales en ejecución) — aterriza facturado' : ''))
+      toast(destino === 'facturado' ? 'Enviado — la facturación ya estaba completa: queda facturado' : 'Enviado a facturación')
     } catch { toast('Error al enviar a facturación', 'error') } finally { setAplicando(false) }
   }
 

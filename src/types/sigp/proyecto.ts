@@ -358,6 +358,24 @@ export interface FacturacionProyecto {
  *  número y CUFE intactos, porque es un hecho fiscal que ocurrió — más el
  *  acto de anulación con su nota crédito (la referencia fiscal del reverso,
  *  OBLIGATORIA). Append-only en `facturas_anuladas`: visible para siempre. */
+/** FACTURACIÓN PARCIAL (07-nov — caso PRY-2026-058/SENA: el cliente autoriza
+ *  facturar por avance y el objeto único no admitía varios hechos — el mismo
+ *  antipatrón de `anticipo` y del pago único, tercera vez). La LISTA es la
+ *  forma canónica (`proyecto.facturas[]`, append-only); `facturacion`
+ *  singular queda como legacy leída en dual por `facturasDe()` — el primer
+ *  write nuevo la materializa como facturas[0], SIN reinterpretar nada.
+ *  Anulación por MARCADOR dentro de la factura (nota crédito obligatoria,
+ *  como siempre); `facturas_anuladas` queda como histórico congelado de la
+ *  era del objeto único. */
+export interface FacturaProyecto extends FacturacionProyecto {
+  /** Bloque 2 (corte de obra): el corte emitido que SUSTENTA esta factura. */
+  corte_id?: string
+  corte_consecutivo?: string
+  /** Anulación soft — la factura queda como hecho fiscal registrado FUERA de
+   *  la suma, con su nota crédito (el reverso fiscal, obligatorio). */
+  anulada?: { fecha: Timestamp; por: string; por_nombre?: string; motivo: string; nota_credito: string }
+}
+
 export interface FacturaAnulada extends FacturacionProyecto {
   motivo_anulacion: string
   nota_credito: string
@@ -500,9 +518,16 @@ export const pagoClientePendiente = (
  *  (ausente = 0: censo 26-oct, cero liquidadas históricas — toda liquidada
  *  futura nace con el contador del bundle B). */
 export const puedeCerrarseProyecto = (
-  p: Pick<Proyecto, 'estado' | 'pago_cliente'> & { resumen_asignaciones?: Pick<ResumenAsignaciones, 'saldos_pendientes'> },
+  p: Pick<Proyecto, 'estado' | 'pago_cliente'>
+    & Partial<Pick<Proyecto, 'facturacion' | 'facturas' | 'snapshot'>>
+    & { resumen_asignaciones?: Pick<ResumenAsignaciones, 'saldos_pendientes'> },
 ): boolean => p.estado === 'liquidado_contratista' && !!p.pago_cliente
   && (p.resumen_asignaciones?.saldos_pendientes ?? 0) === 0
+  // Facturación parcial (07-nov): el cierre exige facturación COMPLETA, no
+  // "una factura cualquiera". Solo aplica a proyectos con la LISTA (la era
+  // del singular queda como estaba — llegar a liquidado ya implicaba la
+  // factura; sin reinterpretar el pasado).
+  && (p.facturas == null || facturacionCompletaDe(p as Pick<Proyecto, 'facturas' | 'facturacion' | 'snapshot'>))
 
 // ── Facturas: anular y reemplazar, nunca editar (08-oct) ────────────────────
 
@@ -569,7 +594,10 @@ export function facturasPreviasDelSitio(
     if (p.id === proyectoId) continue
     if ((p.snapshot?.nombre_sitio ?? '').trim().toLowerCase() !== s) continue
     if ((p.snapshot?.cliente ?? '').trim().toLowerCase() !== c) continue
-    if (p.facturacion) res.push({ consecutivo: p.consecutivo, numero: p.facturacion.numero, fecha: p.facturacion.fecha, valor: p.facturacion.valor, vigente: true })
+    // Dual (07-nov): vivas y anuladas de la LISTA + el legacy singular + el
+    // histórico de la era del objeto único — todas a la vista.
+    for (const f of facturasDe(p))
+      res.push({ consecutivo: p.consecutivo, numero: f.numero, fecha: f.fecha, valor: f.valor, vigente: !f.anulada })
     for (const a of p.facturas_anuladas ?? [])
       res.push({ consecutivo: p.consecutivo, numero: a.numero, fecha: a.fecha, valor: a.valor, vigente: false })
   }
@@ -579,15 +607,163 @@ export function facturasPreviasDelSitio(
 /** ¿Este número de factura ya está registrado en OTRO proyecto? (aviso
  *  informativo de factura AGRUPADA — jamás bloquea). */
 export function numeroFacturaEnOtroProyecto(
-  proyectos: Pick<Proyecto, 'id' | 'consecutivo' | 'facturacion'>[],
+  proyectos: Pick<Proyecto, 'id' | 'consecutivo' | 'facturacion' | 'facturas'>[],
   proyectoId: string,
   numero: string,
 ): string[] {
   const n = numero.trim().toLowerCase().replace(/\s+/g, '')
   if (!n) return []
   return proyectos
-    .filter(p => p.id !== proyectoId && (p.facturacion?.numero ?? '').trim().toLowerCase().replace(/\s+/g, '') === n)
+    .filter(p => p.id !== proyectoId && facturasVivasDe(p).some(f => (f.numero ?? '').trim().toLowerCase().replace(/\s+/g, '') === n))
     .map(p => p.consecutivo)
+}
+
+// ── Facturación PARCIAL (07-nov) — la lista como forma canónica ─────────────
+
+type ProyectoFacturable = Pick<Proyecto, 'facturacion' | 'facturas'>
+
+/** Lectura DUAL: la lista canónica, o el singular legacy como facturas[0]
+ *  virtual ("el primer elemento, sin reinterpretar"). */
+export const facturasDe = (p: ProyectoFacturable): FacturaProyecto[] =>
+  p.facturas ?? (p.facturacion ? [p.facturacion as FacturaProyecto] : [])
+
+/** Facturas NO anuladas — las que suman. */
+export const facturasVivasDe = (p: ProyectoFacturable): FacturaProyecto[] =>
+  facturasDe(p).filter(f => !f.anulada)
+
+/** Σ facturada viva. */
+export const totalFacturadoDe = (p: ProyectoFacturable): number =>
+  facturasVivasDe(p).reduce((s, f) => s + (f.valor || 0), 0)
+
+/** FACTURADO ahora significa facturación COMPLETA: Σ vivas ≥ valor del
+ *  proyecto. Una parcial no está "facturada" — dejar el estado como estaba
+ *  haría mentir al riel (decisión Giovanny 07-nov). */
+export const facturacionCompletaDe = (
+  p: ProyectoFacturable & Pick<Proyecto, 'snapshot'>,
+): boolean => {
+  const total = totalFacturadoDe(p)
+  return total > 0 && total >= (p.snapshot?.valor_venta ?? 0)
+}
+
+/** Estados donde se REGISTRA factura: desde `en_ejecucion` (la realidad del
+ *  contrato SENA — se factura por avance, no al final) hasta `facturado`
+ *  incluido (un adicional que reabre la cuenta). Antes del arranque de obra
+ *  no hay qué facturar; después del pago es territorio cerrado. */
+export const ESTADOS_REGISTRO_FACTURA: readonly EstadoProyecto[] = [
+  'en_ejecucion', 'ejecutado', 'entregado_cliente', 'soporte_recibido',
+  'enviado_a_facturacion', 'facturado',
+]
+
+/** Registrar una factura (parcial o final). La transición a `facturado`
+ *  ocurre SOLO cuando la Σ completa el valor Y el proyecto ya hizo el
+ *  handoff (una parcial en ejecución jamás salta el riel; si la Σ se
+ *  completa antes del handoff, el handoff la reconoce — ver
+ *  `estadoHandoffConFacturas`). Devuelve el aviso de SOBRE-facturación
+ *  (advertencia con constancia, jamás bloqueo — patrón sobre-giro). */
+export function patchRegistrarFacturaParcial(
+  p: Pick<Proyecto, 'estado' | 'facturacion' | 'facturas' | 'snapshot' | 'historial'>,
+  factura: Omit<FacturaProyecto, 'anulada'>,
+  uid: string,
+  ahora: Timestamp,
+  nombre?: string,
+): {
+  padre: {
+    facturas: FacturaProyecto[]
+    total_facturado: number
+    facturacion: null          // el caller lo mapea a deleteField() (materialización del legacy)
+    estado?: 'facturado'
+    historial: EntradaHistorialProyecto[]
+    fecha_actualizacion: Timestamp
+  }
+  total: number
+  completa: boolean
+  sobrepasa: boolean
+} | null {
+  if (!ESTADOS_REGISTRO_FACTURA.includes(p.estado)) return null
+  if (!factura.numero?.trim() || !(factura.valor > 0)) return null
+  const facturas: FacturaProyecto[] = [...facturasDe(p), factura]
+  const total = facturas.filter(f => !f.anulada).reduce((s, f) => s + (f.valor || 0), 0)
+  const valorProyecto = p.snapshot?.valor_venta ?? 0
+  const completa = total >= valorProyecto
+  const sobrepasa = total > valorProyecto
+  const transiciona = completa && p.estado === 'enviado_a_facturacion'
+  const entrada: EntradaHistorialProyecto = {
+    de: p.estado, a: transiciona ? 'facturado' : p.estado, por: uid, fecha: ahora,
+    ...(nombre ? { por_nombre: nombre } : {}),
+    motivo: `Factura ${factura.numero.trim()} registrada — ${factura.valor}` +
+      (factura.corte_consecutivo ? ` · soportada por el corte ${factura.corte_consecutivo}` : '') +
+      ` · Σ facturada ${total} de ${valorProyecto}` +
+      (completa ? ' · FACTURACIÓN COMPLETA' : ' · facturación PARCIAL') +
+      (sobrepasa ? ` · ⚠ LA SUMA SUPERA EL VALOR DEL PROYECTO — registrada con las dos cifras a la vista` : ''),
+  }
+  return {
+    padre: {
+      facturas, total_facturado: total, facturacion: null,
+      ...(transiciona ? { estado: 'facturado' as const } : {}),
+      historial: [...p.historial, entrada], fecha_actualizacion: ahora,
+    },
+    total, completa, sobrepasa,
+  }
+}
+
+/** El HANDOFF con facturas parciales ya registradas: si la Σ ya está
+ *  completa, el handoff aterriza DIRECTO en `facturado` (nadie va a
+ *  registrar más — sin esto el proyecto quedaría varado en "por facturar"
+ *  con la facturación completa). */
+export const estadoHandoffConFacturas = (
+  p: ProyectoFacturable & Pick<Proyecto, 'snapshot'>,
+): 'enviado_a_facturacion' | 'facturado' =>
+  facturacionCompletaDe(p) ? 'facturado' : 'enviado_a_facturacion'
+
+/** Anular UNA factura de la lista (marcador + nota crédito, patrón giros).
+ *  Si el proyecto estaba `facturado` y la Σ deja de ser completa, revierte a
+ *  `enviado_a_facturacion` con traza (la correcta se registra como factura
+ *  nueva). Bloqueos: pago del cliente encima (anular una factura cobrada es
+ *  otro acto — borde declarado, igual que siempre). */
+export function patchAnularFacturaDeLista(
+  p: Pick<Proyecto, 'estado' | 'facturacion' | 'facturas' | 'snapshot' | 'pago_cliente' | 'historial'>,
+  indice: number,
+  motivo: string,
+  notaCredito: string,
+  uid: string,
+  ahora: Timestamp,
+  nombre?: string,
+): {
+  padre: {
+    facturas: FacturaProyecto[]
+    total_facturado: number
+    facturacion: null
+    estado?: 'enviado_a_facturacion'
+    historial: EntradaHistorialProyecto[]
+    fecha_actualizacion: Timestamp
+  }
+  total: number
+} | null {
+  if (!motivo.trim() || !notaCredito.trim()) return null
+  if (p.pago_cliente) return null
+  const lista = facturasDe(p)
+  const f = lista[indice]
+  if (!f || f.anulada) return null
+  const facturas = lista.map((x, i) => i === indice
+    ? { ...x, anulada: { fecha: ahora, por: uid, ...(nombre ? { por_nombre: nombre } : {}), motivo: motivo.trim(), nota_credito: notaCredito.trim() } }
+    : x)
+  const total = facturas.filter(x => !x.anulada).reduce((s, x) => s + (x.valor || 0), 0)
+  const valorProyecto = p.snapshot?.valor_venta ?? 0
+  const revierte = p.estado === 'facturado' && !(total > 0 && total >= valorProyecto)
+  const entrada: EntradaHistorialProyecto = {
+    de: p.estado, a: revierte ? 'enviado_a_facturacion' : p.estado, por: uid, fecha: ahora,
+    ...(nombre ? { por_nombre: nombre } : {}),
+    motivo: `Factura ${f.numero} ANULADA (nota crédito ${notaCredito.trim()}): ${motivo.trim()} — queda en la lista fuera de la suma · Σ facturada vigente ${total}` +
+      (revierte ? ' · la facturación dejó de estar completa: el proyecto vuelve a Por facturar' : ''),
+  }
+  return {
+    padre: {
+      facturas, total_facturado: total, facturacion: null,
+      ...(revierte ? { estado: 'enviado_a_facturacion' as const } : {}),
+      historial: [...p.historial, entrada], fecha_actualizacion: ahora,
+    },
+    total,
+  }
 }
 
 /** Validación de FORMATO del CUFE (08-oct, mismo caso FV 1807-1809): el
@@ -746,10 +922,15 @@ export const puedeCerrarseEn = (estado: EstadoProyecto): boolean =>
  *  del ciclo quedó capturada. La satisfacción del cliente pendiente se
  *  ofrece capturar — jamás bloquea el cierre. */
 export const completitudCierre = (
-  p: Pick<Proyecto, 'facturacion' | 'pago_cliente' | 'liquidacion' | 'evaluacion_contratista' | 'evaluacion_cliente'>
-    & Partial<Pick<Proyecto, 'estado' | 'resumen_asignaciones'>>,
+  p: Pick<Proyecto, 'facturacion' | 'facturas' | 'pago_cliente' | 'liquidacion' | 'evaluacion_contratista' | 'evaluacion_cliente'>
+    & Partial<Pick<Proyecto, 'estado' | 'resumen_asignaciones' | 'snapshot'>>,
 ): { clave: string; etiqueta: string; ok: boolean }[] => [
-  { clave: 'facturacion', etiqueta: 'Factura registrada', ok: !!p.facturacion },
+  // Parcial (07-nov): el cierre exige facturación COMPLETA, no "una factura".
+  // Legacy singular (sin lista): la vigente era el total — sin reinterpretar.
+  { clave: 'facturacion', etiqueta: 'Facturación completa',
+    ok: p.facturas
+      ? (p.snapshot ? facturacionCompletaDe(p as Pick<Proyecto, 'facturas' | 'facturacion' | 'snapshot'>) : totalFacturadoDe(p) > 0)
+      : !!p.facturacion },
   { clave: 'pago_cliente', etiqueta: 'Pago del cliente registrado', ok: !!p.pago_cliente },
   // P2-2/07-sep: en el camino POR ASIGNACIÓN la liquidación vive en los
   // sub-docs y el padre NO tiene `liquidacion` — pero llegar a
@@ -1386,7 +1567,13 @@ export interface Proyecto {
   ejecucion?: EjecucionProyecto        // F2.1.d — inicio + ejecutado con evidencia
   entrega?: EntregaProyecto            // F2.1.d — entrega al cliente
   soporte_cliente?: SoporteCliente     // F2.1.d — soporte emitido por el cliente
-  facturacion?: FacturacionProyecto    // Administrativa B1 — factura registrada (VIGENTE)
+  facturacion?: FacturacionProyecto    // LEGACY (pre 07-nov): factura única — leída en dual por facturasDe()
+  /** CANÓNICO (07-nov — facturación parcial): la lista de facturas,
+   *  append-only, anulación por marcador. Σ vivas = total_facturado. */
+  facturas?: FacturaProyecto[]
+  /** Denormalizado en cada registro/anulación (las reglas no suman arrays):
+   *  Σ de facturas VIVAS. Ausente = proyecto de la era del objeto único. */
+  total_facturado?: number
   facturas_anuladas?: FacturaAnulada[] // 08-oct — anular y reemplazar, nunca editar
   pago_cliente?: PagoClienteProyecto   // Administrativa B2 — pago del cliente
   compras_reembolsos?: CompraReembolso[] // Administrativa B3b — línea propia, separada de la mano de obra

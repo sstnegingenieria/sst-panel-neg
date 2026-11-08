@@ -23,6 +23,7 @@ import type { Proyecto, EntradaHistorialProyecto } from './proyecto'
 import type { Solicitud, CambioEstado, DatosPreventivo } from './solicitud'
 import type { AsignacionContratista, EntradaHistorialAsignacion, MargenEnVivo, PreliquidacionAsignacion } from './asignacion'
 import { girosVivosDe, anticipoTotalDe, margenEnVivoDe } from './asignacion'
+import { facturasVivasDe } from './proyecto'
 import type { EstadoOrdenCompra } from './ordenCompra'
 import { ESTADO_OC_LABEL } from './ordenCompra'
 import { precioPreventivo, TIPO_SITIO_LABEL, INTENSIDAD_LABEL } from './preventivos'
@@ -44,7 +45,7 @@ const fechaCorta = (t?: Timestamp): string =>
  *  "Preliquidación aprobada por Marcela el 03-nov" le dice a quien mira qué
  *  tiene que resolver; "no se puede" lo manda a preguntar. [] = corregible. */
 export function impedimentosCorreccion(
-  p: Pick<Proyecto, 'origen' | 'estado' | 'facturacion' | 'pago_cliente' | 'liquidacion'>,
+  p: Pick<Proyecto, 'origen' | 'estado' | 'facturacion' | 'facturas' | 'pago_cliente' | 'liquidacion'>,
   asignaciones: Pick<AsignacionContratista, 'contratista_nombre' | 'estado' | 'preliquidacion' | 'liquidacion'>[],
   ocs: OcLigada[],
   resolverNombre?: (uid: string) => string | undefined,
@@ -53,8 +54,9 @@ export function impedimentosCorreccion(
   if (p.origen !== 'preventivo') out.push('No es un proyecto de preventivo (el precio no sale de la matriz)')
   if (p.estado === 'cerrado') out.push('Proyecto CERRADO — inmutable')
   if (p.estado === 'cancelado') out.push('Proyecto CANCELADO — inmutable')
-  if (p.facturacion)
-    out.push(`Factura ${p.facturacion.numero} registrada el ${fechaCorta(p.facturacion.fecha_registro ?? p.facturacion.fecha)} por ${fmtMoney(p.facturacion.valor)}`)
+  // Parcial (07-nov): CUALQUIER factura viva impide — lista dual (facturas[] + legacy)
+  for (const f of facturasVivasDe(p))
+    out.push(`Factura ${f.numero} registrada el ${fechaCorta(f.fecha_registro ?? f.fecha)} por ${fmtMoney(f.valor)}`)
   if (p.pago_cliente)
     out.push(`Pago del cliente registrado el ${fechaCorta(p.pago_cliente.fecha)} por ${fmtMoney(p.pago_cliente.valor)}`)
   if (p.liquidacion) out.push('Liquidación del contratista registrada')
