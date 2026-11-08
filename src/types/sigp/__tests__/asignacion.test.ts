@@ -67,7 +67,7 @@ describe('construirAsignacionMulti — invariante duro de átomos', () => {
   })
   it('contratista no habilitado / átomo inexistente / vacíos / solo_mano_obra sin materiales → lanzan', () => {
     expect(() => construirAsignacionMulti({ ...hector, estado: 'inactivo' }, ['Ensayos y diagnóstico estructural'], 'todo_costo', undefined, ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/habilitados/)
-    expect(() => construirAsignacionMulti(hector, ['No existe'], 'todo_costo', undefined, ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/no existe en el alcance/)
+    expect(() => construirAsignacionMulti(hector, ['No existe'], 'todo_costo', undefined, ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/ya no existe\(n\) en el alcance vigente/)
     expect(() => construirAsignacionMulti(hector, [], 'todo_costo', undefined, ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/al menos una/)
     expect(() => construirAsignacionMulti(hector, ['Ensayos y diagnóstico estructural'], 'solo_mano_obra', undefined, ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/materiales/)
   })
@@ -106,7 +106,7 @@ describe('construirAsignacionHistorica — registro retroactivo SIN simular el f
     expect(() => construirAsignacionHistorica(otroContratista, atomosH, 'todo_costo', undefined, 0, 'm', ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/valor realmente pagado/)
     const viva = base({ atomos: ['Apertura de grietas o fisuras'] })
     expect(() => construirAsignacionHistorica(otroContratista, atomosH, 'todo_costo', undefined, 1, 'm', ALCANCE_MEGACENTER, [viva], 'u', ts)).toThrow(/ya está asignada/)
-    expect(() => construirAsignacionHistorica(otroContratista, ['No existe'], 'todo_costo', undefined, 1, 'm', ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/no existe en el alcance/)
+    expect(() => construirAsignacionHistorica(otroContratista, ['No existe'], 'todo_costo', undefined, 1, 'm', ALCANCE_MEGACENTER, [], 'u', ts)).toThrow(/ya no existe\(n\) en el alcance vigente/)
   })
   it('el costo ENTRA al indicador y al presupuesto (el objetivo) y cubre sus átomos', () => {
     const a = { ...construirAsignacionHistorica(otroContratista, atomosH, 'solo_mano_obra', 3_000_000,

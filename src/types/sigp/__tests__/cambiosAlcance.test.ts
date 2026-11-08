@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url)
 const { diffAlcance, decidirAccion, asignacionesASenalar } = require('../../../../functions/crearProyecto.js') as {
   diffAlcance: (v?: { grupo: string; subtotal: number }[], n?: { grupo: string; subtotal: number }[]) => { grupo: string; tipo: string; delta: number }[]
   decidirAccion: (p: Record<string, unknown> | null, v: number) => string
-  asignacionesASenalar: (asigs: Record<string, unknown>[], grupos: string[]) => { id: string; atomos_afectados: string[] }[]
+  asignacionesASenalar: (asigs: Record<string, unknown>[], grupos: string[], clavesNuevas?: string[]) => { id: string; atomos_afectados: string[] }[]
 }
 
 const g = (grupo: string, subtotal: number) => ({ grupo, items: 1, subtotal })
@@ -125,6 +125,30 @@ describe('P2-2 SB5 — asignacionesASenalar: la señal apunta a la ASIGNACIÓN a
   it('sin afectados o sin asignaciones → vacío (el flag del padre queda para legacy)', () => {
     expect(asignacionesASenalar([], ['Fibra'])).toEqual([])
     expect(asignacionesASenalar([asig('a1', ['Ensayos'])], [])).toEqual([])
+  })
+  // 08-nov (caso PRY-2026-058): las asignaciones de nivel ÍTEM guardan CLAVES
+  // (uuids) — intersectarlas con nombres de grupo daba SIEMPRE vacío y la
+  // señal jamás llegaba, aunque sus claves hubieran desaparecido del alcance.
+  it('nivel ÍTEM: señala por claves HUÉRFANAS contra el alcance nuevo (el caso del 058)', () => {
+    const asigs = [
+      // El 058 real: 1 átomo (el ítem global de la v1) que no existe en v2/v3
+      asig('jersson', ['uuid-v1-global'], { atomos_nivel: 'item', atomos_grupos: ['Otros'] }),
+      // Claves sobreviven y su grupo NO está afectado → fuera
+      asig('b1', ['k1'], { atomos_nivel: 'item', atomos_grupos: ['Redes'] }),
+      // Claves sobreviven pero su grupo SÍ cambió → señalada por el grupo
+      asig('b2', ['k2'], { atomos_nivel: 'item', atomos_grupos: ['Fibra'] }),
+      // Huérfana pero cancelada → fuera
+      asig('b3', ['uuid-v1-global'], { atomos_nivel: 'item', estado: 'cancelada' }),
+    ]
+    expect(asignacionesASenalar(asigs, ['Fibra'], ['k1', 'k2'])).toEqual([
+      { id: 'jersson', atomos_afectados: ['uuid-v1-global'] },
+      { id: 'b2', atomos_afectados: ['Fibra'] },
+    ])
+  })
+  it('nivel grupo con claves nuevas presentes: la intersección por grupo sigue intacta (retrocompat)', () => {
+    expect(asignacionesASenalar([asig('a1', ['Fibra'])], ['Fibra'], ['k1'])).toEqual([
+      { id: 'a1', atomos_afectados: ['Fibra'] },
+    ])
   })
 })
 
