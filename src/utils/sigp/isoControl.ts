@@ -102,3 +102,18 @@ export const ACCION_MEJORA: ControlDocumentalIso = {
   modificado: '14/04/2025',
   nombre: 'MATRIZ DE ACCIONES CORRECTIVAS Y PREVENTIVAS',
 }
+
+// ── Corte de avance de obra (07-nov-2026) ──
+// ⚠ CÓDIGO PENDIENTE DE RATIFICACIÓN por Ingrid (GI) + registro en el
+// Listado Maestro — el PDF sale ROTULADO como pendiente mientras tanto
+// (decisión Giovanny 07-nov: arrancar sin esperar el código; lo que NO
+// puede salir es un código que no corresponde — el modelo hecho a mano
+// traía el CM-FT-CT-19, que es el de COTIZACIÓN). Al ratificarse, se
+// actualiza esta constante y el PDF queda con el código real.
+export const CORTE_OBRA: ControlDocumentalIso = {
+  area: 'GESTIÓN DE PROYECTOS',
+  codigo: 'PENDIENTE DE RATIFICACIÓN SGI',
+  version: '01',
+  modificado: 'NOV-2026',
+  nombre: 'CORTE DE AVANCE DE OBRA',
+}

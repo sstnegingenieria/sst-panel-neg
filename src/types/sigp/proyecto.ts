@@ -1567,6 +1567,10 @@ export interface Proyecto {
   ejecucion?: EjecucionProyecto        // F2.1.d — inicio + ejecutado con evidencia
   entrega?: EntregaProyecto            // F2.1.d — entrega al cliente
   soporte_cliente?: SoporteCliente     // F2.1.d — soporte emitido por el cliente
+  /** CORTE DE OBRA (07-nov): avance ACUMULADO por ítem del alcance, con
+   *  autor y fecha por registro — se captura cuando ocurre, no al armar el
+   *  corte. Lo escriben los GESTORES; el corte lo emite gerencia. */
+  avance_items?: import('./corteObra').AvanceItem[]
   facturacion?: FacturacionProyecto    // LEGACY (pre 07-nov): factura única — leída en dual por facturasDe()
   /** CANÓNICO (07-nov — facturación parcial): la lista de facturas,
    *  append-only, anulación por marcador. Σ vivas = total_facturado. */

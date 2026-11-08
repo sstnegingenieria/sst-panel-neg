@@ -25,7 +25,7 @@ const NUEVOS = ['AC', 'AP', 'MEJ']
 // (OFR/ACT/LIQ/FAC/NC/PRY) salieron de la superficie y quedan documentados
 // en comentario de la CF. El test anterior fijaba la lista de 16; este fija
 // la de 10 EN USO.
-const EN_USO = ['SOL', 'VIS', 'COT', 'CAT', 'OC', 'PEA', 'LIC', 'AC', 'AP', 'MEJ']
+const EN_USO = ['SOL', 'VIS', 'COT', 'CAT', 'OC', 'PEA', 'LIC', 'AC', 'AP', 'MEJ', 'CRT']  // CRT: corte de obra (07-nov)
 
 describe('PREFIJOS_VALIDOS — AC / AP / MEJ (contrato post-mapa)', () => {
   it('los tres están en la lista blanca', () => {

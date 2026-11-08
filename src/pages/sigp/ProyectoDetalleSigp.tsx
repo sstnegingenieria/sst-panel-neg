@@ -10,6 +10,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useFeatureFlag } from '../../hooks/useFeatureFlag'
 import { puedeGestionarProyectosUI, puedeAprobarPreliquidacionUI, puedeCorregirClasificacionUI } from '../../types/sigp/permisos'
 import CorreccionClasificacionModal from '../../components/sigp/proyectos/CorreccionClasificacion'
+import AvanceObra from '../../components/sigp/proyectos/AvanceObra'
 import AsignacionesProyecto from '../../components/sigp/proyectos/AsignacionesProyecto'
 import PermisosIngreso from '../../components/sigp/proyectos/PermisosIngreso'
 import PreliquidacionProyecto from '../../components/sigp/proyectos/PreliquidacionProyecto'
@@ -410,6 +411,10 @@ export default function ProyectoDetalleSigp() {
 
       {/* Ejecución → entrega → soporte → handoff (F2.1.d) */}
       <EjecucionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+
+      {/* Corte de obra (07-nov): avance por ítem + cortes emitidos — se
+          auto-oculta sin items_alcance o antes de la ejecución. */}
+      <AvanceObra proyecto={proyecto} reload={load} nombres={nombres} />
 
       {/* Administrativa B1 + facturación PARCIAL (07-nov) — la LISTA de
           facturas con la Σ contra el valor (lectura; se gestiona en

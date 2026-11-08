@@ -1093,6 +1093,21 @@ service cloud.firestore {
       // la ficha (detectarDesincronizacion) compara resumen ↔ subcolección y
       // MUESTRA la discrepancia con botón de reparación — el control es la
       // detección visible, no la prevención imposible.
+      // ── CORTES DE AVANCE DE OBRA (07-nov-2026) ──
+      // El corte es un documento EMITIDO (consecutivo CRT + snapshot + hash):
+      // lo crea SOLO gerencia (quien mide no emite — el corte sustenta una
+      // factura) y es INMUTABLE — sin update ni delete, como todo documento
+      // que sale a un cliente. El AVANCE vivo (avance_items, en el padre) lo
+      // escriben los gestores por su vía operativa.
+      match /cortes/{corteId} {
+        allow read: if puedeVerProyectos();
+        allow create: if isAuthed()
+                      && rolActual() in ['gerencia_administrativa', 'admin']
+                      && request.resource.data.get('consecutivo', '') != ''
+                      && request.resource.data.get('emitido_por', '') == request.auth.uid
+                      && request.resource.data.get('resumen', {}).get('total', 0) > 0;
+      }
+
       match /asignaciones/{asignacionId} {
         allow read: if puedeVerProyectos();
 

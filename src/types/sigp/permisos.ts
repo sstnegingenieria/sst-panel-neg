@@ -466,3 +466,11 @@ export const veEppUI = puedeGestionarEppUI
 // gerencia corrige). Espejo de la vía de corrección en firestore.rules.
 export const puedeCorregirClasificacionUI = (rol: string | undefined) =>
   rol === 'gerencia_general' || rol === 'gerencia_administrativa' || rol === 'admin'
+
+// ── Corte de avance de obra (07-nov-2026) ──
+// Capturan los GESTORES (quien mide), EMITE GERENCIA (quien factura sobre
+// él) — misma separación de definir y aprobar, por la misma razón.
+export const puedeCapturarAvanceUI = (rol: string | undefined) =>
+  puedeGestionarProyectosUI(rol)
+export const puedeEmitirCorteUI = (rol: string | undefined) =>
+  rol === 'gerencia_administrativa' || rol === 'admin'
