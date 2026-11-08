@@ -19,7 +19,7 @@ import type { Proyecto } from '../../../types/sigp/proyecto'
 import { idxRiel, ESTADOS_PROYECTO } from '../../../types/sigp/proyecto'
 import {
   avanceDe, pctItem, estadoItemAvance, ESTADO_ITEM_LABEL, patchRegistrarAvance,
-  construirCorte, entradaHistorialCorte, type CorteObra,
+  construirCorte, entradaHistorialCorte, plantillaObservacionesCorte, type CorteObra,
 } from '../../../types/sigp/corteObra'
 import { autorDe } from '../../../utils/sigp/autoria'
 import type { ConfigAIU, EsquemaTributario } from '../../../types/sigp/cotizacion'
@@ -49,6 +49,10 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
   const [observaciones, setObservaciones] = useState('')
   const [esquema, setEsquema] = useState<EsquemaTributario>('iva_pleno')
   const [aiu, setAiu] = useState<ConfigAIU | undefined>(undefined)
+  // Forma SENA (08-nov): referencias de contrato del cliente + firma del
+  // emisor (correo del perfil; celular si existe — campo OC1).
+  const [contratoRefs, setContratoRefs] = useState<string[]>([])
+  const [celularEmisor, setCelularEmisor] = useState<string | undefined>(undefined)
 
   const items = proyecto.snapshot.items_alcance ?? []
   const enEjecucionOMas = idxRiel(proyecto.estado) >= ESTADOS_PROYECTO.indexOf('en_ejecucion')
@@ -94,7 +98,31 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
     } catch { toast('Error al registrar el avance (verifica tu rol)', 'error') } finally { setAplicando(false) }
   }
 
-  const preview = construirCorte({ proyecto, cortesPrevios: cortes, esquema, aiu, observaciones })
+  const preview = construirCorte({ proyecto, cortesPrevios: cortes, esquema, aiu, observaciones, contratoReferencias: contratoRefs })
+
+  const abrirEmitir = async () => {
+    setEmitirOpen(true)
+    // Contratos del cliente + celular del emisor (best-effort — sin ellos el
+    // corte sale con '—' y sin teléfono, no se bloquea nada).
+    try {
+      if (proyecto.cliente_id) {
+        const c = await getDoc(doc(db, 'clientes', proyecto.cliente_id))
+        setContratoRefs((c.data()?.contratos as string[] | undefined) ?? [])
+      }
+    } catch { setContratoRefs([]) }
+    try {
+      if (user?.uid) {
+        const u = await getDoc(doc(db, 'users', user.uid))
+        setCelularEmisor(u.data()?.celular as string | undefined)
+      }
+    } catch { /* sin celular */ }
+    // La plantilla INVITA en vez de quedar vacía (forma SENA): avance global,
+    // ítems fuera de lo típico y la nota de adicionales — editable.
+    if (!observaciones.trim()) {
+      const pre = construirCorte({ proyecto, cortesPrevios: cortes, esquema, aiu })
+      if (pre.ok) setObservaciones(plantillaObservacionesCorte(pre.corte))
+    }
+  }
 
   const emitir = async () => {
     if (!preview.ok) return
@@ -106,6 +134,12 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
         ...preview.corte, consecutivo,
         fecha_emision: ahora, emitido_por: user?.uid ?? '',
         ...(user?.nombre ? { emitido_por_nombre: user.nombre } : {}),
+        emisor: {
+          nombre: user?.nombre ?? user?.email ?? '—',
+          area: 'GESTIÓN ADMINISTRATIVA',
+          ...(user?.email ? { correo: user.email } : {}),
+          ...(celularEmisor ? { telefono: celularEmisor } : {}),
+        },
         fecha_creacion: ahora,
       }
       // PDF generado + hash (regla 8) + Storage — el documento ES el corte
@@ -140,7 +174,7 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
           </span>
         </p>
         {puedeEmitir && (
-          <button onClick={() => setEmitirOpen(true)}
+          <button onClick={abrirEmitir}
             className="px-3 py-1.5 rounded-lg border border-brand-300 bg-brand-50 text-brand-700 text-xs font-medium hover:bg-brand-100 transition">
             📄 Emitir corte de obra
           </button>
@@ -239,8 +273,8 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
             </div>
           )}
           <label className="block text-xs text-gray-500">
-            Observaciones (texto libre — salen en el PDF)
-            <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)} rows={2}
+            Observaciones (texto libre — salen en el PDF; la guía sugerida es editable)
+            <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)} rows={6}
               className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300" />
           </label>
           <p className="text-[11px] text-gray-400">
