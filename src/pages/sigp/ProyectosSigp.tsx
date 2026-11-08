@@ -20,10 +20,17 @@ import {
 import { cargarAsignaciones } from '../../utils/sigp/asignaciones'
 import type { SubEtapaPreparacion } from '../../types/sigp/asignacion'
 import type { Proyecto } from '../../types/sigp/proyecto'
+import { useAuth } from '../../contexts/AuthContext'
+import { puedeCorregirClasificacionUI } from '../../types/sigp/permisos'
+import CorreccionClasificacionModal from '../../components/sigp/proyectos/CorreccionClasificacion'
 
 export default function ProyectosSigp() {
   const f2Enabled = useFeatureFlag('sigp_f2_enabled', false)
   const { getAll } = useFirestore()
+  const { user } = useAuth()
+  // Corrección de clasificación en LOTE (07-nov): los errores llegan en lote
+  // y la salida tiene la misma forma — una autorización, una traza por PRY.
+  const [correccionLoteOpen, setCorreccionLoteOpen] = useState(false)
   const [proyectos, setProyectos] = useState<Proyecto[]>([])
   const [loading, setLoading] = useState(true)
   const [filtroEstado, setFiltroEstado] = useState('')
@@ -154,13 +161,29 @@ export default function ProyectosSigp() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div>
-        <p className="text-xs font-semibold tracking-wide text-brand-700 uppercase">SIGP · Proyectos</p>
-        <h1 className="text-2xl font-bold text-gray-800">Proyectos</h1>
-        <p className="text-sm text-gray-500">
-          Ejecución de lo aprobado · un proyecto nace automáticamente al aprobar una cotización
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold tracking-wide text-brand-700 uppercase">SIGP · Proyectos</p>
+          <h1 className="text-2xl font-bold text-gray-800">Proyectos</h1>
+          <p className="text-sm text-gray-500">
+            Ejecución de lo aprobado · un proyecto nace automáticamente al aprobar una cotización
+          </p>
+        </div>
+        {puedeCorregirClasificacionUI(user?.rol)
+          && proyectos.some(p => p.origen === 'preventivo' && p.estado !== 'cerrado' && p.estado !== 'cancelado') && (
+          <button onClick={() => setCorreccionLoteOpen(true)}
+            className="flex-shrink-0 px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-xs font-medium hover:bg-amber-100 transition">
+            ✎ Corregir clasificación (lote)
+          </button>
+        )}
       </div>
+
+      <CorreccionClasificacionModal
+        isOpen={correccionLoteOpen}
+        onClose={() => setCorreccionLoteOpen(false)}
+        proyectos={proyectos.filter(p => p.origen === 'preventivo' && p.estado !== 'cerrado' && p.estado !== 'cancelado')}
+        onAplicado={load}
+      />
 
       {/* Cola de señales de alcance — tiene que DOLER (patrón "Pendientes
           para el acta"): banner clickeable con la más vieja a la vista */}

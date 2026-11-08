@@ -460,3 +460,9 @@ export const veAccionesMejoraUI = puedeGestionarAcapUI
 export const ROLES_GESTIONA_EPP: Rol[] = ['gestion_integral', 'admin']
 export const puedeGestionarEppUI = (rol: string | undefined) => en(rol, ROLES_GESTIONA_EPP)
 export const veEppUI = puedeGestionarEppUI
+
+// ── Corrección de clasificación de preventivos (07-nov-2026) ──
+// GG/GA/admin — quien captura no se corrige a sí misma (Paula registra,
+// gerencia corrige). Espejo de la vía de corrección en firestore.rules.
+export const puedeCorregirClasificacionUI = (rol: string | undefined) =>
+  rol === 'gerencia_general' || rol === 'gerencia_administrativa' || rol === 'admin'

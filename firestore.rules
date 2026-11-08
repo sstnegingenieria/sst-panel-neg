@@ -795,6 +795,33 @@ service cloud.firestore {
     match /solicitudes/{solicitudId} {
       allow read: if accesoSIGP();
       allow create, update, delete: if puedeGestionarProyectos();
+      // Corrección de clasificación de preventivos (07-nov): gerencia_
+      // administrativa corrige SOLO el dato del preventivo (+traza) en
+      // solicitudes tipo preventivo — GG y admin ya pasan por la vía de
+      // arriba. Quien captura no se corrige a sí misma: la segregación del
+      // lado del PROYECTO (donde vive la plata) está en su vía propia.
+      allow update: if isAuthed()
+                    && rolActual() == 'gerencia_administrativa'
+                    && resource.data.get('tipo', '') == 'preventivo'
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['preventivo', 'historial', 'fecha_actualizacion']);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // COLECCIÓN: sitios_preventivos (maestro de sitios — 07-nov-2026)
+    // ────────────────────────────────────────────────────────────────
+    // La condición jungle es del SITIO, no de la solicitud (caso de los once
+    // de Vertis). Doc id = código del cliente normalizado. El ALTA la hace
+    // quien registra solicitudes (el primer hecho lo trae la captura);
+    // CAMBIAR la clasificación es de GG/GA/admin (vía de corrección). Sin
+    // delete: el maestro no se borra (restricción 5.1).
+
+    match /sitios_preventivos/{codigoSitio} {
+      allow read: if accesoSIGP();
+      allow create: if puedeGestionarProyectos()
+                    || (isAuthed() && rolActual() == 'gerencia_administrativa');
+      allow update: if isAuthed()
+                    && rolActual() in ['gerencia_general', 'gerencia_administrativa', 'admin'];
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -890,6 +917,15 @@ service cloud.firestore {
       allow update: if puedeCrearProyectos()
                     && resource.data.get('estado', '') != 'cerrado'
                     && resource.data.get('estado', '') != 'cancelado'
+                    // ENDURECIMIENTO (07-nov, 4ª aparición de "la regla más
+                    // ancha que la pantalla"): la vía OPERATIVA no toca el
+                    // precio pactado — `snapshot` y `valor_venta_inicial`
+                    // los escribe la CF al nacer/cambiar alcance (Admin SDK)
+                    // y la corrección de clasificación va por su vía propia
+                    // (GG/GA/admin, abajo). Ningún flujo de gestor los
+                    // escribía (verificado con la batería completa).
+                    && !request.resource.data.diff(resource.data).affectedKeys()
+                         .hasAny(['snapshot', 'valor_venta_inicial'])
                     && (request.resource.data.get('estado', '') != 'cancelado'
                         || (resource.data.get('estado', '') in
                               ['creado', 'contratista_asignado', 'permisos_en_tramite',
@@ -943,6 +979,27 @@ service cloud.firestore {
                     && fijaAprobacionPreliq()
                     && salvedadPreliq() != ''
                     && request.resource.data.get('estado', '') in ['preliquidacion_aprobada', 'anticipo_girado'];
+
+      // Corrección de clasificación de PREVENTIVOS (07-nov): GG/GA/admin
+      // corrigen tipo/intensidad/jungle → la venta se recalcula con la
+      // matriz y el snapshot se reconstruye CON TRAZA. Las precondiciones
+      // del acto de los once, EN REGLA: sin factura, sin pago, sin
+      // liquidación, sin anticipo girado y sin preliquidación aprobada —
+      // con dinero o documento encima, el camino no es corregir. El valor
+      // del contratista vive en las asignaciones y esta vía no lo alcanza.
+      allow update: if isAuthed()
+                    && rolActual() in ['gerencia_general', 'gerencia_administrativa', 'admin']
+                    && resource.data.get('origen', '') == 'preventivo'
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['valor_venta_inicial', 'snapshot', 'historial', 'fecha_actualizacion'])
+                    && resource.data.get('estado', '') != 'cerrado'
+                    && resource.data.get('estado', '') != 'cancelado'
+                    && resource.data.get('facturacion', null) == null
+                    && resource.data.get('pago_cliente', null) == null
+                    && resource.data.get('liquidacion', null) == null
+                    && resource.data.get('resumen_asignaciones', {}).get('anticipos_girados', 0) == 0
+                    && !resource.data.get('resumen_asignaciones', {}).get('por_estado', {}).keys()
+                         .hasAny(['preliquidacion_aprobada', 'anticipo_girado', 'liquidada']);
 
       // F2.1.c — SEGREGACIÓN DE FUNCIONES: gerencia_administrativa aprueba la
       // preliquidación y registra el anticipo girado (quien define ≠ quien

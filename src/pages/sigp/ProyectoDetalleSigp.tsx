@@ -8,7 +8,8 @@ import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import { useAuth } from '../../contexts/AuthContext'
 import { useFeatureFlag } from '../../hooks/useFeatureFlag'
-import { puedeGestionarProyectosUI, puedeAprobarPreliquidacionUI } from '../../types/sigp/permisos'
+import { puedeGestionarProyectosUI, puedeAprobarPreliquidacionUI, puedeCorregirClasificacionUI } from '../../types/sigp/permisos'
+import CorreccionClasificacionModal from '../../components/sigp/proyectos/CorreccionClasificacion'
 import AsignacionesProyecto from '../../components/sigp/proyectos/AsignacionesProyecto'
 import PermisosIngreso from '../../components/sigp/proyectos/PermisosIngreso'
 import PreliquidacionProyecto from '../../components/sigp/proyectos/PreliquidacionProyecto'
@@ -61,6 +62,8 @@ export default function ProyectoDetalleSigp() {
   // lo dice (la señal alcance_desactualizado solo nace DESPUÉS de aterrizar).
   // Best-effort: 1 getDoc solo en origen 'cotizacion'.
   const [cambioVuelo, setCambioVuelo] = useState<{ version: number; dias: number | null } | null>(null)
+  // Corrección de clasificación de preventivos (07-nov) — GG/GA/admin.
+  const [correccionOpen, setCorreccionOpen] = useState(false)
 
   const load = useCallback(async () => {
     if (!proyectoId) return
@@ -224,13 +227,23 @@ export default function ProyectoDetalleSigp() {
 
       {/* Snapshot pactado */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-          Lo pactado <span className="normal-case font-normal">
-            {proyecto.origen === 'preventivo'
-              ? `(precio de matriz · ${proyecto.solicitud_consecutivo})`
-              : `(copia de ${proyecto.cotizacion_consecutivo}${etiquetaVersion(proyecto.cotizacion_version ?? 1) ? ` ${etiquetaVersion(proyecto.cotizacion_version ?? 1)}` : ''} aprobada)`}
-          </span>
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Lo pactado <span className="normal-case font-normal">
+              {proyecto.origen === 'preventivo'
+                ? `(precio de matriz · ${proyecto.solicitud_consecutivo})`
+                : `(copia de ${proyecto.cotizacion_consecutivo}${etiquetaVersion(proyecto.cotizacion_version ?? 1) ? ` ${etiquetaVersion(proyecto.cotizacion_version ?? 1)}` : ''} aprobada)`}
+            </span>
+          </p>
+          {/* Corrección de clasificación (07-nov): GG/GA/admin — quien captura
+              no se corrige a sí misma. Las precondiciones las dice el modal. */}
+          {proyecto.origen === 'preventivo' && puedeCorregirClasificacionUI(user?.rol) && !cerrado && !cancelado && (
+            <button onClick={() => setCorreccionOpen(true)}
+              className="flex-shrink-0 px-2.5 py-1 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-xs font-medium hover:bg-amber-100 transition">
+              ✎ Corregir clasificación
+            </button>
+          )}
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
           <div>
             <p className="text-xs text-gray-400">Sitio</p>
@@ -534,6 +547,16 @@ export default function ProyectoDetalleSigp() {
           encabezado con actos rutinarios; el componente se auto-gatea */}
       {puedeGestionarProyectosUI(user?.rol) && !cerrado && !cancelado && (
         <CierreAnticipadoProyecto proyecto={proyecto} comprasEjecutadas={comprasEjecutadas} reload={load} />
+      )}
+
+      {/* Corrección de clasificación (07-nov) — individual desde la ficha */}
+      {proyecto.origen === 'preventivo' && (
+        <CorreccionClasificacionModal
+          isOpen={correccionOpen}
+          onClose={() => setCorreccionOpen(false)}
+          proyectos={[proyecto]}
+          onAplicado={load}
+        />
       )}
     </div>
   )
