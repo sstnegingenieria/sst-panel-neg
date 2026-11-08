@@ -26,7 +26,7 @@ import { fmtMoney, etiquetaVersion } from '../../utils/sigp/formato'
 import { cambioEnVuelo, diasCambioEnVuelo, UMBRAL_CAMBIO_EN_VUELO_DIAS } from '../../types/sigp/cotizacion'
 import type { Cotizacion } from '../../types/sigp/cotizacion'
 import { sincronizarObraEspejo } from '../../utils/sigp/obraEspejo'
-import { ESTADOS_PROYECTO, idxRiel, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO, costoEjecutadoDe, TIPO_CIERRE_LABEL, asignacionesPorAprobar } from '../../types/sigp/proyecto'
+import { ESTADOS_PROYECTO, idxRiel, ESTADO_PRY_LABEL, ESTADO_PRY_COLOR, ESTADO_INICIO_ADMINISTRATIVA, MEDIO_PAGO_LABEL, origenDiferenciaLiquidacion, ventaInicialDe, ETIQUETA_COMPONENTE_CAMBIO, costoEjecutadoDe, TIPO_CIERRE_LABEL, asignacionesPorAprobar, facturasDe, totalFacturadoDe, facturacionCompletaDe } from '../../types/sigp/proyecto'
 import type { Proyecto } from '../../types/sigp/proyecto'
 import { autorEntradaProyecto } from '../../utils/sigp/autoria'
 import { useNombresUsuarios } from '../../hooks/sigp/useNombresUsuarios'
@@ -411,27 +411,33 @@ export default function ProyectoDetalleSigp() {
       {/* Ejecución → entrega → soporte → handoff (F2.1.d) */}
       <EjecucionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
 
-      {/* Administrativa B1 — factura registrada (lectura; se gestiona en
-          Facturación y Pagos) */}
-      {proyecto.facturacion && (
+      {/* Administrativa B1 + facturación PARCIAL (07-nov) — la LISTA de
+          facturas con la Σ contra el valor (lectura; se gestiona en
+          Gestión Administrativa). */}
+      {facturasDe(proyecto).length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-1.5">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-            Factura <span className="normal-case font-normal">(registrada por Gerencia Administrativa)</span>
+            Facturación <span className="normal-case font-normal">(registrada por Gerencia Administrativa)</span>
           </p>
-          <p className="text-sm text-gray-800">
-            <span className="font-mono font-semibold">{proyecto.facturacion.numero}</span>
-            <span className="text-gray-500"> · emitida el {fFecha(proyecto.facturacion.fecha)} · </span>
-            <span className="font-mono">{fmtMoney(proyecto.facturacion.valor)}</span>
+          {facturasDe(proyecto).map((f, i) => (
+            <p key={i} className={`text-sm ${f.anulada ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+              <span className="font-mono font-semibold">{f.numero}</span>
+              <span className="text-gray-500"> · emitida el {fFecha(f.fecha)} · </span>
+              <span className="font-mono">{fmtMoney(f.valor)}</span>
+              {f.corte_consecutivo && <span className="ml-1 text-[11px] font-mono text-gray-400">(corte {f.corte_consecutivo})</span>}
+              {f.anulada && <span className="ml-1.5 no-underline text-[11px] font-semibold text-rose-600">ANULADA · NC {f.anulada.nota_credito}</span>}
+              {!f.anulada && f.adjunto_url && (
+                <a href={f.adjunto_url} target="_blank" rel="noreferrer"
+                  className="ml-1.5 text-xs text-brand-700 underline underline-offset-2">📎 PDF</a>
+              )}
+            </p>
+          ))}
+          <p className={`text-xs font-semibold ${totalFacturadoDe(proyecto) > proyecto.snapshot.valor_venta ? 'text-red-700'
+            : facturacionCompletaDe(proyecto) ? 'text-emerald-700' : 'text-amber-700'}`}>
+            Σ facturado {fmtMoney(totalFacturadoDe(proyecto))} de {fmtMoney(proyecto.snapshot.valor_venta)}
+            {totalFacturadoDe(proyecto) > proyecto.snapshot.valor_venta ? ' — ⚠ SUPERA el valor del proyecto'
+              : facturacionCompletaDe(proyecto) ? ' — facturación completa' : ' — facturación parcial'}
           </p>
-          {proyecto.facturacion.cufe && (
-            <p className="text-[11px] text-gray-400 font-mono break-all">CUFE: {proyecto.facturacion.cufe}</p>
-          )}
-          {proyecto.facturacion.adjunto_url && (
-            <a href={proyecto.facturacion.adjunto_url} target="_blank" rel="noreferrer"
-              className="text-xs text-brand-700 underline underline-offset-2">
-              📎 {proyecto.facturacion.adjunto_nombre ?? 'PDF de la factura'}
-            </a>
-          )}
         </div>
       )}
 

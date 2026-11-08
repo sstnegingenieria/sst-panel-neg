@@ -925,7 +925,12 @@ service cloud.firestore {
                     // (GG/GA/admin, abajo). Ningún flujo de gestor los
                     // escribía (verificado con la batería completa).
                     && !request.resource.data.diff(resource.data).affectedKeys()
-                         .hasAny(['snapshot', 'valor_venta_inicial'])
+                         .hasAny(['snapshot', 'valor_venta_inicial',
+                                  // Facturacion parcial (07-nov): facturar es
+                                  // de gerencia — la via operativa tampoco
+                                  // toca la lista ni su suma (la 4a leccion
+                                  // del mes, aplicada ANTES de la 5a).
+                                  'facturas', 'total_facturado', 'facturacion', 'facturas_anuladas'])
                     && (request.resource.data.get('estado', '') != 'cancelado'
                         || (resource.data.get('estado', '') in
                               ['creado', 'contratista_asignado', 'permisos_en_tramite',
@@ -943,7 +948,14 @@ service cloud.firestore {
                             // pagar: el contador lo mantiene el resumen
                             // (ausente = 0; censo 26-oct: cero liquidadas
                             // históricas — toda liquidada futura lo trae).
-                            && resource.data.get('resumen_asignaciones', {}).get('saldos_pendientes', 0) == 0))
+                            && resource.data.get('resumen_asignaciones', {}).get('saldos_pendientes', 0) == 0
+                            // Facturacion PARCIAL (07-nov): el cierre exige
+                            // facturacion COMPLETA. Solo proyectos con la
+                            // LISTA (total_facturado presente); la era del
+                            // singular queda como estaba (sin reinterpretar).
+                            && (resource.data.get('total_facturado', -1) < 0
+                                || resource.data.get('total_facturado', 0)
+                                     >= resource.data.get('snapshot', {}).get('valor_venta', 0))))
                     && (request.resource.data.get('estado', '') != 'liquidado_contratista'
                         || resource.data.get('estado', '') == 'liquidado_contratista'
                         // A.4 (28-oct — "la garantía vive donde sale el dinero"): el
@@ -1018,7 +1030,7 @@ service cloud.firestore {
       allow update: if isAuthed()
                     && rolActual() == 'gerencia_administrativa'
                     && request.resource.data.diff(resource.data)
-                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'facturas_anuladas', 'pago_cliente', 'liquidacion', 'compras_reembolsos', 'cierre', 'estado', 'historial', 'fecha_actualizacion', 'resumen_asignaciones'])
+                        .affectedKeys().hasOnly(['preliquidacion', 'facturacion', 'facturas', 'total_facturado', 'facturas_anuladas', 'pago_cliente', 'liquidacion', 'compras_reembolsos', 'cierre', 'estado', 'historial', 'fecha_actualizacion', 'resumen_asignaciones'])
                     // Bloque final: cerrado inmutable + solo desde liquidado
                     // CON el pago del cliente registrado (no se cierra con
                     // cuenta por cobrar abierta — anticipada, 23-jul)
@@ -1037,7 +1049,14 @@ service cloud.firestore {
                             // pagar: el contador lo mantiene el resumen
                             // (ausente = 0; censo 26-oct: cero liquidadas
                             // históricas — toda liquidada futura lo trae).
-                            && resource.data.get('resumen_asignaciones', {}).get('saldos_pendientes', 0) == 0))
+                            && resource.data.get('resumen_asignaciones', {}).get('saldos_pendientes', 0) == 0
+                            // Facturacion PARCIAL (07-nov): el cierre exige
+                            // facturacion COMPLETA. Solo proyectos con la
+                            // LISTA (total_facturado presente); la era del
+                            // singular queda como estaba (sin reinterpretar).
+                            && (resource.data.get('total_facturado', -1) < 0
+                                || resource.data.get('total_facturado', 0)
+                                     >= resource.data.get('snapshot', {}).get('valor_venta', 0))))
                     // Bloque 3a/3b + anticipada (23-jul): liquidar exige el
                     // aval SST SIEMPRE; origen solo pagado_cliente (normal) o
                     // facturado (anticipada: marca + justificación). Un doc

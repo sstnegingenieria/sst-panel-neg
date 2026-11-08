@@ -28,8 +28,11 @@ import {
   completitudCierre, pagoClientePendiente, puedeCerrarseProyecto,
   asignacionesPorAprobar, asignacionesPorGirar, asignacionesPorLiquidar,
   MEDIOS_PAGO, MEDIO_PAGO_LABEL,
-  patchAnularFactura, facturasPreviasDelSitio, numeroFacturaEnOtroProyecto,
+  facturasPreviasDelSitio, numeroFacturaEnOtroProyecto,
   diasEnPorFacturar, UMBRAL_POR_FACTURAR_DIAS, avisoFormatoCufe,
+  // Facturación PARCIAL (07-nov): la lista como forma canónica
+  facturasDe, facturasVivasDe, totalFacturadoDe, facturacionCompletaDe,
+  ESTADOS_REGISTRO_FACTURA, patchRegistrarFacturaParcial, patchAnularFacturaDeLista,
 } from '../../types/sigp/proyecto'
 import { puedeRegistrarFacturaUI, puedeLiquidarUI, puedeCerrarProyectoUI, puedeAprobarPreliquidacionUI, puedeAsignarTareasUI } from '../../types/sigp/permisos'
 import { separarSenales, diasSenal, UMBRAL_SENAL_ALCANCE_DIAS } from '../../types/sigp/asignacion'
@@ -66,7 +69,9 @@ export default function FacturacionPagos() {
   const [adjunto, setAdjunto] = useState<File | null>(null)
   const [aplicando, setAplicando] = useState(false)
   // 08-oct — anular y reemplazar, nunca editar (número y CUFE no se tocan)
+  // 07-nov: la anulación es POR FACTURA de la lista (índice elegido en el modal)
   const [anularTarget, setAnularTarget] = useState<Proyecto | null>(null)
+  const [anularIndice, setAnularIndice] = useState<number | null>(null)
   const [anularMotivo, setAnularMotivo] = useState('')
   const [notaCredito, setNotaCredito] = useState('')
   // B2 — registro del pago del cliente
@@ -313,7 +318,7 @@ export default function FacturacionPagos() {
           (p.snapshot.nombre_sitio ?? '').toLowerCase().includes(q) ||
           (p.snapshot.codigo_sitio_cliente ?? '').toLowerCase().includes(q) ||
           p.snapshot.asunto.toLowerCase().includes(q) ||
-          (p.facturacion?.numero ?? '').toLowerCase().includes(q))
+          facturasDe(p).some(f => (f.numero ?? '').toLowerCase().includes(q)))
       : base
     // Orden elegido por el usuario (27-jul): fecha con fallback a creación;
     // cliente insensible a mayúsculas/tildes con desempate por reciente.
@@ -342,7 +347,9 @@ export default function FacturacionPagos() {
     setTarget(p)
     setNumero('')
     setFecha(new Date().toISOString().slice(0, 10))
-    setValor(p.snapshot.valor_venta)   // prellenado con lo pactado, editable
+    // Parcial (07-nov): prellenado con el RESTANTE por facturar (editable) —
+    // con la Σ ya facturada a la vista en el modal.
+    setValor(Math.max(0, p.snapshot.valor_venta - totalFacturadoDe(p)) || p.snapshot.valor_venta)
     setCufe('')
     setAdjunto(null)
   }
@@ -368,25 +375,29 @@ export default function FacturacionPagos() {
         const snap = await uploadBytes(ref(storage, `proyectos/${target.id}/factura/${nombre}`), adjunto)
         adjuntoData = { adjunto_url: await getDownloadURL(snap.ref), adjunto_nombre: adjunto.name }
       }
+      // Parcial (07-nov): el builder decide lista, Σ, transición y constancias
+      // (completa/parcial/sobre-valor). El singular legacy se materializa como
+      // facturas[0] en este mismo write (deleteField del campo viejo).
+      const r = patchRegistrarFacturaParcial(target, {
+        numero: numero.trim(),
+        fecha: Timestamp.fromDate(new Date(fecha + 'T12:00:00')),
+        valor,
+        ...(cufe.trim() ? { cufe: cufe.trim() } : {}),
+        ...adjuntoData,
+        registrado_por: user?.uid ?? '',
+        fecha_registro: ahora,
+      }, user?.uid ?? '', ahora, user?.nombre)
+      if (!r) { toast('El proyecto no está en un estado facturable', 'error'); return }
       await updateDoc(doc(db, 'proyectos', target.id), {
-        facturacion: {
-          numero: numero.trim(),
-          fecha: Timestamp.fromDate(new Date(fecha + 'T12:00:00')),
-          valor,
-          ...(cufe.trim() ? { cufe: cufe.trim() } : {}),
-          ...adjuntoData,
-          registrado_por: user?.uid ?? '',
-          fecha_registro: ahora,
-        },
-        estado: 'facturado',
-        fecha_actualizacion: ahora,
-        historial: arrayUnion({
-          de: 'enviado_a_facturacion', a: 'facturado', por: user?.uid ?? '', ...(user?.nombre ? { por_nombre: user.nombre } : {}), fecha: ahora,
-          motivo: `Factura registrada — N° ${numero.trim()} por ${fmtMoney(valor)}`
-            + (previasDelSitio.length ? ` — registrada CON la advertencia de sitio ya facturado a la vista (${previasDelSitio.map(f => f.numero).join(', ')})` : ''),
-        }),
+        ...r.padre,
+        facturacion: deleteField(),
       })
-      toast(`Factura ${numero.trim()} registrada — proyecto facturado`)
+      toast(r.completa
+        ? (r.padre.estado === 'facturado'
+            ? `Factura ${numero.trim()} registrada — facturación COMPLETA: proyecto facturado`
+            : `Factura ${numero.trim()} registrada — facturación COMPLETA (el estado avanza con el handoff)`)
+        : `Factura ${numero.trim()} registrada — PARCIAL: ${fmtMoney(r.total)} de ${fmtMoney(target.snapshot.valor_venta)}`)
+      if (r.sobrepasa) toast('⚠ La suma facturada SUPERA el valor del proyecto — quedó constancia en el historial', 'error')
       setTarget(null)
       await load()
     } catch {
@@ -394,19 +405,23 @@ export default function FacturacionPagos() {
     } finally { setAplicando(false) }
   }
 
-  // ── 08-oct — ANULAR la factura vigente (nunca editar número ni CUFE) ──
+  // ── Anular UNA factura de la lista (07-nov — marcador + nota crédito;
+  //    nunca editar número ni CUFE; con pago del cliente encima se bloquea) ──
   const anularFactura = async () => {
-    if (!anularTarget) return
-    const patch = patchAnularFactura(anularTarget, anularMotivo, notaCredito, user?.uid ?? '', Timestamp.now(), user?.nombre)
-    if (!patch) return
+    if (!anularTarget || anularIndice == null) return
+    const r = patchAnularFacturaDeLista(anularTarget, anularIndice, anularMotivo, notaCredito, user?.uid ?? '', Timestamp.now(), user?.nombre)
+    if (!r) return
     setAplicando(true)
     try {
       await updateDoc(doc(db, 'proyectos', anularTarget.id), {
-        ...patch,
-        facturacion: deleteField(),   // el builder marca null; el write lo retira
+        ...r.padre,
+        facturacion: deleteField(),
       })
-      toast(`Factura ${anularTarget.facturacion?.numero} anulada — el proyecto vuelve a Por facturar; registra la correcta como factura nueva`)
+      toast(r.padre.estado
+        ? 'Factura anulada — la facturación dejó de estar completa: el proyecto vuelve a Por facturar'
+        : `Factura anulada — Σ facturada vigente ${fmtMoney(r.total)}`)
       setAnularTarget(null)
+      setAnularIndice(null)
       setAnularMotivo('')
       setNotaCredito('')
       await load()
@@ -419,7 +434,7 @@ export default function FacturacionPagos() {
   const abrirPago = (p: Proyecto) => {
     setPagoTarget(p)
     setPagoFecha(new Date().toISOString().slice(0, 10))
-    setPagoValor(p.facturacion?.valor ?? p.snapshot.valor_venta)   // prellenado con lo facturado
+    setPagoValor(totalFacturadoDe(p) || p.snapshot.valor_venta)   // prellenado con la Σ facturada viva
     setPagoMedio('transferencia')
     setPagoComprobante(null)
   }
@@ -639,16 +654,36 @@ export default function FacturacionPagos() {
                 <td className="py-3 px-4 text-gray-700">{p.snapshot.cliente}</td>
                 <td className="py-3 px-4 text-right font-mono text-gray-700">{fmtMoney(p.snapshot.valor_venta)}</td>
                 <td className="py-3 px-4">
-                  {p.facturacion ? (
-                    <span className="text-xs text-gray-700">
-                      <span className="font-mono font-semibold">{p.facturacion.numero}</span>
-                      <span className="text-gray-400"> · {fFecha(p.facturacion.fecha)} · {fmtMoney(p.facturacion.valor)}</span>
-                      {p.facturacion.adjunto_url && (
-                        <a href={p.facturacion.adjunto_url} target="_blank" rel="noreferrer"
-                          className="ml-1.5 text-brand-700 underline underline-offset-2">PDF</a>
-                      )}
-                    </span>
-                  ) : <span className="text-gray-300 text-xs">—</span>}
+                  {/* Parcial (07-nov): la Σ facturada contra el valor, SIEMPRE
+                      a la vista — un proyecto parcial no está facturado ni sin
+                      facturar, y la columna lo dice. */}
+                  {(() => {
+                    const vivas = facturasVivasDe(p)
+                    if (vivas.length === 0) return <span className="text-gray-300 text-xs">—</span>
+                    const total = totalFacturadoDe(p)
+                    const completa = facturacionCompletaDe(p)
+                    return (
+                      <div className="text-xs text-gray-700 space-y-0.5">
+                        {vivas.map((f, i) => (
+                          <div key={i}>
+                            <span className="font-mono font-semibold">{f.numero}</span>
+                            <span className="text-gray-400"> · {fFecha(f.fecha)} · {fmtMoney(f.valor)}</span>
+                            {f.corte_consecutivo && <span className="ml-1 text-[10px] font-mono text-gray-400">({f.corte_consecutivo})</span>}
+                            {f.adjunto_url && (
+                              <a href={f.adjunto_url} target="_blank" rel="noreferrer"
+                                className="ml-1.5 text-brand-700 underline underline-offset-2">PDF</a>
+                            )}
+                          </div>
+                        ))}
+                        <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          total > p.snapshot.valor_venta ? 'bg-red-100 text-red-800'
+                          : completa ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
+                          Σ {fmtMoney(total)} de {fmtMoney(p.snapshot.valor_venta)}
+                          {total > p.snapshot.valor_venta ? ' ⚠ SUPERA el valor' : completa ? ' · completa' : ` · ${Math.round(total / Math.max(1, p.snapshot.valor_venta) * 100)}%`}
+                        </span>
+                      </div>
+                    )
+                  })()}
                 </td>
                 <td className="py-3 px-4">
                   {p.pago_cliente ? (
@@ -714,6 +749,26 @@ export default function FacturacionPagos() {
                   )}
                 </td>
                 <td className="py-3 px-4 text-right">
+                  {/* Facturación PARCIAL (07-nov, caso SENA): registrable desde
+                      en_ejecucion — se factura por avance, no al final. En los
+                      estados pre-handoff es un botón ADICIONAL (no reemplaza la
+                      acción del riel); anular es por factura y vive aquí mismo
+                      mientras no haya pago del cliente. */}
+                  {puedeRegistrar && ESTADOS_REGISTRO_FACTURA.includes(p.estado) && p.estado !== 'enviado_a_facturacion' && p.estado !== 'facturado' && (
+                    <div className="mb-1.5 flex items-center justify-end gap-2">
+                      <button onClick={() => abrirRegistro(p)}
+                        title="Factura parcial por avance — la Σ facturada contra el valor del proyecto queda a la vista"
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
+                        🧾 Factura parcial
+                      </button>
+                      {facturasVivasDe(p).length > 0 && !p.pago_cliente && (
+                        <button onClick={() => { setAnularTarget(p); setAnularIndice(null); setAnularMotivo(''); setNotaCredito('') }}
+                          className="text-xs px-2.5 py-1.5 rounded-lg font-medium border border-rose-300 text-rose-700 hover:bg-rose-50">
+                          Anular
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {/* Las acciones de preliquidación YA existen en la ficha del
                       proyecto (F2.1.c) — aquí se SURFACEAN con enlace directo,
                       no se reinventan. */}
@@ -730,10 +785,18 @@ export default function FacturacionPagos() {
                           : p.estado === 'preliquidacion_definida' ? '✓ Aprobar preliquidación →' : '💸 Registrar anticipo →'}
                     </Link>
                   ) : p.estado === 'enviado_a_facturacion' && puedeRegistrar ? (
-                    <button onClick={() => abrirRegistro(p)}
-                      className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
-                      🧾 Registrar factura
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => abrirRegistro(p)}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium border border-brand-300 text-brand-700 hover:bg-brand-50">
+                        🧾 Registrar factura
+                      </button>
+                      {facturasVivasDe(p).length > 0 && !p.pago_cliente && (
+                        <button onClick={() => { setAnularTarget(p); setAnularIndice(null); setAnularMotivo(''); setNotaCredito('') }}
+                          className="text-xs px-2.5 py-1.5 rounded-lg font-medium border border-rose-300 text-rose-700 hover:bg-rose-50">
+                          Anular
+                        </button>
+                      )}
+                    </div>
                   ) : p.estado === 'facturado' && puedeRegistrar ? (
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => abrirPago(p)}
@@ -743,8 +806,8 @@ export default function FacturacionPagos() {
                       {/* 08-oct — anular y reemplazar, nunca editar: número y
                           CUFE no se tocan; con pago encima se bloquea. */}
                       {!p.pago_cliente && (
-                        <button onClick={() => { setAnularTarget(p); setAnularMotivo(''); setNotaCredito('') }}
-                          title="Anula el registro con motivo y nota crédito; la factura queda congelada (CUFE intacto) y la correcta se registra como factura nueva"
+                        <button onClick={() => { setAnularTarget(p); setAnularIndice(null); setAnularMotivo(''); setNotaCredito('') }}
+                          title="Anula UNA factura de la lista con motivo y nota crédito; queda congelada fuera de la suma (CUFE intacto) y la correcta se registra como factura nueva"
                           className="text-xs px-3 py-1.5 rounded-lg font-medium border border-rose-300 text-rose-700 hover:bg-rose-50">
                           Anular factura
                         </button>
@@ -855,7 +918,7 @@ export default function FacturacionPagos() {
         actions={[
           { label: 'Cancelar', onClick: () => setTarget(null), variant: 'secondary' },
           {
-            label: aplicando ? 'Registrando…' : 'Registrar y marcar facturado',
+            label: aplicando ? 'Registrando…' : 'Registrar factura',
             onClick: registrar, variant: 'primary', loading: aplicando,
           },
         ]}
@@ -907,11 +970,35 @@ export default function FacturacionPagos() {
             <InputExpresion valor={valor} onValor={setValor}
               className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
           </label>
-          {valor !== undefined && target && valor !== target.snapshot.valor_venta && (
-            <p className="text-xs text-amber-800 bg-amber-50 rounded px-2 py-1.5">
-              ⚠ El valor facturado difiere del pactado ({fmtMoney(target.snapshot.valor_venta)}) — verifica antes de registrar.
-            </p>
-          )}
+          {/* Parcial (07-nov): la cuenta del proyecto SIEMPRE a la vista —
+              Σ ya facturada, esta factura, y dónde queda la suma. Superar el
+              valor ADVIERTE con constancia, no bloquea (patrón sobre-giro). */}
+          {target && (() => {
+            const yaFacturado = totalFacturadoDe(target)
+            const vivas = facturasVivasDe(target)
+            const nuevaSuma = yaFacturado + (valor ?? 0)
+            const valorProyecto = target.snapshot.valor_venta
+            return (
+              <div className={`rounded-lg border px-3 py-2 text-xs space-y-1 ${
+                nuevaSuma > valorProyecto ? 'border-red-300 bg-red-50 text-red-900' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
+                {vivas.length > 0 && (
+                  <p>Ya facturado en este proyecto: <span className="font-mono font-semibold">{fmtMoney(yaFacturado)}</span> ({vivas.map(f => f.numero).join(', ')})</p>
+                )}
+                <p>
+                  Con esta factura: <span className="font-mono font-semibold">{fmtMoney(nuevaSuma)}</span> de{' '}
+                  <span className="font-mono">{fmtMoney(valorProyecto)}</span>
+                  {' '}({Math.round(nuevaSuma / Math.max(1, valorProyecto) * 100)}%)
+                  {nuevaSuma >= valorProyecto && nuevaSuma <= valorProyecto && ' — facturación COMPLETA'}
+                </p>
+                {nuevaSuma > valorProyecto && (
+                  <p className="font-semibold">⚠ La suma SUPERARÍA el valor del proyecto por {fmtMoney(nuevaSuma - valorProyecto)} — puede haber razón (adicional en camino), pero quedará constancia en el historial de que registraste con las dos cifras a la vista.</p>
+                )}
+                {nuevaSuma < valorProyecto && (
+                  <p className="text-gray-500">Facturación PARCIAL — restarán {fmtMoney(valorProyecto - nuevaSuma)} por facturar.</p>
+                )}
+              </div>
+            )
+          })()}
           <label className="block text-xs text-gray-500">
             CUFE (factura electrónica — opcional)
             <input value={cufe} onChange={e => setCufe(e.target.value)} placeholder="Código único de factura electrónica"
@@ -936,30 +1023,41 @@ export default function FacturacionPagos() {
       {/* ── 08-oct — Modal de ANULACIÓN: anular y reemplazar, nunca editar ── */}
       <Modal
         isOpen={anularTarget !== null}
-        title={`Anular factura — ${anularTarget?.facturacion?.numero ?? ''} · ${anularTarget?.consecutivo ?? ''}`}
+        title={`Anular factura — ${anularTarget?.consecutivo ?? ''}`}
         onClose={() => setAnularTarget(null)}
         actions={[
           { label: 'Volver', onClick: () => setAnularTarget(null), variant: 'secondary' },
           {
-            label: aplicando ? 'Anulando…' : 'Anular la factura',
+            label: aplicando ? 'Anulando…' : 'Anular la factura elegida',
             onClick: anularFactura, variant: 'danger', loading: aplicando,
-            disabled: !anularTarget
-              || patchAnularFactura(anularTarget, anularMotivo, notaCredito, user?.uid ?? '', Timestamp.now()) === null,
+            disabled: !anularTarget || anularIndice == null
+              || patchAnularFacturaDeLista(anularTarget, anularIndice, anularMotivo, notaCredito, user?.uid ?? '', Timestamp.now()) === null,
           },
         ]}
       >
-        {anularTarget?.facturacion && (
+        {anularTarget && (
           <div className="space-y-3">
-            {/* La factura A LA VISTA — es lo que se está anulando */}
-            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 space-y-0.5">
-              <p><b>N° {anularTarget.facturacion.numero}</b> · {fFecha(anularTarget.facturacion.fecha)} · <span className="font-mono">{fmtMoney(anularTarget.facturacion.valor)}</span></p>
-              {anularTarget.facturacion.cufe && <p className="font-mono text-[10px] break-all text-gray-500">CUFE {anularTarget.facturacion.cufe}</p>}
+            {/* 07-nov — la anulación es POR FACTURA: se ELIGE cuál de la
+                lista (con una sola, igual se elige — nada implícito). */}
+            <p className="text-xs font-semibold text-gray-700">¿Cuál factura se anula?</p>
+            <div className="space-y-1.5">
+              {facturasDe(anularTarget).map((f, i) => f.anulada ? null : (
+                <label key={i} className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 cursor-pointer">
+                  <input type="radio" name="anular-factura" className="mt-0.5 accent-rose-600"
+                    checked={anularIndice === i} onChange={() => setAnularIndice(i)} />
+                  <span>
+                    <b>N° {f.numero}</b> · {fFecha(f.fecha)} · <span className="font-mono">{fmtMoney(f.valor)}</span>
+                    {f.corte_consecutivo && <span className="ml-1 font-mono text-[10px] text-gray-400">({f.corte_consecutivo})</span>}
+                    {f.cufe && <span className="block font-mono text-[10px] break-all text-gray-500">CUFE {f.cufe}</span>}
+                  </span>
+                </label>
+              ))}
             </div>
             <p className="text-xs text-gray-600">
-              El registro NO desaparece: queda congelado en <b>facturas anuladas</b> con su número y su
-              CUFE intactos — es un hecho fiscal que ocurrió. El proyecto vuelve a <b>Por facturar</b> y
-              la factura correcta se registra como <b>registro nuevo</b>. El número y el CUFE no se
-              editan en ningún camino: un documento fiscal no se corrige, se reemplaza.
+              El registro NO desaparece: queda en la lista <b>fuera de la suma</b>, con su número y su
+              CUFE intactos — es un hecho fiscal que ocurrió. Si la facturación deja de estar completa,
+              el proyecto vuelve a <b>Por facturar</b>; la correcta se registra como <b>registro nuevo</b>.
+              El número y el CUFE no se editan en ningún camino: un documento fiscal no se corrige, se reemplaza.
             </p>
             <label className="block text-xs text-gray-500">
               N° de la nota crédito (DIAN) <span className="text-red-500">*</span>
@@ -992,8 +1090,10 @@ export default function FacturacionPagos() {
         <div className="space-y-3">
           <p className="text-xs text-gray-500">
             {pagoTarget?.snapshot.nombre_sitio || pagoTarget?.snapshot.asunto} · {pagoTarget?.snapshot.cliente} ·
-            facturado <span className="font-mono">{fmtMoney(pagoTarget?.facturacion?.valor ?? 0)}</span>
-            {pagoTarget?.facturacion?.numero && <span className="font-mono"> ({pagoTarget.facturacion.numero})</span>}
+            facturado <span className="font-mono">{fmtMoney(pagoTarget ? totalFacturadoDe(pagoTarget) : 0)}</span>
+            {pagoTarget && facturasVivasDe(pagoTarget).length > 0 && (
+              <span className="font-mono"> ({facturasVivasDe(pagoTarget).map(f => f.numero).join(', ')})</span>
+            )}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="text-xs text-gray-500">
@@ -1014,9 +1114,9 @@ export default function FacturacionPagos() {
             <InputExpresion valor={pagoValor} onValor={setPagoValor}
               className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
           </label>
-          {pagoValor !== undefined && pagoTarget?.facturacion && pagoValor !== pagoTarget.facturacion.valor && (
+          {pagoValor !== undefined && pagoTarget && totalFacturadoDe(pagoTarget) > 0 && pagoValor !== totalFacturadoDe(pagoTarget) && (
             <p className="text-xs text-amber-800 bg-amber-50 rounded px-2 py-1.5">
-              ⚠ El valor recibido difiere del facturado ({fmtMoney(pagoTarget.facturacion.valor)}) — verifica antes de
+              ⚠ El valor recibido difiere de la Σ facturada ({fmtMoney(totalFacturadoDe(pagoTarget))}) — verifica antes de
               registrar. (Pagos parciales/abonos: extensión futura si el área los confirma.)
             </p>
           )}
