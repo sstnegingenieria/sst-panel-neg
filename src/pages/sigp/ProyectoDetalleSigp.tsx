@@ -409,12 +409,14 @@ export default function ProyectoDetalleSigp() {
       {/* Entregables IHS (F2.3 — solo preventivos; requisito de la entrega) */}
       <EntregablesIhs proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
 
+      {/* Corte de obra (07-nov): avance por ítem + cortes emitidos — ANTES de
+          "Ejecución y entrega" (08-nov: el avance es el pulso diario de la
+          obra; la entrega es su desenlace). Se auto-oculta sin items_alcance
+          o antes de la ejecución; desplegable cerrada hasta que haya avance. */}
+      <AvanceObra proyecto={proyecto} reload={load} nombres={nombres} />
+
       {/* Ejecución → entrega → soporte → handoff (F2.1.d) */}
       <EjecucionProyecto proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
-
-      {/* Corte de obra (07-nov): avance por ítem + cortes emitidos — se
-          auto-oculta sin items_alcance o antes de la ejecución. */}
-      <AvanceObra proyecto={proyecto} reload={load} nombres={nombres} />
 
       {/* Administrativa B1 + facturación PARCIAL (07-nov) — la LISTA de
           facturas con la Σ contra el valor (lectura; se gestiona en

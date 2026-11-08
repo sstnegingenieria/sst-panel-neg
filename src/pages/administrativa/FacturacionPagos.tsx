@@ -344,8 +344,11 @@ export default function FacturacionPagos() {
   const enCamino = useMemo(() => proyectos.filter(p => enCaminoAdministrativa(p.estado)).length, [proyectos])
 
   // Corte de obra (07-nov): el corte emitido SUSTENTA la factura parcial —
-  // el registro lo referencia y prellena el valor con el facturable.
-  const [cortesTarget, setCortesTarget] = useState<{ id: string; consecutivo: string; numero_corte: number; total: number }[]>([])
+  // el registro lo referencia y prellena el valor con lo que FALTA del corte.
+  // 08-nov: solo cortes FACTURABLES (un informativo no sustenta factura); la
+  // aritmética facturado vs. falta POR CORTE va a la vista, y superar el
+  // facturable ADVIERTE con constancia, no bloquea (patrón sobre-giro).
+  const [cortesTarget, setCortesTarget] = useState<{ id: string; consecutivo: string; numero_corte: number; total: number; facturado: number }[]>([])
   const [corteSel, setCorteSel] = useState('')
 
   const abrirRegistro = (p: Proyecto) => {
@@ -358,14 +361,21 @@ export default function FacturacionPagos() {
     setCufe('')
     setAdjunto(null)
     setCorteSel(''); setCortesTarget([])
-    // cortes emitidos aún sin factura viva que los referencie (best-effort)
+    // cortes FACTURABLES emitidos, con su Σ ya facturada (varias facturas
+    // pueden cubrir un corte — la cuenta queda a la vista; best-effort)
     ;(async () => {
       try {
         const snap = await getDocs(query(collection(db, 'proyectos', p.id, 'cortes'), orderBy('numero_corte', 'asc')))
-        const referenciados = new Set(facturasVivasDe(p).map(f => f.corte_id).filter(Boolean))
+        const vivas = facturasVivasDe(p)
         setCortesTarget(snap.docs
-          .filter(d => !referenciados.has(d.id))
-          .map(d => ({ id: d.id, consecutivo: d.data().consecutivo as string, numero_corte: d.data().numero_corte as number, total: (d.data().resumen as { total: number }).total })))
+          .filter(d => d.data().tipo !== 'informativo')
+          .map(d => ({
+            id: d.id,
+            consecutivo: d.data().consecutivo as string,
+            numero_corte: d.data().numero_corte as number,
+            total: (d.data().resumen as { total: number }).total,
+            facturado: vivas.filter(f => f.corte_id === d.id).reduce((s, f) => s + (f.valor || 0), 0),
+          })))
       } catch { /* sin cortes el selector no sale */ }
     })()
   }
@@ -404,7 +414,7 @@ export default function FacturacionPagos() {
         ...adjuntoData,
         registrado_por: user?.uid ?? '',
         fecha_registro: ahora,
-      }, user?.uid ?? '', ahora, user?.nombre)
+      }, user?.uid ?? '', ahora, user?.nombre, corte?.total)
       if (!r) { toast('El proyecto no está en un estado facturable', 'error'); return }
       await updateDoc(doc(db, 'proyectos', target.id), {
         ...r.padre,
@@ -416,6 +426,7 @@ export default function FacturacionPagos() {
             : `Factura ${numero.trim()} registrada — facturación COMPLETA (el estado avanza con el handoff)`)
         : `Factura ${numero.trim()} registrada — PARCIAL: ${fmtMoney(r.total)} de ${fmtMoney(target.snapshot.valor_venta)}`)
       if (r.sobrepasa) toast('⚠ La suma facturada SUPERA el valor del proyecto — quedó constancia en el historial', 'error')
+      if (r.sobrepasaCorte) toast(`⚠ La Σ facturada contra el corte (${fmtMoney(r.facturadoCorte)}) SUPERA su facturable — quedó constancia en el historial`, 'error')
       setTarget(null)
       await load()
     } catch {
@@ -985,19 +996,38 @@ export default function FacturacionPagos() {
           </div>
           {cortesTarget.length > 0 && (
             <label className="block text-xs text-gray-500">
-              Corte de obra que la sustenta <span className="text-gray-400">(opcional — prellena el valor con el facturable)</span>
+              Corte de obra que la sustenta <span className="text-gray-400">(opcional — prellena el valor con lo que FALTA del corte; solo cortes facturables)</span>
               <select value={corteSel}
                 onChange={e => {
                   setCorteSel(e.target.value)
                   const c = cortesTarget.find(x => x.id === e.target.value)
-                  if (c) setValor(c.total)
+                  if (c) setValor(Math.max(0, c.total - c.facturado) || c.total)
                 }}
                 className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
                 <option value="">— Sin corte —</option>
                 {cortesTarget.map(c => (
-                  <option key={c.id} value={c.id}>{c.consecutivo} · corte {c.numero_corte} · {fmtMoney(c.total)}</option>
+                  <option key={c.id} value={c.id}>
+                    {c.consecutivo} · corte {c.numero_corte} · facturable {fmtMoney(c.total)}
+                    {c.facturado > 0 ? ` · facturado ${fmtMoney(c.facturado)} · falta ${fmtMoney(Math.max(0, c.total - c.facturado))}` : ''}
+                  </option>
                 ))}
               </select>
+              {/* Aritmética POR CORTE en vivo: dónde queda la Σ del corte con
+                  ESTE valor — superar advierte (la constancia va al historial
+                  al registrar), jamás bloquea. */}
+              {(() => {
+                const c = cortesTarget.find(x => x.id === corteSel)
+                if (!c) return null
+                const nuevaSumaCorte = c.facturado + (valor ?? 0)
+                return (
+                  <p className={`mt-1 text-[11px] ${nuevaSumaCorte > c.total ? 'text-red-700 font-semibold' : 'text-gray-500'}`}>
+                    Contra {c.consecutivo}: ya facturado {fmtMoney(c.facturado)} + esta factura = {fmtMoney(nuevaSumaCorte)} de {fmtMoney(c.total)}
+                    {nuevaSumaCorte > c.total
+                      ? ' — ⚠ SUPERA el facturable del corte: se registrará con constancia en el historial'
+                      : nuevaSumaCorte === c.total ? ' — el corte queda facturado completo' : ` — faltará ${fmtMoney(c.total - nuevaSumaCorte)}`}
+                  </p>
+                )
+              })()}
             </label>
           )}
           <label className="block text-xs text-gray-500">
