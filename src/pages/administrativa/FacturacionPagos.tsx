@@ -9,7 +9,7 @@
 // (lectura). Los gestores de proyectos no entran aquí (segregación).
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { collection, getDocs, getDoc, setDoc, doc, updateDoc, arrayUnion, deleteField, query, where, Timestamp } from 'firebase/firestore'
+import { collection, getDocs, getDoc, setDoc, doc, updateDoc, arrayUnion, deleteField, query, where, orderBy, Timestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../firebase/config'
 import { useAuth } from '../../contexts/AuthContext'
@@ -343,6 +343,11 @@ export default function FacturacionPagos() {
   ) as Record<string, number>, [proyectos])
   const enCamino = useMemo(() => proyectos.filter(p => enCaminoAdministrativa(p.estado)).length, [proyectos])
 
+  // Corte de obra (07-nov): el corte emitido SUSTENTA la factura parcial —
+  // el registro lo referencia y prellena el valor con el facturable.
+  const [cortesTarget, setCortesTarget] = useState<{ id: string; consecutivo: string; numero_corte: number; total: number }[]>([])
+  const [corteSel, setCorteSel] = useState('')
+
   const abrirRegistro = (p: Proyecto) => {
     setTarget(p)
     setNumero('')
@@ -352,6 +357,17 @@ export default function FacturacionPagos() {
     setValor(Math.max(0, p.snapshot.valor_venta - totalFacturadoDe(p)) || p.snapshot.valor_venta)
     setCufe('')
     setAdjunto(null)
+    setCorteSel(''); setCortesTarget([])
+    // cortes emitidos aún sin factura viva que los referencie (best-effort)
+    ;(async () => {
+      try {
+        const snap = await getDocs(query(collection(db, 'proyectos', p.id, 'cortes'), orderBy('numero_corte', 'asc')))
+        const referenciados = new Set(facturasVivasDe(p).map(f => f.corte_id).filter(Boolean))
+        setCortesTarget(snap.docs
+          .filter(d => !referenciados.has(d.id))
+          .map(d => ({ id: d.id, consecutivo: d.data().consecutivo as string, numero_corte: d.data().numero_corte as number, total: (d.data().resumen as { total: number }).total })))
+      } catch { /* sin cortes el selector no sale */ }
+    })()
   }
 
   // 08-oct — la GUARDA: facturas previas del mismo sitio+cliente, a la vista
@@ -378,11 +394,13 @@ export default function FacturacionPagos() {
       // Parcial (07-nov): el builder decide lista, Σ, transición y constancias
       // (completa/parcial/sobre-valor). El singular legacy se materializa como
       // facturas[0] en este mismo write (deleteField del campo viejo).
+      const corte = cortesTarget.find(c => c.id === corteSel)
       const r = patchRegistrarFacturaParcial(target, {
         numero: numero.trim(),
         fecha: Timestamp.fromDate(new Date(fecha + 'T12:00:00')),
         valor,
         ...(cufe.trim() ? { cufe: cufe.trim() } : {}),
+        ...(corte ? { corte_id: corte.id, corte_consecutivo: corte.consecutivo } : {}),
         ...adjuntoData,
         registrado_por: user?.uid ?? '',
         fecha_registro: ahora,
@@ -965,6 +983,23 @@ export default function FacturacionPagos() {
                 className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300" />
             </label>
           </div>
+          {cortesTarget.length > 0 && (
+            <label className="block text-xs text-gray-500">
+              Corte de obra que la sustenta <span className="text-gray-400">(opcional — prellena el valor con el facturable)</span>
+              <select value={corteSel}
+                onChange={e => {
+                  setCorteSel(e.target.value)
+                  const c = cortesTarget.find(x => x.id === e.target.value)
+                  if (c) setValor(c.total)
+                }}
+                className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-300">
+                <option value="">— Sin corte —</option>
+                {cortesTarget.map(c => (
+                  <option key={c.id} value={c.id}>{c.consecutivo} · corte {c.numero_corte} · {fmtMoney(c.total)}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="block text-xs text-gray-500">
             Valor facturado <span className="text-red-500">*</span>
             <InputExpresion valor={valor} onValor={setValor}

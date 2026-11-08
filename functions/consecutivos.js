@@ -52,6 +52,9 @@ const ROLES_POR_PREFIJO = {
   AC: ['gestion_integral', 'admin'],
   AP: ['gestion_integral', 'admin'],
   MEJ: ['gestion_integral', 'admin'],
+  // Corte de avance de obra (07-nov): lo EMITE gerencia (quien mide no
+  // emite — segregación captura/emisión, espejo de puedeEmitirCorteUI).
+  CRT: ['gerencia_administrativa', 'admin'],
 };
 
 // RESERVADOS sin llamador — FUERA de la superficie a propósito (un prefijo
