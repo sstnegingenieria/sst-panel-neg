@@ -666,6 +666,11 @@ export function patchRegistrarFacturaParcial(
   uid: string,
   ahora: Timestamp,
   nombre?: string,
+  /** Facturable del corte referenciado (corte de obra, 08-nov): con él la
+   *  aritmética POR CORTE queda en la constancia — si la Σ de facturas vivas
+   *  contra ese corte supera su facturable, se advierte con las dos cifras a
+   *  la vista (jamás se bloquea — patrón sobre-giro). */
+  corteTotal?: number,
 ): {
   padre: {
     facturas: FacturaProyecto[]
@@ -678,6 +683,11 @@ export function patchRegistrarFacturaParcial(
   total: number
   completa: boolean
   sobrepasa: boolean
+  /** Σ de facturas vivas contra el MISMO corte (incluida esta) vs. su
+   *  facturable — solo cuando la factura referencia un corte y se pasó
+   *  `corteTotal`. */
+  sobrepasaCorte: boolean
+  facturadoCorte: number
 } | null {
   if (!ESTADOS_REGISTRO_FACTURA.includes(p.estado)) return null
   if (!factura.numero?.trim() || !(factura.valor > 0)) return null
@@ -686,15 +696,22 @@ export function patchRegistrarFacturaParcial(
   const valorProyecto = p.snapshot?.valor_venta ?? 0
   const completa = total >= valorProyecto
   const sobrepasa = total > valorProyecto
+  const facturadoCorte = factura.corte_id
+    ? facturas.filter(f => !f.anulada && f.corte_id === factura.corte_id).reduce((s, f) => s + (f.valor || 0), 0)
+    : 0
+  const sobrepasaCorte = factura.corte_id != null && corteTotal != null && facturadoCorte > corteTotal
   const transiciona = completa && p.estado === 'enviado_a_facturacion'
   const entrada: EntradaHistorialProyecto = {
     de: p.estado, a: transiciona ? 'facturado' : p.estado, por: uid, fecha: ahora,
     ...(nombre ? { por_nombre: nombre } : {}),
     motivo: `Factura ${factura.numero.trim()} registrada — ${factura.valor}` +
       (factura.corte_consecutivo ? ` · soportada por el corte ${factura.corte_consecutivo}` : '') +
+      (factura.corte_id && corteTotal != null
+        ? ` · Σ facturada contra el corte ${facturadoCorte} de ${corteTotal}` : '') +
       ` · Σ facturada ${total} de ${valorProyecto}` +
       (completa ? ' · FACTURACIÓN COMPLETA' : ' · facturación PARCIAL') +
-      (sobrepasa ? ` · ⚠ LA SUMA SUPERA EL VALOR DEL PROYECTO — registrada con las dos cifras a la vista` : ''),
+      (sobrepasa ? ` · ⚠ LA SUMA SUPERA EL VALOR DEL PROYECTO — registrada con las dos cifras a la vista` : '') +
+      (sobrepasaCorte ? ` · ⚠ LA Σ CONTRA EL CORTE SUPERA SU FACTURABLE — registrada con las dos cifras a la vista` : ''),
   }
   return {
     padre: {
@@ -702,7 +719,7 @@ export function patchRegistrarFacturaParcial(
       ...(transiciona ? { estado: 'facturado' as const } : {}),
       historial: [...p.historial, entrada], fecha_actualizacion: ahora,
     },
-    total, completa, sobrepasa,
+    total, completa, sobrepasa, sobrepasaCorte, facturadoCorte,
   }
 }
 

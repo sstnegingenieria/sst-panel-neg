@@ -124,9 +124,27 @@ export interface ResumenEconomicoCorte {
   total: number
 }
 
+// ── Tipo de corte (08-nov) ───────────────────────────────────────────────────
+// FACTURABLE: sustenta una factura — su delta mueve la base de cobro.
+// INFORMATIVO: congela el acumulado y genera PDF (un hecho fechado para el
+// cliente o una reunión), pero NO mueve la base — el siguiente facturable
+// mide contra el ÚLTIMO FACTURABLE, jamás contra el informativo (si midiera
+// contra "el anterior a secas", un informativo se comería el trabajo que
+// había que cobrar). Ausente = facturable (cortes previos a esta fecha).
+export type TipoCorte = 'facturable' | 'informativo'
+export const TIPO_CORTE_LABEL: Record<TipoCorte, string> = {
+  facturable: 'Facturable',
+  informativo: 'Informativo — no facturable',
+}
+export const esCorteFacturable = (c: Pick<CorteObra, 'tipo'>): boolean =>
+  c.tipo !== 'informativo'
+
 export interface CorteObra {
   consecutivo: string          // CRT-YYYY-NNN (al emitir)
   numero_corte: number         // 1, 2, 3… dentro del proyecto
+  /** Ausente = facturable (legacy). Un informativo congela y documenta pero
+   *  su delta NO es base de cobro ni admite factura que lo referencie. */
+  tipo?: TipoCorte
   proyecto_id: string
   proyecto_consecutivo: string
   cliente: string
@@ -190,25 +208,35 @@ export type ResultadoCorte =
   | { ok: true; corte: Omit<CorteObra, 'consecutivo' | 'fecha_emision' | 'emitido_por' | 'emitido_por_nombre' | 'fecha_creacion' | 'pdf_url' | 'pdf_nombre' | 'pdf_hash'> }
   | { ok: false; error: string }
 
-/** Construye el corte N — PURO. El acumulado anterior sale del ÚLTIMO corte
- *  EMITIDO (congelado allá): corregir el avance después de emitir jamás
- *  cambia el delta de lo ya entregado. */
+/** Construye el corte N — PURO. La BASE del delta sale del ÚLTIMO corte
+ *  FACTURABLE emitido (congelado allá) — un informativo intermedio no la
+ *  mueve; corregir el avance después de emitir jamás cambia el delta de lo
+ *  ya entregado. El número de corte sí es correlativo sobre TODOS. */
 export function construirCorte(args: {
   proyecto: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot' | 'avance_items' | 'cotizacion_version' | 'cotizacion_consecutivo'>
-  cortesPrevios: Pick<CorteObra, 'numero_corte' | 'cd_acum' | 'cotizacion_version_medida'>[]
+  cortesPrevios: (Pick<CorteObra, 'numero_corte' | 'cd_acum' | 'cotizacion_version_medida' | 'tipo'> & { consecutivo?: string })[]
   esquema: EsquemaTributario
   aiu?: ConfigAIU
+  /** Default 'facturable'. Informativo: mismo snapshot/resumen, delta
+   *  ROTULADO no-facturable; admite delta 0 (constancia fechada sin avance
+   *  nuevo), jamás negativo. */
+  tipo?: TipoCorte
   observaciones?: string
   /** Forma SENA: referencias de contrato del cliente (clientes.contratos). */
   contratoReferencias?: string[]
 }): ResultadoCorte {
   const { proyecto, cortesPrevios } = args
+  const tipo: TipoCorte = args.tipo ?? 'facturable'
   const items_alcance = proyecto.snapshot.items_alcance ?? []
   if (items_alcance.length === 0) return { ok: false, error: 'El proyecto no tiene ítems de alcance (items_alcance) — corte no disponible' }
   const avances = proyecto.avance_items ?? []
   if (avances.length === 0) return { ok: false, error: 'No hay avance capturado — el corte se genera del avance, no se arma a mano' }
 
-  const previo = [...cortesPrevios].sort((a, b) => b.numero_corte - a.numero_corte)[0]
+  const ordenados = [...cortesPrevios].sort((a, b) => b.numero_corte - a.numero_corte)
+  const previo = ordenados[0]
+  // La base de cobro: el último FACTURABLE (ausencia de tipo = facturable,
+  // legacy). Los informativos intermedios no mueven esta base.
+  const previoFacturable = ordenados.find(c => esCorteFacturable(c))
   const items: ItemCorte[] = items_alcance.map(it => {
     const av = avances.find(a => a.clave === it.clave)
     const cantidadAcum = av?.cantidad ?? 0
@@ -226,9 +254,18 @@ export function construirCorte(args: {
   })
   const cd_contratado = items.reduce((s, i) => s + i.valor_contratado, 0)
   const cd_acum = items.reduce((s, i) => s + i.valor_acum, 0)
-  const cd_acum_anterior = previo?.cd_acum ?? 0
+  const cd_acum_anterior = previoFacturable?.cd_acum ?? 0
   const deltaCd = cd_acum - cd_acum_anterior
-  if (deltaCd <= 0) return { ok: false, error: `El acumulado (${cd_acum}) no supera el del corte anterior (${cd_acum_anterior}) — no hay avance nuevo que cortar` }
+  if (deltaCd < 0) {
+    // Nombra el corte contra el que choca: un acumulado por debajo de lo ya
+    // cobrado no es un hecho que documentar — es una inconsistencia que
+    // alguien tiene que resolver (decisión Giovanny 08-nov).
+    const nombrePrevio = previoFacturable
+      ? (previoFacturable.consecutivo ?? `N° ${previoFacturable.numero_corte}`)
+      : 'anterior'
+    return { ok: false, error: `El acumulado (${cd_acum}) quedó POR DEBAJO de lo ya cobrado en el corte facturable ${nombrePrevio} (${cd_acum_anterior}). Eso no es un hecho que documentar — es una inconsistencia que alguien tiene que resolver (avance corregido a la baja o cambio de alcance) antes de emitir cualquier corte, informativo incluido` }
+  }
+  if (deltaCd === 0 && tipo === 'facturable') return { ok: false, error: `El acumulado (${cd_acum}) no supera la base del último corte facturable (${cd_acum_anterior}) — no hay avance nuevo que cobrar. Si lo que se necesita es una constancia fechada del estado de la obra, emite un corte INFORMATIVO` }
 
   // Huérfanos: avance de claves que YA no están en el alcance vigente
   const claves = new Set(items_alcance.map(i => i.clave))
@@ -244,6 +281,7 @@ export function construirCorte(args: {
     ok: true,
     corte: {
       numero_corte: (previo?.numero_corte ?? 0) + 1,
+      tipo,
       proyecto_id: proyecto.id,
       proyecto_consecutivo: proyecto.consecutivo,
       cliente: proyecto.snapshot.cliente,
@@ -268,12 +306,39 @@ export function construirCorte(args: {
  *  proyecto, no solo en la subcolección). */
 export const entradaHistorialCorte = (
   estado: Proyecto['estado'], consecutivo: string, numero: number, total: number,
-  uid: string, fecha: Timestamp, nombre?: string,
+  uid: string, fecha: Timestamp, nombre?: string, tipo: TipoCorte = 'facturable',
 ): EntradaHistorialProyecto => ({
   de: estado, a: estado, por: uid, fecha,
   ...(nombre ? { por_nombre: nombre } : {}),
-  motivo: `Corte de obra ${consecutivo} (corte ${numero}) EMITIDO — facturable del corte ${total} (congelado con hash; el avance posterior solo afecta los cortes siguientes)`,
+  motivo: tipo === 'informativo'
+    ? `Corte de obra ${consecutivo} (corte ${numero}) EMITIDO — INFORMATIVO, no facturable: delta ${total} rotulado como constancia; NO mueve la base de cobro (congelado con hash)`
+    : `Corte de obra ${consecutivo} (corte ${numero}) EMITIDO — facturable del corte ${total} (congelado con hash; el avance posterior solo afecta los cortes siguientes)`,
 } as EntradaHistorialProyecto)
+
+// ── Aritmética de facturas POR CORTE (08-nov) ────────────────────────────────
+// Un corte facturable puede cubrirse con VARIAS facturas (parciales) — la
+// cuenta facturado vs. falta queda a la vista, y superar lo facturable
+// ADVIERTE con constancia, jamás bloquea (patrón sobre-giro).
+export interface AritmeticaFacturasCorte {
+  facturado: number
+  falta: number
+  sobrepasa: boolean
+  numeros: string[]
+}
+export const aritmeticaFacturasCorte = (
+  corteId: string,
+  totalCorte: number,
+  facturas: { corte_id?: string; valor: number; numero: string; anulada?: unknown }[],
+): AritmeticaFacturasCorte => {
+  const propias = facturas.filter(f => !f.anulada && f.corte_id === corteId)
+  const facturado = propias.reduce((s, f) => s + (f.valor || 0), 0)
+  return {
+    facturado,
+    falta: Math.max(0, totalCorte - facturado),
+    sobrepasa: facturado > totalCorte,
+    numeros: propias.map(f => f.numero),
+  }
+}
 
 /** PLANTILLA de observaciones (forma SENA, 08-nov): el campo INVITA en vez
  *  de quedar vacío — un primer punto con el avance global, los ítems que se

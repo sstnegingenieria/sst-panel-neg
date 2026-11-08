@@ -6,8 +6,9 @@ import { describe, it, expect } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
 import {
   patchRegistrarAvance, pctItem, estadoItemAvance, valorEjecutadoItem,
-  resumenEconomicoCorte, construirCorte,
+  resumenEconomicoCorte, construirCorte, esCorteFacturable, aritmeticaFacturasCorte,
 } from '../corteObra'
+import { patchRegistrarFacturaParcial } from '../proyecto'
 import type { Proyecto } from '../proyecto'
 
 const ts = Timestamp.fromDate(new Date('2026-11-07T12:00:00Z'))
@@ -93,12 +94,61 @@ describe('construirCorte — generado del avance, congelado al emitir', () => {
     expect(r.corte.cd_acum_anterior).toBe(4_000_000) // del corte 1, congelado
     expect(r.corte.resumen.delta_cd).toBe(4_000_000)
   })
-  it('sin avance nuevo (acumulado ≤ corte anterior) → error con razón; sin avance capturado → error', () => {
+  it('sin avance nuevo → error con razón (negativo: inconsistencia; igual: nada que cobrar); sin avance capturado → error', () => {
     const corte1 = { numero_corte: 1, cd_acum: 8_000_000, cotizacion_version_medida: 3 }
     const r = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: [corte1], esquema: 'iva_pleno' })
-    expect(!r.ok && r.error).toContain('no supera')
+    expect(!r.ok && r.error).toContain('POR DEBAJO')
+    const igual = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: [{ ...corte1, cd_acum: 4_000_000 }], esquema: 'iva_pleno' })
+    expect(!igual.ok && igual.error).toContain('no supera')
     const r2 = construirCorte({ proyecto: proyecto(), cortesPrevios: [], esquema: 'iva_pleno' })
     expect(!r2.ok && r2.error).toContain('no se arma a mano')
+  })
+  it('INFORMATIVO NO SE COME LA BASE: el facturable que sigue mide contra el último FACTURABLE, no el anterior a secas', () => {
+    // Corte 1 FACTURABLE congeló 4M. Corte 2 INFORMATIVO congeló 6M. El corte
+    // 3 facturable debe cobrar 8M − 4M = 4M (si midiera contra el 2, el
+    // trabajo entre 4M y 6M jamás se cobraría).
+    const previos = [
+      { numero_corte: 1, cd_acum: 4_000_000, cotizacion_version_medida: 3 },                        // legacy sin tipo = facturable
+      { numero_corte: 2, cd_acum: 6_000_000, cotizacion_version_medida: 3, tipo: 'informativo' as const },
+    ]
+    const r = construirCorte({ proyecto: conAvance(60, 20), cortesPrevios: previos, esquema: 'iva_pleno' })
+    if (!r.ok) throw new Error(r.error)
+    expect(r.corte.numero_corte).toBe(3)                 // el correlativo cuenta TODOS
+    expect(r.corte.cd_acum).toBe(8_000_000)
+    expect(r.corte.cd_acum_anterior).toBe(4_000_000)     // base = último FACTURABLE
+    expect(r.corte.resumen.delta_cd).toBe(4_000_000)
+    expect(r.corte.tipo).toBe('facturable')
+  })
+  it('el INFORMATIVO también mide contra el último facturable, congela y se rotula; ausencia de tipo = facturable', () => {
+    const previos = [{ numero_corte: 1, cd_acum: 4_000_000, cotizacion_version_medida: 3 }]
+    const r = construirCorte({ proyecto: conAvance(60, 20), cortesPrevios: previos, esquema: 'iva_pleno', tipo: 'informativo' })
+    if (!r.ok) throw new Error(r.error)
+    expect(r.corte.tipo).toBe('informativo')
+    expect(r.corte.cd_acum_anterior).toBe(4_000_000)
+    expect(r.corte.resumen.delta_cd).toBe(4_000_000)     // informativo: cuánto HABRÍA para cobrar hoy
+    expect(esCorteFacturable(r.corte)).toBe(false)
+    expect(esCorteFacturable({ tipo: undefined })).toBe(true)  // legacy
+  })
+  it('DELTA CERO: el informativo lo admite (constancia fechada); el facturable no (nada que cobrar)', () => {
+    const previos = [{ numero_corte: 1, cd_acum: 4_000_000, cotizacion_version_medida: 3 }]
+    const fact = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: previos, esquema: 'iva_pleno' })
+    expect(!fact.ok && fact.error).toContain('INFORMATIVO')   // el error orienta al tipo correcto
+    const info = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: previos, esquema: 'iva_pleno', tipo: 'informativo' })
+    if (!info.ok) throw new Error(info.error)
+    expect(info.corte.resumen.delta_cd).toBe(0)
+    expect(info.corte.resumen.total).toBe(0)
+    expect(info.corte.cd_acum).toBe(4_000_000)           // congela igual
+  })
+  it('DELTA NEGATIVO (acumulado bajo la base facturable): inconsistencia que resolver, NOMBRANDO el corte que choca — ni informativo la documenta', () => {
+    const previos = [{ numero_corte: 1, consecutivo: 'CRT-2026-001', cd_acum: 8_000_000, cotizacion_version_medida: 3 }]
+    const r = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: previos, esquema: 'iva_pleno', tipo: 'informativo' })
+    if (r.ok) throw new Error('debió fallar')
+    expect(r.error).toContain('POR DEBAJO')
+    expect(r.error).toContain('CRT-2026-001')              // nombra el corte contra el que choca
+    expect(r.error).toContain('inconsistencia que alguien tiene que resolver')
+    // Sin consecutivo (objetos mínimos): nombra por número
+    const r2 = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: [{ numero_corte: 1, cd_acum: 8_000_000, cotizacion_version_medida: 3 }], esquema: 'iva_pleno' })
+    expect(!r2.ok && r2.error).toContain('N° 1')
   })
   it('versión de cambio entre cortes → el corte lo DICE; avance huérfano → listado, no silenciado', () => {
     const corte1 = { numero_corte: 1, cd_acum: 1_000_000, cotizacion_version_medida: 3 }
@@ -114,5 +164,53 @@ describe('construirCorte — generado del avance, congelado al emitir', () => {
     expect(r.corte.nota_version_cambio).toContain('v4')
     expect(r.corte.nota_version_cambio).toContain('v3')
     expect(r.corte.items_fuera_de_alcance).toEqual([{ clave: 'retirado', cantidad: 7 }])
+  })
+})
+
+describe('aritmética de facturas POR CORTE — facturado vs. falta, a la vista', () => {
+  const ts2 = ts
+  const facturas = [
+    { numero: 'FE-1', valor: 3_000_000, corte_id: 'c1' },
+    { numero: 'FE-2', valor: 1_000_000, corte_id: 'c1' },
+    { numero: 'FE-3', valor: 9_999_999, corte_id: 'c1', anulada: { fecha: ts2, por: 'u', motivo: 'm', nota_credito: 'NC' } },
+    { numero: 'FE-4', valor: 500_000, corte_id: 'c2' },
+    { numero: 'FE-5', valor: 500_000 },                        // sin corte: no cuenta contra ninguno
+  ]
+  it('suma solo las VIVAS del mismo corte; parcial → falta; las anuladas no cuentan', () => {
+    const a = aritmeticaFacturasCorte('c1', 4_638_000, facturas)
+    expect(a.facturado).toBe(4_000_000)
+    expect(a.falta).toBe(638_000)
+    expect(a.sobrepasa).toBe(false)
+    expect(a.numeros).toEqual(['FE-1', 'FE-2'])
+  })
+  it('superar el facturable del corte → sobrepasa (advertir con constancia, no bloquear)', () => {
+    const a = aritmeticaFacturasCorte('c2', 400_000, facturas)
+    expect(a.sobrepasa).toBe(true)
+    expect(a.falta).toBe(0)
+  })
+  it('patchRegistrarFacturaParcial con corteTotal: la constancia POR CORTE va al historial', () => {
+    const p = {
+      estado: 'en_ejecucion' as const,
+      snapshot: { valor_venta: 20_000_000 } as never,
+      historial: [],
+      facturas: [{ numero: 'FE-1', valor: 3_000_000, corte_id: 'c1', fecha: ts2, registrado_por: 'u', fecha_registro: ts2 }],
+    }
+    const r = patchRegistrarFacturaParcial(p as never, {
+      numero: 'FE-2', valor: 2_000_000, corte_id: 'c1', corte_consecutivo: 'CRT-2026-001',
+      fecha: ts2, registrado_por: 'u', fecha_registro: ts2,
+    }, 'u', ts2, 'Marcela', 4_638_000)!
+    expect(r.facturadoCorte).toBe(5_000_000)
+    expect(r.sobrepasaCorte).toBe(true)
+    const motivo = r.padre.historial[r.padre.historial.length - 1].motivo
+    expect(motivo).toContain('Σ facturada contra el corte 5000000 de 4638000')
+    expect(motivo).toContain('SUPERA SU FACTURABLE')
+  })
+  it('sin corteTotal (factura sin corte, o corte viejo): jamás sobrepasaCorte', () => {
+    const p = { estado: 'en_ejecucion' as const, snapshot: { valor_venta: 20_000_000 } as never, historial: [] }
+    const r = patchRegistrarFacturaParcial(p as never, {
+      numero: 'FE-9', valor: 2_000_000, fecha: ts2, registrado_por: 'u', fecha_registro: ts2,
+    }, 'u', ts2)!
+    expect(r.sobrepasaCorte).toBe(false)
+    expect(r.facturadoCorte).toBe(0)
   })
 })

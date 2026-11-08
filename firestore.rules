@@ -1101,11 +1101,16 @@ service cloud.firestore {
       // escriben los gestores por su vía operativa.
       match /cortes/{corteId} {
         allow read: if puedeVerProyectos();
+        // 08-nov: tipo 'informativo' admite total 0 (constancia fechada sin
+        // avance nuevo — no mueve la base de cobro); el facturable (tipo
+        // ausente o 'facturable') sigue exigiendo total > 0.
         allow create: if isAuthed()
                       && rolActual() in ['gerencia_administrativa', 'admin']
                       && request.resource.data.get('consecutivo', '') != ''
                       && request.resource.data.get('emitido_por', '') == request.auth.uid
-                      && request.resource.data.get('resumen', {}).get('total', 0) > 0;
+                      && (request.resource.data.get('tipo', 'facturable') == 'informativo'
+                            ? request.resource.data.get('resumen', {}).get('total', 0) >= 0
+                            : request.resource.data.get('resumen', {}).get('total', 0) > 0);
       }
 
       match /asignaciones/{asignacionId} {

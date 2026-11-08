@@ -73,6 +73,12 @@ describe('cortes — crea solo gerencia, inmutables; avance de gestores', () => 
     await assertFails(setDoc(doc(db('ga'), 'proyectos/p58/cortes/c5'), { ...corteNuevo('ga'), consecutivo: '' }))
     await assertFails(setDoc(doc(db('ga'), 'proyectos/p58/cortes/c6'), { ...corteNuevo('ga'), resumen: { ...corteNuevo('ga').resumen, total: 0 } }))
   })
+  it('tipo INFORMATIVO (08-nov): GA con total 0 → 200 (constancia fechada); total negativo → 403; gestor sigue 403', async () => {
+    const cero = { ...corteNuevo('ga').resumen, delta_cd: 0, admin: 0, imprevistos: 0, utilidad: 0, base_iva: 0, iva: 0, total: 0 }
+    await assertSucceeds(setDoc(doc(db('ga'), 'proyectos/p58/cortes/c7'), { ...corteNuevo('ga'), tipo: 'informativo', resumen: cero }))
+    await assertFails(setDoc(doc(db('ga'), 'proyectos/p58/cortes/c8'), { ...corteNuevo('ga'), tipo: 'informativo', resumen: { ...cero, total: -1 } }))
+    await assertFails(setDoc(doc(db('aux'), 'proyectos/p58/cortes/c9'), { ...corteNuevo('aux'), tipo: 'informativo', resumen: cero }))
+  })
   it('⛔ INMUTABLE: ni GA ni admin editan o borran un corte emitido', async () => {
     await assertFails(updateDoc(doc(db('ga'), 'proyectos/p58/cortes/c1'), { observaciones: 'editar un hecho' }))
     await assertFails(deleteDoc(doc(db('adm'), 'proyectos/p58/cortes/c1')))

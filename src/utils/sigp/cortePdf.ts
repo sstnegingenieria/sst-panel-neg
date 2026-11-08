@@ -124,6 +124,13 @@ export async function generarPdfCorte(
     }
     y -= 14
     page.drawText(`${corte.proyecto_consecutivo}${corte.nombre_sitio ? ' · ' + corte.nombre_sitio : ''}`, { x: MARGEN, y, size: 8.5, font: fS, color: GRIS_MEDIO })
+    // Tipo del corte (08-nov): el informativo se ROTULA en la cara del
+    // documento — congela y documenta, pero no es base de cobro.
+    if (corte.tipo === 'informativo') {
+      y -= 13
+      page.drawText('CORTE INFORMATIVO — NO FACTURABLE (no mueve la base de cobro; el siguiente corte facturable mide contra el último facturable)',
+        { x: MARGEN, y, size: 7.5, font: fB, color: AMBAR })
+    }
     y -= 20
 
     // ── Tarjeta de datos: SEIS campos en fila (2 × 3) ──
@@ -265,11 +272,12 @@ export async function generarPdfCorte(
     y -= 8
   }
 
-  // ── Resumen económico del CORTE (el DELTA facturable) ──
+  // ── Resumen económico del CORTE (el DELTA — contra el último FACTURABLE) ──
   {
     const r = corte.resumen
+    const informativo = corte.tipo === 'informativo'
     const filas: [string, string][] = [
-      [`Avance del corte (acumulado ${fMoneda(corte.cd_acum)} - cortes anteriores ${fMoneda(corte.cd_acum_anterior)})`, fMoneda(r.delta_cd)],
+      [`Avance del corte (acumulado ${fMoneda(corte.cd_acum)} - base del último corte facturable ${fMoneda(corte.cd_acum_anterior)})`, fMoneda(r.delta_cd)],
       ...(r.esquema === 'aiu' ? [
         [`Administración (${fmtNum(r.aiu_pct?.admin ?? 0)}%)`, fMoneda(r.admin)],
         [`Imprevistos (${fmtNum(r.aiu_pct?.imprevistos ?? 0)}%)`, fMoneda(r.imprevistos)],
@@ -284,7 +292,7 @@ export async function generarPdfCorte(
     const hCard = 14 + filas.length * hFila + hTotal
     asegurar(hCard + 26)
     y -= 10
-    page.drawText('RESUMEN ECONÓMICO DEL CORTE', { x: xCard + 2, y: y - 8, size: 7, font: fB, color: GRIS })
+    page.drawText(informativo ? 'RESUMEN ECONÓMICO DEL CORTE — INFORMATIVO' : 'RESUMEN ECONÓMICO DEL CORTE', { x: xCard + 2, y: y - 8, size: 7, font: fB, color: GRIS })
     let yf = y - 14
     filas.forEach(([k, v], i) => {
       if (i % 2 === 1)
@@ -297,9 +305,9 @@ export async function generarPdfCorte(
     const yBarra = yf - 4
     page.drawSvgPath(
       `M 0 0 H ${wCard} V ${hTotal - 8} Q ${wCard} ${hTotal} ${wCard - 8} ${hTotal} H 8 Q 0 ${hTotal} 0 ${hTotal - 8} Z`,
-      { x: xCard, y: yBarra, color: VERDE },
+      { x: xCard, y: yBarra, color: informativo ? GRIS : VERDE },
     )
-    page.drawText('FACTURABLE DEL CORTE', { x: xCard + 14, y: yBarra - 17.5, size: 10, font: fB, color: BLANCO })
+    page.drawText(informativo ? 'DELTA INFORMATIVO — NO FACTURABLE' : 'FACTURABLE DEL CORTE', { x: xCard + 14, y: yBarra - 17.5, size: informativo ? 8.5 : 10, font: fB, color: BLANCO })
     textoDer(fMoneda(r.total), xCard + wCard - 14, yBarra - 18, 12.5, fB, BLANCO)
     y = yBarra - hTotal - 10
   }
