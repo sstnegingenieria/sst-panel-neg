@@ -389,7 +389,17 @@ sst-panel-web/src/
 - Cada regla de negocio del capítulo 7 debe tener al menos un test que verifique el caso feliz y uno que verifique el rechazo.
 - Cobertura mínima objetivo: 70% en `modules/sigp/`.
 
-### Convivencia de sesiones paralelas — worktrees (práctica adoptada 07-ago-2026)
+### Convivencia de sesiones paralelas — worktrees (adoptada 07-ago-2026 · REAFIRMADA 09-nov-2026)
+
+> **🚫 NADIE TRABAJA EN EL CHECKOUT PRINCIPAL. Cada sesión en su worktree.
+> El principal es SOLO para `git pull`** — ni `git checkout <rama>`, ni
+> commits de sesión, ni edición de archivos. Los despliegues de reglas
+> salen de un clon limpio propio de quien despliega.
+>
+> Reafirmada el 09-nov-2026 porque la regla existía y NO se aplicó: una
+> sesión trabajaba en `fix/ruta-llave-lectura` sobre el checkout principal
+> y otro ejecutor hizo `git checkout main` encima — el commit quedó suelto
+> y el arreglo (PR #230) a la deriva hasta que alguien lo rescató.
 
 **Cada carril/tarea activa trabaja en su PROPIO `git worktree`** — nunca dos
 sesiones editando el mismo working tree. Origen de la regla: el incidente del
@@ -401,8 +411,10 @@ Mecánica:
 - `git worktree add ../wt-<carril> -b <rama-del-carril>` al arrancar el carril
   (un worktree por rama; las sesiones con aislamiento automático ya lo hacen
   bajo `.claude/worktrees/`).
-- El working tree principal queda reservado para `main` (docs/bitácora,
-  limpiezas, deploys).
+- El working tree principal NO se toca: solo `git pull --ff-only` sobre
+  `main`. Hasta las entradas de bitácora de este archivo van por rama en
+  worktree + PR. Los deploys de reglas (que exigen `main` limpio) corren en
+  un CLON dedicado de quien despliega, no en el checkout compartido.
 - Antes de commitear reglas u otros archivos compartidos: verificar que el
   diff a commitear contenga EXACTAMENTE los bloques propios (no basta con
   ver el archivo "modified").
