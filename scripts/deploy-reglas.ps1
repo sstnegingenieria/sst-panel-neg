@@ -92,8 +92,11 @@ Paso '1/8' 'Rama, cambios sin commit, HEAD == origin/main y sesion de Firebase'
 # cuenta: se aborta en vez de advertir.
 if ($env:GOOGLE_APPLICATION_CREDENTIALS) {
   Abortar ("GOOGLE_APPLICATION_CREDENTIALS esta definida ($env:GOOGLE_APPLICATION_CREDENTIALS).`n" +
-    "Los deploys de reglas salen de la sesion de una persona (firebase login), nunca de una llave.`n" +
-    'Limpia la variable ($env:GOOGLE_APPLICATION_CREDENTIALS = $null) y vuelve a correr.')
+    "Los deploys de reglas salen de la sesion de una persona, nunca de una llave de servicio.`n" +
+    "QUE HACER: desactiva la variable y usa tu sesion de Firebase:`n" +
+    '    $env:GOOGLE_APPLICATION_CREDENTIALS = $null' + "`n" +
+    "    npx firebase login   (si no tienes sesion)`n" +
+    'y vuelve a correr el script.')
 }
 
 # La bitacora registra a la PERSONA (la sesion de Firebase que ejecuta el
@@ -144,16 +147,30 @@ $tmp = Join-Path $env:TEMP ("deploy-reglas-" + [Guid]::NewGuid().ToString('N').S
 New-Item -ItemType Directory -Path $tmp | Out-Null
 $lector = Join-Path $tmp 'leer-ruleset.js'
 
-# Lector de la API de reglas (firebase-admin ya instalado en functions/; sin dependencias nuevas).
+# Lector de la API de reglas SIN LLAVE (modelo de tres llaves, 09-nov-2026):
+# lee el ruleset con la SESION de firebase-tools de la persona — igual que
+# los censos. No hay llave que detectar, ni ruta que configurar, ni archivo
+# que viva en el disco de nadie: funciona en cualquier maquina con
+# `npx firebase login` hecho. (El client_id/secret de abajo son los PUBLICOS
+# del CLI de firebase-tools, embebidos en su codigo abierto — no son un
+# secreto; la credencial real es el refresh_token de la sesion local.)
 @'
-const fs = require('fs')
-const [, , adminPath, credPath, salida] = process.argv
-const a = require(adminPath)
-const cred = a.credential.cert(JSON.parse(fs.readFileSync(credPath, 'utf8')))
+const fs = require('fs'), os = require('os'), path = require('path')
+const [, , salida] = process.argv
 const P = 'projects/neg-sst-app'
 ;(async () => {
-  const { access_token } = await cred.getAccessToken()
-  const h = { Authorization: 'Bearer ' + access_token }
+  const cfgPath = path.join(os.homedir(), '.config', 'configstore', 'firebase-tools.json')
+  let rt
+  try { rt = JSON.parse(fs.readFileSync(cfgPath, 'utf8')).tokens.refresh_token } catch (e) { rt = null }
+  if (!rt) throw new Error('sin sesion de firebase-tools — corre: npx firebase login')
+  const tok = await (await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: rt,
+      client_id: '563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com',
+      client_secret: 'j9iVZfS8kkCEFUPaAeJV0sAi' }),
+  })).json()
+  if (!tok.access_token) throw new Error('la sesion de firebase-tools no refresca — corre: npx firebase login')
+  const h = { Authorization: 'Bearer ' + tok.access_token }
   const rel = await (await fetch('https://firebaserules.googleapis.com/v1/' + P + '/releases/cloud.firestore', { headers: h })).json()
   if (!rel.rulesetName) throw new Error('sin release cloud.firestore: ' + JSON.stringify(rel).slice(0, 300))
   const rs = await (await fetch('https://firebaserules.googleapis.com/v1/' + rel.rulesetName, { headers: h })).json()
@@ -164,26 +181,9 @@ const P = 'projects/neg-sst-app'
 })().catch(e => { console.error('ERROR: ' + e.message); process.exit(1) })
 '@ | Set-Content -Path $lector -Encoding UTF8
 
-function Resolver-Admin {
-  $c = @(
-    (Join-Path $RepoRoot 'functions\node_modules\firebase-admin'),
-    (Join-Path (Split-Path $RepoRoot -Parent) 'sst-panel-web\functions\node_modules\firebase-admin')
-  )
-  foreach ($x in $c) { if (Test-Path $x) { return $x } }
-  Abortar 'no encuentro firebase-admin (npm install en functions/).'
-}
-function Resolver-Credencial {
-  # Modelo de tres llaves (09-nov-2026): el lector usa SIEMPRE la llave de
-  # LECTURA (firebaserules.viewer + datastore.viewer + storage.objectViewer).
-  # La llave admin vieja quedo REVOCADA en IAM; el deploy en si jamas usa
-  # una llave (ver chequeo de GOOGLE_APPLICATION_CREDENTIALS en el paso 1).
-  $c = Join-Path (Split-Path $RepoRoot -Parent) '_credenciales\neg-sst-app-lectura.json'
-  if (Test-Path $c) { return $c }
-  Abortar 'no encuentro la llave de LECTURA (..\_credenciales\neg-sst-app-lectura.json).'
-}
 function Bajar-Prod([string]$destino) {
-  $json = & node $lector (Resolver-Admin) (Resolver-Credencial) $destino
-  if ($LASTEXITCODE -ne 0) { Abortar 'no pude leer el ruleset vigente de prod por la API de reglas.' }
+  $json = & node $lector $destino
+  if ($LASTEXITCODE -ne 0) { Abortar 'no pude leer el ruleset vigente de prod con tu sesion de firebase-tools (¿npx firebase login?).' }
   return ($json | Out-String | ConvertFrom-Json)
 }
 
