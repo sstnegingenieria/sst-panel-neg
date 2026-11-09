@@ -83,8 +83,28 @@ Write-Host '=== deploy-reglas.ps1 ===' -ForegroundColor White
 if ($Simulacro) { Write-Host 'MODO SIMULACRO: solo lectura, no se despliega.' -ForegroundColor Yellow }
 Write-Host "Repo: $RepoRoot"
 
-# ═══ 1. Estado de git ═══════════════════════════════════════════════════════
-Paso '1/8' 'Rama, cambios sin commit y HEAD == origin/main'
+# ═══ 1. Estado de git + identidad del desplegador ═══════════════════════════
+Paso '1/8' 'Rama, cambios sin commit, HEAD == origin/main y sesion de Firebase'
+
+# Modelo de tres llaves (09-nov-2026): los DESPLIEGUES salen SIEMPRE de la
+# sesion autenticada de una PERSONA — jamas de una llave de servicio. Con
+# GOOGLE_APPLICATION_CREDENTIALS definida, firebase deploy saldria con esa
+# cuenta: se aborta en vez de advertir.
+if ($env:GOOGLE_APPLICATION_CREDENTIALS) {
+  Abortar ("GOOGLE_APPLICATION_CREDENTIALS esta definida ($env:GOOGLE_APPLICATION_CREDENTIALS).`n" +
+    "Los deploys de reglas salen de la sesion de una persona (firebase login), nunca de una llave.`n" +
+    'Limpia la variable ($env:GOOGLE_APPLICATION_CREDENTIALS = $null) y vuelve a correr.')
+}
+
+# La bitacora registra a la PERSONA (la sesion de Firebase que ejecuta el
+# deploy) — no la identidad de git de la maquina.
+$loginList = (& npx firebase login:list 2>$null | Out-String)
+$quien = ''
+if ($loginList -match 'Logged in as\s+(\S+)') { $quien = $Matches[1] }
+if (-not $quien) {
+  Abortar "no pude determinar la sesion de Firebase (npx firebase login:list). Inicia sesion (npx firebase login) — la bitacora registra a la persona que despliega."
+}
+Write-Host "Sesion de Firebase: $quien" -ForegroundColor Green
 $rama = (Git-Salida @('branch', '--show-current') | Out-String).Trim()
 if ($rama -ne 'main') { Abortar "la rama actual es '$rama'; solo se despliega desde main." }
 
@@ -153,10 +173,13 @@ function Resolver-Admin {
   Abortar 'no encuentro firebase-admin (npm install en functions/).'
 }
 function Resolver-Credencial {
-  if ($env:GOOGLE_APPLICATION_CREDENTIALS -and (Test-Path $env:GOOGLE_APPLICATION_CREDENTIALS)) { return $env:GOOGLE_APPLICATION_CREDENTIALS }
-  $c = Join-Path (Split-Path $RepoRoot -Parent) '_credenciales\neg-sst-app-adminsdk.json'
+  # Modelo de tres llaves (09-nov-2026): el lector usa SIEMPRE la llave de
+  # LECTURA (firebaserules.viewer + datastore.viewer + storage.objectViewer).
+  # La llave admin vieja quedo REVOCADA en IAM; el deploy en si jamas usa
+  # una llave (ver chequeo de GOOGLE_APPLICATION_CREDENTIALS en el paso 1).
+  $c = Join-Path (Split-Path $RepoRoot -Parent) '_credenciales\neg-sst-app-lectura.json'
   if (Test-Path $c) { return $c }
-  Abortar 'no encuentro la credencial de lectura (GOOGLE_APPLICATION_CREDENTIALS o ..\_credenciales\neg-sst-app-adminsdk.json).'
+  Abortar 'no encuentro la llave de LECTURA (..\_credenciales\neg-sst-app-lectura.json).'
 }
 function Bajar-Prod([string]$destino) {
   $json = & node $lector (Resolver-Admin) (Resolver-Credencial) $destino
@@ -294,9 +317,8 @@ if ((Hash-Texto (Leer-Normalizado $archivoProd2)) -ne $hashProd) {
 
 # ═══ 5. Deploy ══════════════════════════════════════════════════════════════
 Paso '5/8' "firebase deploy --only firestore:rules --project $Proyecto"
-if ($env:GOOGLE_APPLICATION_CREDENTIALS) {
-  Write-Host "AVISO: GOOGLE_APPLICATION_CREDENTIALS esta definida; el deploy saldra con esa cuenta de servicio ($env:GOOGLE_APPLICATION_CREDENTIALS)." -ForegroundColor Yellow
-}
+# (GOOGLE_APPLICATION_CREDENTIALS ya se rechazo en el paso 1 — el deploy sale
+# de la sesion de la persona verificada alla: $quien)
 & npx firebase deploy --only firestore:rules --project $Proyecto
 if ($LASTEXITCODE -ne 0) { Remove-Item $tmp -Recurse -Force; Abortar "firebase deploy fallo (codigo $LASTEXITCODE). Revisa el estado de prod con -Simulacro." }
 
@@ -323,8 +345,9 @@ if (-not (Test-Path $bitacora)) {
   $enc = "# Bitacora de despliegues de firestore.rules`n`nUna linea por deploy, escrita por scripts/deploy-reglas.ps1.`n`n| Fecha (UTC) | Commit | PR(s) | Ruleset nuevo | Ruleset anterior | Quien | Post-verificacion |`n|---|---|---|---|---|---|---|`n"
   [System.IO.File]::WriteAllText($bitacora, $enc, (New-Object System.Text.UTF8Encoding($false)))
 }
-$quien = (& git config user.name | Out-String).Trim()
-if (-not $quien) { $quien = '(git config user.name vacio)' }
+# $quien viene del paso 1: la sesion de Firebase que EJECUTO el deploy (la
+# persona), no git config de la maquina — un registro que dice "NEG
+# Ingenieria" no responde quien desplego, que es su unica razon de existir.
 $fechaUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 $estado = if ($verificado) { 'byte-identica' } else { 'FALLIDA' }
 $fila = "| $fechaUtc | $commitCorto | $prDeploy | $($prodDespues.id) | $($prodAntes.id) | $quien | $estado |"
