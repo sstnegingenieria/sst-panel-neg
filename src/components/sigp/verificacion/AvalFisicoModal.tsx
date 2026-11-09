@@ -21,10 +21,10 @@ import {
   fechaFormatosATimestampMs, patchAvalFisico, validarAvalFisico,
 } from '../../../types/sigp/avalFisico'
 import type { EntradaAvalFisico } from '../../../types/sigp/avalFisico'
-import type { VerificacionSst } from '../../../types/sigp/verificacionSst'
+import type { VerificacionFila } from '../../../types/sigp/verificacionSst'
 
 interface Props {
-  verificacion: VerificacionSst | null
+  verificacion: VerificacionFila | null
   uid: string | undefined
   onClose: () => void
   onSaved: () => void
@@ -53,7 +53,7 @@ export default function AvalFisicoModal({ verificacion, uid, onClose, onSaved }:
     if (!abierto) return
     setResponsable(''); setUbicacion(''); setFecha(''); setTipos([]); setOtro(''); setMotivo('')
     setDeclaracion(false); setGuardando(false)
-  }, [abierto, verificacion?.proyecto_id])
+  }, [abierto, verificacion?.docId])
 
   const entrada: EntradaAvalFisico = useMemo(() => ({
     responsable_archivo: responsable, ubicacion, fecha_formatos: fecha,
@@ -72,7 +72,7 @@ export default function AvalFisicoModal({ verificacion, uid, onClose, onSaved }:
       // Estado FRESCO del gate: la regla exige que `de` de la entrada del
       // historial coincida con el estado real en el servidor (una pestaña con
       // datos viejos habría fallado con un error engañoso).
-      const fresco = await getDoc(doc(db, 'verificaciones_sst', verificacion.proyecto_id))
+      const fresco = await getDoc(doc(db, 'verificaciones_sst', verificacion.docId))
       const estadoActual = estadoSstGate({ sst_gate: fresco.data()?.sst_gate as SstGateProyecto | undefined })
       // Correo AUTÉNTICO de la sesión (la regla lo compara con el del token).
       const email = auth.currentUser?.email ?? ''
@@ -81,12 +81,12 @@ export default function AvalFisicoModal({ verificacion, uid, onClose, onSaved }:
         serverTimestamp(), Timestamp.now(), Timestamp.fromMillis(fechaFormatosATimestampMs(fecha)),
       )
       if (!p) { toast('No se pudo identificar tu correo de sesión — vuelve a iniciar sesión', 'error'); return }
-      await updateDoc(doc(db, 'verificaciones_sst', verificacion.proyecto_id), {
+      await updateDoc(doc(db, 'verificaciones_sst', verificacion.docId), {
         sst_gate: p.sst_gate,
         fecha_actualizacion: serverTimestamp(),
         historial: arrayUnion(p.entradaHistorial),
       })
-      toast('Aval físico registrado — liquidación habilitada')
+      toast('Aval físico registrado — contratista al día en este proyecto')
       onSaved()
       onClose()
     } catch {

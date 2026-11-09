@@ -60,7 +60,29 @@ export interface VerificacionSst {
   migrada_a?: string[]
   fecha_sincronizacion?: Timestamp
   fecha_actualizacion?: Timestamp
+  /** SOLO cliente (jamás se escribe a Firestore): id del DOCUMENTO leído. Es la
+   *  ÚNICA clave válida para escribir y para la key de fila. NO usar
+   *  `proyecto_id`: en los docs nuevos (`{pid}__{cid}`) ese campo trae el id del
+   *  PROYECTO y pisaba el id del doc → el gate se escribía en el doc viejo
+   *  (caso 08-nov: marcar "al día" no autorizaba nada). */
+  docId?: string
 }
+
+/** Fila de la cola: una proyección con su `docId` garantizado. */
+export type VerificacionFila = VerificacionSst & { docId: string }
+
+/** Arma la fila desde un doc de Firestore. El `docId` va DESPUÉS del spread:
+ *  nada que traiga la data puede pisarlo. */
+export const filaVerificacion = (docId: string, data: Record<string, unknown>): VerificacionFila =>
+  ({ ...data, docId }) as VerificacionFila
+
+/** ¿Este doc de la proyección está VIGENTE para operar la cola? Se ignoran:
+ *  - los docs legacy `{proyectoId}` congelados por la migración del 31-oct
+ *    (`migrada_a` presente — la regla además les niega escrituras de gate);
+ *  - los de un contratista sin asignación viva (`activa === false`). */
+export const esVerificacionVigente = (
+  v: Pick<VerificacionSst, 'migrada_a' | 'activa'>,
+): boolean => v.migrada_a == null && v.activa !== false
 
 /** Estado AGREGADO del gate de un proyecto sobre sus proyecciones
  *  por-contratista VIVAS — para el chip de la bandeja administrativa:

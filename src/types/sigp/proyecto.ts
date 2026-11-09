@@ -1042,9 +1042,13 @@ export const enColaVerificacionSst = (estado: EstadoProyecto): boolean =>
  *  Tesoro III: 7 proyectos esperaron 6 semanas sin que nadie se enterara —
  *  la cola nació sin señal). Pendiente = en cola Y sin aval al día. */
 export const pendientesVerificacionDe = (
-  vs: { estado: EstadoProyecto; sst_gate?: SstGateProyecto }[],
+  vs: { estado: EstadoProyecto; sst_gate?: SstGateProyecto; migrada_a?: string[]; activa?: boolean }[],
 ): number =>
-  vs.filter(v => enColaVerificacionSst(v.estado) && !sstGateAlDia(v)).length
+  // 08-nov: los docs legacy congelados (`migrada_a`) y los de contratista sin
+  // asignación viva (`activa === false`) NO cuentan — antes cada proyecto se
+  // contaba dos veces (doc viejo + doc nuevo).
+  vs.filter(v => v.migrada_a == null && v.activa !== false
+    && enColaVerificacionSst(v.estado) && !sstGateAlDia(v)).length
 
 /** ¿El proyecto pertenece a la bandeja de Facturación y Pagos? (desde el
  *  handoff en adelante — territorio del módulo administrativo). */

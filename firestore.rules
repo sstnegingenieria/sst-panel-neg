@@ -1562,8 +1562,16 @@ service cloud.firestore {
       // sst/residente_sst/gestion_integral marcan el gate — su ÚNICO campo
       // de escritura (patrón hasOnly, como contratistas.estado). Nadie más
       // escribe el gate; create/delete solo la Cloud Function.
+      // A4 (08-nov): los docs LEGACY `{proyectoId}` quedaron CONGELADOS por la
+      // migración del 31-oct (marcador `migrada_a`) — el gate vigente vive en los
+      // `{proyectoId}__{contratista_id}`, que es lo único que lee la regla de
+      // liquidación. Sin este guard el marcador era decorativo: la pantalla de SST
+      // escribía el gate en el doc viejo, la escritura PASABA y no autorizaba nada
+      // (control declarado ≠ control verificado). Ahora un doc con `migrada_a`
+      // niega CUALQUIER update (sst_gate / historial / fecha_actualizacion).
       allow update: if isAuthed()
                     && rolActual() in ['sst', 'residente_sst', 'gestion_integral']
+                    && !('migrada_a' in resource.data)
                     && request.resource.data.diff(resource.data)
                         .affectedKeys().hasOnly(['sst_gate', 'historial', 'fecha_actualizacion'])
                     && historialSoloAgrega()

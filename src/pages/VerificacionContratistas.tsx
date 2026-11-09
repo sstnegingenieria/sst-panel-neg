@@ -40,7 +40,8 @@ import { exportarAvalesFisicos } from '../utils/sigp/avalesFisicosExcel'
 import AvalFisicoModal from '../components/sigp/verificacion/AvalFisicoModal'
 import RastroCustodiaModal from '../components/sigp/verificacion/RastroCustodiaModal'
 import type { EstadoSstGate } from '../types/sigp/proyecto'
-import type { VerificacionSst } from '../types/sigp/verificacionSst'
+import { filaVerificacion, esVerificacionVigente } from '../types/sigp/verificacionSst'
+import type { VerificacionFila } from '../types/sigp/verificacionSst'
 import ObjetoObra from '../components/ObjetoObra'
 
 const fFecha = (t?: { toDate?: () => Date }) =>
@@ -52,17 +53,17 @@ export default function VerificacionContratistas() {
   const puedeFisico = puedeAvalarFisicoUI(user?.rol)
   // `todas` = toda la proyección (incluye proyectos que ya salieron de la cola
   // y siguen avalados en físico — el auditor los pide); `verificaciones` = la cola.
-  const [todas, setTodas] = useState<VerificacionSst[]>([])
-  const [verificaciones, setVerificaciones] = useState<VerificacionSst[]>([])
+  const [todas, setTodas] = useState<VerificacionFila[]>([])
+  const [verificaciones, setVerificaciones] = useState<VerificacionFila[]>([])
   const [vista, setVista] = useState<'cola' | 'fisico'>('cola')
-  const [rastroTarget, setRastroTarget] = useState<VerificacionSst | null>(null)
+  const [rastroTarget, setRastroTarget] = useState<VerificacionFila | null>(null)
   const [loading, setLoading] = useState(true)
   const [aplicando, setAplicando] = useState(false)
   // novedad (observación obligatoria)
-  const [novedadTarget, setNovedadTarget] = useState<VerificacionSst | null>(null)
+  const [novedadTarget, setNovedadTarget] = useState<VerificacionFila | null>(null)
   const [observacion, setObservacion] = useState('')
   // Aval físico (solo gestion_integral)
-  const [fisicoTarget, setFisicoTarget] = useState<VerificacionSst | null>(null)
+  const [fisicoTarget, setFisicoTarget] = useState<VerificacionFila | null>(null)
   // Nº de formularios de la obra-espejo en la app (solo se consulta para quien
   // puede avalar físico). null/ausente = desconocido → se muestran ambas vías.
   const [formsPorObra, setFormsPorObra] = useState<Record<string, number | null>>({})
@@ -81,7 +82,12 @@ export default function VerificacionContratistas() {
     setLoading(true)
     try {
       const snap = await getDocs(collection(db, 'verificaciones_sst'))
-      const docs = snap.docs.map(d => ({ proyecto_id: d.id, ...d.data() }) as VerificacionSst)
+      // `docId` = id del DOCUMENTO, después del spread (nada lo pisa): es la
+      // clave de escritura y de fila. Se ignoran los docs legacy `migrada_a`
+      // (congelados) y los de contratista sin asignación viva (activa === false).
+      const docs = snap.docs
+        .map(d => filaVerificacion(d.id, d.data()))
+        .filter(esVerificacionVigente)
       setTodas(docs)
       setVerificaciones(docs.filter(v => enColaVerificacionSst(v.estado)))
     } catch {
@@ -152,11 +158,11 @@ export default function VerificacionContratistas() {
   }, [base, filtroCliente, busqueda])  // eslint-disable-line react-hooks/exhaustive-deps
   const pendientes = verificaciones.filter(v => estadoSstGate(v) !== 'al_dia').length
 
-  const marcar = async (v: VerificacionSst, estado: EstadoSstGate, obs?: string) => {
+  const marcar = async (v: VerificacionFila, estado: EstadoSstGate, obs?: string) => {
     setAplicando(true)
     try {
       const ahora = Timestamp.now()
-      await updateDoc(doc(db, 'verificaciones_sst', v.proyecto_id), {
+      await updateDoc(doc(db, 'verificaciones_sst', v.docId), {
         sst_gate: {
           estado,
           verificado_por: user?.uid ?? '',
@@ -171,7 +177,9 @@ export default function VerificacionContratistas() {
             : `Gate SST: CON NOVEDAD — ${obs?.trim() ?? ''} (la liquidación queda bloqueada)`,
         }),
       })
-      toast(estado === 'al_dia' ? 'Contratista al día — liquidación habilitada' : 'Novedad registrada — liquidación bloqueada')
+      // El pago lo habilita la REGLA de liquidación (lee este mismo doc), no esta
+      // pantalla — el aviso no promete más de lo que esta vista decide.
+      toast(estado === 'al_dia' ? 'Contratista al día en este proyecto' : 'Novedad registrada — liquidación bloqueada')
       setNovedadTarget(null)
       setObservacion('')
       await load()
@@ -259,7 +267,7 @@ export default function VerificacionContratistas() {
             {!loading && ordenadas.map(v => {
               const gate = estadoSstGate(v)
               return (
-                <tr key={v.proyecto_id} className="border-b border-gray-100 hover:bg-gray-50">
+                <tr key={v.docId} data-doc-id={v.docId} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="py-3 px-4">
                     {/* Sin enlace a la ficha del proyecto: SST no accede a `proyectos` */}
                     <span className="font-mono text-gray-800 font-semibold">{v.consecutivo}</span>
