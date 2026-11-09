@@ -23,7 +23,9 @@
  *     npx vite-node functions/scripts/importar-licitaciones.js --commit     # escribe
  *
  *   Para --commit contra producción hace falta la service account:
- *     $env:GOOGLE_APPLICATION_CREDENTIALS="…\neg-sst-app-adminsdk.json"
+ *     $env:GOOGLE_APPLICATION_CREDENTIALS="C:\apps\APLICACION SST\_credenciales\escritura-en-acto.json"
+ *     (llave de ESCRITURA DE DATOS entregada por Giovanny para el acto aprobado
+ *      - modelo de tres llaves 09-nov-2026; se retira al terminar)
  *     $env:IMPORTA_UID="<uid de quien ejecuta la migración>"
  *
  * Se corre con vite-node (no `node`) porque importa el parser TS directamente:

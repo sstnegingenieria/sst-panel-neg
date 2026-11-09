@@ -17,7 +17,9 @@
  *   1. Exportar la ruta a la service account de `neg-sst-app` y el password temporal
  *      de los usuarios nuevos (NINGUNO se versiona en el repo):
  *        Windows PowerShell:
- *          $env:GOOGLE_APPLICATION_CREDENTIALS="C:\apps\APLICACION SST\_credenciales\neg-sst-app-adminsdk.json"
+ *          $env:GOOGLE_APPLICATION_CREDENTIALS="C:\apps\APLICACION SST\_credenciales\escritura-en-acto.json"
+ *          (llave de ESCRITURA DE DATOS entregada por Giovanny para el acto
+ *           aprobado - modelo de tres llaves 09-nov-2026; se retira al terminar)
  *          $env:PASSWORD_TEMPORAL_NUEVOS="<password temporal>"
  *   2. Desde `sst-panel-web/` (firebase-admin está en `functions/node_modules`):
  *        node functions/scripts/migrar-usuarios-sigp.js            # dry-run (default)

@@ -13,9 +13,11 @@
  * 1. Descargar la service account key del proyecto `neg-sst-app`:
  *      Firebase Console → ⚙ Configuración del proyecto → Cuentas de servicio
  *      → "Generar nueva clave privada" → guarda el JSON.
- * 2. Exportar la ruta a la key (NO la subas al repo):
- *      Windows PowerShell:  $env:GOOGLE_APPLICATION_CREDENTIALS="C:\ruta\a\key.json"
- *      Git Bash / Linux:    export GOOGLE_APPLICATION_CREDENTIALS="/c/ruta/a/key.json"
+ * 2. Exportar la ruta a la llave — este script es SOLO LECTURA: usa la llave
+ *    de LECTURA del modelo de tres llaves (09-nov-2026), la por-defecto de
+ *    los ejecutores (NO la subas al repo):
+ *      Windows PowerShell:  $env:GOOGLE_APPLICATION_CREDENTIALS="C:\apps\APLICACION SST\_credenciales\neg-sst-app-lectura.json"
+ *      Git Bash / Linux:    export GOOGLE_APPLICATION_CREDENTIALS="/c/apps/APLICACION SST/_credenciales/neg-sst-app-lectura.json"
  * 3. Desde `sst-panel-web/functions/` (donde ya está instalado firebase-admin):
  *      node scripts/audit-users-rol.js
  *
