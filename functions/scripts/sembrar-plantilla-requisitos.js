@@ -26,7 +26,9 @@
  *   1. Exportar la service account y el uid del autor (la persona de dirección
  *      que adopta la plantilla — queda en `autor_uid`):
  *        Windows PowerShell:
- *          $env:GOOGLE_APPLICATION_CREDENTIALS="C:\apps\APLICACION SST\_credenciales\neg-sst-app-adminsdk.json"
+ *          $env:GOOGLE_APPLICATION_CREDENTIALS="C:\apps\APLICACION SST\_credenciales\escritura-en-acto.json"
+ *          (llave de ESCRITURA DE DATOS entregada por Giovanny para el acto
+ *           aprobado - modelo de tres llaves 09-nov-2026; se retira al terminar)
  *          $env:AUTOR_UID="<uid de quien adopta la plantilla>"
  *   2. Desde `sst-panel-web/`:
  *        node functions/scripts/sembrar-plantilla-requisitos.js            # dry-run (default)
