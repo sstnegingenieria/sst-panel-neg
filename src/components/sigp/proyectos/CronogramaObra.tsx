@@ -6,16 +6,26 @@
 // El BORRADOR vive en proyecto.cronograma_borrador (los gestores ya escriben
 // el doc: sin regla nueva). La emisión (CRN + PDF + hash) llega en C3.
 import { useState, useEffect, useMemo, useCallback, type ReactNode } from 'react'
-import { doc, updateDoc, deleteField, Timestamp } from 'firebase/firestore'
-import { db } from '../../../firebase/config'
+import {
+  doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteField,
+  arrayUnion, query, orderBy, Timestamp,
+} from 'firebase/firestore'
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
+import { db, storage } from '../../../firebase/config'
 import { toast } from '../../shared/Toast'
 import { useAuth } from '../../../contexts/AuthContext'
+import { useConsecutivo } from '../../../hooks/sigp/useConsecutivo'
+import { generarPdfCronograma, cargarAssetsPdf } from '../../../utils/sigp/cronogramaPdf'
+import { sha256Hex } from '../../../utils/sigp/cotizacionPdf'
+import { puedeEmitirCronogramaUI } from '../../../types/sigp/permisos'
 import type { Proyecto } from '../../../types/sigp/proyecto'
 import type {
   ActividadCronograma, BorradorCronograma, FaseCronograma, HitoCronograma,
+  CronogramaObra as CronogramaEmitido,
 } from '../../../types/sigp/cronograma'
 import {
   construirCronograma, actividadesHuerfanas, plantillaFases,
+  entradaHistorialCronograma,
 } from '../../../types/sigp/cronograma'
 import {
   pintarBarra, moverHito, programarFaseEnCadena, moverFase, volverTextoLibre,
@@ -48,8 +58,10 @@ type Paint = { actividadId: string; ancla: number; hasta: number }
 
 export default function CronogramaObra({ proyecto, puedeGestionar, reload }: Props) {
   const { user } = useAuth()
+  const { obtener } = useConsecutivo()
   const guardado = proyecto.cronograma_borrador
   const editable = puedeGestionar && proyecto.estado !== 'cerrado' && proyecto.estado !== 'cancelado'
+  const puedeEmitir = puedeEmitirCronogramaUI(user?.rol) && editable
 
   // Borrador LOCAL del editor; se persiste con "Guardar borrador".
   const [plan, setPlan] = useState<BorradorCronograma | null>(guardado ?? null)
@@ -64,6 +76,17 @@ export default function CronogramaObra({ proyecto, puedeGestionar, reload }: Pro
   const [addClave, setAddClave] = useState('')
   const [addLibre, setAddLibre] = useState('')
   const [addHito, setAddHito] = useState('')
+  // Cronogramas EMITIDOS (subcolección — congelados con CRN + hash)
+  const [emitidos, setEmitidos] = useState<(CronogramaEmitido & { id: string })[]>([])
+  const [emitiendo, setEmitiendo] = useState(false)
+
+  const cargarEmitidos = useCallback(async () => {
+    try {
+      const snap = await getDocs(query(collection(db, 'proyectos', proyecto.id, 'cronogramas'), orderBy('numero_cronograma', 'asc')))
+      setEmitidos(snap.docs.map(d => ({ id: d.id, ...(d.data() as CronogramaEmitido) })))
+    } catch (e) { console.error('Error cargando cronogramas emitidos:', e) }
+  }, [proyecto.id])
+  useEffect(() => { void cargarEmitidos() }, [cargarEmitidos])
 
   // El doc recargado pisa el estado local SOLO si no hay edición en curso.
   useEffect(() => { if (!dirty) setPlan(proyecto.cronograma_borrador ?? null) }, [proyecto, dirty])
@@ -101,9 +124,9 @@ export default function CronogramaObra({ proyecto, puedeGestionar, reload }: Pro
     return construirCronograma({
       proyecto, fecha_inicio: plan.fecha_inicio, plazo_dias: plan.plazo_dias,
       fases: plan.fases, ventana_corte: plan.ventana_corte,
-      observaciones: plan.observaciones, cronogramasPrevios: [],
+      observaciones: plan.observaciones, cronogramasPrevios: emitidos,
     })
-  }, [plan, proyecto, fechaValida])
+  }, [plan, proyecto, fechaValida, emitidos])
 
   const sinReferenciar = useMemo(() => {
     if (!plan) return []
@@ -170,6 +193,58 @@ export default function CronogramaObra({ proyecto, puedeGestionar, reload }: Pro
     } catch (e) {
       console.error(e); toast('Error al eliminar el borrador', 'error')
     } finally { setGuardando(false) }
+  }
+
+  // ── Emisión (C3): el documento congelado — CRN + PDF + hash ────────────────
+  const emitir = async () => {
+    if (!plan || dirty || !validacion?.ok) return
+    const r = construirCronograma({
+      proyecto, fecha_inicio: plan.fecha_inicio, plazo_dias: plan.plazo_dias,
+      fases: plan.fases, ventana_corte: plan.ventana_corte,
+      observaciones: plan.observaciones, cronogramasPrevios: emitidos,
+    })
+    if (!r.ok) { toast(r.error, 'error'); return }
+    if (!confirm(`¿Emitir el cronograma (emisión N° ${r.cronograma.numero_cronograma}, del ${r.cronograma.fecha_inicio} al ${r.cronograma.fecha_fin})? Queda CONGELADO con consecutivo CRN, PDF y hash — una modificación posterior se emite como cronograma nuevo.`)) return
+    setEmitiendo(true)
+    try {
+      const consecutivo = await obtener('CRN')
+      const ahora = Timestamp.now()
+      // Firma del emisor: correo del perfil + celular si existe (patrón corte)
+      let celular: string | undefined
+      try {
+        if (user?.uid) celular = (await getDoc(doc(db, 'users', user.uid))).data()?.celular as string | undefined
+      } catch { /* el celular es opcional */ }
+      const cr: CronogramaEmitido = {
+        ...r.cronograma, consecutivo,
+        fecha_emision: ahora, emitido_por: user?.uid ?? '',
+        ...(user?.nombre ? { emitido_por_nombre: user.nombre } : {}),
+        emisor: {
+          nombre: user?.nombre ?? user?.email ?? '—',
+          area: 'GESTIÓN DE PROYECTOS',
+          ...(user?.email ? { correo: user.email } : {}),
+          ...(celular ? { telefono: celular } : {}),
+        },
+        fecha_creacion: ahora,
+      }
+      const assets = await cargarAssetsPdf()
+      const bytes = await generarPdfCronograma(cr, assets)
+      const hash = await sha256Hex(bytes)
+      const nombrePdf = `${consecutivo}.pdf`
+      const up = await uploadBytes(ref(storage, `proyectos/${proyecto.id}/cronogramas/${nombrePdf}`), bytes, { contentType: 'application/pdf' })
+      const url = await getDownloadURL(up.ref)
+      await setDoc(doc(collection(db, 'proyectos', proyecto.id, 'cronogramas')), {
+        ...cr, pdf_url: url, pdf_nombre: nombrePdf, pdf_hash: hash,
+      })
+      await updateDoc(doc(db, 'proyectos', proyecto.id), {
+        historial: arrayUnion(entradaHistorialCronograma(proyecto.estado, consecutivo, cr.numero_cronograma, cr.fecha_inicio, cr.fecha_fin, user?.uid ?? '', ahora, user?.nombre)),
+        fecha_actualizacion: ahora,
+      })
+      toast(`${consecutivo} emitido — cronograma congelado con PDF y hash`)
+      await cargarEmitidos(); await reload()
+    } catch (e) {
+      console.error('Error emitiendo cronograma:', e)
+      toast('Error al emitir el cronograma (verifica tu rol y el consecutivo)', 'error')
+    } finally { setEmitiendo(false) }
   }
 
   const aplicarCadena = (faseId: string) => {
@@ -273,6 +348,13 @@ export default function CronogramaObra({ proyecto, puedeGestionar, reload }: Pro
                 className="text-xs px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 transition">
                 💾 Guardar borrador
               </button>
+              {puedeEmitir && (
+                <button onClick={emitir} disabled={emitiendo || dirty || !validacion?.ok}
+                  title={dirty ? 'Guarda el borrador antes de emitir' : !validacion?.ok ? 'El plan tiene pendientes (ver el aviso abajo)' : 'Congela el plan con consecutivo CRN, PDF y hash'}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-brand-700 text-white hover:bg-brand-600 disabled:opacity-40 transition">
+                  {emitiendo ? 'Emitiendo…' : '📄 Emitir cronograma'}
+                </button>
+              )}
               <button onClick={eliminarBorrador} disabled={guardando}
                 className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-200 transition"
                 title="Eliminar el borrador completo">🗑</button>
@@ -423,7 +505,6 @@ export default function CronogramaObra({ proyecto, puedeGestionar, reload }: Pro
           {validacion && (validacion.ok
             ? <p className="text-[11px] text-gray-500 italic">{validacion.cronograma.nota_jornada}</p>
             : <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">⚠ {validacion.error}</p>)}
-          <p className="text-[11px] text-gray-400">La emisión del cronograma al cliente (consecutivo CRN + PDF con hash) llega en el siguiente corte del bloque.</p>
 
           <label className="block text-xs text-gray-500">
             Observaciones del documento
@@ -431,6 +512,24 @@ export default function CronogramaObra({ proyecto, puedeGestionar, reload }: Pro
               onChange={e => edita(p => ({ ...p, observaciones: e.target.value }))}
               className="mt-1 w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs" />
           </label>
+        </div>
+      )}
+
+      {/* Cronogramas EMITIDOS (congelados — el vigente es el último) */}
+      {abierta && emitidos.length > 0 && (
+        <div className="border-t border-gray-100 pt-2 space-y-1">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Cronogramas emitidos</p>
+          {emitidos.map((c, i) => (
+            <div key={c.id} className="flex items-center gap-2 text-xs flex-wrap">
+              <span className="font-semibold text-brand-700">{c.consecutivo}</span>
+              <span className="text-gray-500">emisión {c.numero_cronograma} · del {c.fecha_inicio} al {c.fecha_fin} · {c.plazo_dias} días</span>
+              {i === emitidos.length - 1 && (
+                <span className="px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 text-[10px] font-semibold">VIGENTE</span>
+              )}
+              {c.emitido_por_nombre && <span className="text-gray-400">por {c.emitido_por_nombre}</span>}
+              {c.pdf_url && <a href={c.pdf_url} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">📄 PDF</a>}
+            </div>
+          ))}
         </div>
       )}
     </div>

@@ -474,3 +474,9 @@ export const puedeCapturarAvanceUI = (rol: string | undefined) =>
   puedeGestionarProyectosUI(rol)
 export const puedeEmitirCorteUI = (rol: string | undefined) =>
   rol === 'gerencia_administrativa' || rol === 'admin'
+// CRONOGRAMA DE OBRA (08-nov, C3): el plan lo emiten los GESTORES (área de
+// proyectos — a diferencia del corte, que sustenta factura y emite
+// gerencia). Espejo del prefijo CRN en la CF y de la regla de la
+// subcolección cronogramas.
+export const puedeEmitirCronogramaUI = (rol: string | undefined) =>
+  puedeGestionarProyectosUI(rol)

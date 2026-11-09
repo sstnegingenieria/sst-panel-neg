@@ -8,7 +8,7 @@ import { functions } from '../../firebase/config'
 // Prefijos EN USO (mapa prefijo→roles, 19-oct): la CF rechaza cualquier otro
 // (deny-by-default). Los reservados (OFR/ACT/LIQ/FAC/NC/PRY) salieron del
 // union — ver el comentario de ROLES_POR_PREFIJO en functions/consecutivos.js.
-export type PrefijoConsecutivo = 'SOL' | 'VIS' | 'COT' | 'CAT' | 'OC' | 'PEA' | 'LIC' | 'AC' | 'AP' | 'MEJ' | 'CRT'
+export type PrefijoConsecutivo = 'SOL' | 'VIS' | 'COT' | 'CAT' | 'OC' | 'PEA' | 'LIC' | 'AC' | 'AP' | 'MEJ' | 'CRT' | 'CRN'
 
 interface GenerarConsecutivoRequest {
   prefijo: PrefijoConsecutivo
