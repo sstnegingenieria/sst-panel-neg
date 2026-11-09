@@ -13,7 +13,7 @@
 //    actividades van en lima (único uso del acento).
 //  - Columnas no laborables sombreadas con rótulo VERTICAL (DOMINGO /
 //    FESTIVO); sábado con rayado diagonal.
-//  - Pie con leyenda + nota de jornada (festivos NOMBRADOS y días hábiles
+//  - Leyenda + nota de jornada BAJO LA REJILLA (festivos NOMBRADOS y hábiles
 //    efectivos calculados) en TODAS las hojas, como el modelo.
 // ⚠ El cuadro ISO sale con CÓDIGO PENDIENTE DE RATIFICACIÓN (Ingrid/GI).
 import { PDFDocument, PDFFont, PDFPage, rgb, degrees } from 'pdf-lib'
@@ -113,7 +113,7 @@ const fFecha = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.sl
 const fDiaMes = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
 
 type Fila =
-  | { t: 'fase'; fase: FaseCronograma; h: number }
+  | { t: 'fase'; fase: FaseCronograma; h: number; cont?: boolean }
   | { t: 'act'; fila: ActividadCronograma; lineas: string[]; h: number }
   | { t: 'hito'; fila: HitoCronograma; h: number }
 
@@ -140,14 +140,17 @@ export async function generarPdfCronograma(
   const bloques = bloquesDias(cr.plazo_dias, Math.floor(W_DIAS / DIA_MIN))
 
   // ── Filas medidas (comunes a todos los bloques) ──
+  // Altura de fila GENEROSA (observación de Giovanny, 08-nov): el modelo
+  // llena la hoja — una rejilla apretada con media página en blanco se ve
+  // menos sólida de lo que es, y esto es un anexo de licitación.
   const filas: Fila[] = []
   for (const fase of cr.fases) {
-    filas.push({ t: 'fase', fase, h: 15 })
+    filas.push({ t: 'fase', fase, h: 19 })
     for (const f of fase.filas) {
-      if (f.tipo === 'hito') filas.push({ t: 'hito', fila: f, h: 13 })
+      if (f.tipo === 'hito') filas.push({ t: 'hito', fila: f, h: 17 })
       else {
-        const lineas = partir(f.descripcion, fR, 6.6, W_NOM - 14)
-        filas.push({ t: 'act', fila: f, lineas: lineas.slice(0, 2), h: Math.max(13, lineas.slice(0, 2).length * 8.4 + 5) })
+        const lineas = partir(f.descripcion, fR, 7.2, W_NOM - 14)
+        filas.push({ t: 'act', fila: f, lineas: lineas.slice(0, 2), h: Math.max(17, lineas.slice(0, 2).length * 9.4 + 7) })
       }
     }
   }
@@ -163,7 +166,7 @@ export async function generarPdfCronograma(
   const hNotas = notasLineas.reduce((s, b) => s + b.length * 8.6 + 2, 0)
   const Y_PIE = 46
   const H_LEYENDA = 14
-  const pisoCuerpo = Y_PIE + 14 + hNotas + H_LEYENDA + 6
+  const pisoCuerpo = Y_PIE + 10 + hNotas + H_LEYENDA
 
   let page!: PDFPage
   const textoDer = (t: string, xDer: number, yy: number, size: number, font: PDFFont, color = TINTA) =>
@@ -238,9 +241,11 @@ export async function generarPdfCronograma(
     return y - 8
   }
 
-  /** Dibuja el pie por página: leyenda + notas (encima del pie institucional). */
-  const pieContenido = () => {
-    let yy = Y_PIE + 14 + hNotas
+  /** Dibuja leyenda + notas INMEDIATAMENTE BAJO la rejilla (como el modelo —
+   *  no ancladas al pie de la hoja); `pisoCuerpo` garantiza que siempre
+   *  quepan encima del pie institucional. */
+  const pieContenido = (yDesde: number) => {
+    let yy = yDesde - H_LEYENDA
     // leyenda
     let x = MARGEN
     const item = (dibujo: (xx: number, cy: number) => void, label: string, wGlifo: number) => {
@@ -289,11 +294,25 @@ export async function generarPdfCronograma(
       const H_CAB_GRID = 30
       let hDisponible = yTop - H_CAB_GRID - pisoCuerpo
       const pagina: Fila[] = []
+      // una fase partida por el salto de página reabre con su banda "(cont.)"
+      // (patrón del corte) — el lector de la hoja 2 sabe de qué fase viene
+      if (idx < filas.length && filas[idx].t !== 'fase') {
+        let fasePrev: FaseCronograma | null = null
+        for (let j = idx - 1; j >= 0; j--) { const fj = filas[j]; if (fj.t === 'fase') { fasePrev = fj.fase; break } }
+        if (fasePrev) { pagina.push({ t: 'fase', fase: fasePrev, h: 19, cont: true }); hDisponible -= 19 }
+      }
       while (idx < filas.length) {
         const f = filas[idx]
         // la banda de fase no queda huérfana: entra solo si cabe con su 1ª fila
         const hNecesaria = f.t === 'fase' && idx + 1 < filas.length ? f.h + filas[idx + 1].h : f.h
-        if (hNecesaria > hDisponible && pagina.length > 0) break
+        if (hNecesaria > hDisponible && pagina.length > 0) {
+          // ANTI-VIUDA: si lo que queda del documento cabe comiéndose un
+          // pelo del aire del pie (≤ 14 pt), entra aquí — una hoja final
+          // con una sola fila se ve peor que un pie 14 pt más apretado.
+          const resto = filas.slice(idx).reduce((s, fr) => s + fr.h, 0)
+          if (resto <= hDisponible + 14) { for (const fr of filas.slice(idx)) pagina.push(fr); idx = filas.length }
+          break
+        }
         pagina.push(f); hDisponible -= f.h; idx++
       }
       const hCuerpo = pagina.reduce((s, f) => s + f.h, 0)
@@ -361,8 +380,8 @@ export async function generarPdfCronograma(
         const cy = yBase + h / 2            // centro vertical de la fila
         if (f.t === 'fase') {
           page.drawRectangle({ x: MARGEN, y: yBase, width: W_NOM + W_COD, height: h, color: VERDE_PALIDO })
-          const nom = partir(f.fase.nombre.toUpperCase(), fB, 6.8, W_NOM + W_COD - 12)[0]
-          page.drawText(nom, { x: MARGEN + 6, y: cy - 2.4, size: 6.8, font: fB, color: VERDE_OSCURO })
+          const nom = partir(f.fase.nombre.toUpperCase() + (f.cont ? ' (CONT.)' : ''), fB, 7.4, W_NOM + W_COD - 12)[0]
+          page.drawText(nom, { x: MARGEN + 6, y: cy - 2.6, size: 7.4, font: fB, color: VERDE_OSCURO })
           page.drawRectangle({ x: MARGEN + W_NOM + W_COD, y: yBase, width: nDias * wDia, height: h, color: VERDE_PALIDO, opacity: 0.45 })
           const r = rangoFase(f.fase)
           if (r) {
@@ -370,7 +389,7 @@ export async function generarPdfCronograma(
             if (a <= b) {
               const x1 = X_DIAS + (a - bloque.desde) * wDia + 1
               const x2 = X_DIAS + (b - bloque.desde + 1) * wDia - 1
-              page.drawRectangle({ x: x1, y: cy - 1.4, width: x2 - x1, height: 2.8, color: VERDE_OSCURO })
+              page.drawRectangle({ x: x1, y: cy - 1.6, width: x2 - x1, height: 3.2, color: VERDE_OSCURO })
               if (r.d1 >= bloque.desde) page.drawSvgPath('M 0 0 L 5.6 0 L 2.8 5 Z', { x: x1, y: cy - 1.2, color: VERDE_OSCURO })
               if (r.d2 <= bloque.hasta) page.drawSvgPath('M 0 0 L 5.6 0 L 2.8 5 Z', { x: x2 - 5.6, y: cy - 1.2, color: VERDE_OSCURO })
               else {
@@ -380,24 +399,24 @@ export async function generarPdfCronograma(
             }
           }
         } else if (f.t === 'hito') {
-          const nom = partir(f.fila.nombre, fS, 6.6, W_NOM - 14)[0]
-          page.drawText(nom, { x: MARGEN + 10, y: cy - 2.4, size: 6.6, font: fS, color: VERDE_OSCURO })
+          const nom = partir(f.fila.nombre, fS, 7.2, W_NOM - 14)[0]
+          page.drawText(nom, { x: MARGEN + 10, y: cy - 2.6, size: 7.2, font: fS, color: VERDE_OSCURO })
           if (f.fila.dia >= bloque.desde && f.fila.dia <= bloque.hasta) {
             const xC = X_DIAS + (f.fila.dia - bloque.desde) * wDia + wDia / 2
-            page.drawSvgPath('M 3.4 0 L 6.8 3.4 L 3.4 6.8 L 0 3.4 Z', { x: xC - 3.4, y: cy + 3.4, color: VERDE_OSCURO })
+            page.drawSvgPath('M 3.8 0 L 7.6 3.8 L 3.8 7.6 L 0 3.8 Z', { x: xC - 3.8, y: cy + 3.8, color: VERDE_OSCURO })
             const et = fDiaMes(dias[f.fila.dia - 1].iso)
             const xEt = xC + 6
-            if (xEt + fS.widthOfTextAtSize(et, 5.4) < X_DIAS + nDias * wDia - 2)
-              page.drawText(et, { x: xEt, y: cy - 2, size: 5.4, font: fS, color: VERDE_OSCURO })
-            else textoDer(et, xC - 6, cy - 2, 5.4, fS, VERDE_OSCURO)
+            if (xEt + fS.widthOfTextAtSize(et, 6) < X_DIAS + nDias * wDia - 2)
+              page.drawText(et, { x: xEt, y: cy - 2.2, size: 6, font: fS, color: VERDE_OSCURO })
+            else textoDer(et, xC - 6, cy - 2.2, 6, fS, VERDE_OSCURO)
           }
         } else {
           const a = f.fila
-          const yTxt = yBase + h - 9.4
-          f.lineas.forEach((l, i) => page.drawText(l, { x: MARGEN + 10, y: yTxt - i * 8.4, size: 6.6, font: fR, color: TINTA }))
+          const yTxt = yBase + h - 10.6
+          f.lineas.forEach((l, i) => page.drawText(l, { x: MARGEN + 10, y: yTxt - i * 9.4, size: 7.2, font: fR, color: TINTA }))
           if (a.item_codigo) {
             const cod = a.item_codigo.slice(0, 7)
-            page.drawText(cod, { x: MARGEN + W_NOM + (W_COD - fR.widthOfTextAtSize(cod, 6)) / 2, y: cy - 2.2, size: 6, font: fR, color: GRIS })
+            page.drawText(cod, { x: MARGEN + W_NOM + (W_COD - fR.widthOfTextAtSize(cod, 6.4)) / 2, y: cy - 2.3, size: 6.4, font: fR, color: GRIS })
           }
           // barra: segmentos laborables + conector punteado en los huecos
           const colorBarra = a.en_ventana ? LIMA : VERDE
@@ -405,7 +424,7 @@ export async function generarPdfCronograma(
           segs.forEach(([s1, s2], i) => {
             const x1 = X_DIAS + (s1 - bloque.desde) * wDia + 0.8
             const x2 = X_DIAS + (s2 - bloque.desde + 1) * wDia - 0.8
-            page.drawRectangle({ x: x1, y: cy - 2.8, width: x2 - x1, height: 5.6, color: colorBarra })
+            page.drawRectangle({ x: x1, y: cy - 3.2, width: x2 - x1, height: 6.4, color: colorBarra })
             if (i > 0) {
               const [, prevFin] = segs[i - 1]
               const xa = X_DIAS + (prevFin - bloque.desde + 1) * wDia - 0.8
@@ -435,7 +454,7 @@ export async function generarPdfCronograma(
         }
       }
 
-      pieContenido()
+      pieContenido(yFin)
     }
   }
 
