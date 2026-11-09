@@ -21,6 +21,16 @@
  *          (llave de ESCRITURA DE DATOS entregada por Giovanny para el acto
  *           aprobado - modelo de tres llaves 09-nov-2026; se retira al terminar)
  *          $env:PASSWORD_TEMPORAL_NUEVOS="<password temporal>"
+ *
+ * ── Qué llave para qué (modelo de tres llaves, 09-nov-2026) ─────────────────
+ *   · DRY-RUN (solo lectura): usa la llave de LECTURA por defecto de los
+ *     ejecutores — _credenciales
+eg-sst-app-lectura.json.
+ *   · --apply (escritura de datos): SOLO con la llave de escritura-en-acto
+ *     entregada por Giovanny para el acto aprobado, y se retira al terminar.
+ *   · NINGUNA llave de servicio sirve para desplegar reglas: el deploy va
+ *     únicamente por scripts/deploy-reglas.ps1 con la sesión de una persona
+ *     (firebase login) — verificación, PR declarado y bitácora en el acto.
  *   2. Desde `sst-panel-web/` (firebase-admin está en `functions/node_modules`):
  *        node functions/scripts/migrar-usuarios-sigp.js            # dry-run (default)
  *        node functions/scripts/migrar-usuarios-sigp.js --dry-run  # dry-run explícito
