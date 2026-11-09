@@ -78,6 +78,22 @@ export interface VentanaCorte {
   nota: string
 }
 
+// ── El BORRADOR (campo del proyecto — el plan mientras se arma) ──────────────
+// Vive DENTRO del doc de proyectos (los gestores ya escriben ahí: C2 no
+// necesita regla nueva). Al emitir (C3) el documento congelado va a la
+// subcolección proyectos/{id}/cronogramas con consecutivo CRN + hash.
+
+export interface BorradorCronograma {
+  fecha_inicio: string         // 'YYYY-MM-DD'
+  plazo_dias: number
+  fases: FaseCronograma[]
+  ventana_corte?: VentanaCorte
+  observaciones?: string
+  fecha_actualizacion: Timestamp
+  actualizado_por: string
+  actualizado_por_nombre?: string
+}
+
 // ── El CRONOGRAMA (subcolección proyectos/{id}/cronogramas) ──────────────────
 
 export interface CronogramaObra {

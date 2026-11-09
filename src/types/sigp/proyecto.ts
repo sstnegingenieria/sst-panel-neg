@@ -1588,6 +1588,10 @@ export interface Proyecto {
    *  autor y fecha por registro — se captura cuando ocurre, no al armar el
    *  corte. Lo escriben los GESTORES; el corte lo emite gerencia. */
   avance_items?: import('./corteObra').AvanceItem[]
+  /** CRONOGRAMA DE OBRA (08-nov, C2): el BORRADOR del plan mientras se
+   *  arma — lo editan los gestores en la ficha. Al emitir (C3) el documento
+   *  congelado va a la subcolección cronogramas con consecutivo CRN. */
+  cronograma_borrador?: import('./cronograma').BorradorCronograma
   facturacion?: FacturacionProyecto    // LEGACY (pre 07-nov): factura única — leída en dual por facturasDe()
   /** CANÓNICO (07-nov — facturación parcial): la lista de facturas,
    *  append-only, anulación por marcador. Σ vivas = total_facturado. */

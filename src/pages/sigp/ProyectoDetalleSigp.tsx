@@ -11,6 +11,7 @@ import { useFeatureFlag } from '../../hooks/useFeatureFlag'
 import { puedeGestionarProyectosUI, puedeAprobarPreliquidacionUI, puedeCorregirClasificacionUI } from '../../types/sigp/permisos'
 import CorreccionClasificacionModal from '../../components/sigp/proyectos/CorreccionClasificacion'
 import AvanceObra from '../../components/sigp/proyectos/AvanceObra'
+import CronogramaObra from '../../components/sigp/proyectos/CronogramaObra'
 import AsignacionesProyecto from '../../components/sigp/proyectos/AsignacionesProyecto'
 import PermisosIngreso from '../../components/sigp/proyectos/PermisosIngreso'
 import PreliquidacionProyecto from '../../components/sigp/proyectos/PreliquidacionProyecto'
@@ -413,6 +414,11 @@ export default function ProyectoDetalleSigp() {
           "Ejecución y entrega" (08-nov: el avance es el pulso diario de la
           obra; la entrega es su desenlace). Se auto-oculta sin items_alcance
           o antes de la ejecución; desplegable cerrada hasta que haya avance. */}
+      {/* Cronograma de obra (08-nov, C2): el PLAN que se entrega antes de
+          iniciar — editor de rejilla, borrador en el proyecto; la emisión
+          (CRN + PDF) llega en C3. Antes del avance: el plan antecede al pulso. */}
+      <CronogramaObra proyecto={proyecto} puedeGestionar={puedeGestionar} reload={load} />
+
       <AvanceObra proyecto={proyecto} reload={load} nombres={nombres} />
 
       {/* Ejecución → entrega → soporte → handoff (F2.1.d) */}
