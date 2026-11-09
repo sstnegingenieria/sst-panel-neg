@@ -12,6 +12,7 @@ import {
   REF_PERSONA_TIPOS, REF_PERSONA_TIPO_LABEL,
   veredictoFirmado, personalAcreditado, indicadorMedido, requisitoConsistente,
   clonarRequisitosComoPlantilla,
+  nuevoRequisito, requisitosDesdePlantilla, patchActivoRequisito,
   puedeMarcarseRequisito, patchMarcarRequisito,
 } from '../requisito'
 import type { Requisito, EstadoRequisito } from '../requisito'
@@ -599,5 +600,232 @@ describe('REGRESIÓN COPNIA — la pérdida real de 2026 no puede repetirse', ()
     for (const campo of ['estado', 'verificado_por', 'verificado_en', 'valor_neg', 'persona']) {
       expect(plantilla, `"${campo}" no debe viajar en la plantilla`).not.toContain(`'${campo}'`)
     }
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════════════════
+// EL NACIMIENTO (A.2b) — un solo dueño, espejado contra el create de la regla
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe('nuevoRequisito — espeja las cuatro guardas del create', () => {
+  const datos = {
+    categoria: 'juridico' as const,
+    descripcion: 'Certificado de existencia y representación legal',
+    tipo_evidencia: 'documento_empresa' as const,
+  }
+
+  it('nace PENDIENTE, ACTIVO, sin firma y sin evidencia', () => {
+    const r = nuevoRequisito(datos, ACTOR, AHORA)!
+    expect(r.estado).toBe('pendiente')
+    expect(r.activo).toBe(true)
+    expect(r.verificado_por).toBeNull()
+    expect(r.verificado_en).toBeNull()
+    expect(r.valor_neg).toBeNull()
+    expect(r.persona).toBeNull()
+    expect(r.documento_empresa_id).toBeNull()
+    expect(r.observacion).toBe('')
+  })
+
+  it('el actor firma la autoría en los dos campos', () => {
+    const r = nuevoRequisito(datos, ACTOR, AHORA)!
+    expect(r.creado_por).toBe('uid-karen')
+    expect(r.actualizado_por).toBe('uid-karen')
+    expect(r.creado_en).toBe(AHORA)
+  })
+
+  it('CLAVE: sin actor no nace — la regla exige creado_por == auth.uid', () => {
+    expect(nuevoRequisito(datos, { uid: '' }, AHORA)).toBeNull()
+    expect(nuevoRequisito(datos, { uid: '   ' }, AHORA)).toBeNull()
+  })
+
+  it('CLAVE: descripcion vacia no nace — la regla la exige no vacia', () => {
+    expect(nuevoRequisito({ ...datos, descripcion: '' }, ACTOR, AHORA)).toBeNull()
+    expect(nuevoRequisito({ ...datos, descripcion: '   ' }, ACTOR, AHORA)).toBeNull()
+  })
+
+  it('vocabularios cerrados: categoria o tipo de evidencia inventados no nacen', () => {
+    expect(nuevoRequisito({ ...datos, categoria: 'inventada' as never }, ACTOR, AHORA)).toBeNull()
+    expect(nuevoRequisito({ ...datos, tipo_evidencia: 'papelito' as never }, ACTOR, AHORA)).toBeNull()
+  })
+
+  it('el requisito que nace es CONSISTENTE con las invariantes de forma', () => {
+    expect(requisitoConsistente(nuevoRequisito(datos, ACTOR, AHORA)!)).toBe(true)
+  })
+
+  it('el que nace NO puede presentarse: pendiente bloquea el gate', () => {
+    const r = nuevoRequisito(datos, ACTOR, AHORA)!
+    expect(puedePresentar([{ estado: r.estado }])).toBe(false)
+  })
+
+  it('fuente_pliego entra si se da, y es null si no', () => {
+    expect(nuevoRequisito({ ...datos, fuente_pliego: '4.1.2' }, ACTOR, AHORA)!.fuente_pliego)
+      .toBe('4.1.2')
+    expect(nuevoRequisito(datos, ACTOR, AHORA)!.fuente_pliego).toBeNull()
+  })
+})
+
+describe('nuevoRequisito — el requisito de indicador no nace a medias', () => {
+  const base = {
+    categoria: 'financiero' as const,
+    descripcion: 'Indice de liquidez mayor o igual a 1,5',
+    tipo_evidencia: 'indicador' as const,
+  }
+
+  it('CLAVE: sin indicador, operador y valor exigido NO nace', () => {
+    // Un indicador sin con que compararse quedaria en `pendiente` para siempre
+    // por la invariante 4, y sin decir por que. Mejor rechazarlo al nacer.
+    expect(nuevoRequisito(base, ACTOR, AHORA)).toBeNull()
+    expect(nuevoRequisito({ ...base, indicador: 'liquidez' }, ACTOR, AHORA)).toBeNull()
+    expect(nuevoRequisito({ ...base, indicador: 'liquidez', operador: 'gte' }, ACTOR, AHORA))
+      .toBeNull()
+  })
+
+  it('con los tres, nace — y con valor_neg en null, como debe', () => {
+    const r = nuevoRequisito(
+      { ...base, indicador: 'liquidez', operador: 'gte', valor_exigido: 1.5 }, ACTOR, AHORA)!
+    expect(r.indicador).toBe('liquidez')
+    expect(r.operador).toBe('gte')
+    expect(r.valor_exigido).toBe(1.5)
+    expect(r.valor_neg).toBeNull()
+  })
+
+  it('indicador u operador fuera del vocabulario: no nace', () => {
+    expect(nuevoRequisito(
+      { ...base, indicador: 'inventado' as never, operador: 'gte', valor_exigido: 1 },
+      ACTOR, AHORA)).toBeNull()
+    expect(nuevoRequisito(
+      { ...base, indicador: 'liquidez', operador: 'eq' as never, valor_exigido: 1 },
+      ACTOR, AHORA)).toBeNull()
+  })
+
+  it('valor exigido que no es numero finito: no nace', () => {
+    for (const v of [NaN, Infinity, null]) {
+      expect(nuevoRequisito(
+        { ...base, indicador: 'liquidez', operador: 'gte', valor_exigido: v as number },
+        ACTOR, AHORA), String(v)).toBeNull()
+    }
+  })
+})
+
+describe('ESPEJO: el builder dice lo mismo que el create de firestore.rules', () => {
+  const REGLAS_A2B = readFileSync(resolve(__dirname, '../../../../firestore.rules'), 'utf8')
+  const iMatch = REGLAS_A2B.indexOf('match /requisitos/{reqId}')
+  const bloqueCreate = REGLAS_A2B.slice(iMatch, REGLAS_A2B.indexOf('allow update', iMatch))
+  // El bloque se acota por su CIERRE real, no por un numero de caracteres: el
+  // match mide ~2.900 y una ventana fija de 2.500 lo truncaba — un numero
+  // magico en una verificacion es justo lo que este proyecto dejo de hacer.
+  const CIERRE_DEL_MATCH = '\n      }'
+  const matchCompleto = REGLAS_A2B.slice(
+    iMatch, REGLAS_A2B.indexOf(CIERRE_DEL_MATCH, iMatch))
+  const minimo = {
+    categoria: 'juridico' as const,
+    descripcion: 'Formatos de la entidad diligenciados',
+    tipo_evidencia: 'declaracion' as const,
+  }
+
+  it('la regla exige estado pendiente, y el builder lo impone', () => {
+    expect(bloqueCreate).toContain("get('estado', '') == 'pendiente'")
+    expect(nuevoRequisito(minimo, ACTOR, AHORA)!.estado).toBe('pendiente')
+  })
+
+  it('la regla exige activo == true, y el builder lo impone', () => {
+    expect(bloqueCreate).toContain("get('activo', false) == true")
+    expect(nuevoRequisito(minimo, ACTOR, AHORA)!.activo).toBe(true)
+  })
+
+  it('la regla exige descripcion no vacia, y el builder la rechaza vacia', () => {
+    expect(bloqueCreate).toContain("get('descripcion', '') != ''")
+    expect(nuevoRequisito({ ...minimo, descripcion: '' }, ACTOR, AHORA)).toBeNull()
+  })
+
+  it('la regla exige creado_por == auth.uid, y el builder firma con el actor', () => {
+    expect(bloqueCreate).toContain("get('creado_por', '') == request.auth.uid")
+    expect(nuevoRequisito(minimo, { uid: 'uid-pedro' }, AHORA)!.creado_por).toBe('uid-pedro')
+  })
+
+  it('la regla NO admite delete, y esta escrito', () => {
+    expect(matchCompleto).not.toContain('allow delete')
+    expect(matchCompleto).toContain('Sin delete — DENEGADO SIEMPRE, incluso para admin')
+  })
+})
+
+describe('requisitosDesdePlantilla — la lista de preguntas se vuelve checklist', () => {
+  const items = [
+    { categoria: 'juridico' as const, descripcion: 'Carta de presentacion de la oferta', tipo_evidencia: 'declaracion' as const },
+    { categoria: 'personal' as const, descripcion: 'Personal minimo requerido', tipo_evidencia: 'documento_personal' as const },
+    { categoria: 'financiero' as const, descripcion: 'Estados financieros', tipo_evidencia: 'documento_empresa' as const },
+  ]
+
+  it('los convierte a todos, en pendiente y activos', () => {
+    const rs = requisitosDesdePlantilla(items, ACTOR, AHORA)
+    expect(rs).toHaveLength(3)
+    for (const r of rs) {
+      expect(r.estado).toBe('pendiente')
+      expect(r.activo).toBe(true)
+      expect(r.verificado_por).toBeNull()
+    }
+  })
+
+  it('CLAVE: ninguno nace con veredicto — la plantilla es una lista de preguntas', () => {
+    const rs = requisitosDesdePlantilla(items, ACTOR, AHORA)
+    expect(rs.some(r => r.estado !== 'pendiente')).toBe(false)
+    expect(puedePresentar(rs.map(r => ({ estado: r.estado })))).toBe(false)
+    expect(resumenCumplimiento(rs).pendientes).toBe(3)
+  })
+
+  it('CLAVE: "personal minimo" conserva categoria personal — la guarda COPNIA viva', () => {
+    const personal = requisitosDesdePlantilla(items, ACTOR, AHORA)
+      .find(r => r.descripcion.includes('Personal minimo'))!
+    expect(personal.categoria).toBe('personal')
+    // Y por eso no se puede dar por cumplido sin persona acreditada.
+    expect(puedeMarcarseRequisito(personal, 'cumple')).toBe(false)
+  })
+
+  it('un renglon corrupto se OMITE en vez de contaminar la carga', () => {
+    const conBasura = [...items,
+      { categoria: 'juridico' as const, descripcion: '  ', tipo_evidencia: 'declaracion' as const }]
+    expect(requisitosDesdePlantilla(conBasura, ACTOR, AHORA)).toHaveLength(3)
+  })
+
+  it('sin actor no produce nada: no hay carga sin quien la haga', () => {
+    expect(requisitosDesdePlantilla(items, { uid: '' }, AHORA)).toEqual([])
+  })
+})
+
+describe('patchActivoRequisito — soft-delete, que NO es un veredicto', () => {
+  it('desactiva y deja autoria de la correccion', () => {
+    const p = patchActivoRequisito(req(), false, { uid: 'uid-pedro' }, AHORA)!
+    expect(p).toEqual({ activo: false, actualizado_por: 'uid-pedro', actualizado_en: AHORA })
+  })
+
+  it('CLAVE: no toca estado ni firma — desactivar no borra que alguien verifico', () => {
+    const verificado = req({ estado: 'cumple', verificado_por: 'uid-karen', verificado_en: ANTES })
+    const p = patchActivoRequisito(verificado, false, ACTOR, AHORA)!
+    expect('estado' in p).toBe(false)
+    expect('verificado_por' in p).toBe(false)
+  })
+
+  it('reactiva', () => {
+    expect(patchActivoRequisito(req({ activo: false }), true, ACTOR, AHORA)!.activo).toBe(true)
+  })
+
+  it('sin cambio no escribe ruido', () => {
+    expect(patchActivoRequisito(req({ activo: true }), true, ACTOR, AHORA)).toBeNull()
+    expect(patchActivoRequisito(req({ activo: false }), false, ACTOR, AHORA)).toBeNull()
+  })
+
+  it('sin actor no se puede: toda correccion tiene dueno', () => {
+    expect(patchActivoRequisito(req(), false, { uid: '' }, AHORA)).toBeNull()
+  })
+
+  it('CLAVE: desactivar y no_aplica son caminos DISTINTOS', () => {
+    // `no_aplica` es un veredicto: cuenta como resuelto y exige firma.
+    const noAplica = patchMarcarRequisito(req(), 'no_aplica', ACTOR, AHORA)!
+    expect(noAplica.verificado_por).toBe('uid-karen')
+    expect(resumenCumplimiento([{ estado: 'no_aplica' }]).pendientes).toBe(0)
+    // `activo: false` no es un veredicto: el requisito sale del conteo porque
+    // nunca debio estar, no porque alguien lo haya resuelto.
+    const desactivado = patchActivoRequisito(req(), false, ACTOR, AHORA)!
+    expect('verificado_por' in desactivado).toBe(false)
   })
 })

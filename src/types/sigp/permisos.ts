@@ -384,8 +384,9 @@ export const puedeGestionarActividadesUI = (rol: string | undefined) => en(rol, 
 // ── Módulo LICITACIONES (1.4, 21-ago-2026) ──
 // Espejo EXACTO de los helpers de firestore.rules del sub-bloque 1.2:
 //
-//   ROLES_VE_LICITACIONES        ⟷ gestionaLicitaciones()
-//   ROLES_VE_ECONOMIA_LICITACION ⟷ veEconomiaLicitacion()
+//   ROLES_VE_LICITACIONES            ⟷ gestionaLicitaciones()
+//   ROLES_VE_ECONOMIA_LICITACION     ⟷ veEconomiaLicitacion()
+//   ROLES_EDITA_PLANTILLA_LICITACIONES ⟷ editaPlantillaRequisitos()
 //
 // `operacion_comercial` ESTÁ en el módulo (las licitaciones son su frente,
 // decisión del PR #97) y NO está en la economía: quien arma la propuesta no
@@ -414,6 +415,23 @@ export const ROLES_VE_ECONOMIA_LICITACION: Rol[] = [
 ]
 export const veEconomiaLicitacionUI = (rol: string | undefined) =>
   en(rol, ROLES_VE_ECONOMIA_LICITACION)
+
+// Quién puede ESCRIBIR `configuracion/plantilla_requisitos` — la plantilla del
+// pliego típico del módulo (A.2a). Espejo de `editaPlantillaRequisitos()`.
+//
+// ⚠ ES UN SUBCONJUNTO ESTRICTO de quien ve el módulo, y eso tiene consecuencia
+// de UI: `operacion_comercial` (Karen) y `gerencia_administrativa` gestionan
+// licitaciones pero NO editan la plantilla — quien trabaja contra una lista no
+// la define. Por eso el estado "sin plantilla cargada" del checklist se
+// BIFURCA: a quien puede escribirla se le ofrece el botón; a quien no, se le
+// dice quién la carga y se le deja capturar los requisitos a mano. Un botón
+// que la regla va a rechazar con 403 es un botón muerto, y este sub-bloque
+// existe justamente para quitar el que dejó el A.2a.
+export const ROLES_EDITA_PLANTILLA_LICITACIONES: Rol[] = [
+  'gerencia_general', 'director_proyectos', 'admin',
+]
+export const editaPlantillaLicitacionesUI = (rol: string | undefined) =>
+  en(rol, ROLES_EDITA_PLANTILLA_LICITACIONES)
 
 // ── Módulo Indicadores SG-SST (F1, 22-sep) ──
 // Colecciones `indicadores_sst`/`indicador_mediciones` — digitaliza el Plan

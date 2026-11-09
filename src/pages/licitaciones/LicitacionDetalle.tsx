@@ -39,6 +39,8 @@ import { useConsecutivo } from '../../hooks/sigp/useConsecutivo'
 import { fmtMoney, fmtNum } from '../../utils/sigp/formato'
 import EconomiaLicitacion from '../../components/sigp/licitaciones/EconomiaLicitacion'
 import AdjuntosLicitacion from '../../components/sigp/licitaciones/AdjuntosLicitacion'
+import ChecklistRequisitos from '../../components/sigp/licitaciones/ChecklistRequisitos'
+import { useRequisitos } from '../../hooks/sigp/useRequisitos'
 import ModalPresentar from '../../components/sigp/licitaciones/ModalPresentar'
 import ModalResultado from '../../components/sigp/licitaciones/ModalResultado'
 import ModalOverride from '../../components/sigp/licitaciones/ModalOverride'
@@ -91,12 +93,23 @@ export default function LicitacionDetalle() {
 
   const hoy = useMemo(() => isoLocal(new Date()), [])
 
-  // ── Invariante 8: el gate de cumplimiento ──
-  // El A.2 carga los requisitos del pliego; hoy la lista es VACÍA y eso
-  // bloquea con motivo `SIN_REQUISITOS`. Un solo punto: lo que se pasa al
-  // patch builder es exactamente lo que se evalúa para el aviso, así que el
-  // texto nunca puede contradecir al botón.
-  const cumplimiento: DatosCumplimiento = useMemo(() => ({ requisitos: [] }), [])
+  // ── Invariante 8: el gate de cumplimiento, YA OPERATIVO (A.2b) ──
+  // Hasta el A.2a esta lista era VACÍA y presentar quedaba bloqueado con
+  // `SIN_REQUISITOS` — un botón muerto deliberado. Ahora lee los requisitos
+  // REALES de la subcolección.
+  //
+  // Solo cuentan los ACTIVOS: un requisito marcado como mal creado no es un
+  // pendiente ni un incumplido, es un renglón que nunca debió estar. Ver el
+  // campo `activo` de `requisito.ts`.
+  //
+  // Un solo punto: lo que se pasa al patch builder es exactamente lo que se
+  // evalúa para el aviso, así que el texto nunca puede contradecir al botón.
+  const requisitosApi = useRequisitos(licitacionId, user?.uid ?? '')
+  const requisitosLic = requisitosApi.requisitos
+  const cumplimiento: DatosCumplimiento = useMemo(
+    () => ({ requisitos: requisitosLic.filter(r => r.activo) }),
+    [requisitosLic],
+  )
   const bloqueo = useMemo(
     () => bloqueoPresentacion(cumplimiento.requisitos, cumplimiento.override),
     [cumplimiento],
@@ -356,6 +369,13 @@ export default function LicitacionDetalle() {
           {/* ── Adjuntos ── */}
           <AdjuntosLicitacion licitacionId={lic.id} puedeSubir={puedeGestionar} />
 
+          {/* ── Checklist del pliego (A.2b) ── */}
+          <ChecklistRequisitos
+            rol={user?.rol}
+            puedeGestionar={puedeGestionar}
+            api={requisitosApi}
+          />
+
           {/* ── Acciones ── */}
           {puedeGestionar && salidas.length > 0 && (
             <section className="bg-white border border-gray-300 rounded-lg p-4">
@@ -424,11 +444,12 @@ export default function LicitacionDetalle() {
                   {bloqueo.codigo === 'SIN_REQUISITOS' ? (
                     <>
                       <span className="font-semibold">
-                        Presentar está bloqueado: el checklist del pliego todavía no existe.
+                        Presentar está bloqueado: este pliego todavía no tiene requisitos
+                        capturados.
                       </span>{' '}
-                      Se habilita en el siguiente bloque del módulo, cuando se puedan
-                      registrar y verificar los requisitos. No es un error — es el estado
-                      esperado hasta entonces.
+                      Captúralos en el checklist de arriba — puedes traer la plantilla del
+                      pliego típico o agregarlos uno por uno. Presentarse sin nada
+                      verificado es exactamente el escenario que este bloqueo evita.
                     </>
                   ) : (
                     <>

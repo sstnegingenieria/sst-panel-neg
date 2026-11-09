@@ -9,7 +9,9 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   ROLES_VE_LICITACIONES, ROLES_VE_ECONOMIA_LICITACION,
+  ROLES_EDITA_PLANTILLA_LICITACIONES,
   veLicitacionesUI, gestionaLicitacionesUI, veEconomiaLicitacionUI,
+  editaPlantillaLicitacionesUI,
 } from '../permisos'
 import { ROLES_PANEL_WEB } from '../roles'
 import type { Rol } from '../roles'
@@ -27,6 +29,11 @@ function rolesDelHelper(nombre: string): string[] {
 describe('espejo UI ⟷ firestore.rules', () => {
   it('ROLES_VE_LICITACIONES == gestionaLicitaciones()', () => {
     expect([...ROLES_VE_LICITACIONES].sort()).toEqual(rolesDelHelper('gestionaLicitaciones'))
+  })
+
+  it('ROLES_EDITA_PLANTILLA_LICITACIONES == editaPlantillaRequisitos()', () => {
+    expect([...ROLES_EDITA_PLANTILLA_LICITACIONES].sort())
+      .toEqual(rolesDelHelper('editaPlantillaRequisitos'))
   })
 
   it('ROLES_VE_ECONOMIA_LICITACION == veEconomiaLicitacion()', () => {
@@ -92,5 +99,51 @@ describe('el residente_obra NO entra por esta puerta', () => {
     // concesión es explícita. Licitaciones no le concede ninguna.
     expect(ROLES_VE_LICITACIONES).not.toContain('residente_obra')
     expect(ROLES_VE_ECONOMIA_LICITACION).not.toContain('residente_obra')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// La plantilla del pliego típico: quién la escribe (A.2b)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Estos casos existen porque de ellos depende que el checklist NO muestre un
+// botón que la regla va a rechazar. El A.2a dejó un botón muerto a propósito
+// (el gate inerte) y este sub-bloque viene a quitarlo: meter otro por no mirar
+// la diferencia entre "ve el módulo" y "edita la plantilla" sería irónico.
+
+describe('quién edita la plantilla del pliego típico', () => {
+  it('CLAVE: es un SUBCONJUNTO ESTRICTO de quien ve el módulo', () => {
+    for (const r of ROLES_EDITA_PLANTILLA_LICITACIONES) {
+      expect(ROLES_VE_LICITACIONES, `${r} edita la plantilla pero no ve el módulo`)
+        .toContain(r)
+    }
+    expect(ROLES_EDITA_PLANTILLA_LICITACIONES.length)
+      .toBeLessThan(ROLES_VE_LICITACIONES.length)
+  })
+
+  it('CLAVE: operacion_comercial VE el módulo y NO edita la plantilla', () => {
+    // Karen es la usuaria del módulo y la que trabaja contra la lista. Que no
+    // la defina es la segregación del A.2a funcionando, no un olvido — y es la
+    // razón por la que el estado "sin plantilla" se bifurca por rol.
+    expect(veLicitacionesUI('operacion_comercial')).toBe(true)
+    expect(editaPlantillaLicitacionesUI('operacion_comercial')).toBe(false)
+  })
+
+  it('gerencia_administrativa tampoco: gestiona licitaciones, no define la lista', () => {
+    expect(veLicitacionesUI('gerencia_administrativa')).toBe(true)
+    expect(editaPlantillaLicitacionesUI('gerencia_administrativa')).toBe(false)
+  })
+
+  it('los tres que sí: gerencia_general, director_proyectos y admin', () => {
+    for (const r of ['gerencia_general', 'director_proyectos', 'admin'] as Rol[]) {
+      expect(editaPlantillaLicitacionesUI(r), r).toBe(true)
+    }
+  })
+
+  it('nadie de fuera del panel la edita', () => {
+    for (const r of ['tecnico', 'contratista', 'cliente_final', 'residente_obra'] as string[]) {
+      expect(editaPlantillaLicitacionesUI(r), r).toBe(false)
+    }
+    expect(editaPlantillaLicitacionesUI(undefined)).toBe(false)
   })
 })
