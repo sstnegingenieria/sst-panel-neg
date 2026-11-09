@@ -20,7 +20,7 @@ export function usePendientesVerificacionSst(activo: boolean) {
     const unsub = onSnapshot(
       collection(db, 'verificaciones_sst'),
       snap => setPendientes(pendientesVerificacionDe(
-        snap.docs.map(d => d.data() as { estado: EstadoProyecto; sst_gate?: SstGateProyecto }))),
+        snap.docs.map(d => d.data() as { estado: EstadoProyecto; sst_gate?: SstGateProyecto; migrada_a?: string[]; activa?: boolean }))),
       () => setPendientes(0),
     )
     return () => unsub()
