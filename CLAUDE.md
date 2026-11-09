@@ -401,6 +401,15 @@ sst-panel-web/src/
 > y otro ejecutor hizo `git checkout main` encima — el commit quedó suelto
 > y el arreglo (PR #230) a la deriva hasta que alguien lo rescató.
 
+> **🔐 SESIONES PERSONALES PARA DESPLEGAR (acuerdo de los tres frentes,
+> 09-nov-2026)**: cada persona inicia sesión en firebase-tools con SU
+> cuenta para desplegar y la cierra al terminar
+> (`npx firebase login` → deploy → `npx firebase logout`).
+> **La cuenta compartida NO queda con sesión abierta en ningún equipo** —
+> de nada sirve que la bitácora capture la sesión si todos usan la misma.
+> Los censos y lecturas de producción no necesitan sesión: usan la llave
+> de LECTURA del modelo de tres llaves.
+
 **Cada carril/tarea activa trabaja en su PROPIO `git worktree`** — nunca dos
 sesiones editando el mismo working tree. Origen de la regla: el incidente del
 C3 (PR #65), donde una sesión paralela sobrescribió `firestore.rules` sin
