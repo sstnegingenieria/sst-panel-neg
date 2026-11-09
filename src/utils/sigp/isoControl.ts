@@ -117,3 +117,15 @@ export const CORTE_OBRA: ControlDocumentalIso = {
   modificado: 'NOV-2026',
   nombre: 'CORTE DE AVANCE DE OBRA',
 }
+
+// CRONOGRAMA DE OBRA (08-nov-2026, C3) — mismo patrón que el corte: el
+// código lo ASIGNA Ingrid (GI) en el Listado Maestro (área DO, proyectos);
+// mientras tanto el PDF sale ROTULADO como pendiente. Giovanny ya pidió los
+// dos códigos juntos (corte + cronograma) el 08-nov.
+export const CRONOGRAMA_OBRA: ControlDocumentalIso = {
+  area: 'GESTIÓN DE PROYECTOS',
+  codigo: 'PENDIENTE DE RATIFICACIÓN SGI',
+  version: '01',
+  modificado: 'NOV-2026',
+  nombre: 'CRONOGRAMA DE OBRA',
+}

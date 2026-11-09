@@ -27,6 +27,7 @@ import {
   ROLES_CREA_OC,
   ROLES_GESTIONA_ACTIVIDADES,
   ROLES_VE_LICITACIONES,
+  ROLES_GESTIONA_PROYECTOS,
 } from '../permisos'
 
 const igualesSinOrden = (a: string[], b: string[]) =>
@@ -56,6 +57,11 @@ describe('espejo CF ⟷ permisos.ts — mapa prefijo→roles', () => {
     for (const p of ['AC', 'AP', 'MEJ']) {
       igualesSinOrden(cf.ROLES_POR_PREFIJO[p], ['gestion_integral', 'admin'])
     }
+  })
+
+  it('CRT = gerencia + admin (quien mide no emite) · CRN espeja ROLES_GESTIONA_PROYECTOS (el plan lo emiten los gestores)', () => {
+    igualesSinOrden(cf.ROLES_POR_PREFIJO.CRT, ['gerencia_administrativa', 'admin'])
+    igualesSinOrden(cf.ROLES_POR_PREFIJO.CRN, ROLES_GESTIONA_PROYECTOS as unknown as string[])
   })
 
   it('DENY-BY-DEFAULT: la whitelist son EXACTAMENTE las claves del mapa, sin reservados', () => {

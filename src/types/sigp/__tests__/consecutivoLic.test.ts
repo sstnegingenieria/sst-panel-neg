@@ -25,7 +25,7 @@ const cf = require('../../../../functions/consecutivos.js') as {
  *  llamador (OFR/ACT/LIQ/FAC/NC/PRY) salieron de la superficie. */
 const PREFIJOS_PREVIOS = ['SOL', 'VIS', 'COT', 'CAT', 'OC', 'PEA']
 /** Prefijos agregados DESPUÉS de LIC (AC/AP, cláusula 10.2) — ver consecutivoAcap.test.ts. */
-const PREFIJOS_POSTERIORES = ['AC', 'AP', 'MEJ', 'CRT']  // CRT: corte de obra (07-nov)
+const PREFIJOS_POSTERIORES = ['AC', 'AP', 'MEJ', 'CRT', 'CRN']  // CRT: corte (07-nov) · CRN: cronograma (08-nov)
 
 describe('PREFIJOS_VALIDOS', () => {
   it('LIC está en la lista blanca', () => {

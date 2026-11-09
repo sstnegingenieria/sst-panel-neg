@@ -55,6 +55,10 @@ const ROLES_POR_PREFIJO = {
   // Corte de avance de obra (07-nov): lo EMITE gerencia (quien mide no
   // emite — segregación captura/emisión, espejo de puedeEmitirCorteUI).
   CRT: ['gerencia_administrativa', 'admin'],
+  // Cronograma de obra (08-nov, C3): el PLAN lo emiten los gestores de
+  // proyectos (espejo de ROLES_GESTIONA_PROYECTOS / puedeEmitirCronogramaUI
+  // — es un documento del área DO, no sustenta factura).
+  CRN: ['admin', 'gerencia_general', 'director_proyectos', 'auxiliar_proyectos'],
 };
 
 // RESERVADOS sin llamador — FUERA de la superficie a propósito (un prefijo
