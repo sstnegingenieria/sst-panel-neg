@@ -18,6 +18,28 @@
  *   · IDEMPOTENTE por `numero_proceso`: el doc id es su hash normalizado, así
  *     que re-correr actualiza en vez de duplicar.
  *
+ * ── QUÉ LLAVE PARA QUÉ (modelo de tres llaves, 09-nov-2026) ────────────────
+ *
+ *   · LEER — el dry-run de este script y cualquier verificación:
+ *       `_credenciales\neg-sst-app-lectura.json`
+ *       (sigp-lectura@neg-sst-app.iam.gserviceaccount.com)
+ *     El dry-run SOLO hace `get`, así que la llave de lectura le alcanza y no
+ *     hay razón para pedir otra. Si alguien necesita una llave con escritura
+ *     para ver el plan, algo está mal en el script, no en la llave.
+ *
+ *   · ESCRIBIR DATOS — la bandera de aplicar:
+ *       la llave de ESCRITURA DE DATOS (`sigp-escritura-datos`), que entrega
+ *       Giovanny POR ACTO y se retira al terminar.
+ *     Sin ella la escritura falla, y así debe ser: el acto es la autorización.
+ *
+ *   · DESPLEGAR — NINGUNA llave de servicio sirve, y no se debe buscar una.
+ *     Las reglas salen por `scripts/deploy-reglas.ps1` con la sesión de la
+ *     persona; las Cloud Functions, igual. Una llave capaz de desplegar es
+ *     exactamente lo que este modelo vino a eliminar.
+ *
+ *   ⚠ La llave admin `neg-sst-app-adminsdk.json` fue REVOCADA. Si algún
+ *     instructivo todavía la pide, está viejo: NO se vuelve a descargar.
+ *
  * ── Cómo ejecutarlo ─────────────────────────────────────────────────────────
  *     npx vite-node functions/scripts/importar-licitaciones.js              # dry-run
  *     npx vite-node functions/scripts/importar-licitaciones.js --commit     # escribe
