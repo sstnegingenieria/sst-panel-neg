@@ -24,8 +24,7 @@
  *
  * ── Qué llave para qué (modelo de tres llaves, 09-nov-2026) ─────────────────
  *   · DRY-RUN (solo lectura): usa la llave de LECTURA por defecto de los
- *     ejecutores — _credenciales
-eg-sst-app-lectura.json.
+ *     ejecutores — _credenciales\neg-sst-app-lectura.json.
  *   · --apply (escritura de datos): SOLO con la llave de escritura-en-acto
  *     entregada por Giovanny para el acto aprobado, y se retira al terminar.
  *   · NINGUNA llave de servicio sirve para desplegar reglas: el deploy va
