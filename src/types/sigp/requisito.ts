@@ -379,21 +379,108 @@ export function clonarRequisitosComoPlantilla(
   actor: { uid: string },
   ahora: Timestamp,
 ): Requisito[] {
-  return origen.map(r => ({
-    // ── Lo que viaja: la estructura de la exigencia ──
-    categoria: r.categoria,
-    descripcion: r.descripcion,
-    tipo_evidencia: r.tipo_evidencia,
-    indicador: r.indicador,
-    operador: r.operador,
-    valor_exigido: r.valor_exigido,
+  // DELEGA en `nuevoRequisito`: el nacimiento tiene un solo dueño. Lo que este
+  // builder decide es qué viaja (la estructura) y qué no (todo rastro de
+  // veredicto o evidencia) — no cómo se construye el documento. Antes esto era
+  // un objeto literal propio, y dos nacimientos distintos son dos lugares
+  // donde uno puede olvidarse de reiniciar un campo.
+  return origen
+    .map(r => nuevoRequisito(
+      {
+        // ── Lo que viaja: la estructura de la exigencia ──
+        categoria: r.categoria,
+        descripcion: r.descripcion,
+        tipo_evidencia: r.tipo_evidencia,
+        indicador: r.indicador,
+        operador: r.operador,
+        valor_exigido: r.valor_exigido,
+        // ── Lo que NO viaja: el numeral es de OTRO pliego ──
+        fuente_pliego: null,
+      },
+      actor,
+      ahora,
+    ))
+    .filter((r): r is Requisito => r !== null)
+}
 
-    // ── Lo que NO viaja: todo rastro de veredicto o evidencia ──
-    fuente_pliego: null,
+// ── El NACIMIENTO de un requisito: dueño único de las guardas del create ────
+
+/**
+ * Lo que define una exigencia al nacer. Todo lo demás —estado, firma,
+ * evidencia, `activo`— lo pone el builder, no quien lo llama.
+ */
+export interface DatosNuevoRequisito {
+  categoria: CategoriaRequisito
+  descripcion: string
+  tipo_evidencia: TipoEvidencia
+  fuente_pliego?: string | null
+  indicador?: IndicadorRup | null
+  operador?: OperadorRequisito | null
+  valor_exigido?: number | null
+}
+
+/**
+ * Construye un requisito NUEVO, o `null` si los datos no alcanzan.
+ *
+ * Es el ÚNICO lugar donde nace un requisito: la captura a mano, el clonado de
+ * una licitación anterior y la carga desde la plantilla del pliego típico
+ * pasan todos por acá. Con tres caminos y tres nacimientos distintos, uno de
+ * ellos acabaría naciendo con un veredicto heredado — que es exactamente la
+ * invariante 1.
+ *
+ * ── ESPEJA LAS CUATRO GUARDAS DEL `create` DE firestore.rules ──────────────
+ *
+ *   regla                                    acá
+ *   creado_por == request.auth.uid           `actor.uid` no vacío, y es quien firma
+ *   estado == 'pendiente'                    nace `pendiente`, sin excepción
+ *   descripcion != ''                        `descripcion.trim() !== ''`
+ *   activo == true                           nace `activo: true`
+ *
+ * No es duplicación por descuido: la regla fija lo que un cliente no puede
+ * falsear y el builder fija lo que la UI no puede olvidar. Si divergieran, la
+ * UI escribiría documentos que la regla rechaza — y hay test de que no.
+ *
+ * Nace SIN firma y SIN evidencia a propósito. Un requisito recién capturado es
+ * una pregunta abierta: el veredicto lo pone una persona, por
+ * `patchMarcarRequisito`, y queda con su nombre (invariante 2).
+ */
+export function nuevoRequisito(
+  d: DatosNuevoRequisito,
+  actor: { uid: string },
+  ahora: Timestamp,
+): Requisito | null {
+  if (actor.uid.trim() === '') return null
+  if (d.descripcion.trim() === '') return null
+  if (!CATEGORIAS_REQUISITO.includes(d.categoria)) return null
+  if (!TIPOS_EVIDENCIA.includes(d.tipo_evidencia)) return null
+
+  const indicador = d.indicador ?? null
+  const operador = d.operador ?? null
+  const valorExigido = d.valor_exigido ?? null
+
+  // Un requisito de indicador sin qué indicador, con qué operador y contra qué
+  // número no se puede evaluar NUNCA: `evaluarIndicador` no tendría con qué, y
+  // la invariante 4 lo dejaría colgado en `pendiente` para siempre sin decir
+  // por qué. Mejor rechazarlo al nacer que crear un requisito inverificable.
+  if (d.tipo_evidencia === 'indicador') {
+    if (indicador === null || !INDICADORES_RUP.includes(indicador)) return null
+    if (operador === null || !OPERADORES_REQUISITO.includes(operador)) return null
+    if (typeof valorExigido !== 'number' || !Number.isFinite(valorExigido)) return null
+  }
+
+  return {
+    categoria: d.categoria,
+    descripcion: d.descripcion,
+    fuente_pliego: d.fuente_pliego ?? null,
+    tipo_evidencia: d.tipo_evidencia,
     documento_empresa_id: null,
     persona: null,
+    indicador,
+    operador,
+    valor_exigido: valorExigido,
     valor_neg: null,
-    estado: 'pendiente' as EstadoRequisito,
+
+    estado: 'pendiente',
     verificado_por: null,
     verificado_en: null,
     observacion: '',
@@ -403,7 +490,53 @@ export function clonarRequisitosComoPlantilla(
     creado_en: ahora,
     actualizado_por: actor.uid,
     actualizado_en: ahora,
-  }))
+  }
+}
+
+/**
+ * Los renglones de la plantilla del pliego típico, como requisitos nuevos.
+ *
+ * La plantilla es una LISTA DE PREGUNTAS: sus renglones traen capítulo,
+ * categoría, descripción y tipo de evidencia, y ningún veredicto. Acá se
+ * convierten en requisitos `pendiente` — el `capitulo` se queda en la
+ * plantilla porque es su agrupación del pliego, no comportamiento; lo que
+ * manda comportamiento es `categoria` (ver la guarda COPNIA).
+ *
+ * Devuelve solo los que el builder aceptó: un renglón corrupto se omite en
+ * vez de contaminar la carga, y `itemsOmitidos` deja decirlo en pantalla.
+ */
+export function requisitosDesdePlantilla(
+  items: readonly { categoria: CategoriaRequisito; descripcion: string; tipo_evidencia: TipoEvidencia }[],
+  actor: { uid: string },
+  ahora: Timestamp,
+): Requisito[] {
+  return items
+    .map(i => nuevoRequisito(
+      { categoria: i.categoria, descripcion: i.descripcion, tipo_evidencia: i.tipo_evidencia },
+      actor,
+      ahora,
+    ))
+    .filter((r): r is Requisito => r !== null)
+}
+
+/**
+ * Soft-delete y su reverso. `activo: false` para el requisito MAL CREADO
+ * (duplicado, typo, capturado del pliego equivocado); `true` para devolverlo.
+ *
+ * NO toca `estado` ni la firma: un requisito ya verificado que se desactiva
+ * conserva quién lo verificó, porque eso pasó. Y no se confunde con
+ * `no_aplica`, que es un veredicto y exige firma — la diferencia está escrita
+ * en el campo `activo` del tipo.
+ */
+export function patchActivoRequisito(
+  r: Pick<Requisito, 'activo'>,
+  activo: boolean,
+  actor: { uid: string },
+  ahora: Timestamp,
+) {
+  if (actor.uid.trim() === '') return null
+  if (r.activo === activo) return null          // nada que cambiar: no se escribe ruido
+  return { activo, actualizado_por: actor.uid, actualizado_en: ahora }
 }
 
 // ── Patch builder: el único dueño de las invariantes 2, 3 y 4 ───────────────
