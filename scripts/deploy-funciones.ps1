@@ -58,7 +58,29 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string]$Codebase,
-  [switch]$Simulacro
+  [switch]$Simulacro,
+  # ── ESCOTILLA DEL NUDO DE IDENTIDAD (09-nov-2026) ─────────────────────────
+  # El acuerdo de los tres frentes es sesion de PERSONA. Pero el acto de IAM
+  # para la cuenta nominal FALLO: Google respondio "User
+  # giovanny.montes@negingenieria.com does not exist" — el dominio no esta en
+  # Workspace ni en Cloud Identity, asi que esos correos son buzones, no
+  # identidades de Google, y no se les puede conceder ningun rol. Hoy la unica
+  # identidad con permisos de desplegar es la cuenta COMPARTIDA, que este
+  # script veta.
+  #
+  # Dejar el veto absoluto hace imposible desplegar — el radar y el codebase
+  # `default` de los otros frentes quedan bloqueados hasta que el dominio
+  # tenga Cloud Identity. Quitar el veto perderia lo unico que la bitacora
+  # existe para responder: QUIEN desplego.
+  #
+  # Salida: la excepcion EXISTE, pero es explicita, atribuida y queda escrita
+  # — como el override del semaforo, la salvedad del aprobador de respaldo o
+  # el `autorizado_manual` de la guarda de volumen. Con la cuenta compartida
+  # hay que declarar quien lo ejecuta y por que, y las dos cosas van a la fila
+  # de la bitacora.
+  [switch]$ConCuentaCompartida,
+  [string]$AutorizadoPor,
+  [string]$Motivo
 )
 
 Set-StrictMode -Version Latest
@@ -111,13 +133,44 @@ if ($loginList -match 'Logged in as\s+(\S+)') { $quien = $Matches[1] }
 if (-not $quien) {
   Abortar 'no pude determinar la sesion de Firebase (npx firebase login:list). Inicia sesion con TU cuenta (npx firebase login).'
 }
-if ($CuentasCompartidas -contains $quien) {
-  Abortar ("la sesion activa es la CUENTA COMPARTIDA ($quien).`n" +
-    "El acuerdo de los tres frentes es sesion de persona: login -> deploy -> logout.`n" +
-    "QUE HACER:`n" +
-    "    npx firebase logout`n" +
-    "    npx firebase login        (con TU cuenta)`n" +
-    'y vuelve a correr el script.')
+$esCompartida = ($CuentasCompartidas -contains $quien)
+$excepcionCompartida = ''
+if ($esCompartida) {
+  if (-not $ConCuentaCompartida) {
+    $ayuda = @(
+      "la sesion activa es la CUENTA COMPARTIDA ($quien).",
+      'El acuerdo de los tres frentes es sesion de persona: login -> deploy -> logout.',
+      '',
+      'QUE HACER, en orden de preferencia:',
+      '  1. Desplegar con TU cuenta de Google:',
+      '       npx firebase logout',
+      '       npx firebase login',
+      '     Requiere que tu identidad EXISTA en Google y tenga los roles.',
+      '     Ver el prerequisito de IAM en docs/radar-cuenta-de-servicio.md.',
+      '',
+      '  2. Si el nudo de identidad sigue abierto (el dominio sin Cloud Identity),',
+      '     la excepcion existe pero hay que firmarla:',
+      '',
+      ("       .\scripts\deploy-funciones.ps1 -Codebase $Codebase -ConCuentaCompartida -AutorizadoPor 'Nombre Apellido' -Motivo 'por que no hay identidad nominal todavia'"),
+      '',
+      '     Quien ejecuta y por que quedan EN LA FILA DE LA BITACORA.'
+    ) -join [Environment]::NewLine
+    Abortar $ayuda
+  }
+  if (-not $AutorizadoPor.Trim()) {
+    Abortar '-ConCuentaCompartida exige -AutorizadoPor: la bitacora tiene que poder responder QUIEN desplego, y la cuenta compartida no lo responde.'
+  }
+  if (-not $Motivo.Trim()) {
+    Abortar '-ConCuentaCompartida exige -Motivo: una excepcion sin razon escrita se vuelve la norma.'
+  }
+  $excepcionCompartida = 'cuenta compartida; ejecuto ' + $AutorizadoPor.Trim() + '; motivo: ' + $Motivo.Trim()
+  Write-Host ''
+  Write-Host '*** EXCEPCION: se despliega con la CUENTA COMPARTIDA ***' -ForegroundColor Red
+  Write-Host ('    Ejecuta: ' + $AutorizadoPor.Trim()) -ForegroundColor Yellow
+  Write-Host ('    Motivo:  ' + $Motivo.Trim()) -ForegroundColor Yellow
+  Write-Host '    Queda escrito en la bitacora. Cuando el dominio tenga Cloud Identity, esto sobra.' -ForegroundColor Yellow
+} elseif ($ConCuentaCompartida) {
+  Abortar "-ConCuentaCompartida pero la sesion activa ($quien) NO es una cuenta compartida. Quita la bandera: no se firma una excepcion que no hace falta."
 }
 Write-Host "Sesion de Firebase: $quien" -ForegroundColor Green
 
@@ -523,7 +576,9 @@ if (-not (Test-Path $bitacora)) {
 $fechaUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 $estado = if ($verificado) { 'OK' } else { 'FALLIDA' }
 $listaNuevas = if ($nuevas.Count -gt 0) { ($nuevas -join ' ') } else { '-' }
-$fila = "| $fechaUtc | $Codebase | $commitCorto | $prDeploy | $($declaradas.Count) | $listaNuevas | $quien | $estado |"
+$quienFila = $quien
+if ($excepcionCompartida) { $quienFila = "$quien (EXCEPCION: $excepcionCompartida)" }
+$fila = "| $fechaUtc | $Codebase | $commitCorto | $prDeploy | $($declaradas.Count) | $listaNuevas | $quienFila | $estado |"
 [System.IO.File]::AppendAllText($bitacora, $fila + "`n", (New-Object System.Text.UTF8Encoding($false)))
 Write-Host $fila
 

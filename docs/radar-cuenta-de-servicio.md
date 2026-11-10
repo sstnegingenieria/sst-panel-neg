@@ -138,7 +138,47 @@ chequeo previo con `testIamPermissions` sobre la sesión activa, que aborta
 diciendo **qué permiso falta** en vez de fallar a mitad del deploy, después de
 haber tecleado el PR y la palabra `DESPLEGAR`.
 
+### ⛔ Y el acto de IAM YA SE INTENTÓ Y FALLÓ: NUDO DE IDENTIDAD
+
+Dato de Giovanny (09-nov-2026): el comando para darle el rol a la cuenta
+nominal **se ejecutó y Google respondió**:
+
+> `User giovanny.montes@negingenieria.com does not exist`
+
+**El dominio `negingenieria.com` no está en Google Workspace ni en Cloud
+Identity.** Esos correos son buzones, no identidades de Google: **no se les
+puede conceder ningún rol de IAM.** No es un permiso que falta, es una
+identidad que no existe.
+
+Consecuencia, y afecta a los tres frentes: **hoy la única identidad con
+permisos de desplegar es la cuenta compartida**, que el script veta por
+acuerdo. Por ese camino nadie despliega funciones — ni el radar ni el codebase
+`default`.
+
+**Las salidas, en orden de preferencia:**
+
+1. **Cloud Identity (o Workspace) para `negingenieria.com`** — la correcta.
+   Convierte los correos del equipo en identidades de Google y todo lo demás de
+   este documento funciona como está escrito. Es una decisión de
+   infraestructura de la empresa, no del repo.
+2. **Una cuenta de Google personal nominal como puente** (por ejemplo el gmail
+   de la persona, con su nombre): conserva lo que importa —la bitácora puede
+   responder *quién* desplegó— y los comandos de abajo funcionan cambiando el
+   `--member`. Es un puente, no una solución: la identidad no es corporativa.
+3. **La cuenta compartida, con la excepción FIRMADA del script.** El veto no se
+   quita: se firma. `-ConCuentaCompartida -AutorizadoPor "<nombre>" -Motivo
+   "<razón>"`, y las dos cosas quedan en la fila de la bitácora
+   (`cuenta compartida; ejecutó X; motivo: Y`). Es el patrón de la casa para
+   cuando la regla no se puede cumplir pero el trabajo no puede esperar: el
+   override del semáforo, la salvedad del aprobador de respaldo, el
+   `autorizado_manual` de la guarda de volumen. **Cuando el dominio tenga Cloud
+   Identity, esta escotilla sobra y se quita.**
+
 ### El acto de IAM que falta (lo ejecuta alguien con propiedad del proyecto)
+
+⚠ Con el nudo abierto, el `--member="user:giovanny.montes@..."` de abajo
+**falla**. Sustitúyelo por la identidad que exista de verdad (salida 1 o 2).
+
 
 ```bash
 # 1. Permiso de desplegar funciones, para quien vaya a desplegar
