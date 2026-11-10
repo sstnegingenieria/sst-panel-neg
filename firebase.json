@@ -13,6 +13,7 @@
     {
       "source": "functions-radar",
       "codebase": "radar",
+      "prefix": "lic",
       "predeploy": [
         "npm --prefix \"$RESOURCE_DIR\" run build"
       ],

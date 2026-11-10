@@ -28,6 +28,37 @@ nacimientos del mismo criterio** — exactamente lo que el bloque A.2b vino a
 eliminar. Con este codebase hay UNA implementación: la del repo, la que corren
 los tests.
 
+## Para los otros frentes: NO instalen nada acá
+
+**Medido el 09-nov-2026** en un worktree limpio (`functions/` instalado, como lo
+tienen ustedes; `functions-radar/` sin `npm install` y sin build):
+
+| escenario | emulador listo | funciones de ustedes |
+|---|---|---|
+| un solo codebase (lo de antes) | 18,2 s | 15 |
+| **dos codebases, `functions-radar/` sin instalar** | **17,9 s** | 15 |
+| dos codebases, `functions-radar/` instalado sin build | 20,3 s | 15 |
+| dos codebases, instalado **y construido** | 26,2 s | 15 + 2 ignoradas |
+
+El emulador **no** puede filtrar por codebase: carga todos los declarados
+(verificado en `lib/emulator/controller.js`, que itera la config completa sin
+filtro). Pero cuando este codebase no está instalado ni construido, **advierte
+dos veces y sigue** — sus 15 triggers cargan igual y **no cuesta tiempo**.
+
+Las dos líneas que van a ver, y que **no son un fallo**:
+
+```
+!   functions: Couldn't find firebase-functions package in your source code. Have you run 'npm install'?
+!!  functions: Failed to load function definition from source: ... functions-radar\lib\index.js does not exist
+```
+
+Así que: **no corran `npm install` en `functions-radar/`** salvo que vengan a
+trabajar en el radar. Instalarlo cuesta ~2 s por arranque y construirlo, ~8 s
+más dos funciones programadas en su emulador. No instalarlo cuesta cero.
+
+(Por eso tampoco se versiona el bundle: tenerlo en git haría que el codebase
+cargue en el emulador de todos, que es el escenario de 26,2 s.)
+
 ## Cómo se trabaja
 
 ```

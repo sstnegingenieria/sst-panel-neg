@@ -51,9 +51,10 @@
  *   2. Volver a desplegar SOLO este codebase:
  *          firebase deploy --only functions:radar
  *
- * Eso es todo: `defineString` lo lee de ahí al desplegar. Sin variable, el
- * valor es `''` y `cabecerasConsulta('')` no manda la cabecera — la petición
- * sale anónima, que es el estado de arranque.
+ * Eso es todo: firebase-tools carga ese `.env` como variables de entorno de la
+ * función al desplegar. Sin variable, el valor es `''` y
+ * `cabecerasConsulta('')` no manda la cabecera — la petición sale anónima, que
+ * es el estado de arranque.
  *
  * El token va en la cabecera `X-App-Token`, NUNCA en el query string (Socrata
  * también acepta `$$app_token` en la URL; las URLs quedan en logs). Y con
@@ -69,7 +70,6 @@
  * `firebase-schedule-ingerirRadarSecop-us-central1` → "Forzar ejecución".
  */
 import { onSchedule } from 'firebase-functions/v2/scheduler'
-import { defineString } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { initializeApp, getApps } from 'firebase-admin/app'
 import { getFirestore, Timestamp } from 'firebase-admin/firestore'
@@ -98,7 +98,22 @@ import type { EstadoRadar } from '../../src/utils/sigp/radarCorrida'
 
 if (getApps().length === 0) initializeApp()
 
-const SECOP_APP_TOKEN = defineString('SECOP_APP_TOKEN', { default: '' })
+/**
+ * El app token, leído del entorno.
+ *
+ * ⚠ NO se usa `defineString` de `firebase-functions/params`, y la razón se
+ * midió: con un parámetro declarado y sin valor, **el emulador se DETIENE a
+ * pedirlo por consola** (`? Enter a string value for SECOP_APP_TOKEN:`) y no
+ * llega nunca a "All emulators ready". Eso colgaría el emulador de CUALQUIER
+ * frente que tuviera este codebase construido en su worktree — un `default: ''`
+ * no lo evita.
+ *
+ * `process.env` no pregunta nada. Y el mecanismo de configuración es el mismo:
+ * firebase-tools carga `functions-radar/.env` (o `.env.<projectId>`) como
+ * variables de entorno de la función al desplegar. Sin archivo, el valor es
+ * `''` y la petición sale anónima.
+ */
+const appToken = (): string => (process.env.SECOP_APP_TOKEN ?? '').trim()
 
 /**
  * LAS DOS UNICAS PUERTAS a Firestore de esta funcion.
@@ -194,7 +209,7 @@ const OPCIONES_CORRIDA = {
  */
 async function corridaDelRadar(): Promise<void> {
   const db = getFirestore()
-  const token = SECOP_APP_TOKEN.value()
+  const token = appToken()
   const inicio = new Date()
   const corridaId = inicio.toISOString()
 
