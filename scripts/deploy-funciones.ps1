@@ -310,11 +310,30 @@ if ($LASTEXITCODE -ne 0) { Remove-Item $tmp -Recurse -Force; Abortar "no pude le
 $lectura = ($declaradasJson | Out-String | ConvertFrom-Json)
 $declaradas = @($lectura.nombres)
 $sinEndpoint = @($lectura.sinEndpoint)
+# LA LISTA ESPERADA SE DERIVA, NO SE CABLEA. Sale de los exports del entry del
+# codebase EN EL COMMIT QUE SE ESTA DESPLEGANDO — el paso 1 ya exigio arbol
+# limpio y HEAD == origin/main, asi que el archivo que se acaba de leer es
+# exactamente el del commit. Una lista escrita a mano envejeceria en silencio:
+# el dia que alguien agregue una funcion, la post-verificacion exigiria la
+# lista vieja y diria "sobra en prod" sobre algo correcto.
+Write-Host ("Lista derivada de $carpeta/$entry en el commit $commitCorto (no hay lista fija en este script).") -ForegroundColor DarkGray
 if ($sinEndpoint.Count -gt 0) {
   Write-Host ("Exports que NO son funciones desplegables (se ignoran): " + ($sinEndpoint -join ', ')) -ForegroundColor Yellow
 }
 if ($declaradas.Count -eq 0) { Remove-Item $tmp -Recurse -Force; Abortar "$carpeta/$entry no exporta ninguna funcion. Un deploy asi BORRARIA todo el codebase." }
 Write-Host ("Declaradas por el codigo ({0}): {1}" -f $declaradas.Count, ($declaradas -join ', '))
+
+# El PREFIJO del codebase (firebase.json) cambia el nombre DESPLEGADO:
+# firebase-tools renombra cada endpoint a `<prefijo>-<export>` (applyPrefix).
+# Sin esto, la comparacion contra prod veria "sobra lic-x / falta x" en cada
+# corrida de un codebase con prefijo.
+$prefijo = ''
+if ($entrada.PSObject.Properties.Name -contains 'prefix' -and $entrada.prefix) { $prefijo = [string]$entrada.prefix }
+if ($prefijo) {
+  Write-Host ("Prefijo del codebase: '$prefijo' -> los nombres desplegados son '$prefijo-<export>'.") -ForegroundColor DarkGray
+  $declaradas = @($declaradas | ForEach-Object { "$prefijo-$_" })
+  Write-Host ("Declaradas con prefijo: " + ($declaradas -join ', '))
+}
 
 $nombresVivas = @($vivasCodebase | ForEach-Object { $_.nombre })
 $soloProd = @($nombresVivas | Where-Object { $declaradas -notcontains $_ })
