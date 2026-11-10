@@ -73,6 +73,7 @@ import { defineString } from 'firebase-functions/params'
 import { logger } from 'firebase-functions'
 import { initializeApp, getApps } from 'firebase-admin/app'
 import { getFirestore, Timestamp } from 'firebase-admin/firestore'
+import type { Firestore } from 'firebase-admin/firestore'
 import { createHash } from 'node:crypto'
 
 import {
@@ -86,6 +87,9 @@ import {
 } from '../../src/types/sigp/vocabularioNeg'
 import type { RegistroVocabularioNeg } from '../../src/types/sigp/vocabularioNeg'
 import {
+  RUTA_ESTADO_RADAR, RUTA_VOCABULARIO_NEG, rutaLicitacion, validarRutaEscritura,
+} from '../../src/utils/sigp/radarRutas'
+import {
   evaluarVolumen, cuantosCrearia, planearEscritura, construirRegistroCorrida,
   marcaSiguiente, sellarParaEscritura, fechasATimestamp, avanzarEstadoRadar,
   resumenLegible, ACTOR_RADAR, ESTADO_RADAR_INICIAL,
@@ -96,9 +100,17 @@ if (getApps().length === 0) initializeApp()
 
 const SECOP_APP_TOKEN = defineString('SECOP_APP_TOKEN', { default: '' })
 
-const REF_ESTADO = 'configuracion/radar_secop'
-const REF_VOCABULARIO = 'configuracion/vocabulario_neg'
-const COL = 'licitaciones'
+/**
+ * LAS DOS UNICAS PUERTAS a Firestore de esta funcion.
+ *
+ * Todo `db.doc(...)` de este archivo pasa por una de estas dos lineas, y la de
+ * escritura valida la ruta contra la lista blanca de `radarRutas.ts`. No es
+ * estilo: con `datastore.user` la cuenta puede escribir en cualquier parte de
+ * la base, asi que el limite vive en el codigo — y su test lee ESTE archivo
+ * para verificar que no hay una tercera puerta.
+ */
+const refLectura = (db: Firestore, ruta: string) => db.doc(ruta)
+const refEscritura = (db: Firestore, ruta: string) => db.doc(validarRutaEscritura(ruta))
 
 /** Tamaño de los lotes de escritura. El límite de Firestore es 500. */
 const LOTE_ESCRITURA = 400
@@ -188,8 +200,8 @@ async function corridaDelRadar(): Promise<void> {
 
   // ── 1. Estado y léxico ──
   const [snapEstado, snapVocab] = await Promise.all([
-    db.doc(REF_ESTADO).get(),
-    db.doc(REF_VOCABULARIO).get(),
+    refLectura(db, RUTA_ESTADO_RADAR).get(),
+    refLectura(db, RUTA_VOCABULARIO_NEG).get(),
   ])
   const estado: EstadoRadar = snapEstado.exists
     ? { ...ESTADO_RADAR_INICIAL, ...(snapEstado.data() as Partial<EstadoRadar>) }
@@ -225,7 +237,7 @@ async function corridaDelRadar(): Promise<void> {
   const ids = reporte.registros.map(r => r.meta.doc_id)
   const existentes = new Map<string, Partial<LicitacionDetectada>>()
   for (const grupo of trozos(ids, LOTE_LECTURA)) {
-    const snaps = await db.getAll(...grupo.map(id => db.doc(`${COL}/${id}`)))
+    const snaps = await db.getAll(...grupo.map(id => refLectura(db, rutaLicitacion(id))))
     for (const s of snaps) {
       if (s.exists) existentes.set(s.id, s.data() as Partial<LicitacionDetectada>)
     }
@@ -242,7 +254,7 @@ async function corridaDelRadar(): Promise<void> {
     const motivo = volumen.motivo ?? reporte.senales.join(' · ')
     const registro = construirRegistroCorrida(resumen, volumen, null,
       marcaSiguiente(ventana, false, estado.marca))
-    await db.doc(REF_ESTADO).set(avanzarEstadoRadar(estado, registro), { merge: false })
+    await refEscritura(db, RUTA_ESTADO_RADAR).set(avanzarEstadoRadar(estado, registro), { merge: false })
     logger.warn('radar: NO se escribió', { motivo, sugerencia: volumen.sugerencia })
     return
   }
@@ -256,7 +268,7 @@ async function corridaDelRadar(): Promise<void> {
     const lote = db.batch()
     for (const { doc_id, doc } of grupo) {
       const conTs = fechasATimestamp(doc, aTs) as unknown as LicitacionDetectada
-      lote.create(db.doc(`${COL}/${doc_id}`),
+      lote.create(refEscritura(db, rutaLicitacion(doc_id)),
         sellarParaEscritura(conTs, { corrida: corridaId, ahora, actor: ACTOR_RADAR }))
     }
     await lote.commit()
@@ -267,7 +279,7 @@ async function corridaDelRadar(): Promise<void> {
       const p = patch.cronograma !== undefined
         ? { ...patch, cronograma: fechasATimestamp(patch as LicitacionDetectada, aTs).cronograma }
         : patch
-      lote.update(db.doc(`${COL}/${doc_id}`), {
+      lote.update(refEscritura(db, rutaLicitacion(doc_id)), {
         ...p, actualizado_por: ACTOR_RADAR, actualizado_en: ahora,
       })
     }
@@ -283,7 +295,7 @@ async function corridaDelRadar(): Promise<void> {
   }
   const registro = construirRegistroCorrida(resumen, volumen, escritura,
     marcaSiguiente(ventana, true, estado.marca))
-  await db.doc(REF_ESTADO).set(avanzarEstadoRadar(estado, registro), { merge: false })
+  await refEscritura(db, RUTA_ESTADO_RADAR).set(avanzarEstadoRadar(estado, registro), { merge: false })
   logger.info('radar: ' + resumenLegible(registro))
 }
 
