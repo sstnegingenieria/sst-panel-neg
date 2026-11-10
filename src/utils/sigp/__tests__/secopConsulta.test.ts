@@ -12,7 +12,7 @@ import {
   literalSoql, clausulaIn, clausulaFamilias, clausulaFechas, whereIngesta,
   ORDEN_INGESTA, paramsIngesta, urlIngesta, paramsConteo, urlConteo,
   cabecerasConsulta, ventanaIngesta, paginasPara, verificarCosecha,
-  EXPR_FECHA_VENTANA, MODO_INGESTA_DEFECTO,
+  EXPR_FECHA_VENTANA, MODO_INGESTA_DEFECTO, DEPARTAMENTOS_OBSERVADOS,
 } from '../secopConsulta'
 
 let fetchOriginal: typeof globalThis.fetch
@@ -103,8 +103,20 @@ describe('whereIngesta', () => {
     // En octubre de 2026 el filtro por familia veía 21 procesos de 2.259: la
     // categoría UNSPC se asigna tarde, así que a nivel de API no se filtra.
     expect(w).not.toContain('codigo_principal_de_categoria')
-    expect(w).toContain("departamento_entidad in('Distrito Capital de Bogotá','Cundinamarca')")
+    expect(w).toContain("departamento_entidad in('Distrito Capital de Bogotá','Cundinamarca'")
     expect(w).toContain("modalidad_de_contratacion in('Mínima cuantía'")
+  })
+
+  it('trae los departamentos OBSERVADOS para contarlos (B.1c)', () => {
+    // No abrirlos es una decisión; sin traerlos no habría nada que contar.
+    const w = whereIngesta()
+    expect(w).toContain("'Antioquia'")
+    expect(w).toContain("'Boyacá'")
+    expect(DEPARTAMENTOS_OBSERVADOS).toEqual(['Antioquia', 'Boyacá'])
+    // Y se pueden dejar fuera explícitamente.
+    const sin = whereIngesta({ incluir_observados: false })
+    expect(sin).not.toContain('Antioquia')
+    expect(sin).toContain("'Cundinamarca'")
   })
 
   it('modo histórico: con las familias en la consulta, para reprocesos', () => {

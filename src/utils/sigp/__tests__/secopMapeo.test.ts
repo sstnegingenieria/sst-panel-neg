@@ -399,13 +399,18 @@ describe('deduplicación por id_del_proceso, no por referencia', () => {
     expect([...refs][0]).toBe('MC-001-2025')
     expect(ids.size, 'los id_del_proceso son distintos').toBe(2)
 
+    // La deduplicación es del COLAPSO, no de la persistencia: una de las dos
+    // filas es de Tolima y el territorio la deja afuera (B.1c), pero las dos
+    // siguen siendo procesos distintos y con documento distinto.
     const rep = ingerirSecop(filas, hash)
-    expect(rep.procesos).toBe(2)
-    expect(rep.registros).toHaveLength(2)
+    expect(rep.procesos_vistos).toBe(2)
     expect(rep.colisiones).toEqual([])
+    const { procesos } = colapsarPorProceso(filas)
+    expect(procesos).toHaveLength(2)
+    const mapeados = procesos.map(p => mapearProceso(p, hash)!)
+    expect(new Set(mapeados.map(r => r.meta.doc_id)).size).toBe(2)
     // Y son entidades distintas: deduplicar por referencia habría perdido una.
-    const nits = new Set(rep.registros.map(r => r.doc.entidad.nit))
-    expect(nits.size).toBe(2)
+    expect(new Set(mapeados.map(r => r.doc.entidad.nit)).size).toBe(2)
   })
 
   it('el doc id es determinístico: re-ingerir actualiza, no duplica', () => {

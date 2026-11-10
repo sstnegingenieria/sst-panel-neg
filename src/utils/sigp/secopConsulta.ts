@@ -99,6 +99,22 @@ export const DEPARTAMENTOS_INGESTA = [
 ] as const
 
 /**
+ * Departamentos que se TRAEN para contarlos, no para abrirlos (B.1c).
+ *
+ * La consulta los incluye y el clasificador los marca `fuera_de_territorio`
+ * con `habria_calificado`, así que ninguno se persiste pero todos quedan
+ * contados. Sin traerlos no habría nada que contar, y la decisión de no
+ * abrirlos dejaría de ser revisable con número.
+ *
+ * Costo medido de traerlos: en octubre–noviembre de 2026 Antioquia + Boyacá
+ * suman unas 1.800 filas sin clasificar contra las 2.300 del territorio, o
+ * sea que la cosecha diaria casi se duplica. Son unos pocos miles de filas por
+ * corrida: cabe de sobra en una página de 50.000.
+ */
+export { DEPARTAMENTOS_OBSERVADOS } from './secopMapeo'
+import { DEPARTAMENTOS_OBSERVADOS } from './secopMapeo'
+
+/**
  * Modalidades que entran. Las dos del brief MÁS la variante sin tildes
  * (decisión documentada en la trampa 11 de `secopMapeo.ts`): es menor cuantía
  * sin manifestación de interés — o sea sin sorteo de consolidación, la
@@ -150,6 +166,12 @@ export interface OpcionesIngesta {
   /** Familias a exigir en `modo: 'historico'`. */
   familias?: readonly string[]
   departamentos?: readonly string[]
+  /**
+   * Traer además los departamentos OBSERVADOS para contarlos (B.1c). Por
+   * defecto `true`: no abrirlos es una decisión, y una decisión sin contador
+   * no se puede revisar.
+   */
+  incluir_observados?: boolean
   modalidades?: readonly string[]
   /**
    * Incluir las filas sin fecha de publicación (515 medidas en el filtro).
@@ -224,13 +246,18 @@ export function whereIngesta(opciones: OpcionesIngesta = {}): string {
     hasta = null,
     familias = FAMILIAS_RUP_NEG,
     departamentos = DEPARTAMENTOS_INGESTA,
+    incluir_observados = true,
     modalidades = MODALIDADES_INGESTA,
     incluir_sin_fecha = true,
   } = opciones
 
+  const deptos = incluir_observados
+    ? [...departamentos, ...DEPARTAMENTOS_OBSERVADOS]
+    : [...departamentos]
+
   const clausulas: string[] = []
   if (modo === 'historico') clausulas.push(clausulaFamilias(familias))
-  clausulas.push(clausulaIn('departamento_entidad', departamentos))
+  clausulas.push(clausulaIn('departamento_entidad', deptos))
   clausulas.push(clausulaIn('modalidad_de_contratacion', modalidades))
   const fechas = clausulaFechas(desde, hasta, incluir_sin_fecha)
   if (fechas) clausulas.push(fechas)

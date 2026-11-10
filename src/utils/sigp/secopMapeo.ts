@@ -130,7 +130,7 @@
  *     cronograma queda con las dos fechas, sin corregir ninguna a mano.
  */
 import type { ModalidadLicitacion, MotivoSemaforo, Semaforo } from '../../types/sigp/licitacion'
-import { calcularSemaforo } from './semaforo'
+import { calcularSemaforo, esTerritorioNeg } from './semaforo'
 import type { EntradaSemaforo } from './semaforo'
 import {
   coincideVocabulario, TERMINOS_NEG, VOCABULARIO_NEG_VERSION,
@@ -502,6 +502,47 @@ export function esUrlGenerica(url: string): boolean {
  */
 export const FAMILIAS_RUP_NEG = ['V1.7210', 'V1.7215', 'V1.8110'] as const
 
+/**
+ * CLASES —no familias— con ADJUDICACIÓN PROBADA de NEG (B.1c).
+ *
+ * ── EL CRITERIO DE INCLUSIÓN, ESCRITO ──────────────────────────────────────
+ *
+ * Una clase UNSPC entra acá **cuando tiene una adjudicación probada de NEG en
+ * SECOP II**. No por parecido semántico, no porque "suena a lo que hacemos":
+ * por evidencia. Quien quiera agregar una clase tiene que poder nombrar el
+ * proceso que NEG ganó bajo ese código.
+ *
+ * Y entra A NIVEL DE CLASE (6 dígitos), no de segmento (2) ni de familia (4).
+ * El segmento completo trae el sector entero: medido el 09-nov-2026 sobre el
+ * territorio, los segmentos 30, 31 y 83 completos habrían agregado 532
+ * procesos en 2025 (+17 % sobre los «si») y 4.187 en el histórico; las tres
+ * CLASES agregan 69 en 2025 (**+2,2 %**) y 550 en el histórico (+2,0 %). Ocho
+ * veces menos, por la misma evidencia.
+ *
+ * Las tres, con el proceso que las acredita:
+ *  · 301717 — vidrio, carpintería y divisiones.  `V1.30171706`, "adecuación de
+ *    ambientes para programas formativos" (SENA). 3 procesos en 2025.
+ *  · 311628 — ferretería y materiales.  `V1.31162800`, "suministrar elementos
+ *    de ferretería para las adecuaciones de los edificios de la Facultad de
+ *    Ingeniería". 54 en 2025 — el 78 % del delta; 30 de esos 54 coinciden
+ *    además con el léxico (son ferretería PARA mantenimiento).
+ *  · 831018 — servicios eléctricos.  `V1.83101800`, "mantenimiento correctivo
+ *    y preventivo de la subestación eléctrica". 12 en 2025.
+ *
+ * El veredicto que producen se marca con su propia señal
+ * (`codigo_en_clase_adjudicada`), así que el aporte de esta decisión se puede
+ * medir corrida por corrida en vez de quedar diluido en los «si».
+ */
+export const CLASES_CON_ADJUDICACION_NEG = [
+  'V1.301717', 'V1.311628', 'V1.831018',
+] as const
+
+/** El catálogo completo con el que se reconoce un código como de NEG. */
+export const CATALOGO_UNSPC_NEG = {
+  familias: FAMILIAS_RUP_NEG,
+  clases: CLASES_CON_ADJUDICACION_NEG,
+} as const
+
 export const CATEGORIA_SIN_CLASIFICAR = 'UNSPECIFIED'
 
 export type FamiliaRup = 'familia_neg' | 'fuera_de_familia' | 'sin_clasificar'
@@ -521,12 +562,23 @@ export function categoriaONull(fila: FilaSecop): string | null {
  * medido. Confundirlos deja al radar ciego justo en la ventana en la que
  * todavía se puede presentar.
  */
+/**
+ * Por qué un código se reconoce como de NEG: por familia del RUP (4 dígitos) o
+ * por clase con adjudicación probada (6 dígitos). `null` = no se reconoce.
+ */
+export type OrigenCodigoNeg = 'familia' | 'clase' | null
+
+export function origenCodigoNeg(categoria: string | null): OrigenCodigoNeg {
+  if (categoria === null) return null
+  const c = norm(categoria)
+  if (FAMILIAS_RUP_NEG.some(f => c.startsWith(norm(f)))) return 'familia'
+  if (CLASES_CON_ADJUDICACION_NEG.some(k => c.startsWith(norm(k)))) return 'clase'
+  return null
+}
+
 export function familiaRup(categoria: string | null): FamiliaRup {
   if (categoria === null) return 'sin_clasificar'
-  const c = norm(categoria)
-  return FAMILIAS_RUP_NEG.some(f => c.startsWith(norm(f)))
-    ? 'familia_neg'
-    : 'fuera_de_familia'
+  return origenCodigoNeg(categoria) !== null ? 'familia_neg' : 'fuera_de_familia'
 }
 
 // ── Clasificación híbrida: código arriba, texto abajo (trampa 13) ───────────
@@ -537,22 +589,55 @@ export type VeredictoRadar = 'si' | 'probable' | 'no'
 /** Qué señal produjo el veredicto. Un veredicto sin señal no es auditable. */
 export type SenalClasificacion =
   | 'codigo_en_familia'
+  | 'codigo_en_clase_adjudicada'
   | 'codigo_fuera_de_familia'
   | 'texto_coincide'
   | 'sin_codigo_ni_texto'
+  | 'fuera_de_territorio'
+
+/**
+ * Departamentos que NO entran a la bandeja pero SÍ se cuentan (B.1c).
+ *
+ * NEG ganó en Antioquia y Boyacá, así que la pregunta "¿deberíamos abrirlos?"
+ * es legítima. La respuesta de hoy es NO, y está medida, no intuida: el 24 %
+ * de los descartes del registro de Karen son limitación territorial MiPyme, su
+ * regla de logística mata la mayoría de lo de afuera, y SOLTEC multiplicó por
+ * 17 su facturación sin salir de Bogotá. Profundidad antes que amplitud.
+ *
+ * Pero una decisión así tiene que ser revisable con número: estos procesos se
+ * clasifican igual, se marcan `fuera_de_territorio` con `habria_calificado`, y
+ * el agregado de la corrida los cuenta con muestra. Si el contador dice que se
+ * está dejando pasar demasiado, se revisa con el dato en la mano.
+ *
+ * ⚠ Referencia medida al fijar esto (09-nov-2026), para que nadie se sorprenda:
+ * en 2025 Antioquia + Boyacá tuvieron **1.696 procesos reconocidos por código**
+ * en las modalidades de ingesta, más 1.600 sin clasificar. El orden de magnitud
+ * del "qué estamos dejando pasar" es de millares al año, no de centenas — y
+ * eso NO cambia la decisión, porque lo que decide es cuántos de esos NEG podría
+ * ganar y atender, no cuántos existen. El contador medirá lo primero.
+ */
+export const DEPARTAMENTOS_OBSERVADOS = ['Antioquia', 'Boyacá'] as const
 
 export interface Clasificacion {
   veredicto: VeredictoRadar
   senal: SenalClasificacion
   familia: FamiliaRup
+  /** Por familia del RUP o por clase con adjudicación probada. */
+  origen_codigo: OrigenCodigoNeg
   /** Términos del léxico encontrados en el objeto. Vacío si no se consultó. */
   terminos: string[]
   /**
    * `true` cuando el CÓDIGO descartó un proceso cuyo TEXTO sí reconoce el
    * léxico. Es el contador que mide lo que la regla está dejando pasar: de los
-   * 23 procesos que NEG ganó, 3 caen acá.
+   * 23 procesos que NEG ganó, 3 caen acá — y por eso tres CLASES entraron.
    */
   descartado_con_texto_coincidente: boolean
+  /**
+   * `true` si el proceso está en un departamento OBSERVADO y habría calificado
+   * de estar en el territorio. Mismo instrumento que el contador de arriba,
+   * aplicado a la frontera geográfica.
+   */
+  habria_calificado: boolean
 }
 
 /**
@@ -571,44 +656,72 @@ export function clasificarProceso(
   categoria: string | null,
   objeto: string | null | undefined,
   terminos: readonly string[],
+  contexto?: { departamento?: string },
 ): Clasificacion {
   const familia = familiaRup(categoria)
+  const origen_codigo = origenCodigoNeg(categoria)
   const { coincide, terminos: hallados } = coincideVocabulario(objeto, terminos)
 
+  const base = { familia, origen_codigo, habria_calificado: false }
+  let v: Clasificacion
+
   if (familia === 'familia_neg') {
-    return {
+    v = {
+      ...base,
       veredicto: 'si',
-      senal: 'codigo_en_familia',
-      familia,
+      // La señal distingue familia del RUP de clase con adjudicación probada,
+      // para poder medir el aporte de la decisión de B.1c corrida por corrida.
+      senal: origen_codigo === 'clase' ? 'codigo_en_clase_adjudicada' : 'codigo_en_familia',
       terminos: hallados,
       descartado_con_texto_coincidente: false,
     }
-  }
-  if (familia === 'fuera_de_familia') {
-    return {
+  } else if (familia === 'fuera_de_familia') {
+    v = {
+      ...base,
       veredicto: 'no',
       senal: 'codigo_fuera_de_familia',
-      familia,
       terminos: hallados,
       descartado_con_texto_coincidente: coincide,
     }
-  }
-  // Sin código: el texto es la única señal.
-  return coincide
-    ? {
+  } else if (coincide) {
+    // Sin código: el texto es la única señal.
+    v = {
+      ...base,
       veredicto: 'probable',
       senal: 'texto_coincide',
-      familia,
       terminos: hallados,
       descartado_con_texto_coincidente: false,
     }
-    : {
+  } else {
+    v = {
+      ...base,
       veredicto: 'no',
       senal: 'sin_codigo_ni_texto',
-      familia,
       terminos: [],
       descartado_con_texto_coincidente: false,
     }
+  }
+
+  // ── La frontera geográfica se aplica DESPUÉS, y deja huella ──
+  // El orden importa: primero se decide si el proceso califica por lo que es,
+  // y solo entonces el territorio lo deja afuera. Al revés no habría nada que
+  // contar — y lo que se cuenta es exactamente "qué estamos dejando pasar".
+  const depto = contexto?.departamento
+  if (depto !== undefined && depto !== '' && !esTerritorioNeg(depto)) {
+    return {
+      ...v,
+      veredicto: 'no',
+      senal: 'fuera_de_territorio',
+      habria_calificado: sePersiste(v.veredicto),
+    }
+  }
+  return v
+}
+
+/** ¿Es un departamento de los que se observan sin abrir? */
+export function esDepartamentoObservado(departamento: string): boolean {
+  const n = norm(departamento)
+  return DEPARTAMENTOS_OBSERVADOS.some(d => norm(d) === n)
 }
 
 /** Veredictos que producen documento. El resto se cuenta y se tira. */
@@ -936,7 +1049,8 @@ export function mapearProceso(
   const problema = problemaPresupuesto(presupuesto_crudo)
   const url_proceso = urlSecop(f, CAMPO_SECOP.url_proceso)
   const objeto = texto(f, CAMPO_SECOP.objeto)
-  const clasificacion = clasificarProceso(categoria_unspsc, objeto, terminos)
+  const departamento = textoONull(f, CAMPO_SECOP['entidad.departamento']) ?? ''
+  const clasificacion = clasificarProceso(categoria_unspsc, objeto, terminos, { departamento })
   const fecha = fechaReferencia(f)
   const publicacion = fechaSecopAIso(f, CAMPO_SECOP['cronograma.publicacion'])
   const cierre = fechaSecopAIso(f, CAMPO_SECOP['cronograma.cierre'])
@@ -945,7 +1059,7 @@ export function mapearProceso(
     nombre: texto(f, CAMPO_SECOP['entidad.nombre']),
     nit: texto(f, CAMPO_SECOP['entidad.nit']),
     orden: texto(f, CAMPO_SECOP['entidad.orden']),
-    departamento: textoONull(f, CAMPO_SECOP['entidad.departamento']) ?? '',
+    departamento,
     ciudad: textoONull(f, CAMPO_SECOP['entidad.ciudad']) ?? '',
   }
 
@@ -1069,6 +1183,11 @@ export interface DescartesIngesta {
   /** Sin código y sin coincidencia de léxico. */
   sin_codigo_ni_texto: number
   /**
+   * Descartados por el TERRITORIO (B.1c). Cierra la identidad del struct:
+   * `total` = código fuera + sin código ni texto + fuera de territorio.
+   */
+  fuera_de_territorio: number
+  /**
    * De los descartados por código, cuántos SÍ coinciden con el léxico. El
    * contador que importa: 3 de los 23 procesos que NEG ganó caen acá.
    */
@@ -1079,6 +1198,23 @@ export interface DescartesIngesta {
     categoria: string | null
     objeto: string
     terminos: string[]
+  }[]
+}
+
+/**
+ * Procesos de los departamentos OBSERVADOS (B.1c): no se persisten, se
+ * cuentan. `habrian_calificado` es la respuesta a "qué estamos dejando pasar
+ * por no abrir Antioquia y Boyacá", con muestra para mirarla a mano.
+ */
+export interface ObservadosIngesta {
+  total: number
+  habrian_calificado: number
+  ejemplos: {
+    id_secop: string
+    departamento: string
+    categoria: string | null
+    objeto: string
+    senal_previa: SenalClasificacion
   }[]
 }
 
@@ -1093,7 +1229,15 @@ export interface ReporteIngestaSecop {
   filas_sin_identidad: number
   /** Conteo por veredicto sobre TODOS los procesos vistos. */
   por_veredicto: Record<VeredictoRadar, number>
+  /**
+   * Conteo por señal. Separa `codigo_en_familia` de
+   * `codigo_en_clase_adjudicada`, así que el aporte de las tres clases de
+   * B.1c se mide en cada corrida en vez de diluirse en los «si».
+   */
+  por_senal: Record<SenalClasificacion, number>
   descartes: DescartesIngesta
+  /** Los departamentos observados sin abrir (B.1c). */
+  observados: ObservadosIngesta
   /** Conteo por tri-estado de familia (trampa 5), sobre los vistos. */
   por_familia: Record<FamiliaRup, number>
   /** De dónde salió la fecha de cada persistible (trampa 12). */
@@ -1128,6 +1272,14 @@ export function ingerirSecop(
   const { procesos: colapsados, sin_identidad } = colapsarPorProceso(filas)
 
   const por_veredicto: Record<VeredictoRadar, number> = { si: 0, probable: 0, no: 0 }
+  const por_senal: Record<SenalClasificacion, number> = {
+    codigo_en_familia: 0,
+    codigo_en_clase_adjudicada: 0,
+    codigo_fuera_de_familia: 0,
+    texto_coincide: 0,
+    sin_codigo_ni_texto: 0,
+    fuera_de_territorio: 0,
+  }
   const por_familia: Record<FamiliaRup, number> = {
     familia_neg: 0, fuera_de_familia: 0, sin_clasificar: 0,
   }
@@ -1135,9 +1287,11 @@ export function ingerirSecop(
     total: 0,
     codigo_fuera_de_familia: 0,
     sin_codigo_ni_texto: 0,
+    fuera_de_territorio: 0,
     con_texto_coincidente: 0,
     ejemplos_con_texto_coincidente: [],
   }
+  const observados: ObservadosIngesta = { total: 0, habrian_calificado: 0, ejemplos: [] }
 
   // Se mapea TODO (el veredicto necesita el objeto ya leído) y se persiste
   // solo lo que da `si` o `probable`. Los `no` no producen documento pero SÍ
@@ -1151,11 +1305,31 @@ export function ingerirSecop(
     procesos_vistos++
     const c = r.meta.clasificacion
     por_veredicto[c.veredicto]++
+    por_senal[c.senal]++
     por_familia[c.familia]++
     if (sePersiste(c.veredicto)) { registros.push(r); continue }
     descartes.total++
     if (c.senal === 'codigo_fuera_de_familia') descartes.codigo_fuera_de_familia++
     if (c.senal === 'sin_codigo_ni_texto') descartes.sin_codigo_ni_texto++
+    if (c.senal === 'fuera_de_territorio') {
+      descartes.fuera_de_territorio++
+      observados.total++
+      if (c.habria_calificado) {
+        observados.habrian_calificado++
+        if (observados.ejemplos.length < MAX_EJEMPLOS_DESCARTE) {
+          observados.ejemplos.push({
+            id_secop: r.doc.id_secop,
+            departamento: r.doc.entidad.departamento,
+            categoria: r.doc.categoria_unspsc,
+            objeto: r.doc.objeto.slice(0, 200),
+            senal_previa: c.origen_codigo !== null
+              ? (c.origen_codigo === 'clase' ? 'codigo_en_clase_adjudicada' : 'codigo_en_familia')
+              : 'texto_coincide',
+          })
+        }
+      }
+      continue
+    }
     if (c.descartado_con_texto_coincidente) {
       descartes.con_texto_coincidente++
       if (descartes.ejemplos_con_texto_coincidente.length < MAX_EJEMPLOS_DESCARTE) {
@@ -1234,7 +1408,9 @@ export function ingerirSecop(
     procesos,
     filas_sin_identidad: sin_identidad,
     por_veredicto,
+    por_senal,
     descartes,
+    observados,
     por_familia,
     por_origen_fecha,
     vocabulario_version: opciones?.vocabulario_version ?? VOCABULARIO_NEG_VERSION,
@@ -1275,7 +1451,10 @@ export interface ResumenCorridaRadar {
   procesos_vistos: number
   persistidos: number
   por_veredicto: Record<VeredictoRadar, number>
+  por_senal: Record<SenalClasificacion, number>
   descartes: DescartesIngesta
+  /** Qué se está dejando pasar por no abrir Antioquia y Boyacá (B.1c). */
+  observados: ObservadosIngesta
   por_familia: Record<FamiliaRup, number>
   por_origen_fecha: Record<OrigenFecha, number>
   adjudicacion_ambigua: number
@@ -1303,7 +1482,9 @@ export function construirResumenCorrida(
     procesos_vistos: r.procesos_vistos,
     persistidos: r.procesos,
     por_veredicto: r.por_veredicto,
+    por_senal: r.por_senal,
     descartes: r.descartes,
+    observados: r.observados,
     por_familia: r.por_familia,
     por_origen_fecha: r.por_origen_fecha,
     adjudicacion_ambigua: r.adjudicacion_ambigua,

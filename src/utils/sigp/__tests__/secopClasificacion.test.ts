@@ -28,6 +28,8 @@ import {
   clasificarProceso, sePersiste, VEREDICTOS_PERSISTIBLES,
   fechaReferencia, colapsarPorProceso, mapearProceso, ingerirSecop,
   construirResumenCorrida, CAMPO_SECOP, texto,
+  CLASES_CON_ADJUDICACION_NEG, CATALOGO_UNSPC_NEG, FAMILIAS_RUP_NEG,
+  origenCodigoNeg, esDepartamentoObservado, DEPARTAMENTOS_OBSERVADOS,
   type FilaSecop,
 } from '../secopMapeo'
 
@@ -270,25 +272,61 @@ describe('clasificarProceso — los cuatro casos de la tabla', () => {
   })
 })
 
-describe('el hueco MEDIDO de la regla: los ganados con código fuera de familia', () => {
-  it('los 3 que NEG ganó fuera de familia salen NO, y 2 quedan contados', () => {
+describe('las tres CLASES con adjudicación probada (B.1c)', () => {
+  it('el criterio de inclusión es la evidencia: tres clases, no tres segmentos', () => {
+    expect(CLASES_CON_ADJUDICACION_NEG).toEqual(['V1.301717', 'V1.311628', 'V1.831018'])
+    // Clase = 6 dígitos. Si alguien metiera el segmento (2) o la familia (4),
+    // entraría el sector entero: medido, 532 procesos en 2025 contra 69.
+    for (const c of CLASES_CON_ADJUDICACION_NEG) {
+      expect(c.replace('V1.', ''), c).toHaveLength(6)
+    }
+    expect(CATALOGO_UNSPC_NEG.familias).toBe(FAMILIAS_RUP_NEG)
+    expect(CATALOGO_UNSPC_NEG.clases).toBe(CLASES_CON_ADJUDICACION_NEG)
+  })
+
+  it('un código de la clase entra como SI, con su propia señal', () => {
+    const c = clasificarProceso('V1.31162800', 'SUMINISTRO DE FERRETERIA', TERMINOS_NEG,
+      { departamento: 'Cundinamarca' })
+    expect(c.veredicto).toBe('si')
+    expect(c.senal).toBe('codigo_en_clase_adjudicada')
+    expect(c.origen_codigo).toBe('clase')
+  })
+
+  it('la familia del RUP conserva su señal: el aporte de B.1c es medible aparte', () => {
+    const c = clasificarProceso('V1.72101500', 'MANTENIMIENTO', TERMINOS_NEG,
+      { departamento: 'Cundinamarca' })
+    expect(c.senal).toBe('codigo_en_familia')
+    expect(c.origen_codigo).toBe('familia')
+  })
+
+  it('NO entra el segmento ni la familia de esas clases: solo la clase', () => {
+    // 30 / 3017 son vidrio y muebles en general; 31 / 3116, herrajes enteros;
+    // 83 / 8310, servicios públicos. Entra 301717, no 3017 ni 30.
+    for (const ajeno of ['V1.30101500', 'V1.31160000', 'V1.83110000', 'V1.30171500']) {
+      const c = clasificarProceso(ajeno, 'SUMINISTRO', TERMINOS_NEG, { departamento: 'Cundinamarca' })
+      expect(c.veredicto, ajeno).toBe('no')
+      expect(c.origen_codigo, ajeno).toBeNull()
+    }
+    expect(origenCodigoNeg('V1.3017')).toBeNull()
+    expect(origenCodigoNeg('V1.301717')).toBe('clase')
+    expect(origenCodigoNeg('V1.30171706')).toBe('clase')
+  })
+
+  it('con las filas REALES: 2 de los 3 ganados entran, el de Boyacá se cuenta', () => {
     const filas = caso('ganados_neg_fuera_de_familia')
     expect(filas).toHaveLength(3)
     const rep = ingerirSecop(filas, hash)
     expect(rep.procesos_vistos).toBe(3)
-    expect(rep.procesos, 'ninguno se persiste: el código los descarta').toBe(0)
-    expect(rep.descartes.total).toBe(3)
-    expect(rep.descartes.codigo_fuera_de_familia).toBe(3)
-    // De los 3, el léxico reconoce 2 (la subestación eléctrica y la adecuación
-    // de ambientes); la ferretería no. Ese contador es la medida de lo que la
-    // regla deja pasar.
-    expect(rep.descartes.con_texto_coincidente).toBe(2)
-    expect(rep.descartes.ejemplos_con_texto_coincidente).toHaveLength(2)
-    for (const e of rep.descartes.ejemplos_con_texto_coincidente) {
-      expect(e.categoria).not.toBeNull()
-      expect(e.terminos.length).toBeGreaterThan(0)
-      expect(e.objeto.length).toBeGreaterThan(0)
-    }
+    // Los tres son de las clases nuevas, así que por CÓDIGO ya califican…
+    expect(rep.por_senal.codigo_fuera_de_familia).toBe(0)
+    // …pero uno está en Boyacá y el territorio lo deja afuera: 2 persistidos.
+    expect(rep.procesos).toBe(2)
+    expect(rep.por_senal.codigo_en_clase_adjudicada).toBe(2)
+    expect(rep.descartes.fuera_de_territorio).toBe(1)
+    expect(rep.observados.total).toBe(1)
+    expect(rep.observados.habrian_calificado).toBe(1)
+    expect(rep.observados.ejemplos[0].departamento).toBe('Boyacá')
+    expect(rep.observados.ejemplos[0].senal_previa).toBe('codigo_en_clase_adjudicada')
   })
 
   it('los 3 que ganó SIN código entran como PROBABLE', () => {
@@ -304,6 +342,53 @@ describe('el hueco MEDIDO de la regla: los ganados con código fuera de familia'
       expect(r.meta.clasificacion.senal).toBe('texto_coincide')
       expect(r.doc.categoria_unspsc).toBeNull()
     }
+  })
+})
+
+describe('Antioquia y Boyacá: no se abren, se cuentan (B.1c)', () => {
+  it('los departamentos observados son exactamente dos', () => {
+    expect(DEPARTAMENTOS_OBSERVADOS).toEqual(['Antioquia', 'Boyacá'])
+    expect(esDepartamentoObservado('antioquia')).toBe(true)
+    expect(esDepartamentoObservado('BOYACA')).toBe(true)      // sin tilde
+    expect(esDepartamentoObservado('Cundinamarca')).toBe(false)
+  })
+
+  it('el territorio se aplica DESPUÉS de clasificar: por eso hay qué contar', () => {
+    // Al revés no habría nada que medir — y lo que se mide es exactamente
+    // "qué estamos dejando pasar".
+    const c = clasificarProceso('V1.72101500', 'MANTENIMIENTO DE CUBIERTAS', TERMINOS_NEG,
+      { departamento: 'Antioquia' })
+    expect(c.veredicto).toBe('no')
+    expect(c.senal).toBe('fuera_de_territorio')
+    expect(c.habria_calificado).toBe(true)
+    expect(c.origen_codigo).toBe('familia')   // la señal previa se conserva
+  })
+
+  it('lo que NO habría calificado igual no cuenta como pérdida', () => {
+    const c = clasificarProceso('V1.90101600', 'SUMINISTRO DE REFRIGERIOS', TERMINOS_NEG,
+      { departamento: 'Boyacá' })
+    expect(c.senal).toBe('fuera_de_territorio')
+    expect(c.habria_calificado).toBe(false)
+  })
+
+  it('en el territorio nada se marca fuera', () => {
+    for (const d of ['Distrito Capital de Bogotá', 'Cundinamarca', 'distrito capital de bogota']) {
+      const c = clasificarProceso('V1.72101500', 'MANTENIMIENTO', TERMINOS_NEG, { departamento: d })
+      expect(c.veredicto, d).toBe('si')
+      expect(c.habria_calificado, d).toBe(false)
+    }
+  })
+
+  it('un departamento vacío o ausente NO se trata como fuera de territorio', () => {
+    // 'No Definido' llega como centinela y el mapeo lo deja en ''. Descartar
+    // por eso sería perder procesos del territorio por un dato que falta.
+    for (const d of [undefined, '']) {
+      const c = clasificarProceso('V1.72101500', 'MANTENIMIENTO', TERMINOS_NEG,
+        d === undefined ? undefined : { departamento: d })
+      expect(c.veredicto).toBe('si')
+    }
+    const r = ingerirSecop(caso('departamento_no_definido'), hash)
+    expect(r.por_senal.fuera_de_territorio).toBe(0)
   })
 })
 
@@ -374,8 +459,12 @@ describe('agregado de la corrida', () => {
     expect(rep.procesos_vistos).toBe(rep.procesos + rep.descartes.total)
     expect(rep.por_veredicto.si + rep.por_veredicto.probable + rep.por_veredicto.no)
       .toBe(rep.procesos_vistos)
-    expect(rep.descartes.codigo_fuera_de_familia + rep.descartes.sin_codigo_ni_texto)
-      .toBe(rep.descartes.total)
+    // La identidad del struct de descartes cierra con los tres motivos.
+    expect(rep.descartes.codigo_fuera_de_familia + rep.descartes.sin_codigo_ni_texto
+      + rep.descartes.fuera_de_territorio).toBe(rep.descartes.total)
+    // Y las señales cuadran con los vistos.
+    const sumaSenales = Object.values(rep.por_senal).reduce((a, b) => a + b, 0)
+    expect(sumaSenales).toBe(rep.procesos_vistos)
     expect(rep.registros.every(r => sePersiste(r.meta.clasificacion.veredicto))).toBe(true)
   })
 
@@ -422,11 +511,32 @@ describe('agregado de la corrida', () => {
   })
 
   it('la muestra de descartes está acotada: no se guarda un corpus entero', () => {
-    const base = una('ganados_neg_fuera_de_familia')
+    // Código fuera de familia (y fuera de las clases) pero con texto de NEG:
+    // el caso que el contador vigila.
+    const base: FilaSecop = {
+      ...una('minima_limpia'),
+      codigo_principal_de_categoria: 'V1.81112200',
+      descripci_n_del_procedimiento: 'MANTENIMIENTO Y ADECUACION DE LA INFRAESTRUCTURA FISICA',
+    }
     const muchas: FilaSecop[] = []
     for (let i = 0; i < 40; i++) muchas.push({ ...base, id_del_proceso: `CO1.REQ.FAKE${i}` })
     const rep = ingerirSecop(muchas, hash)
+    expect(rep.descartes.codigo_fuera_de_familia).toBe(40)
     expect(rep.descartes.con_texto_coincidente).toBe(40)
     expect(rep.descartes.ejemplos_con_texto_coincidente).toHaveLength(10)
+  })
+
+  it('la muestra del contador territorial también está acotada', () => {
+    const base: FilaSecop = {
+      ...una('minima_limpia'),
+      departamento_entidad: 'Antioquia',
+    }
+    const muchas: FilaSecop[] = []
+    for (let i = 0; i < 25; i++) muchas.push({ ...base, id_del_proceso: `CO1.REQ.ANT${i}` })
+    const rep = ingerirSecop(muchas, hash)
+    expect(rep.observados.total).toBe(25)
+    expect(rep.observados.habrian_calificado).toBe(25)
+    expect(rep.observados.ejemplos).toHaveLength(10)
+    expect(rep.procesos).toBe(0)
   })
 })
