@@ -98,10 +98,43 @@
  *     por modalidad igual que la otra menor cuantía, así que no inunda la
  *     bandeja: queda detrás del portero. Se activa con la constante
  *     `MODALIDADES_INGESTA` de `secopConsulta.ts` — revertirla es una línea.
+ *
+ * ── B.1b ────────────────────────────────────────────────────────────────────
+ *
+ * 12. `fecha_de_ultima_publicaci` NO SIRVE DE RESPALDO DE FECHA. De las 3.785
+ *     filas del territorio sin `fecha_de_publicacion_del`, las que tienen
+ *     `fecha_de_ultima_publicaci` son **CERO**. Lo que sí existe:
+ *     `fecha_de_recepcion_de` en 2.859 (75,5 %) y `fecha_adjudicacion` en 806.
+ *     Quedan 926 sin NINGUNA fecha utilizable — esas entran MARCADAS
+ *     (`origen_fecha: 'ninguna'`), nunca desaparecidas.
+ *     La cadena es: publicación -> recepción de ofertas -> marcada.
+ *
+ * 13. CLASIFICACIÓN HÍBRIDA: el código manda cuando existe, el texto habla
+ *     cuando no. Cuatro casos (B.1b):
+ *       código en familia              -> `si`        (confianza alta)
+ *       código presente y fuera        -> `no`
+ *       sin código y el texto coincide -> `probable`  (lectura humana)
+ *       sin código y el texto no       -> `no`
+ *     Solo `si` y `probable` se persisten; los `no` se CUENTAN. Y el conteo
+ *     incluye `descartados_con_texto_coincidente`: los que el código descartó
+ *     aunque el léxico sí los reconoce. No es un detalle — de los 23 procesos
+ *     que NEG ganó, 3 tienen código presente y FUERA de las tres familias
+ *     (adecuación de ambientes, ferretería, subestación eléctrica) y el texto
+ *     coincide en 2 de los 3. Ese contador es la medida de lo que la regla
+ *     está dejando pasar.
+ *
+ * 14. `fecha_de_recepcion_de` ES EL CIERRE, verificado: cae 4–13 días después
+ *     de la publicación y coincide con la apertura de respuestas en las
+ *     mínimas cuantías. 618 filas del territorio la tienen ANTES de la
+ *     publicación — inconsistencia del origen; se mapea verbatim y el
+ *     cronograma queda con las dos fechas, sin corregir ninguna a mano.
  */
 import type { ModalidadLicitacion, MotivoSemaforo, Semaforo } from '../../types/sigp/licitacion'
 import { calcularSemaforo } from './semaforo'
 import type { EntradaSemaforo } from './semaforo'
+import {
+  coincideVocabulario, TERMINOS_NEG, VOCABULARIO_NEG_VERSION,
+} from '../../types/sigp/vocabularioNeg'
 
 // ── Las 59 columnas del dataset ──────────────────────────────────────────────
 // Transcritas del encabezado `X-SODA2-Fields` de una respuesta real (no a
@@ -198,6 +231,7 @@ export type DestinoMapeado =
   | 'presupuesto_oficial'
   | 'lotes'
   | 'cronograma.publicacion'
+  | 'cronograma.cierre'
   | 'url_proceso'
   | 'ofertas_recibidas'
   | 'ganador.nit'
@@ -226,6 +260,11 @@ export const CAMPO_SECOP = {
   presupuesto_oficial: 'precio_base',
   lotes: 'numero_de_lotes',
   'cronograma.publicacion': 'fecha_de_publicacion_del',
+  // Verificado contra el dato (B.1b): es la fecha de RECEPCIÓN DE OFERTAS, o
+  // sea el cierre — cae entre 4 y 13 días después de la publicación y coincide
+  // con `fecha_de_apertura_de_respuesta` en las mínimas cuantías. Es además el
+  // respaldo de fecha cuando no hay publicación (trampa 12).
+  'cronograma.cierre': 'fecha_de_recepcion_de',
   url_proceso: 'urlproceso',
   ofertas_recibidas: 'respuestas_al_procedimiento',
   'ganador.nit': 'nit_del_proveedor_adjudicado',
@@ -259,8 +298,11 @@ export const CAMPOS_NO_MAPEADOS: Partial<Record<CampoSecop, string>> = {
   justificaci_n_modalidad_de: 'Texto jurídico de la modalidad; no alimenta ninguna decisión del semáforo.',
   duracion: 'Plazo de ejecución; entra cuando el radar evalúe capacidad, no ahora.',
   unidad_de_duracion: 'Unidad del anterior.',
-  fecha_de_recepcion_de: 'CANDIDATA a cronograma.cierre en un bloque posterior; fuera del contrato de B.1.',
-  fecha_de_apertura_de_respuesta: 'Ídem, para la apertura de ofertas.',
+  fecha_de_apertura_de_respuesta:
+    'Apertura de ofertas. Coincide con fecha_de_recepcion_de en las mínimas '
+    + 'cuantías y existe en 2.860 de las 3.785 filas sin publicación — casi las '
+    + 'mismas que la de recepción. Con una basta para el respaldo de fecha; dos '
+    + 'fuentes para el mismo hito son dos cosas que pueden divergir.',
   fecha_de_apertura_efectiva: 'Ídem.',
   ciudad_de_la_unidad_de: 'Unidad de contratación; la geografía del radar es la de la entidad.',
   nombre_de_la_unidad_de: 'Ídem.',
@@ -400,6 +442,35 @@ export function fechaSecopAIso(fila: FilaSecop, campo: CampoSecop): string | nul
   return d.toISOString()
 }
 
+/** De dónde salió la fecha con la que se ubica el proceso en el tiempo. */
+export type OrigenFecha = 'publicacion' | 'recepcion_de_ofertas' | 'ninguna'
+
+export interface FechaReferencia {
+  /** ISO con zona, o `null` si el origen no trae ninguna fecha utilizable. */
+  iso: string | null
+  origen: OrigenFecha
+}
+
+/**
+ * Fecha con la que el proceso se ubica en el tiempo (trampa 12).
+ *
+ * Cadena medida, no supuesta: `fecha_de_publicacion_del` ->
+ * `fecha_de_recepcion_de` -> nada. `fecha_de_ultima_publicaci`, que parecía
+ * el respaldo natural, está vacía en TODAS las filas sin publicación (0 de
+ * 3.785), así que no entra en la cadena: un respaldo que nunca tiene dato es
+ * peor que no tenerlo, porque se cita como si existiera.
+ *
+ * Las 926 filas que no tienen ninguna de las dos entran con
+ * `origen: 'ninguna'` y el mapeo las marca. Desaparecer no es una opción.
+ */
+export function fechaReferencia(fila: FilaSecop): FechaReferencia {
+  const pub = fechaSecopAIso(fila, CAMPO_SECOP['cronograma.publicacion'])
+  if (pub !== null) return { iso: pub, origen: 'publicacion' }
+  const rec = fechaSecopAIso(fila, CAMPO_SECOP['cronograma.cierre'])
+  if (rec !== null) return { iso: rec, origen: 'recepcion_de_ofertas' }
+  return { iso: null, origen: 'ninguna' }
+}
+
 /** URL de la columna `url` de Socrata, que llega como objeto (trampa 3). */
 export function urlSecop(fila: FilaSecop, campo: CampoSecop): string {
   const v = fila[campo]
@@ -457,6 +528,94 @@ export function familiaRup(categoria: string | null): FamiliaRup {
     ? 'familia_neg'
     : 'fuera_de_familia'
 }
+
+// ── Clasificación híbrida: código arriba, texto abajo (trampa 13) ───────────
+
+/** Qué se hace con el proceso. Solo `si` y `probable` se persisten. */
+export type VeredictoRadar = 'si' | 'probable' | 'no'
+
+/** Qué señal produjo el veredicto. Un veredicto sin señal no es auditable. */
+export type SenalClasificacion =
+  | 'codigo_en_familia'
+  | 'codigo_fuera_de_familia'
+  | 'texto_coincide'
+  | 'sin_codigo_ni_texto'
+
+export interface Clasificacion {
+  veredicto: VeredictoRadar
+  senal: SenalClasificacion
+  familia: FamiliaRup
+  /** Términos del léxico encontrados en el objeto. Vacío si no se consultó. */
+  terminos: string[]
+  /**
+   * `true` cuando el CÓDIGO descartó un proceso cuyo TEXTO sí reconoce el
+   * léxico. Es el contador que mide lo que la regla está dejando pasar: de los
+   * 23 procesos que NEG ganó, 3 caen acá.
+   */
+  descartado_con_texto_coincidente: boolean
+}
+
+/**
+ * Clasifica un proceso con las dos señales.
+ *
+ * El código UNSPC MANDA cuando existe —es un dato estructurado, declarado por
+ * la entidad— y el texto solo habla cuando no hay código, que es el caso
+ * normal de lo recién publicado. El orden no es negociable: si el texto pudiera
+ * sobreponerse al código, un "mantenimiento de software" entraría por la
+ * palabra MANTENIMIENTO.
+ *
+ * `terminos` se inyecta para que el léxico pueda venir del documento de
+ * configuración o del paquete, sin que este módulo sepa de dónde.
+ */
+export function clasificarProceso(
+  categoria: string | null,
+  objeto: string | null | undefined,
+  terminos: readonly string[],
+): Clasificacion {
+  const familia = familiaRup(categoria)
+  const { coincide, terminos: hallados } = coincideVocabulario(objeto, terminos)
+
+  if (familia === 'familia_neg') {
+    return {
+      veredicto: 'si',
+      senal: 'codigo_en_familia',
+      familia,
+      terminos: hallados,
+      descartado_con_texto_coincidente: false,
+    }
+  }
+  if (familia === 'fuera_de_familia') {
+    return {
+      veredicto: 'no',
+      senal: 'codigo_fuera_de_familia',
+      familia,
+      terminos: hallados,
+      descartado_con_texto_coincidente: coincide,
+    }
+  }
+  // Sin código: el texto es la única señal.
+  return coincide
+    ? {
+      veredicto: 'probable',
+      senal: 'texto_coincide',
+      familia,
+      terminos: hallados,
+      descartado_con_texto_coincidente: false,
+    }
+    : {
+      veredicto: 'no',
+      senal: 'sin_codigo_ni_texto',
+      familia,
+      terminos: [],
+      descartado_con_texto_coincidente: false,
+    }
+}
+
+/** Veredictos que producen documento. El resto se cuenta y se tira. */
+export const VEREDICTOS_PERSISTIBLES: readonly VeredictoRadar[] = ['si', 'probable']
+
+export const sePersiste = (v: VeredictoRadar): boolean =>
+  (VEREDICTOS_PERSISTIBLES as readonly string[]).includes(v)
 
 // ── Modalidad ────────────────────────────────────────────────────────────────
 
@@ -683,7 +842,8 @@ export interface LicitacionDetectada {
     publicacion: string | null
     manifestacion: null
     sorteo: null
-    cierre: null
+    /** Recepción de ofertas = cierre, verificado contra el dato (trampa 14). */
+    cierre: string | null
     adjudicacion: null
   }
   semaforo: Semaforo
@@ -706,6 +866,10 @@ export interface LicitacionDetectada {
 /** Metadatos del acto de ingesta — para el reporte y el triage, no para el doc. */
 export interface MetaIngesta {
   doc_id: string
+  /** Veredicto híbrido con su señal y los términos que lo sostienen. */
+  clasificacion: Clasificacion
+  /** De dónde salió la fecha del proceso (trampa 12). */
+  origen_fecha: OrigenFecha
   familia_rup: FamiliaRup
   categoria_cruda: string | null
   modalidad_cruda: string
@@ -759,6 +923,7 @@ export function entradaSemaforoSecop(d: {
  */
 export function mapearProceso(
   p: ProcesoColapsado, hash: (s: string) => string,
+  terminos: readonly string[] = TERMINOS_NEG,
 ): RegistroIngesta | null {
   const f = p.representante
   const id_secop = p.id_secop.trim()
@@ -770,7 +935,11 @@ export function mapearProceso(
   const presupuesto_crudo = numeroSecop(f, CAMPO_SECOP.presupuesto_oficial)
   const problema = problemaPresupuesto(presupuesto_crudo)
   const url_proceso = urlSecop(f, CAMPO_SECOP.url_proceso)
+  const objeto = texto(f, CAMPO_SECOP.objeto)
+  const clasificacion = clasificarProceso(categoria_unspsc, objeto, terminos)
+  const fecha = fechaReferencia(f)
   const publicacion = fechaSecopAIso(f, CAMPO_SECOP['cronograma.publicacion'])
+  const cierre = fechaSecopAIso(f, CAMPO_SECOP['cronograma.cierre'])
 
   const entidad = {
     nombre: texto(f, CAMPO_SECOP['entidad.nombre']),
@@ -789,7 +958,7 @@ export function mapearProceso(
     origen: 'secop_ii',
     url_proceso,
     entidad,
-    objeto: texto(f, CAMPO_SECOP.objeto),
+    objeto,
     categoria_unspsc,
     modalidad: mod.modalidad,
     presupuesto_oficial: problema === null ? presupuesto_crudo : null,
@@ -798,7 +967,7 @@ export function mapearProceso(
       publicacion,
       manifestacion: null,
       sorteo: null,
-      cierre: null,
+      cierre,
       adjudicacion: null,
     },
     semaforo: sem.semaforo,
@@ -819,7 +988,9 @@ export function mapearProceso(
 
   const meta: MetaIngesta = {
     doc_id: docIdSecop(id_secop, hash),
-    familia_rup: familiaRup(categoria_unspsc),
+    clasificacion,
+    origen_fecha: fecha.origen,
+    familia_rup: clasificacion.familia,
     categoria_cruda,
     modalidad_cruda: mod.crudo,
     modalidad_imprevista: mod.imprevista,
@@ -876,23 +1047,64 @@ export function guardaIdentidad(registros: readonly RegistroIngesta[]): {
 export const GUARD_SECOP = {
   /** Más de este % de modalidades imprevistas: apareció un vocabulario nuevo. */
   MAX_PCT_MODALIDAD_IMPREVISTA: 5,
-  /** Más de este % sin fecha de publicación: la consulta está trayendo basura. */
+  /**
+   * Más de este % SIN NINGUNA fecha utilizable (ni publicación ni recepción):
+   * la consulta está trayendo basura. Que falte la publicación ya no cuenta —
+   * para eso está la cadena de respaldo de la trampa 12.
+   */
   MAX_PCT_SIN_FECHA: 10,
   /** Más de este % de presupuestos inservibles. */
   MAX_PCT_PRESUPUESTO_PROBLEMA: 15,
 } as const
 
+/**
+ * Cuántos procesos se descartaron y POR QUÉ. Es el instrumento que mide si el
+ * clasificador está dejando pasar cosas: sin esto, un radar que no muestra
+ * nada y un radar que descarta lo bueno se ven igual.
+ */
+export interface DescartesIngesta {
+  total: number
+  /** Código presente y fuera de las tres familias del RUP. */
+  codigo_fuera_de_familia: number
+  /** Sin código y sin coincidencia de léxico. */
+  sin_codigo_ni_texto: number
+  /**
+   * De los descartados por código, cuántos SÍ coinciden con el léxico. El
+   * contador que importa: 3 de los 23 procesos que NEG ganó caen acá.
+   */
+  con_texto_coincidente: number
+  /** Muestra acotada de esos casos, para revisarlos a mano. */
+  ejemplos_con_texto_coincidente: {
+    id_secop: string
+    categoria: string | null
+    objeto: string
+    terminos: string[]
+  }[]
+}
+
 export interface ReporteIngestaSecop {
+  /** SOLO los persistibles: veredicto `si` o `probable` (trampa 13). */
   registros: RegistroIngesta[]
   filas_vistas: number
+  /** Procesos distintos vistos, persistibles o no. */
+  procesos_vistos: number
+  /** Procesos que producen documento. */
   procesos: number
   filas_sin_identidad: number
-  /** Conteo por tri-estado de familia (trampa 5). */
+  /** Conteo por veredicto sobre TODOS los procesos vistos. */
+  por_veredicto: Record<VeredictoRadar, number>
+  descartes: DescartesIngesta
+  /** Conteo por tri-estado de familia (trampa 5), sobre los vistos. */
   por_familia: Record<FamiliaRup, number>
+  /** De dónde salió la fecha de cada persistible (trampa 12). */
+  por_origen_fecha: Record<OrigenFecha, number>
+  /** Versión del léxico con la que se clasificó. */
+  vocabulario_version: string
   colisiones: ColisionDocId[]
   /** Procesos con varias adjudicaciones: sin ganador fijado (trampa 9). */
   adjudicacion_ambigua: number
   sin_fecha_publicacion: number
+  sin_ninguna_fecha: number
   presupuesto_problema: Record<Exclude<ProblemaPresupuesto, null>, number>
   modalidades_imprevistas: { crudo: string; procesos: number }[]
   urls_genericas: number
@@ -901,23 +1113,64 @@ export interface ReporteIngestaSecop {
   puede_escribir: boolean
 }
 
+/** Cuántos ejemplos de descarte-con-texto se guardan para revisión. */
+export const MAX_EJEMPLOS_DESCARTE = 10
+
 /**
  * Pipeline completo: colapsa filas a procesos, mapea, cuenta y decide si se
  * puede escribir. No escribe nada: devuelve el reporte y los registros.
  */
 export function ingerirSecop(
   filas: readonly FilaSecop[], hash: (s: string) => string,
+  opciones?: { terminos?: readonly string[]; vocabulario_version?: string },
 ): ReporteIngestaSecop {
+  const terminos = opciones?.terminos ?? TERMINOS_NEG
   const { procesos: colapsados, sin_identidad } = colapsarPorProceso(filas)
 
-  const registros: RegistroIngesta[] = []
-  for (const p of colapsados) {
-    const r = mapearProceso(p, hash)
-    if (r) registros.push(r)
-  }
-
+  const por_veredicto: Record<VeredictoRadar, number> = { si: 0, probable: 0, no: 0 }
   const por_familia: Record<FamiliaRup, number> = {
     familia_neg: 0, fuera_de_familia: 0, sin_clasificar: 0,
+  }
+  const descartes: DescartesIngesta = {
+    total: 0,
+    codigo_fuera_de_familia: 0,
+    sin_codigo_ni_texto: 0,
+    con_texto_coincidente: 0,
+    ejemplos_con_texto_coincidente: [],
+  }
+
+  // Se mapea TODO (el veredicto necesita el objeto ya leído) y se persiste
+  // solo lo que da `si` o `probable`. Los `no` no producen documento pero SÍ
+  // producen conteo — decenas de miles de registros de comida y software no
+  // entran a Firestore, pero tampoco desaparecen sin dejar número.
+  const registros: RegistroIngesta[] = []
+  let procesos_vistos = 0
+  for (const p of colapsados) {
+    const r = mapearProceso(p, hash, terminos)
+    if (!r) continue
+    procesos_vistos++
+    const c = r.meta.clasificacion
+    por_veredicto[c.veredicto]++
+    por_familia[c.familia]++
+    if (sePersiste(c.veredicto)) { registros.push(r); continue }
+    descartes.total++
+    if (c.senal === 'codigo_fuera_de_familia') descartes.codigo_fuera_de_familia++
+    if (c.senal === 'sin_codigo_ni_texto') descartes.sin_codigo_ni_texto++
+    if (c.descartado_con_texto_coincidente) {
+      descartes.con_texto_coincidente++
+      if (descartes.ejemplos_con_texto_coincidente.length < MAX_EJEMPLOS_DESCARTE) {
+        descartes.ejemplos_con_texto_coincidente.push({
+          id_secop: r.doc.id_secop,
+          categoria: r.doc.categoria_unspsc,
+          objeto: r.doc.objeto.slice(0, 200),
+          terminos: c.terminos,
+        })
+      }
+    }
+  }
+
+  const por_origen_fecha: Record<OrigenFecha, number> = {
+    publicacion: 0, recepcion_de_ofertas: 0, ninguna: 0,
   }
   const presupuesto_problema = { ausente: 0, cero: 0, negativo: 0, absurdo: 0 }
   const imprevistas = new Map<string, number>()
@@ -926,7 +1179,7 @@ export function ingerirSecop(
   let urls_genericas = 0
 
   for (const r of registros) {
-    por_familia[r.meta.familia_rup]++
+    por_origen_fecha[r.meta.origen_fecha]++
     if (r.meta.problema_presupuesto !== null) presupuesto_problema[r.meta.problema_presupuesto]++
     if (r.meta.modalidad_imprevista) {
       imprevistas.set(r.meta.modalidad_cruda, (imprevistas.get(r.meta.modalidad_cruda) ?? 0) + 1)
@@ -955,10 +1208,13 @@ export function ingerirSecop(
       + [...imprevistas.keys()].join(' · '),
     )
   }
-  if (pct(sin_fecha_publicacion) > GUARD_SECOP.MAX_PCT_SIN_FECHA) {
+  const sin_ninguna_fecha = por_origen_fecha.ninguna
+  if (pct(sin_ninguna_fecha) > GUARD_SECOP.MAX_PCT_SIN_FECHA) {
     senales.push(
-      `SIN FECHA DE PUBLICACIÓN: ${sin_fecha_publicacion} de ${procesos} `
-      + `(${pct(sin_fecha_publicacion).toFixed(1)} %).`,
+      `SIN NINGUNA FECHA UTILIZABLE: ${sin_ninguna_fecha} de ${procesos} `
+      + `(${pct(sin_ninguna_fecha).toFixed(1)} %) — ni publicación ni recepción `
+      + 'de ofertas. Entran marcadas, pero esta proporción dice que la consulta '
+      + 'está trayendo basura.',
     )
   }
   const conProblema = Object.values(presupuesto_problema).reduce((a, b) => a + b, 0)
@@ -974,12 +1230,18 @@ export function ingerirSecop(
   return {
     registros,
     filas_vistas: filas.length,
+    procesos_vistos,
     procesos,
     filas_sin_identidad: sin_identidad,
+    por_veredicto,
+    descartes,
     por_familia,
+    por_origen_fecha,
+    vocabulario_version: opciones?.vocabulario_version ?? VOCABULARIO_NEG_VERSION,
     colisiones,
     adjudicacion_ambigua,
     sin_fecha_publicacion,
+    sin_ninguna_fecha,
     presupuesto_problema,
     modalidades_imprevistas: [...imprevistas.entries()]
       .map(([crudo, p]) => ({ crudo, procesos: p }))
@@ -987,5 +1249,68 @@ export function ingerirSecop(
     urls_genericas,
     senales,
     puede_escribir: senales.length === 0,
+  }
+}
+
+// ── El agregado de la corrida ────────────────────────────────────────────────
+
+/**
+ * Resumen de UNA corrida del radar, listo para persistir.
+ *
+ * Es la contraparte medible de "solo se guarda lo que da sí o probable": sin
+ * este documento, nadie puede responder si el clasificador está dejando pasar
+ * cosas, porque lo descartado no deja rastro en ninguna colección. Guarda los
+ * conteos y una muestra acotada de los descartes que coinciden con el léxico.
+ *
+ * PURA: el caller pone el reloj y el id. La colección (`corridas_radar`) y su
+ * regla de lectura son del bloque que escriba —acá no se toca ninguna regla—.
+ */
+export interface ResumenCorridaRadar {
+  ejecutada_en: string
+  /** Ventana consultada, tal como se le pidió a la API. */
+  ventana: { desde: string | null; hasta: string | null; solape_dias: number }
+  modo: string
+  vocabulario_version: string
+  filas_vistas: number
+  procesos_vistos: number
+  persistidos: number
+  por_veredicto: Record<VeredictoRadar, number>
+  descartes: DescartesIngesta
+  por_familia: Record<FamiliaRup, number>
+  por_origen_fecha: Record<OrigenFecha, number>
+  adjudicacion_ambigua: number
+  presupuesto_problema: Record<Exclude<ProblemaPresupuesto, null>, number>
+  modalidades_imprevistas: { crudo: string; procesos: number }[]
+  urls_genericas: number
+  senales: string[]
+  puede_escribir: boolean
+}
+
+export function construirResumenCorrida(
+  r: ReporteIngestaSecop,
+  contexto: {
+    ejecutada_en: string
+    modo: string
+    ventana: { desde: string | null; hasta: string | null; solape_dias: number }
+  },
+): ResumenCorridaRadar {
+  return {
+    ejecutada_en: contexto.ejecutada_en,
+    ventana: contexto.ventana,
+    modo: contexto.modo,
+    vocabulario_version: r.vocabulario_version,
+    filas_vistas: r.filas_vistas,
+    procesos_vistos: r.procesos_vistos,
+    persistidos: r.procesos,
+    por_veredicto: r.por_veredicto,
+    descartes: r.descartes,
+    por_familia: r.por_familia,
+    por_origen_fecha: r.por_origen_fecha,
+    adjudicacion_ambigua: r.adjudicacion_ambigua,
+    presupuesto_problema: r.presupuesto_problema,
+    modalidades_imprevistas: r.modalidades_imprevistas,
+    urls_genericas: r.urls_genericas,
+    senales: r.senales,
+    puede_escribir: r.puede_escribir,
   }
 }

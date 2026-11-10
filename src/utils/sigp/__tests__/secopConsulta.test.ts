@@ -12,6 +12,7 @@ import {
   literalSoql, clausulaIn, clausulaFamilias, clausulaFechas, whereIngesta,
   ORDEN_INGESTA, paramsIngesta, urlIngesta, paramsConteo, urlConteo,
   cabecerasConsulta, ventanaIngesta, paginasPara, verificarCosecha,
+  EXPR_FECHA_VENTANA, MODO_INGESTA_DEFECTO,
 } from '../secopConsulta'
 
 let fetchOriginal: typeof globalThis.fetch
@@ -70,48 +71,60 @@ describe('cláusulas del filtro', () => {
     )
   })
 
-  it('fechas: rango inclusivo y, por defecto, ADMITE las filas sin fecha', () => {
-    // 515 filas del filtro no tienen fecha de publicación: un `>` pelado las
-    // pierde en TODAS las corridas, no en una.
+  it('fechas: la ventana va sobre coalesce(publicación, recepción de ofertas)', () => {
+    // 3.785 filas del territorio no tienen fecha de publicación; 2.859 sí
+    // tienen recepción. Con el coalesce entran UNA vez en su ventana en vez de
+    // entrar en todas las corridas por la vía del IS NULL (B.1b).
+    expect(EXPR_FECHA_VENTANA).toBe('coalesce(fecha_de_publicacion_del, fecha_de_recepcion_de)')
     expect(clausulaFechas('2026-01-01', '2026-01-31')).toBe(
-      "(fecha_de_publicacion_del >= '2026-01-01'"
-      + " AND fecha_de_publicacion_del <= '2026-01-31'"
-      + ' OR fecha_de_publicacion_del IS NULL)',
+      `(${EXPR_FECHA_VENTANA} >= '2026-01-01'`
+      + ` AND ${EXPR_FECHA_VENTANA} <= '2026-01-31'`
+      + ` OR ${EXPR_FECHA_VENTANA} IS NULL)`,
     )
   })
 
-  it('fechas: se pueden excluir explícitamente las sin fecha', () => {
+  it('fechas: las 926 sin NINGUNA fecha entran por el IS NULL, y se puede excluirlas', () => {
     expect(clausulaFechas('2026-01-01', null, false))
-      .toBe("(fecha_de_publicacion_del >= '2026-01-01')")
-    expect(clausulaFechas(null, null, false)).toBe('fecha_de_publicacion_del IS NOT NULL')
+      .toBe(`(${EXPR_FECHA_VENTANA} >= '2026-01-01')`)
+    expect(clausulaFechas(null, null, false)).toBe(`${EXPR_FECHA_VENTANA} IS NOT NULL`)
     expect(clausulaFechas(null, null, true)).toBeNull()
+  })
+
+  it('NO usa fecha_de_ultima_publicaci: está vacía en las 3.785 sin publicación', () => {
+    expect(EXPR_FECHA_VENTANA).not.toContain('ultima_publicaci')
+    expect(whereIngesta({ desde: '2026-01-01' })).not.toContain('ultima_publicaci')
   })
 })
 
 describe('whereIngesta', () => {
-  it('modo histórico (DEFECTO) = el filtro del brief: familias + depto + modalidad', () => {
+  it('el DEFECTO es modo RADAR: la familia sale de la consulta (B.1b)', () => {
+    expect(MODO_INGESTA_DEFECTO).toBe('radar')
     const w = whereIngesta()
-    expect(w).toContain('starts_with(codigo_principal_de_categoria,')
+    // En octubre de 2026 el filtro por familia veía 21 procesos de 2.259: la
+    // categoría UNSPC se asigna tarde, así que a nivel de API no se filtra.
+    expect(w).not.toContain('codigo_principal_de_categoria')
     expect(w).toContain("departamento_entidad in('Distrito Capital de Bogotá','Cundinamarca')")
     expect(w).toContain("modalidad_de_contratacion in('Mínima cuantía'")
   })
 
-  it('modo radar: SIN filtro de familia en la API (la categoría llega tarde)', () => {
-    const w = whereIngesta({ modo: 'radar' })
-    expect(w).not.toContain('codigo_principal_de_categoria')
+  it('modo histórico: con las familias en la consulta, para reprocesos', () => {
+    const w = whereIngesta({ modo: 'historico' })
+    expect(w).toContain('starts_with(codigo_principal_de_categoria,')
     expect(w).toContain('departamento_entidad in(')
     expect(w).toContain('modalidad_de_contratacion in(')
   })
 
-  it('la marca incremental entra como rango sobre fecha_de_publicacion_del', () => {
+  it('la marca incremental entra como rango sobre la expresión de fecha', () => {
     const w = whereIngesta({ desde: '2026-09-01', hasta: '2026-11-09' })
-    expect(w).toContain("fecha_de_publicacion_del >= '2026-09-01'")
-    expect(w).toContain("fecha_de_publicacion_del <= '2026-11-09'")
+    expect(w).toContain(`${EXPR_FECHA_VENTANA} >= '2026-09-01'`)
+    expect(w).toContain(`${EXPR_FECHA_VENTANA} <= '2026-11-09'`)
   })
 
   it('las cláusulas se unen con AND, nunca con OR suelto', () => {
-    const w = whereIngesta({ desde: '2026-01-01' })
+    const w = whereIngesta({ desde: '2026-01-01', modo: 'historico' })
     expect(w.split(' AND ').length).toBeGreaterThanOrEqual(4)
+    // En radar hay una cláusula menos (no va la familia), pero sigue siendo AND.
+    expect(whereIngesta({ desde: '2026-01-01' }).split(' AND ').length).toBeGreaterThanOrEqual(3)
   })
 })
 
@@ -219,8 +232,8 @@ describe('ventana incremental con solape', () => {
   it('la ventana se puede pasar directo al where', () => {
     const v = ventanaIngesta('2026-11-01', ahora)
     const w = whereIngesta({ desde: v.desde, hasta: v.hasta })
-    expect(w).toContain("fecha_de_publicacion_del >= '2026-09-17'")
-    expect(w).toContain("fecha_de_publicacion_del <= '2026-11-09'")
+    expect(w).toContain(`${EXPR_FECHA_VENTANA} >= '2026-09-17'`)
+    expect(w).toContain(`${EXPR_FECHA_VENTANA} <= '2026-11-09'`)
   })
 })
 

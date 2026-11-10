@@ -53,11 +53,11 @@
  *    (jul 356 · ago 248 · sep 124 · **oct 12** · nov 0) mientras el mismo
  *    corte sin familias sigue normal (oct 2.259 · nov 429).
  *    Conclusión medida: el filtro de familias da un CORPUS HISTÓRICO
- *    excelente, pero como radar llega tarde. Por eso existe
- *    `modo: 'radar' | 'historico'` — y el default del módulo es el filtro del
- *    brief (`historico`), para no cambiarle el alcance a nadie por mi cuenta.
- *    La decisión de pasar el radar a `radar` es de Giovanny; el reporte lleva
- *    los números.
+ *    excelente, pero como radar llega tarde.
+ *    **B.1b: Giovanny confirmó el modo `radar` como el de la ingesta** — la
+ *    familia sale de la consulta y la clasificación se hace en casa, con el
+ *    código arriba y el léxico de `vocabularioNeg.ts` abajo. `historico` queda
+ *    para reprocesos.
  *
  *  · `:updated_at` NO SIRVE DE MARCA INCREMENTAL: las 29.354 filas del filtro
  *    tienen el MISMO `:updated_at` (2026-11-08T13:35:42.561Z) — el dataset se
@@ -66,16 +66,15 @@
  *    y otros campos cambian después, un `>` pelado congela para siempre la
  *    foto de la primera lectura.
  *
- *  · 515 filas del filtro NO TIENEN `fecha_de_publicacion_del`. Un
- *    `where fecha > marca` las excluye SIEMPRE, en toda corrida. Por eso
- *    `incluir_sin_fecha` existe y por defecto está en `true`: entran y el
- *    mapeo las marca.
- *    CONSECUENCIA MEDIDA, para que no sorprenda: como no tienen fecha, esas
- *    filas caen DENTRO de cualquier ventana. El filtro de 2025 da 3.446 filas
- *    con el corte exacto del brief y 3.981 con los defectos de este módulo —
- *    la diferencia son esas ~515 sin fecha más los 15 de la variante sin
- *    tildes. Cuesta un re-leído acotado y constante por corrida, y no duplica
- *    nada porque el doc id es determinístico.
+ *  · FILAS SIN `fecha_de_publicacion_del`: 520 en el filtro con familias,
+ *    3.785 en el territorio completo (modo radar). Un `where fecha > marca`
+ *    las excluye SIEMPRE, en toda corrida.
+ *    B.1b lo resuelve con `coalesce(publicación, recepción de ofertas)` —
+ *    `EXPR_FECHA_VENTANA` —: 2.859 de esas 3.785 tienen fecha de recepción, así
+ *    que entran UNA VEZ en su ventana. Las 926 que no tienen ninguna siguen
+ *    entrando por `IS NULL` y el mapeo las marca con
+ *    `origen_fecha: 'ninguna'`. `fecha_de_ultima_publicaci` NO sirve: está
+ *    vacía en las 3.785 (ver trampa 12 de `secopMapeo.ts`).
  *
  * ── VERIFICACIÓN DEL CONSTRUCTOR CONTRA LA API (09-nov-2026) ────────────────
  * Las URLs que produce este módulo se dispararon contra el endpoint y se
@@ -126,13 +125,22 @@ export const DIAS_SOLAPE_DEFECTO = 45
 
 export type ModoIngesta = 'historico' | 'radar'
 
+/**
+ * El radar ingiere en modo `radar` (B.1b, decisión de Giovanny). El filtro por
+ * familia a nivel de API deja de ser el camino principal porque no ve lo
+ * recién publicado; `historico` queda para reprocesos.
+ */
+export const MODO_INGESTA_DEFECTO: ModoIngesta = 'radar'
+
 export interface OpcionesIngesta {
   /**
-   * `historico` (DEFECTO) = el filtro del brief: familias UNSPC + territorio +
-   * modalidades. Corpus limpio, pero ciego a lo recién publicado.
-   * `radar` = territorio + modalidades, SIN filtro de familia en la API: trae
-   * también lo `UNSPECIFIED` y la familia se decide en casa con
-   * `familiaRup()`. Ver el hallazgo del encabezado.
+   * `radar` (DEFECTO desde B.1b, confirmado por Giovanny) = territorio +
+   * modalidades, SIN filtro de familia en la API: trae también lo
+   * `UNSPECIFIED` y la clasificación se hace en casa con `clasificarProceso()`
+   * (código arriba, léxico abajo). Es el único modo que ve lo recién
+   * publicado — ver el hallazgo del encabezado.
+   * `historico` = el filtro original con las familias UNSPC en la consulta.
+   * Queda para REPROCESOS: corpus limpio de lo ya clasificado por SECOP.
    */
   modo?: ModoIngesta
   /** Marca inferior, inclusiva: ISO o 'YYYY-MM-DD'. */
@@ -175,13 +183,31 @@ export function clausulaFamilias(familias: readonly string[] = FAMILIAS_RUP_NEG)
 }
 
 /**
+ * Expresión de fecha de la ventana: la publicación, y si no hay, la RECEPCIÓN
+ * DE OFERTAS (B.1b).
+ *
+ * `coalesce` está soportado por el SoQL de datos.gov.co — verificado con una
+ * consulta real, no supuesto. Importa mucho: de las 3.785 filas del territorio
+ * sin fecha de publicación, 2.859 (75,5 %) tienen fecha de recepción, así que
+ * con el coalesce entran UNA VEZ en su ventana en vez de entrar en TODAS las
+ * corridas por la vía del `IS NULL`. Y 1.830 de ellas tienen recepción en
+ * 2026: procesos vivos que de otro modo se leerían fuera de tiempo.
+ *
+ * `fecha_de_ultima_publicaci` NO entra en el coalesce: está vacía en las
+ * 3.785. Ver la trampa 12 de `secopMapeo.ts`.
+ */
+export const EXPR_FECHA_VENTANA =
+  'coalesce(fecha_de_publicacion_del, fecha_de_recepcion_de)'
+
+/**
  * Ventana de fechas. Con `incluir_sin_fecha` la cláusula admite además las
- * filas sin publicación — si no, se perderían en todas las corridas.
+ * filas que no tienen NINGUNA de las dos (926 medidas) — si no, se perderían
+ * en todas las corridas, no en una.
  */
 export function clausulaFechas(
   desde?: string | null, hasta?: string | null, incluir_sin_fecha = true,
 ): string | null {
-  const campo = 'fecha_de_publicacion_del'
+  const campo = EXPR_FECHA_VENTANA
   const partes: string[] = []
   if (desde) partes.push(`${campo} >= ${literalSoql(desde)}`)
   if (hasta) partes.push(`${campo} <= ${literalSoql(hasta)}`)
@@ -193,7 +219,7 @@ export function clausulaFechas(
 /** El `$where` completo del filtro de ingesta. */
 export function whereIngesta(opciones: OpcionesIngesta = {}): string {
   const {
-    modo = 'historico',
+    modo = MODO_INGESTA_DEFECTO,
     desde = null,
     hasta = null,
     familias = FAMILIAS_RUP_NEG,
@@ -217,7 +243,7 @@ export function whereIngesta(opciones: OpcionesIngesta = {}): string {
  * repetir y saltarse filas, y una cosecha paginada queda con huecos que nadie
  * ve.
  */
-export const ORDEN_INGESTA = 'fecha_de_publicacion_del ASC, id_del_proceso ASC'
+export const ORDEN_INGESTA = `${EXPR_FECHA_VENTANA} ASC, id_del_proceso ASC`
 
 /**
  * Parámetros de una página. `$limit` SIEMPRE presente (ver
