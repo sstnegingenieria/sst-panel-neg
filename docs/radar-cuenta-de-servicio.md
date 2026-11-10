@@ -150,12 +150,31 @@ Identity.** Esos correos son buzones, no identidades de Google: **no se les
 puede conceder ningún rol de IAM.** No es un permiso que falta, es una
 identidad que no existe.
 
-Consecuencia, y afecta a los tres frentes: **hoy la única identidad con
-permisos de desplegar es la cuenta compartida**, que el script veta por
-acuerdo. Por ese camino nadie despliega funciones — ni el radar ni el codebase
+> ## ✅ RESUELTO el 09-nov-2026 — por la salida 1
+>
+> **Cloud Identity quedó activo en `negingenieria.com` y la cuenta nominal
+> funciona.** Lo verificó el frente SIGP con Giovanny: el cotejo de las 16
+> funciones contra producción lo corrió él con su cuenta de la empresa.
+>
+> Consecuencias, y son las que importan:
+> - **La escotilla de la cuenta compartida se BORRÓ del script** (no se dejó
+>   vencer: desaparecida la causa, una excepción que ya no habilita nada solo
+>   deja el agujero abierto). El veto a la cuenta compartida es **absoluto** —
+>   sin bandera, sin firma, sin fecha.
+> - El `--member="user:giovanny.montes@negingenieria.com"` de más abajo **ya
+>   funciona** tal como está escrito.
+> - Falta solo que se ejecute el acto de IAM: hasta entonces el pre-chequeo de
+>   permisos del script aborta diciendo qué rol falta.
+>
+> Lo que sigue de esta sección se conserva como **historia** — por qué existió
+> la escotilla y con qué criterio se diseñó. No describe el estado actual.
+
+Consecuencia de entonces, y afectaba a los tres frentes: **la única identidad
+con permisos de desplegar era la cuenta compartida**, que el script veta por
+acuerdo. Por ese camino nadie desplegaba funciones — ni el radar ni el codebase
 `default`.
 
-**Las salidas, en orden de preferencia:**
+**Las salidas que se evaluaron, en orden de preferencia:**
 
 1. **Cloud Identity (o Workspace) para `negingenieria.com`** — la correcta.
    Convierte los correos del equipo en identidades de Google y todo lo demás de
@@ -165,8 +184,11 @@ acuerdo. Por ese camino nadie despliega funciones — ni el radar ni el codebase
    de la persona, con su nombre): conserva lo que importa —la bitácora puede
    responder *quién* desplegó— y los comandos de abajo funcionan cambiando el
    `--member`. Es un puente, no una solución: la identidad no es corporativa.
-3. **La cuenta compartida, con la excepción FIRMADA Y CON VENCIMIENTO.** El
-   veto no se quita: se firma y caduca.
+3. ~~**La cuenta compartida, con la excepción FIRMADA Y CON VENCIMIENTO.**~~
+   **← ESTA SALIDA YA NO EXISTE: borrada del script el 09-nov-2026 junto con su
+   causa.** Se describe abajo tal como se diseñó, porque el criterio sigue
+   valiendo para la próxima excepción que haga falta. El
+   veto no se quitaba: se firmaba y caducaba.
    `-ConCuentaCompartida -AutorizadoPor "<nombre>" -Motivo "<razón>"`, y las dos
    cosas quedan en la fila de la bitácora
    (`cuenta compartida; ejecutó X; motivo: Y; escotilla vence AAAA-MM-DD`).
@@ -184,8 +206,9 @@ acuerdo. Por ese camino nadie despliega funciones — ni el radar ni el codebase
 
 ### El acto de IAM que falta (lo ejecuta alguien con propiedad del proyecto)
 
-⚠ Con el nudo abierto, el `--member="user:giovanny.montes@..."` de abajo
-**falla**. Sustitúyelo por la identidad que exista de verdad (salida 1 o 2).
+✅ Con Cloud Identity activo (09-nov-2026), el
+`--member="user:giovanny.montes@negingenieria.com"` de abajo **funciona tal
+como está**. Ya no hay que sustituirlo por nada.
 
 
 ```bash

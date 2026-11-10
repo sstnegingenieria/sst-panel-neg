@@ -58,29 +58,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string]$Codebase,
-  [switch]$Simulacro,
-  # ── ESCOTILLA DEL NUDO DE IDENTIDAD (09-nov-2026) ─────────────────────────
-  # El acuerdo de los tres frentes es sesion de PERSONA. Pero el acto de IAM
-  # para la cuenta nominal FALLO: Google respondio "User
-  # giovanny.montes@negingenieria.com does not exist" — el dominio no esta en
-  # Workspace ni en Cloud Identity, asi que esos correos son buzones, no
-  # identidades de Google, y no se les puede conceder ningun rol. Hoy la unica
-  # identidad con permisos de desplegar es la cuenta COMPARTIDA, que este
-  # script veta.
-  #
-  # Dejar el veto absoluto hace imposible desplegar — el radar y el codebase
-  # `default` de los otros frentes quedan bloqueados hasta que el dominio
-  # tenga Cloud Identity. Quitar el veto perderia lo unico que la bitacora
-  # existe para responder: QUIEN desplego.
-  #
-  # Salida: la excepcion EXISTE, pero es explicita, atribuida y queda escrita
-  # — como el override del semaforo, la salvedad del aprobador de respaldo o
-  # el `autorizado_manual` de la guarda de volumen. Con la cuenta compartida
-  # hay que declarar quien lo ejecuta y por que, y las dos cosas van a la fila
-  # de la bitacora.
-  [switch]$ConCuentaCompartida,
-  [string]$AutorizadoPor,
-  [string]$Motivo
+  [switch]$Simulacro
 )
 
 Set-StrictMode -Version Latest
@@ -95,20 +73,19 @@ Set-Location $RepoRoot
 # es que cada persona despliega con SU cuenta y la cierra al terminar. Una
 # bitacora que dice "sstnegingenieria" no responde quien desplego, que es su
 # unica razon de existir.
+#
+# EL VETO ES ABSOLUTO — no hay bandera, firma ni escotilla que lo abra.
+#
+# Hubo una: mientras el dominio no tuvo Cloud Identity, los correos de la
+# empresa eran buzones y no identidades de Google, asi que NINGUNA cuenta
+# nominal podia recibir roles y la unica que podia desplegar era la
+# compartida. La excepcion existio con firma, motivo y fecha de vencimiento.
+#
+# El 09-nov-2026 el nudo se resolvio por la salida correcta: Cloud Identity
+# quedo activo y la cuenta nominal funciona. Desaparecida la causa, la
+# escotilla se BORRA en vez de esperar a que venza — una excepcion que ya no
+# habilita nada solo deja el agujero abierto.
 $CuentasCompartidas = @('sstnegingenieria@gmail.com')
-
-# ── FECHA DE VENCIMIENTO DE LA ESCOTILLA (criterio de Giovanny) ─────────────
-# La excepcion de la cuenta compartida es TEMPORAL, y lo temporal sin
-# vencimiento se queda. Asi que el vencimiento es una FECHA DURA EN CODIGO que
-# hace ABORTAR al pasarse, no un comentario ni la promesa de quitarla cuando
-# llegue Cloud Identity.
-#
-# Renovarla es un PR: un diff visible que alguien tiene que mirar y aprobar.
-# No hay bandera que la extienda desde la linea de comandos — si la hubiera,
-# el vencimiento no seria un vencimiento.
-#
-# La fecha la fija Giovanny; esta son dos semanas desde el nudo (09-nov-2026).
-$EscotillaVence = '2026-11-23'
 
 function Abortar([string]$msg) {
   Write-Host ''
@@ -146,69 +123,22 @@ if ($loginList -match 'Logged in as\s+(\S+)') { $quien = $Matches[1] }
 if (-not $quien) {
   Abortar 'no pude determinar la sesion de Firebase (npx firebase login:list). Inicia sesion con TU cuenta (npx firebase login).'
 }
-$esCompartida = ($CuentasCompartidas -contains $quien)
-$excepcionCompartida = ''
-if ($esCompartida) {
-  if (-not $ConCuentaCompartida) {
-    $ayuda = @(
-      "la sesion activa es la CUENTA COMPARTIDA ($quien).",
-      'El acuerdo de los tres frentes es sesion de persona: login -> deploy -> logout.',
-      '',
-      'QUE HACER, en orden de preferencia:',
-      '  1. Desplegar con TU cuenta de Google:',
-      '       npx firebase logout',
-      '       npx firebase login',
-      '     Requiere que tu identidad EXISTA en Google y tenga los roles.',
-      '     Ver el prerequisito de IAM en docs/radar-cuenta-de-servicio.md.',
-      '',
-      '  2. Si el nudo de identidad sigue abierto (el dominio sin Cloud Identity),',
-      '     la excepcion existe pero hay que firmarla:',
-      '',
-      ("       .\scripts\deploy-funciones.ps1 -Codebase $Codebase -ConCuentaCompartida -AutorizadoPor 'Nombre Apellido' -Motivo 'por que no hay identidad nominal todavia'"),
-      '',
-      '     Quien ejecuta y por que quedan EN LA FILA DE LA BITACORA.'
-    ) -join [Environment]::NewLine
-    Abortar $ayuda
-  }
-  # El vencimiento se revisa ANTES que el autor y el motivo: una excepcion
-  # vencida no se arregla firmandola mejor.
-  # Fecha LOCAL, no UTC: el vencimiento es un plazo humano y tiene que
-  # coincidir con el dia que ve quien lo lee. En UTC la escotilla moriria a las
-  # 19:00 del dia anterior segun el calendario de aqui, y el mensaje diria una
-  # fecha que no es la de hoy para esa persona. (La fila de la bitacora sigue
-  # en UTC, que es lo correcto para un registro.)
-  $hoy = (Get-Date).Date
-  $vence = [datetime]::ParseExact($EscotillaVence, 'yyyy-MM-dd', $null).Date
-  if ($hoy -gt $vence) {
-    Abortar (@(
-      "la ESCOTILLA de la cuenta compartida VENCIO el $EscotillaVence (hoy es " + $hoy.ToString('yyyy-MM-dd') + ').',
-      '',
-      'Era una excepcion temporal por el nudo de identidad, y lo temporal sin',
-      'vencimiento se queda. No hay bandera para extenderla.',
-      '',
-      'QUE HACER:',
-      '  1. Lo correcto: Cloud Identity (o Workspace) para el dominio, desplegar',
-      '     con una identidad nominal, y BORRAR esta escotilla del script.',
-      '  2. Si todavia no se puede: renovar la fecha en un PR, a conciencia,',
-      ("     cambiando `$EscotillaVence en " + $PSCommandPath + '.'),
-      '     Un PR se revisa; una bandera no.'
-    ) -join [Environment]::NewLine)
-  }
-  Write-Host ("   (escotilla vigente hasta $EscotillaVence)") -ForegroundColor DarkGray
-  if (-not $AutorizadoPor.Trim()) {
-    Abortar '-ConCuentaCompartida exige -AutorizadoPor: la bitacora tiene que poder responder QUIEN desplego, y la cuenta compartida no lo responde.'
-  }
-  if (-not $Motivo.Trim()) {
-    Abortar '-ConCuentaCompartida exige -Motivo: una excepcion sin razon escrita se vuelve la norma.'
-  }
-  $excepcionCompartida = 'cuenta compartida; ejecuto ' + $AutorizadoPor.Trim() + '; motivo: ' + $Motivo.Trim() + '; escotilla vence ' + $EscotillaVence
-  Write-Host ''
-  Write-Host '*** EXCEPCION: se despliega con la CUENTA COMPARTIDA ***' -ForegroundColor Red
-  Write-Host ('    Ejecuta: ' + $AutorizadoPor.Trim()) -ForegroundColor Yellow
-  Write-Host ('    Motivo:  ' + $Motivo.Trim()) -ForegroundColor Yellow
-  Write-Host '    Queda escrito en la bitacora. Cuando el dominio tenga Cloud Identity, esto sobra.' -ForegroundColor Yellow
-} elseif ($ConCuentaCompartida) {
-  Abortar "-ConCuentaCompartida pero la sesion activa ($quien) NO es una cuenta compartida. Quita la bandera: no se firma una excepcion que no hace falta."
+if ($CuentasCompartidas -contains $quien) {
+  Abortar (@(
+    "la sesion activa es la CUENTA COMPARTIDA ($quien).",
+    'El acuerdo de los tres frentes es sesion de persona: login -> deploy -> logout,',
+    'y una bitacora que dice "sstnegingenieria" no responde QUIEN desplego.',
+    '',
+    'NO hay excepcion. La hubo mientras el dominio no tenia Cloud Identity y',
+    'ninguna cuenta nominal podia recibir roles; eso se resolvio el 09-nov-2026',
+    'y la escotilla se borro con su causa.',
+    '',
+    'QUE HACER:',
+    '    npx firebase logout',
+    '    npx firebase login',
+    'y vuelve a correr el script con TU cuenta de la empresa.',
+    'Si te falta un rol, el chequeo que sigue te dice cual y con que comando.'
+  ) -join [Environment]::NewLine)
 }
 Write-Host "Sesion de Firebase: $quien" -ForegroundColor Green
 
@@ -614,9 +544,9 @@ if (-not (Test-Path $bitacora)) {
 $fechaUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 $estado = if ($verificado) { 'OK' } else { 'FALLIDA' }
 $listaNuevas = if ($nuevas.Count -gt 0) { ($nuevas -join ' ') } else { '-' }
-$quienFila = $quien
-if ($excepcionCompartida) { $quienFila = "$quien (EXCEPCION: $excepcionCompartida)" }
-$fila = "| $fechaUtc | $Codebase | $commitCorto | $prDeploy | $($declaradas.Count) | $listaNuevas | $quienFila | $estado |"
+# La cuenta es siempre nominal: el veto de arriba no deja llegar aqui de otro
+# modo, asi que la columna responde QUIEN desplego sin salvedades.
+$fila = "| $fechaUtc | $Codebase | $commitCorto | $prDeploy | $($declaradas.Count) | $listaNuevas | $quien | $estado |"
 [System.IO.File]::AppendAllText($bitacora, $fila + "`n", (New-Object System.Text.UTF8Encoding($false)))
 Write-Host $fila
 
