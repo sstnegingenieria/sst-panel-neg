@@ -438,7 +438,7 @@ por los tres frentes, así que esto es lo que hay que saber:
 | codebase | carpeta | build | funciones |
 |---|---|---|---|
 | `default` | `functions/` | **ninguno** | las 12 existentes |
-| `radar` | `functions-radar/` | esbuild (`npm run build`) | el radar de licitaciones |
+| `radar` | `functions-radar/` | esbuild (`npm run build`) | `ingerirRadarSecopManana` (06:30 L–V) y `ingerirRadarSecopTarde` (14:00 L–V), Bogotá |
 
 - **El codebase `default` NO cambió y no necesita build.** `firebase deploy
   --only functions:default` despliega las 12 funciones exactamente como antes.

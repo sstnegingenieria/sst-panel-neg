@@ -42,10 +42,12 @@ export const GUARDA_VOLUMEN = {
   /**
    * Tope de documentos que una corrida automática puede crear. Calibrado
    * contra lo medido: el territorio produce ~12,7 procesos reconocidos por
-   * día hábil y el léxico marca ~11 probables por día, así que una corrida
-   * diaria normal mueve decenas. Doscientos deja margen para un lunes con
-   * fin de semana acumulado y para el solape, y sigue siendo una bandeja que
-   * una persona puede mirar.
+   * día hábil y el léxico marca ~11 probables por día. Con DOS corridas
+   * diarias (06:30 y 14:00) cada una mueve menos todavía — la de la tarde
+   * suele crear casi nada, porque lo de la mañana ya está escrito y el
+   * compare-before-write no reescribe lo que no cambió. Doscientos deja
+   * margen para un lunes con fin de semana acumulado y para el solape, y
+   * sigue siendo una bandeja que una persona puede mirar.
    */
   MAX_CREADOS_POR_CORRIDA: 200,
   /**

@@ -39,12 +39,49 @@ tipos**: sin ese paso, un error de tipos se desplegaría.
 
 `lib/`, `node_modules/` y `.env*` están gitignoreados.
 
-## Configuración
+## Cuándo corre
 
-`SECOP_APP_TOKEN` por `.env` del codebase (no se commitea). Va en la cabecera
-`X-App-Token`, nunca en el query string. Sin token funciona, pero comparte pool
-por IP con 429; con token inválido la API responde 403 y la corrida falla a
-propósito — no hay reintento anónimo.
+**Dos veces al día, 06:30 y 14:00, lunes a viernes, hora de Bogotá.** Son dos
+funciones (`ingerirRadarSecopManana` y `ingerirRadarSecopTarde`) sobre EL MISMO
+handler: unix-cron no puede expresar dos horas con minutos distintos en una
+sola expresión, y duplicar el cron habría sido duplicar el código.
+
+La razón de la segunda pasada es la ventana de cierre: medimos que
+`fecha_de_recepcion_de` cae entre 4 y 13 días después de la publicación, así
+que en una mínima cuantía **un día de retraso es entre el 8 % y el 25 % del
+tiempo para decidir y armar la propuesta**. Con una sola corrida a las 6:30, un
+proceso publicado a las 8 de la mañana se vería al día siguiente.
+
+El costo es despreciable: cada corrida son un `count(1)`, una o dos páginas de
+la API y unas decenas de escrituras. La de la tarde suele crear poco, porque el
+doc id es determinístico y el compare-before-write deja en cero lo que no
+cambió.
+
+## Configuración: ARRANCA SIN APP TOKEN
+
+Decisión explícita: el radar **arranca sin token**. Dos corridas diarias son un
+volumen mínimo y el riesgo de 429 por el pool compartido de IPs de Google es
+bajo a esa frecuencia. Sin variable, el valor es `''`, no se manda la cabecera
+y la petición sale anónima.
+
+**Dónde se pone cuando esté** (no hay que tocar código):
+
+```
+# functions-radar/.env   ← gitignoreado, no se commitea
+SECOP_APP_TOKEN=el-token-que-entregue-socrata
+```
+
+```bash
+firebase deploy --only functions:radar
+```
+
+`defineString('SECOP_APP_TOKEN')` lo lee de ahí al desplegar. Para un token
+distinto por proyecto: `functions-radar/.env.neg-sst-app`.
+
+Va en la cabecera `X-App-Token`, **nunca** en el query string (Socrata también
+acepta `$$app_token` en la URL, y las URLs quedan en logs). Con token inválido
+la API responde 403 y la corrida falla a propósito — no hay reintento anónimo,
+porque un token mal configurado tiene que doler.
 
 ## Qué escribe
 

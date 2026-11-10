@@ -36,13 +36,29 @@
  * `corridas_radar` habría exigido su propia regla de lectura sin dar nada que
  * este documento no dé.
  *
- * ── APP TOKEN ───────────────────────────────────────────────────────────────
+ * ── APP TOKEN: ARRANCA SIN ÉL ───────────────────────────────────────────────
  *
- * `SECOP_APP_TOKEN` por configuración de Functions (`.env` del codebase, que
- * NO se commitea). Va en la cabecera `X-App-Token`, nunca en el query string.
- * Sin token funciona pero comparte pool por IP con 429; con token inválido la
- * API responde 403 y la corrida FALLA a propósito — no hay reintento anónimo,
- * porque un token mal configurado tiene que doler.
+ * Decisión explícita: el radar **arranca sin app token**. Dos corridas diarias
+ * son un volumen mínimo y el riesgo de 429 por el pool compartido de IPs de
+ * Google es bajo a esa frecuencia. Entra después, por configuración, SIN tocar
+ * código.
+ *
+ * DÓNDE SE PONE, cuando esté:
+ *
+ *   1. Crear `functions-radar/.env` (está gitignoreado — no se commitea):
+ *          SECOP_APP_TOKEN=el-token-que-entregue-socrata
+ *      Para un token distinto por proyecto: `functions-radar/.env.neg-sst-app`.
+ *   2. Volver a desplegar SOLO este codebase:
+ *          firebase deploy --only functions:radar
+ *
+ * Eso es todo: `defineString` lo lee de ahí al desplegar. Sin variable, el
+ * valor es `''` y `cabecerasConsulta('')` no manda la cabecera — la petición
+ * sale anónima, que es el estado de arranque.
+ *
+ * El token va en la cabecera `X-App-Token`, NUNCA en el query string (Socrata
+ * también acepta `$$app_token` en la URL; las URLs quedan en logs). Y con
+ * token inválido la API responde 403 y la corrida FALLA a propósito — no hay
+ * reintento anónimo, porque un token mal configurado tiene que doler.
  *
  * ── SI EL SCHEDULER FALLA ───────────────────────────────────────────────────
  *
@@ -130,120 +146,155 @@ async function cosechar(
   return filas
 }
 
-export const ingerirRadarSecop = onSchedule(
-  {
-    // 06:30 de lunes a viernes, hora de Bogotá: antes de que Karen abra el
-    // panel y después de la republicación nocturna del dataset.
-    schedule: '30 6 * * 1-5',
-    timeZone: 'America/Bogota',
-    timeoutSeconds: 540,
-    memory: '512MiB',
-    retryCount: 0,
-  },
-  async () => {
-    const db = getFirestore()
-    const token = SECOP_APP_TOKEN.value()
-    const inicio = new Date()
-    const corridaId = inicio.toISOString()
+/**
+ * Opciones comunes de las dos corridas. Una sola implementación; lo único que
+ * cambia entre las dos es la hora.
+ */
+const OPCIONES_CORRIDA = {
+  timeZone: 'America/Bogota',
+  timeoutSeconds: 540,
+  memory: '512MiB' as const,
+  retryCount: 0,
+}
 
-    // ── 1. Estado y léxico ──
-    const [snapEstado, snapVocab] = await Promise.all([
-      db.doc(REF_ESTADO).get(),
-      db.doc(REF_VOCABULARIO).get(),
-    ])
-    const estado: EstadoRadar = snapEstado.exists
-      ? { ...ESTADO_RADAR_INICIAL, ...(snapEstado.data() as Partial<EstadoRadar>) }
-      : ESTADO_RADAR_INICIAL
-    const registroVocab = snapVocab.exists
-      ? (snapVocab.data() as RegistroVocabularioNeg)
-      : null
-    const terminos = terminosVigentes(registroVocab)
-    const vocabulario_version = versionVocabularioVigente(registroVocab)
+/**
+ * DOS CORRIDAS AL DÍA: 06:30 y 14:00, lunes a viernes, hora de Bogotá.
+ *
+ * No es redundancia, es la ventana. Medimos que el cierre
+ * (`fecha_de_recepcion_de`) cae entre 4 y 13 días después de la publicación:
+ * en una mínima cuantía, **un día de retraso es entre el 8 % y el 25 % del
+ * tiempo disponible** para decidir y armar la propuesta. Con una sola corrida
+ * a las 6:30, un proceso publicado a las 8 de la mañana se ve al día
+ * siguiente — y ese día sale del lado de NEG.
+ *
+ * El costo es despreciable: cada corrida son un `count(1)`, una o dos páginas
+ * de la API y unas decenas de escrituras. La de la tarde suele encontrar poco
+ * que crear, porque el doc id es determinístico y el compare-before-write deja
+ * en cero lo que no cambió.
+ *
+ * SON DOS EXPORTS Y NO UN CRON porque unix-cron no puede expresar dos horas
+ * con MINUTOS DISTINTOS en una sola expresión: `30 6,14` daría 6:30 y 14:30, y
+ * `0,30 6,14` daría cuatro disparos. Dos exports sobre EL MISMO handler dan
+ * las horas exactas sin duplicar una línea de lógica. Cloud Scheduler crea un
+ * job por cada uno:
+ * `firebase-schedule-ingerirRadarSecopManana-us-central1` y
+ * `firebase-schedule-ingerirRadarSecopTarde-us-central1`.
+ */
+async function corridaDelRadar(): Promise<void> {
+  const db = getFirestore()
+  const token = SECOP_APP_TOKEN.value()
+  const inicio = new Date()
+  const corridaId = inicio.toISOString()
 
-    const ventana = ventanaIngesta(estado.marca, inicio, estado.solape_dias)
-    const consulta = { modo: MODO_INGESTA_DEFECTO, desde: ventana.desde, hasta: ventana.hasta }
-    logger.info('radar: arranca', { ventana, vocabulario_version, con_token: token !== '' })
+  // ── 1. Estado y léxico ──
+  const [snapEstado, snapVocab] = await Promise.all([
+    db.doc(REF_ESTADO).get(),
+    db.doc(REF_VOCABULARIO).get(),
+  ])
+  const estado: EstadoRadar = snapEstado.exists
+    ? { ...ESTADO_RADAR_INICIAL, ...(snapEstado.data() as Partial<EstadoRadar>) }
+    : ESTADO_RADAR_INICIAL
+  const registroVocab = snapVocab.exists
+    ? (snapVocab.data() as RegistroVocabularioNeg)
+    : null
+  const terminos = terminosVigentes(registroVocab)
+  const vocabulario_version = versionVocabularioVigente(registroVocab)
 
-    // ── 2. Cosecha verificada ──
-    const total = await contar(consulta, token)
-    const filas = await cosechar(consulta, total, token)
-    const cosecha = verificarCosecha(total, filas.length)
-    if (!cosecha.completa) {
-      // Una cosecha a medias no se escribe: «no falló» no es «funcionó».
-      throw new Error(cosecha.senal ?? 'cosecha incompleta')
+  const ventana = ventanaIngesta(estado.marca, inicio, estado.solape_dias)
+  const consulta = { modo: MODO_INGESTA_DEFECTO, desde: ventana.desde, hasta: ventana.hasta }
+  logger.info('radar: arranca', { ventana, vocabulario_version, con_token: token !== '' })
+
+  // ── 2. Cosecha verificada ──
+  const total = await contar(consulta, token)
+  const filas = await cosechar(consulta, total, token)
+  const cosecha = verificarCosecha(total, filas.length)
+  if (!cosecha.completa) {
+    // Una cosecha a medias no se escribe: «no falló» no es «funcionó».
+    throw new Error(cosecha.senal ?? 'cosecha incompleta')
+  }
+
+  // ── 3. Clasificación (pura) ──
+  const reporte = ingerirSecop(filas, hash, { terminos, vocabulario_version })
+  const resumen = construirResumenCorrida(reporte, {
+    ejecutada_en: corridaId,
+    modo: MODO_INGESTA_DEFECTO,
+    ventana: { desde: ventana.desde, hasta: ventana.hasta, solape_dias: ventana.solape_dias },
+  })
+
+  // ── 4. Qué hay ya en la colección ──
+  const ids = reporte.registros.map(r => r.meta.doc_id)
+  const existentes = new Map<string, Partial<LicitacionDetectada>>()
+  for (const grupo of trozos(ids, LOTE_LECTURA)) {
+    const snaps = await db.getAll(...grupo.map(id => db.doc(`${COL}/${id}`)))
+    for (const s of snaps) {
+      if (s.exists) existentes.set(s.id, s.data() as Partial<LicitacionDetectada>)
     }
+  }
 
-    // ── 3. Clasificación (pura) ──
-    const reporte = ingerirSecop(filas, hash, { terminos, vocabulario_version })
-    const resumen = construirResumenCorrida(reporte, {
-      ejecutada_en: corridaId,
-      modo: MODO_INGESTA_DEFECTO,
-      ventana: { desde: ventana.desde, hasta: ventana.hasta, solape_dias: ventana.solape_dias },
-    })
+  // ── 5. Guarda de volumen ──
+  const volumen = evaluarVolumen(
+    cuantosCrearia(reporte, new Set(existentes.keys())),
+    ventana,
+    { autorizado_manual: estado.autorizado_manual === true },
+  )
 
-    // ── 4. Qué hay ya en la colección ──
-    const ids = reporte.registros.map(r => r.meta.doc_id)
-    const existentes = new Map<string, Partial<LicitacionDetectada>>()
-    for (const grupo of trozos(ids, LOTE_LECTURA)) {
-      const snaps = await db.getAll(...grupo.map(id => db.doc(`${COL}/${id}`)))
-      for (const s of snaps) {
-        if (s.exists) existentes.set(s.id, s.data() as Partial<LicitacionDetectada>)
-      }
-    }
-
-    // ── 5. Guarda de volumen ──
-    const volumen = evaluarVolumen(
-      cuantosCrearia(reporte, new Set(existentes.keys())),
-      ventana,
-      { autorizado_manual: estado.autorizado_manual === true },
-    )
-
-    if (!volumen.procede || !reporte.puede_escribir) {
-      const motivo = volumen.motivo ?? reporte.senales.join(' · ')
-      const registro = construirRegistroCorrida(resumen, volumen, null,
-        marcaSiguiente(ventana, false, estado.marca))
-      await db.doc(REF_ESTADO).set(avanzarEstadoRadar(estado, registro), { merge: false })
-      logger.warn('radar: NO se escribió', { motivo, sugerencia: volumen.sugerencia })
-      return
-    }
-
-    // ── 6. Escritura idempotente ──
-    const plan = planearEscritura(reporte.registros, existentes)
-    const aTs = (iso: string) => Timestamp.fromDate(new Date(iso))
-    const ahora = Timestamp.fromDate(inicio)
-
-    for (const grupo of trozos(plan.crear, LOTE_ESCRITURA)) {
-      const lote = db.batch()
-      for (const { doc_id, doc } of grupo) {
-        const conTs = fechasATimestamp(doc, aTs) as unknown as LicitacionDetectada
-        lote.create(db.doc(`${COL}/${doc_id}`),
-          sellarParaEscritura(conTs, { corrida: corridaId, ahora, actor: ACTOR_RADAR }))
-      }
-      await lote.commit()
-    }
-    for (const grupo of trozos(plan.refrescar, LOTE_ESCRITURA)) {
-      const lote = db.batch()
-      for (const { doc_id, patch } of grupo) {
-        const p = patch.cronograma !== undefined
-          ? { ...patch, cronograma: fechasATimestamp(patch as LicitacionDetectada, aTs).cronograma }
-          : patch
-        lote.update(db.doc(`${COL}/${doc_id}`), {
-          ...p, actualizado_por: ACTOR_RADAR, actualizado_en: ahora,
-        })
-      }
-      await lote.commit()
-    }
-
-    // ── 7. Registro de la corrida ──
-    const escritura = {
-      creados: plan.crear.length,
-      refrescados: plan.refrescar.length,
-      sin_cambio: plan.sin_cambio,
-      cambios_materiales: plan.cambios_materiales,
-    }
-    const registro = construirRegistroCorrida(resumen, volumen, escritura,
-      marcaSiguiente(ventana, true, estado.marca))
+  if (!volumen.procede || !reporte.puede_escribir) {
+    const motivo = volumen.motivo ?? reporte.senales.join(' · ')
+    const registro = construirRegistroCorrida(resumen, volumen, null,
+      marcaSiguiente(ventana, false, estado.marca))
     await db.doc(REF_ESTADO).set(avanzarEstadoRadar(estado, registro), { merge: false })
-    logger.info('radar: ' + resumenLegible(registro))
-  },
+    logger.warn('radar: NO se escribió', { motivo, sugerencia: volumen.sugerencia })
+    return
+  }
+
+  // ── 6. Escritura idempotente ──
+  const plan = planearEscritura(reporte.registros, existentes)
+  const aTs = (iso: string) => Timestamp.fromDate(new Date(iso))
+  const ahora = Timestamp.fromDate(inicio)
+
+  for (const grupo of trozos(plan.crear, LOTE_ESCRITURA)) {
+    const lote = db.batch()
+    for (const { doc_id, doc } of grupo) {
+      const conTs = fechasATimestamp(doc, aTs) as unknown as LicitacionDetectada
+      lote.create(db.doc(`${COL}/${doc_id}`),
+        sellarParaEscritura(conTs, { corrida: corridaId, ahora, actor: ACTOR_RADAR }))
+    }
+    await lote.commit()
+  }
+  for (const grupo of trozos(plan.refrescar, LOTE_ESCRITURA)) {
+    const lote = db.batch()
+    for (const { doc_id, patch } of grupo) {
+      const p = patch.cronograma !== undefined
+        ? { ...patch, cronograma: fechasATimestamp(patch as LicitacionDetectada, aTs).cronograma }
+        : patch
+      lote.update(db.doc(`${COL}/${doc_id}`), {
+        ...p, actualizado_por: ACTOR_RADAR, actualizado_en: ahora,
+      })
+    }
+    await lote.commit()
+  }
+
+  // ── 7. Registro de la corrida ──
+  const escritura = {
+    creados: plan.crear.length,
+    refrescados: plan.refrescar.length,
+    sin_cambio: plan.sin_cambio,
+    cambios_materiales: plan.cambios_materiales,
+  }
+  const registro = construirRegistroCorrida(resumen, volumen, escritura,
+    marcaSiguiente(ventana, true, estado.marca))
+  await db.doc(REF_ESTADO).set(avanzarEstadoRadar(estado, registro), { merge: false })
+  logger.info('radar: ' + resumenLegible(registro))
+}
+
+/** 06:30 L–V (Bogotá) — la corrida de la mañana. */
+export const ingerirRadarSecopManana = onSchedule(
+  { ...OPCIONES_CORRIDA, schedule: '30 6 * * 1-5' },
+  corridaDelRadar,
+)
+
+/** 14:00 L–V (Bogotá) — la segunda pasada del día, por la ventana de cierre. */
+export const ingerirRadarSecopTarde = onSchedule(
+  { ...OPCIONES_CORRIDA, schedule: '0 14 * * 1-5' },
+  corridaDelRadar,
 )
