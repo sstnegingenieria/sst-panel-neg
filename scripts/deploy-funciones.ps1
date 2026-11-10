@@ -152,20 +152,18 @@ Write-Host "Sesion de Firebase: $quien" -ForegroundColor Green
 # Este chequeo le pregunta a Resource Manager que permisos tiene LA SESION
 # ACTIVA (testIamPermissions responde sobre el llamador) ANTES de pedir nada.
 # NO es exhaustivo: un deploy de 2a generacion toca varias APIs (Cloud Run,
-# Artifact Registry, Cloud Build) y el `actAs` sobre la cuenta de servicio de
-# runtime se evalua sobre OTRO recurso, no sobre el proyecto. Lo que si
-# atrapa es el caso medido —una cuenta sin rol de Functions— y lo atrapa
-# temprano, diciendo que rol falta.
-$verificador = Join-Path $env:TEMP ("permisos-" + [Guid]::NewGuid().ToString('N').Substring(0, 8) + '.js')
-@'
+# Artifact Registry, Cloud Build). Y hay un permiso que desde aqui NO SE PUEDE
+# ver: el `actAs` sobre la cuenta de servicio de runtime, que se evalua sobre
+# OTRO recurso —la cuenta— y no sobre el proyecto. Ese tiene su propio
+# chequeo (paso 2-bis), despues del build, porque antes del build no se sabe
+# con que cuenta va a correr el codebase.
+#
+# El prologo que cambia el refresh token de la sesion de firebase-tools por un
+# access token vive en UNA sola variable porque lo usan LOS DOS chequeos de
+# IAM. Duplicar el client_id en dos heredocs seria pedir que uno envejezca.
+$PreludioToken = @'
 const fs = require('fs'), os = require('os'), path = require('path')
-const PERMISOS = [
-  'cloudfunctions.functions.list',
-  'cloudfunctions.functions.create',
-  'cloudfunctions.functions.update',
-  'run.services.update',
-]
-;(async () => {
+async function accessToken() {
   const cfgPath = path.join(os.homedir(), '.config', 'configstore', 'firebase-tools.json')
   let rt
   try { rt = JSON.parse(fs.readFileSync(cfgPath, 'utf8')).tokens.refresh_token } catch (e) { rt = null }
@@ -177,9 +175,23 @@ const PERMISOS = [
       client_secret: 'j9iVZfS8kkCEFUPaAeJV0sAi' }),
   })).json()
   if (!tok.access_token) throw new Error('la sesion no refresca')
+  return tok.access_token
+}
+'@
+
+$verificador = Join-Path $env:TEMP ("permisos-" + [Guid]::NewGuid().ToString('N').Substring(0, 8) + '.js')
+($PreludioToken + @'
+const PERMISOS = [
+  'cloudfunctions.functions.list',
+  'cloudfunctions.functions.create',
+  'cloudfunctions.functions.update',
+  'run.services.update',
+]
+;(async () => {
+  const token = await accessToken()
   const r = await fetch('https://cloudresourcemanager.googleapis.com/v1/projects/neg-sst-app:testIamPermissions', {
     method: 'POST',
-    headers: { Authorization: 'Bearer ' + tok.access_token, 'Content-Type': 'application/json' },
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
     body: JSON.stringify({ permissions: PERMISOS }),
   })
   const j = await r.json()
@@ -187,7 +199,7 @@ const PERMISOS = [
   const tiene = j.permissions || []
   console.log(JSON.stringify({ tiene, faltan: PERMISOS.filter(p => !tiene.includes(p)) }))
 })().catch(e => { console.error('ERROR: ' + e.message); process.exit(1) })
-'@ | Set-Content -Path $verificador -Encoding UTF8
+'@) | Set-Content -Path $verificador -Encoding UTF8
 
 $permJson = & node $verificador
 if ($LASTEXITCODE -ne 0) {
@@ -199,17 +211,16 @@ $perm = ($permJson | Out-String | ConvertFrom-Json)
 $permFaltan = @($perm.faltan)
 if ($permFaltan.Count -gt 0) {
   $rolFn = 'roles/cloudfunctions.developer'
-  $rolSa = 'roles/iam.serviceAccountUser'
   Abortar ("la cuenta $quien NO tiene permisos para desplegar funciones.`n" +
     'Permisos que faltan: ' + ($permFaltan -join ', ') + "`n`n" +
     "QUE HACER (acto de IAM; lo ejecuta alguien con propiedad del proyecto):`n" +
-    "    gcloud projects add-iam-policy-binding neg-sst-app --member=user:$quien --role=$rolFn`n" +
-    "y, sobre la cuenta de servicio de runtime del codebase que vas a desplegar:`n" +
-    "    gcloud iam service-accounts add-iam-policy-binding <SA-de-runtime> --member=user:$quien --role=$rolSa --project=neg-sst-app`n`n" +
+    "    gcloud projects add-iam-policy-binding neg-sst-app --member=user:$quien --role=$rolFn`n`n" +
+    "(El actAs sobre la cuenta de runtime es OTRO permiso, sobre OTRO recurso;`n" +
+    " si tambien falta, el paso 2-bis te lo dira con su propio comando.)`n`n" +
     'Sin eso el deploy fallaria DESPUES de pedirte el PR y la confirmacion, a mitad de camino.')
 }
-Write-Host ('OK: la sesion tiene los permisos comprobables de despliegue (' + ($perm.tiene -join ', ') + ').') -ForegroundColor Green
-Write-Host '   (chequeo no exhaustivo: el actAs sobre la cuenta de runtime se evalua sobre otro recurso)' -ForegroundColor DarkGray
+Write-Host ('OK: la sesion tiene los permisos de proyecto para desplegar (' + ($perm.tiene -join ', ') + ').') -ForegroundColor Green
+Write-Host '   (el actAs sobre la cuenta de runtime se comprueba en el paso 2-bis: va sobre otro recurso)' -ForegroundColor DarkGray
 
 $bitacora = Join-Path $RepoRoot 'docs\bitacora-deploys-funciones.md'
 $bitacoraRel = 'docs/bitacora-deploys-funciones.md'
@@ -383,16 +394,31 @@ $lectorExports = Join-Path $tmp 'leer-exports.js'
 # `default` traen `__endpoint.platform = 'gcfv2'`.
 @'
 const [, , entry] = process.argv
-process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || 'neg-sst-app'
+const PROYECTO = 'neg-sst-app'
+process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || PROYECTO
 const m = require(entry)
 const nombres = []
 const sinEndpoint = []
+const cuentas = new Set()
+// La CUENTA DE RUNTIME tambien se deriva del endpoint: firebase-functions
+// copia la opcion `serviceAccount` a `__endpoint.serviceAccountEmail`. Puede
+// venir en forma corta ('nombre@'), que es la que el propio SDK expande con
+// el proyecto; si el codebase no declara ninguna, el conjunto queda vacio y
+// significa "corre con la cuenta de computo por defecto".
 for (const k of Object.keys(m)) {
   const v = m[k]
-  if (v && v.__endpoint) { nombres.push(k); continue }
+  if (v && v.__endpoint) {
+    nombres.push(k)
+    let sa = v.__endpoint.serviceAccountEmail || v.__endpoint.serviceAccount || ''
+    if (typeof sa === 'string' && sa) {
+      if (sa.endsWith('@')) sa = sa + PROYECTO + '.iam.gserviceaccount.com'
+      if (sa.includes('@')) cuentas.add(sa)
+    }
+    continue
+  }
   if (typeof v === 'function' || (v && typeof v === 'object')) sinEndpoint.push(k)
 }
-console.log(JSON.stringify({ nombres, sinEndpoint }))
+console.log(JSON.stringify({ nombres, sinEndpoint, cuentas: [...cuentas] }))
 '@ | Set-Content -Path $lectorExports -Encoding UTF8
 
 $declaradasJson = & node $lectorExports $entryAbs
@@ -412,6 +438,78 @@ if ($sinEndpoint.Count -gt 0) {
 }
 if ($declaradas.Count -eq 0) { Remove-Item $tmp -Recurse -Force; Abortar "$carpeta/$entry no exporta ninguna funcion. Un deploy asi BORRARIA todo el codebase." }
 Write-Host ("Declaradas por el codigo ({0}): {1}" -f $declaradas.Count, ($declaradas -join ', '))
+
+# ── 2-bis. ¿Puedes desplegar CON LA CUENTA DE RUNTIME que declara el codigo? ─
+# POR QUE ESTE CHEQUEO EXISTE APARTE DEL DE ARRIBA: el permiso que habilita
+# adjuntar una cuenta de servicio a una funcion es `iam.serviceAccounts.actAs`
+# (lo trae `roles/iam.serviceAccountUser`), y NO se evalua sobre el proyecto
+# sino SOBRE LA CUENTA DE SERVICIO, que es otro recurso. La herencia de IAM
+# solo baja de ancestro a descendiente, y dos cuentas de servicio son
+# HERMANAS: un `serviceAccountUser` concedido sobre la cuenta de computo por
+# defecto NO alcanza a una cuenta dedicada. Sin este chequeo, la guarda del
+# paso 1-bis deja pasar un deploy que falla A MITAD DE CAMINO, despues de
+# haber pedido el numero del PR y la palabra DESPLEGAR — exactamente lo que
+# esa guarda existe para evitar.
+#
+# La cuenta tampoco se cablea: sale del MISMO `__endpoint` del commit que se
+# esta desplegando, igual que la lista de funciones. Si el codebase declara
+# varias, se comprueban todas.
+$cuentasRuntime = @($lectura.cuentas)
+if ($cuentasRuntime.Count -eq 0) {
+  Write-Host 'Cuenta de runtime: la de computo por defecto (el codigo no declara otra).' -ForegroundColor DarkGray
+} else {
+  $verifActAs = Join-Path $tmp 'permisos-actas.js'
+  ($PreludioToken + @'
+const [, , ...cuentas] = process.argv
+;(async () => {
+  const token = await accessToken()
+  const salida = []
+  for (const sa of cuentas) {
+    const url = 'https://iam.googleapis.com/v1/projects/-/serviceAccounts/' +
+      encodeURIComponent(sa) + ':testIamPermissions'
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissions: ['iam.serviceAccounts.actAs'] }),
+    })
+    const j = await r.json()
+    if (!r.ok) {
+      salida.push({ sa, error: (j.error && j.error.status) || ('HTTP ' + r.status) })
+      continue
+    }
+    salida.push({ sa, puede: (j.permissions || []).includes('iam.serviceAccounts.actAs') })
+  }
+  console.log(JSON.stringify(salida))
+})().catch(e => { console.error('ERROR: ' + e.message); process.exit(1) })
+'@) | Set-Content -Path $verifActAs -Encoding UTF8
+
+  $actAsJson = & node $verifActAs $cuentasRuntime
+  if ($LASTEXITCODE -ne 0) {
+    Remove-Item $tmp -Recurse -Force
+    Abortar ("no pude comprobar el actAs sobre la(s) cuenta(s) de runtime que declara el codigo: " +
+      ($cuentasRuntime -join ', '))
+  }
+  foreach ($c in @($actAsJson | Out-String | ConvertFrom-Json)) {
+    if ($c.error) {
+      $pista = ''
+      if ($c.error -eq 'NOT_FOUND') {
+        $pista = "`nLa cuenta NO EXISTE todavia en el proyecto. Creala ANTES de desplegar este codebase:`n" +
+          ("    gcloud iam service-accounts create {0} --project=neg-sst-app" -f ($c.sa -split '@')[0])
+      }
+      Remove-Item $tmp -Recurse -Force
+      Abortar ("no pude leer los permisos sobre la cuenta de runtime $($c.sa): $($c.error).$pista")
+    }
+    if (-not $c.puede) {
+      Remove-Item $tmp -Recurse -Force
+      Abortar ("la cuenta $quien NO puede desplegar CON la cuenta de runtime $($c.sa).`n" +
+        "Falta: iam.serviceAccounts.actAs SOBRE ESA CUENTA (no sobre el proyecto, no sobre otra cuenta).`n`n" +
+        "QUE HACER (acto de IAM; lo ejecuta alguien con propiedad del proyecto):`n" +
+        "    gcloud iam service-accounts add-iam-policy-binding $($c.sa) --member=user:$quien --role=roles/iam.serviceAccountUser --project=neg-sst-app`n`n" +
+        'Sin eso el deploy fallaria DESPUES de pedirte el PR y la confirmacion, a mitad de camino.')
+    }
+    Write-Host ("OK: puedes desplegar con la cuenta de runtime $($c.sa).") -ForegroundColor Green
+  }
+}
 
 # El PREFIJO del codebase (firebase.json) cambia el nombre DESPLEGADO:
 # firebase-tools renombra cada endpoint a `<prefijo>-<export>` (applyPrefix).

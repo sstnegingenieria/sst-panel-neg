@@ -103,11 +103,52 @@ Y en el código de la función, una línea en las opciones de `onSchedule`:
 serviceAccount: 'radar-secop@neg-sst-app.iam.gserviceaccount.com',
 ```
 
+### ⚠ Paso 4, DESPUÉS del deploy: `run.invoker`, o el radar no corre nunca
+
+Medido el 10-nov-2026 en `firebase-tools` 15.22.4, el que despliega:
+
+| dónde | qué hace |
+|---|---|
+| `gcp/cloudscheduler.js:136` | el job de Cloud Scheduler usa como identidad OIDC `endpoint.serviceAccount ?? computo por defecto` → **`radar-secop@`** |
+| `release/fabricator.js` (`createV2Function`) | otorga invoker a https, callable, taskQueue y dataConnect — **no hay rama para `schedule`** |
+| `upsertScheduleV2` | solo crea el job. Ningún permiso. |
+| `checkIam.js:105-114` | el `roles/run.invoker` automático está **cableado a la cuenta de cómputo por defecto** |
+
+Hoy esto funciona por accidente: la cuenta de cómputo trae `roles/editor`, que
+ya incluye invocar. Con una cuenta dedicada que solo tenga `datastore.user`, el
+deploy sale bien, el job queda creado **y cada disparo devuelve 403**. No falla
+nada visible: a las 6:30 y a las 14:00 simplemente no pasa nada.
+
+El permiso se concede **acotado al servicio**, que no existe hasta el primer
+deploy. El margen lo dan las propias horas del `onSchedule`:
+
+```bash
+gcloud run services add-iam-policy-binding <servicio-de-la-funcion> \
+  --region=us-central1 \
+  --member="serviceAccount:radar-secop@neg-sst-app.iam.gserviceaccount.com" \
+  --role="roles/run.invoker" \
+  --project=neg-sst-app
+```
+
+La alternativa —darlo a nivel de proyecto antes de desplegar— lo deja
+invocando cualquier servicio del proyecto. Se descarta: el paso extra es más
+barato que la superficie.
+
 **Verificación después** (que no quede en "quedó asignado"):
 
 ```bash
-# Que la cuenta tenga EXACTAMENTE un rol
+# Que la cuenta tenga EXACTAMENTE un rol A NIVEL DE PROYECTO
+# (el run.invoker del paso 4 va sobre el SERVICIO, no aqui: esta lista
+#  debe seguir imprimiendo una sola fila, datastore.user)
 gcloud projects get-iam-policy neg-sst-app \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:radar-secop@neg-sst-app.iam.gserviceaccount.com" \
+  --format="table(bindings.role)"
+
+# Que el job del scheduler pueda invocar (si esto sale vacio, el radar
+# no corre y NADA lo avisa)
+gcloud run services get-iam-policy <servicio-de-la-funcion> \
+  --region=us-central1 --project=neg-sst-app \
   --flatten="bindings[].members" \
   --filter="bindings.members:radar-secop@neg-sst-app.iam.gserviceaccount.com" \
   --format="table(bindings.role)"
