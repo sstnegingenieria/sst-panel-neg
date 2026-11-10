@@ -117,7 +117,23 @@ gcloud functions describe ingerirRadarSecopManana --gen2 --region=us-central1 \
   --project=neg-sst-app --format="value(serviceConfig.serviceAccountEmail)"
 ```
 
-## La alternativa que SÍ daría granularidad — evaluada, no construida
+## La alternativa que SÍ daría granularidad — EVALUADA Y DESCARTADA
+
+> **Decisión (09-nov-2026): descartada.** La razón, escrita para quien la
+> retome: **la lista de campos refrescables quedaría duplicada en dos lados**
+> —`CAMPOS_REFRESCABLES` en TypeScript y el `hasOnly(...)` de las reglas— y eso
+> es el defecto de **dos nacimientos del mismo criterio**, el mismo que el
+> bloque A.2b vino a eliminar (`nuevoRequisito()` como único nacimiento) y el
+> mismo que motivó el bundle en vez del port a CJS. Un test que parsee
+> `firestore.rules` lo mitiga, pero mitigar no es evitar: siguen siendo dos
+> lugares donde alguien puede agregar un campo y olvidar el otro.
+>
+> Lo que sigue queda como el registro de la evaluación, no como un pendiente.
+> Si alguien la retoma, que vea el costo Y la razón del descarte.
+
+El riesgo residual que deja el descarte está cubierto por otra guarda, barata y
+sin duplicación: **un test que afirma que la función solo construye referencias
+bajo `licitaciones/` y `configuracion/radar_secop`** (ver la sección final).
 
 Si lo que se quiere es de verdad "solo `licitaciones` y
 `configuracion/radar_secop`", el único mecanismo que lo da son las **Security
@@ -162,14 +178,37 @@ permiso de datos.
 al Admin SDK que usan las otras 16 funciones del proyecto, un bloque de reglas
 más que desplegar, y la lista de campos duplicada.
 
-### Recomendación
+### Por qué se descartó, en una línea
 
-**Hacer ahora la cuenta dedicada con `datastore.user`** (es una línea en el
-código y tres comandos, y quita 12.474 permisos), y **dejar la identidad
-restringida como bloque propio**, decidido con este documento en la mano. No
-como "pendiente" sin dueño: como un sub-bloque con alcance escrito, porque
-cuesta reglas nuevas, un camino de escritura nuevo y tests nuevos — y eso se
-decide, no se improvisa.
+Porque el precio es duplicar la lista de campos entre TypeScript y las reglas,
+y ese es exactamente el defecto que este proyecto viene cerrando. La reducción
+de superficie que sí se adopta (Editor → `datastore.user`) cuesta tres comandos
+y una línea de código; la granularidad real cuesta un camino de escritura nuevo,
+dos bloques de reglas y una duplicación permanente.
+
+## El riesgo residual, y la guarda que lo cubre
+
+Con `datastore.user` la función **puede** escribir en cualquier parte de
+Firestore. Lo que lo impide es nuestro código — y un límite que vive solo en el
+código tiene que tener un test, o es una intención.
+
+La guarda: **`src/utils/sigp/radarRutas.ts` es el único lugar que construye
+rutas de escritura del radar**, con una lista blanca de dos entradas
+(`licitaciones/{docId}` y `configuracion/radar_secop`), un validador que LANZA
+ante cualquier otra ruta, y un test que:
+
+1. prueba la matriz de rutas permitidas y negadas (incluido
+   `configuracion/vocabulario_neg`, que el radar **lee** pero no escribe);
+2. afirma que la lista blanca tiene exactamente esas dos entradas — ampliarla
+   es un diff visible, no un descuido;
+3. **lee el código fuente de la Cloud Function** y verifica que no construye
+   referencias por fuera de los dos helpers, y que cada escritura pasa por el
+   validador.
+
+Si alguien agrega una escritura fuera de esas dos rutas, **cae la suite**. Es el
+mismo patrón de los guardarraíles textuales del módulo (el test que parsea
+`firestore.rules`, el que compara los dos constructores de la semilla),
+aplicado a las rutas de escritura.
 
 ---
 

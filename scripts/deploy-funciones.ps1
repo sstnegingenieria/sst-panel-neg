@@ -285,17 +285,34 @@ $entryAbs = Join-Path $carpetaAbs $entry
 if (-not (Test-Path $entryAbs)) { Remove-Item $tmp -Recurse -Force; Abortar "no existe el entry del codebase: $carpeta/$entry" }
 
 $lectorExports = Join-Path $tmp 'leer-exports.js'
+# Un export cuenta como funcion DESPLEGABLE solo si firebase-functions le puso
+# `__endpoint` (es la marca que el propio SDK usa para construir el manifiesto
+# del deploy). Aceptar "cualquier objeto" convertiria un export decorativo en
+# una funcion que la post-verificacion exigiria en prod para siempre: una falsa
+# alarma permanente. Medido el 09-nov-2026: los 16 exports del codebase
+# `default` traen `__endpoint.platform = 'gcfv2'`.
 @'
 const [, , entry] = process.argv
 process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || 'neg-sst-app'
 const m = require(entry)
-const nombres = Object.keys(m).filter(k => typeof m[k] === 'function' || (m[k] && typeof m[k] === 'object'))
-console.log(JSON.stringify(nombres))
+const nombres = []
+const sinEndpoint = []
+for (const k of Object.keys(m)) {
+  const v = m[k]
+  if (v && v.__endpoint) { nombres.push(k); continue }
+  if (typeof v === 'function' || (v && typeof v === 'object')) sinEndpoint.push(k)
+}
+console.log(JSON.stringify({ nombres, sinEndpoint }))
 '@ | Set-Content -Path $lectorExports -Encoding UTF8
 
 $declaradasJson = & node $lectorExports $entryAbs
 if ($LASTEXITCODE -ne 0) { Remove-Item $tmp -Recurse -Force; Abortar "no pude leer los exports de $carpeta/$entry." }
-$declaradas = @(($declaradasJson | Out-String | ConvertFrom-Json))
+$lectura = ($declaradasJson | Out-String | ConvertFrom-Json)
+$declaradas = @($lectura.nombres)
+$sinEndpoint = @($lectura.sinEndpoint)
+if ($sinEndpoint.Count -gt 0) {
+  Write-Host ("Exports que NO son funciones desplegables (se ignoran): " + ($sinEndpoint -join ', ')) -ForegroundColor Yellow
+}
 if ($declaradas.Count -eq 0) { Remove-Item $tmp -Recurse -Force; Abortar "$carpeta/$entry no exporta ninguna funcion. Un deploy asi BORRARIA todo el codebase." }
 Write-Host ("Declaradas por el codigo ({0}): {1}" -f $declaradas.Count, ($declaradas -join ', '))
 
