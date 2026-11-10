@@ -117,6 +117,50 @@ gcloud functions describe ingerirRadarSecopManana --gen2 --region=us-central1 \
   --project=neg-sst-app --format="value(serviceConfig.serviceAccountEmail)"
 ```
 
+## ⛔ PREREQUISITO: hoy NADIE puede desplegar funciones
+
+Hallazgo del frente SIGP (09-nov-2026) al revisar el script de despliegue, y
+bloquea el primer deploy real **de cualquiera de los dos codebases**:
+
+- la **cuenta compartida está vetada por diseño** (el script aborta con ella, y
+  el acuerdo del 09-nov dice sesión de persona);
+- y la única cuenta nominal con roles —`giovanny.montes@`— tiene, según el
+  censo de SIGP, solo **`roles/firebaserules.admin` + `roles/firebase.viewer`**:
+  alcanza para desplegar REGLAS, no funciones.
+
+⚠ **Este dato es de SIGP y no lo pude verificar**: la llave de LECTURA no tiene
+`resourcemanager.projects.getIamPolicy` (probado: 403), así que no puedo leer la
+política IAM del proyecto. Queda como lo que es — un censo ajeno, creíble y sin
+confirmar por mí.
+
+Lo que SÍ hice es que el script lo compruebe solo, antes de pedir nada: un
+chequeo previo con `testIamPermissions` sobre la sesión activa, que aborta
+diciendo **qué permiso falta** en vez de fallar a mitad del deploy, después de
+haber tecleado el PR y la palabra `DESPLEGAR`.
+
+### El acto de IAM que falta (lo ejecuta alguien con propiedad del proyecto)
+
+```bash
+# 1. Permiso de desplegar funciones, para quien vaya a desplegar
+gcloud projects add-iam-policy-binding neg-sst-app   --member="user:giovanny.montes@negingenieria.com"   --role="roles/cloudfunctions.developer"
+
+# 2. Permiso de "actuar como" la cuenta de servicio de runtime de cada codebase.
+#    Para el radar, la cuenta dedicada:
+gcloud iam service-accounts add-iam-policy-binding   radar-secop@neg-sst-app.iam.gserviceaccount.com   --member="user:giovanny.montes@negingenieria.com"   --role="roles/iam.serviceAccountUser" --project=neg-sst-app
+
+#    Para el codebase `default`, la cuenta de computo por defecto:
+gcloud iam service-accounts add-iam-policy-binding   <NUMERO-DE-PROYECTO>-compute@developer.gserviceaccount.com   --member="user:giovanny.montes@negingenieria.com"   --role="roles/iam.serviceAccountUser" --project=neg-sst-app
+```
+
+**Verificación**: correr el script en simulacro. Si el chequeo previo pasa, los
+permisos comprobables están; si falta alguno, el mensaje lo nombra.
+
+```powershell
+npx firebase login
+.\scripts\deploy-funciones.ps1 -Codebase radar -Simulacro
+npx firebase logout
+```
+
 ## La alternativa que SÍ daría granularidad — EVALUADA Y DESCARTADA
 
 > **Decisión (09-nov-2026): descartada.** La razón, escrita para quien la

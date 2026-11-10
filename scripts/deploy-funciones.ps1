@@ -121,6 +121,75 @@ if ($CuentasCompartidas -contains $quien) {
 }
 Write-Host "Sesion de Firebase: $quien" -ForegroundColor Green
 
+# ── 1-bis. ¿La persona PUEDE desplegar funciones? ───────────────────────────
+# Hallazgo del frente SIGP (09-nov-2026) al revisar este script: la cuenta
+# compartida esta vetada por diseno (guarda de arriba) y la unica cuenta
+# nominal con roles tenia solo `firebaserules.admin` + `firebase.viewer`. O
+# sea: se podia pasar la guarda 1 y fallar DESPUES, en medio del deploy, tras
+# haber tecleado el numero del PR y la palabra DESPLEGAR.
+#
+# Este chequeo le pregunta a Resource Manager que permisos tiene LA SESION
+# ACTIVA (testIamPermissions responde sobre el llamador) ANTES de pedir nada.
+# NO es exhaustivo: un deploy de 2a generacion toca varias APIs (Cloud Run,
+# Artifact Registry, Cloud Build) y el `actAs` sobre la cuenta de servicio de
+# runtime se evalua sobre OTRO recurso, no sobre el proyecto. Lo que si
+# atrapa es el caso medido —una cuenta sin rol de Functions— y lo atrapa
+# temprano, diciendo que rol falta.
+$verificador = Join-Path $env:TEMP ("permisos-" + [Guid]::NewGuid().ToString('N').Substring(0, 8) + '.js')
+@'
+const fs = require('fs'), os = require('os'), path = require('path')
+const PERMISOS = [
+  'cloudfunctions.functions.list',
+  'cloudfunctions.functions.create',
+  'cloudfunctions.functions.update',
+  'run.services.update',
+]
+;(async () => {
+  const cfgPath = path.join(os.homedir(), '.config', 'configstore', 'firebase-tools.json')
+  let rt
+  try { rt = JSON.parse(fs.readFileSync(cfgPath, 'utf8')).tokens.refresh_token } catch (e) { rt = null }
+  if (!rt) throw new Error('sin sesion de firebase-tools')
+  const tok = await (await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: rt,
+      client_id: '563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com',
+      client_secret: 'j9iVZfS8kkCEFUPaAeJV0sAi' }),
+  })).json()
+  if (!tok.access_token) throw new Error('la sesion no refresca')
+  const r = await fetch('https://cloudresourcemanager.googleapis.com/v1/projects/neg-sst-app:testIamPermissions', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + tok.access_token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ permissions: PERMISOS }),
+  })
+  const j = await r.json()
+  if (!r.ok) throw new Error('testIamPermissions: ' + JSON.stringify(j).slice(0, 200))
+  const tiene = j.permissions || []
+  console.log(JSON.stringify({ tiene, faltan: PERMISOS.filter(p => !tiene.includes(p)) }))
+})().catch(e => { console.error('ERROR: ' + e.message); process.exit(1) })
+'@ | Set-Content -Path $verificador -Encoding UTF8
+
+$permJson = & node $verificador
+if ($LASTEXITCODE -ne 0) {
+  Remove-Item $verificador -Force
+  Abortar 'no pude comprobar tus permisos de despliegue con tu sesion de firebase-tools.'
+}
+Remove-Item $verificador -Force
+$perm = ($permJson | Out-String | ConvertFrom-Json)
+$permFaltan = @($perm.faltan)
+if ($permFaltan.Count -gt 0) {
+  $rolFn = 'roles/cloudfunctions.developer'
+  $rolSa = 'roles/iam.serviceAccountUser'
+  Abortar ("la cuenta $quien NO tiene permisos para desplegar funciones.`n" +
+    'Permisos que faltan: ' + ($permFaltan -join ', ') + "`n`n" +
+    "QUE HACER (acto de IAM; lo ejecuta alguien con propiedad del proyecto):`n" +
+    "    gcloud projects add-iam-policy-binding neg-sst-app --member=user:$quien --role=$rolFn`n" +
+    "y, sobre la cuenta de servicio de runtime del codebase que vas a desplegar:`n" +
+    "    gcloud iam service-accounts add-iam-policy-binding <SA-de-runtime> --member=user:$quien --role=$rolSa --project=neg-sst-app`n`n" +
+    'Sin eso el deploy fallaria DESPUES de pedirte el PR y la confirmacion, a mitad de camino.')
+}
+Write-Host ('OK: la sesion tiene los permisos comprobables de despliegue (' + ($perm.tiene -join ', ') + ').') -ForegroundColor Green
+Write-Host '   (chequeo no exhaustivo: el actAs sobre la cuenta de runtime se evalua sobre otro recurso)' -ForegroundColor DarkGray
+
 $bitacora = Join-Path $RepoRoot 'docs\bitacora-deploys-funciones.md'
 $bitacoraRel = 'docs/bitacora-deploys-funciones.md'
 $bitacoraSucia = Git-Salida @('status', '--porcelain', '--', $bitacoraRel)
