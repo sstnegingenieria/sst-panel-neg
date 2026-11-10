@@ -97,6 +97,19 @@ Set-Location $RepoRoot
 # unica razon de existir.
 $CuentasCompartidas = @('sstnegingenieria@gmail.com')
 
+# ── FECHA DE VENCIMIENTO DE LA ESCOTILLA (criterio de Giovanny) ─────────────
+# La excepcion de la cuenta compartida es TEMPORAL, y lo temporal sin
+# vencimiento se queda. Asi que el vencimiento es una FECHA DURA EN CODIGO que
+# hace ABORTAR al pasarse, no un comentario ni la promesa de quitarla cuando
+# llegue Cloud Identity.
+#
+# Renovarla es un PR: un diff visible que alguien tiene que mirar y aprobar.
+# No hay bandera que la extienda desde la linea de comandos — si la hubiera,
+# el vencimiento no seria un vencimiento.
+#
+# La fecha la fija Giovanny; esta son dos semanas desde el nudo (09-nov-2026).
+$EscotillaVence = '2026-11-23'
+
 function Abortar([string]$msg) {
   Write-Host ''
   Write-Host "ABORTADO: $msg" -ForegroundColor Red
@@ -157,13 +170,38 @@ if ($esCompartida) {
     ) -join [Environment]::NewLine
     Abortar $ayuda
   }
+  # El vencimiento se revisa ANTES que el autor y el motivo: una excepcion
+  # vencida no se arregla firmandola mejor.
+  # Fecha LOCAL, no UTC: el vencimiento es un plazo humano y tiene que
+  # coincidir con el dia que ve quien lo lee. En UTC la escotilla moriria a las
+  # 19:00 del dia anterior segun el calendario de aqui, y el mensaje diria una
+  # fecha que no es la de hoy para esa persona. (La fila de la bitacora sigue
+  # en UTC, que es lo correcto para un registro.)
+  $hoy = (Get-Date).Date
+  $vence = [datetime]::ParseExact($EscotillaVence, 'yyyy-MM-dd', $null).Date
+  if ($hoy -gt $vence) {
+    Abortar (@(
+      "la ESCOTILLA de la cuenta compartida VENCIO el $EscotillaVence (hoy es " + $hoy.ToString('yyyy-MM-dd') + ').',
+      '',
+      'Era una excepcion temporal por el nudo de identidad, y lo temporal sin',
+      'vencimiento se queda. No hay bandera para extenderla.',
+      '',
+      'QUE HACER:',
+      '  1. Lo correcto: Cloud Identity (o Workspace) para el dominio, desplegar',
+      '     con una identidad nominal, y BORRAR esta escotilla del script.',
+      '  2. Si todavia no se puede: renovar la fecha en un PR, a conciencia,',
+      ("     cambiando `$EscotillaVence en " + $PSCommandPath + '.'),
+      '     Un PR se revisa; una bandera no.'
+    ) -join [Environment]::NewLine)
+  }
+  Write-Host ("   (escotilla vigente hasta $EscotillaVence)") -ForegroundColor DarkGray
   if (-not $AutorizadoPor.Trim()) {
     Abortar '-ConCuentaCompartida exige -AutorizadoPor: la bitacora tiene que poder responder QUIEN desplego, y la cuenta compartida no lo responde.'
   }
   if (-not $Motivo.Trim()) {
     Abortar '-ConCuentaCompartida exige -Motivo: una excepcion sin razon escrita se vuelve la norma.'
   }
-  $excepcionCompartida = 'cuenta compartida; ejecuto ' + $AutorizadoPor.Trim() + '; motivo: ' + $Motivo.Trim()
+  $excepcionCompartida = 'cuenta compartida; ejecuto ' + $AutorizadoPor.Trim() + '; motivo: ' + $Motivo.Trim() + '; escotilla vence ' + $EscotillaVence
   Write-Host ''
   Write-Host '*** EXCEPCION: se despliega con la CUENTA COMPARTIDA ***' -ForegroundColor Red
   Write-Host ('    Ejecuta: ' + $AutorizadoPor.Trim()) -ForegroundColor Yellow

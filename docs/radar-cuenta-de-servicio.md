@@ -165,14 +165,22 @@ acuerdo. Por ese camino nadie despliega funciones — ni el radar ni el codebase
    de la persona, con su nombre): conserva lo que importa —la bitácora puede
    responder *quién* desplegó— y los comandos de abajo funcionan cambiando el
    `--member`. Es un puente, no una solución: la identidad no es corporativa.
-3. **La cuenta compartida, con la excepción FIRMADA del script.** El veto no se
-   quita: se firma. `-ConCuentaCompartida -AutorizadoPor "<nombre>" -Motivo
-   "<razón>"`, y las dos cosas quedan en la fila de la bitácora
-   (`cuenta compartida; ejecutó X; motivo: Y`). Es el patrón de la casa para
-   cuando la regla no se puede cumplir pero el trabajo no puede esperar: el
-   override del semáforo, la salvedad del aprobador de respaldo, el
-   `autorizado_manual` de la guarda de volumen. **Cuando el dominio tenga Cloud
-   Identity, esta escotilla sobra y se quita.**
+3. **La cuenta compartida, con la excepción FIRMADA Y CON VENCIMIENTO.** El
+   veto no se quita: se firma y caduca.
+   `-ConCuentaCompartida -AutorizadoPor "<nombre>" -Motivo "<razón>"`, y las dos
+   cosas quedan en la fila de la bitácora
+   (`cuenta compartida; ejecutó X; motivo: Y; escotilla vence AAAA-MM-DD`).
+   Es el patrón de la casa para cuando la regla no se puede cumplir pero el
+   trabajo no puede esperar: el override del semáforo, la salvedad del aprobador
+   de respaldo, el `autorizado_manual` de la guarda de volumen.
+
+   **Y lleva FECHA DURA EN CÓDIGO** (`$EscotillaVence`, hoy `2026-11-23`): al
+   pasarse, `-ConCuentaCompartida` **aborta**. No hay bandera que la extienda —
+   renovarla es cambiar la fecha **en un PR**, que alguien tiene que mirar.
+   Criterio de Giovanny, y la razón es conocida de la casa: *lo temporal sin
+   vencimiento se queda.* Un comentario que diga «quitar esto cuando llegue
+   Cloud Identity» es una promesa, no un control.
+   La fecha se compara en día **local**, no UTC, porque es un plazo humano.
 
 ### El acto de IAM que falta (lo ejecuta alguien con propiedad del proyecto)
 
