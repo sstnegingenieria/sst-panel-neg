@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Cloud Functions para NEG Ingeniería SST Panel",
   "scripts": {
-    "deploy": "firebase deploy --only functions",
+    "deploy": "firebase deploy --only functions:default",
     "serve": "firebase emulators:start",
     "logs": "firebase functions:log"
   },

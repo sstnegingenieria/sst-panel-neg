@@ -130,12 +130,17 @@ cd ..
 ### Paso 5: Validar reglas (ANTES DE DEPLOYAR)
 ```bash
 firebase deploy --only firestore:rules --dry-run
-firebase deploy --only functions --dry-run
+firebase deploy --only functions:default --dry-run
 ```
 
 ### Paso 6: Deploy a producción
 ```bash
-firebase deploy
+# SIEMPRE con objetivo explícito — desde que firebase.json tiene varios
+# codebases (radar SECOP de Licitaciones), un `firebase deploy` pelado
+# desplegaría TODO, incluido el codebase ajeno.
+firebase deploy --only functions:default
+# Las reglas de Firestore van SOLO por scripts/deploy-reglas.ps1 (nunca
+# directo); el panel web lo despliega Vercel al mergear a main.
 ```
 
 Este comando:
@@ -324,7 +329,7 @@ firebase deploy --only firestore:rules
 ## ✅ Checklist Pre-Production
 
 - [ ] Instalar Firebase CLI
-- [ ] Ejecutar `firebase deploy --dry-run` (sin errores)
+- [ ] Ejecutar `firebase deploy --only functions:default --dry-run` (sin errores)
 - [ ] Crear backup de datos (Export en Firestore)
 - [ ] Notificar al equipo sobre logout requerido
 - [ ] Ejecutar migración de claims (Opción B)
