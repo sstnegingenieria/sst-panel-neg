@@ -1,0 +1,177 @@
+# Cuenta de servicio del radar — qué se puede y qué no
+
+Pedido del frente SIGP al revisar el PR #239: que la función del radar **no**
+corra con la cuenta de cómputo por defecto (que suele traer `roles/editor`),
+sino con una cuenta dedicada con **solo `roles/datastore.user`** y nada más.
+
+La petición se puede cumplir. Pero traía una pregunta que había que medir antes
+de prometer nada: **¿puede IAM restringir esa cuenta a escribir solo en
+`licitaciones` y en `configuracion/radar_secop`?**
+
+## La respuesta, medida: NO. `datastore.user` es todo-o-nada sobre la base de datos
+
+Lo digo con esas palabras porque es una diferencia importante entre lo que se
+pidió y lo que se puede entregar.
+
+**`roles/datastore.user` da escritura sobre TODA la base de datos.** No se puede
+acotar a colecciones ni a documentos. Una cuenta con ese rol puede crear,
+actualizar y borrar cualquier documento de cualquier colección del proyecto:
+`users`, `proyectos`, `cotizaciones`, `registros_horario`, todo.
+
+Lo que sí es cierto —y es una reducción grande— es que pasa de **Editor** a
+**solo Firestore**: sin Storage, sin Auth, sin IAM, sin administrar Functions,
+sin tocar nada más del proyecto.
+
+### Cómo se midió
+
+**1. El contenido exacto de los roles, consultado a la API de IAM**
+(`GET https://iam.googleapis.com/v1/roles/...`, lectura de metadatos, sin tocar
+datos del proyecto):
+
+| rol | permisos | los de datos |
+|---|---|---|
+| `roles/editor` | **12.497** | 39 de datastore/firestore, más todo lo demás del proyecto |
+| `roles/datastore.user` | **23** | `datastore.entities.{create,update,delete,get,list,allocateIds}` |
+| `roles/datastore.viewer` | 30 | solo lectura (`entities.get`, `entities.list`) |
+
+Los 17 permisos restantes de `datastore.user` son metadatos de solo lectura
+(`databases.get`, `namespaces.list`, `statistics.get`, consultas de la consola,
+`resourcemanager.projects.get`).
+
+**Ninguno de los permisos de entidades lleva calificador de ruta.** La propia
+documentación de Firestore describe `datastore.entities.create` como *"Create a
+document."*, sin alcance: el alcance es la base de datos.
+
+**2. ¿Y con IAM Conditions?** Tampoco.
+
+- La página de tipos de recurso que aceptan *conditional role bindings* **no
+  incluye Firestore ni Datastore**. Dice: *"some Google Cloud services don't
+  allow conditional role bindings in their resources' allow policies."*
+  ([resource-types-with-conditional-roles](https://docs.cloud.google.com/iam/docs/resource-types-with-conditional-roles))
+- La tabla de atributos de condición sí tiene una fila de Firestore, pero es
+  `firestore.googleapis.com/Database`, con formato
+  `projects/<project>/databases/<database>`: **el recurso más fino que IAM
+  conoce en Firestore es la BASE DE DATOS**. No hay atributo de colección, de
+  documento ni de ruta.
+- La documentación de Firestore sí menciona IAM Conditions, y el ejemplo que da
+  es temporal (`request.time < timestamp(...)`), no de ruta.
+
+**3. ¿Por qué no sirven las Security Rules para acotar la CF?** Porque el
+cliente de servidor las omite, textual:
+
+> *"The server client libraries bypass all Cloud Firestore Security Rules and
+> instead authenticate through Google Application Default Credentials."*
+> — [firestore/security/get-started](https://firebase.google.com/docs/firestore/security/get-started)
+
+(La nota dice "server client libraries"; que el Admin SDK sea una de ellas es
+una inferencia razonable, no una cita literal. La misma nota remata: *"If
+you're using the server client libraries or the REST or RPC APIs, make sure to
+set up Identity and Access Management (IAM) for Cloud Firestore."* — o sea, el
+control de acceso de un backend es IAM, no las reglas.)
+
+## Lo que sí se va a hacer: cuenta dedicada con `datastore.user`
+
+De **12.497 permisos a 23**, y de "todo el proyecto" a "solo Firestore". No es
+granularidad por colección, pero quita Storage, Auth, IAM y la administración de
+Functions de las manos de la función.
+
+Los comandos los ejecuta Giovanny (crear cuentas de servicio y asignar roles es
+infraestructura, no código). Con `gcloud`:
+
+```bash
+# 1. La cuenta dedicada
+gcloud iam service-accounts create radar-secop \
+  --display-name="Radar SECOP (CF de ingesta de licitaciones)" \
+  --project=neg-sst-app
+
+# 2. Su UNICO rol: Firestore, nada mas
+gcloud projects add-iam-policy-binding neg-sst-app \
+  --member="serviceAccount:radar-secop@neg-sst-app.iam.gserviceaccount.com" \
+  --role="roles/datastore.user"
+
+# 3. Que la CF corra con ella (hay que permitir que el deployer la use)
+gcloud iam service-accounts add-iam-policy-binding \
+  radar-secop@neg-sst-app.iam.gserviceaccount.com \
+  --member="user:TU-CORREO" \
+  --role="roles/iam.serviceAccountUser" \
+  --project=neg-sst-app
+```
+
+Y en el código de la función, una línea en las opciones de `onSchedule`:
+
+```ts
+serviceAccount: 'radar-secop@neg-sst-app.iam.gserviceaccount.com',
+```
+
+**Verificación después** (que no quede en "quedó asignado"):
+
+```bash
+# Que la cuenta tenga EXACTAMENTE un rol
+gcloud projects get-iam-policy neg-sst-app \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:radar-secop@neg-sst-app.iam.gserviceaccount.com" \
+  --format="table(bindings.role)"
+
+# Que las dos funciones del radar corran con ella
+gcloud functions describe ingerirRadarSecopManana --gen2 --region=us-central1 \
+  --project=neg-sst-app --format="value(serviceConfig.serviceAccountEmail)"
+```
+
+## La alternativa que SÍ daría granularidad — evaluada, no construida
+
+Si lo que se quiere es de verdad "solo `licitaciones` y
+`configuracion/radar_secop`", el único mecanismo que lo da son las **Security
+Rules**, y para eso el radar tiene que **escribir como una identidad de Auth en
+vez de con Admin SDK**.
+
+Cómo funcionaría:
+
+1. La función **no lleva ningún rol de Firestore**. Su cuenta de servicio solo
+   necesita poder **firmar** un token: `roles/iam.serviceAccountTokenCreator`
+   sobre sí misma. Ese permiso no da acceso a datos.
+2. `admin.auth().createCustomToken('radar_secop', { radar: true })` →
+   intercambio en `identitytoolkit.googleapis.com/.../accounts:signInWithCustomToken`
+   → **ID token**.
+3. Las escrituras salen por la **API REST de Firestore** con ese ID token
+   (`batchGet` para leer, `commit`/`batchWrite` para escribir), así que
+   **pasan por las reglas**.
+4. Reglas nuevas que autoricen a esa identidad y solo a ella:
+   `request.auth.token.radar == true`, sobre `licitaciones` (create/update con
+   guardas por campo) y `configuracion/radar_secop`.
+
+### Qué costaría, en concreto
+
+| pieza | costo |
+|---|---|
+| **Rol nuevo en `users.rol`** | **ninguno.** Se usa un *custom claim* en el token (`radar: true`), no un rol del panel: no se toca `users`, ni `roles.ts`, ni `permisos.ts`, ni el vocabulario de roles que ven los tres frentes. |
+| **Identidad de Auth** | 1 usuario (`uid: radar_secop`), creado implícitamente al canjear el primer custom token. |
+| **Reglas nuevas** | 2 bloques: `licitaciones` (create + update con `hasOnly` de los 10 campos refrescables) y `configuracion/radar_secop`. **Requiere un deploy de reglas** (el de siempre, por `deploy-reglas.ps1`, con OK de Giovanny) y su batería de tests con tokens reales. |
+| **Código** | ~150–200 líneas: canje de custom token → ID token (con caché, el ID token dura 1 h), `batchGet` y `commit` por REST en vez de `db.getAll` y `db.batch()`. Más sus tests. |
+| **Configuración** | la Web API key del proyecto en la config del codebase (ya es pública: va en el bundle del panel). |
+| **Duplicación nueva** | la lista de campos refrescables quedaría en DOS lados: `CAMPOS_REFRESCABLES` en TypeScript y el `hasOnly` de las reglas. Mitigable con el test que parsea `firestore.rules`, que es el patrón que ya usamos en A.2a/A.2b. |
+| **Costo de operación** | cada escritura evalúa reglas (sin cargo en dinero, sí en latencia); `batchWrite` por REST tiene el mismo tope de 500. |
+
+### Lo que gana y lo que pierde
+
+**Gana** lo que SIGP pidió: la función no puede escribir fuera de
+`licitaciones` y `configuracion/radar_secop` ni aunque tuviera un bug — el
+límite lo pone el servidor, no el código. Y la función deja de tener **cualquier**
+permiso de datos.
+
+**Pierde**: un segundo camino de escritura que mantener (REST + reglas) frente
+al Admin SDK que usan las otras 16 funciones del proyecto, un bloque de reglas
+más que desplegar, y la lista de campos duplicada.
+
+### Recomendación
+
+**Hacer ahora la cuenta dedicada con `datastore.user`** (es una línea en el
+código y tres comandos, y quita 12.474 permisos), y **dejar la identidad
+restringida como bloque propio**, decidido con este documento en la mano. No
+como "pendiente" sin dueño: como un sub-bloque con alcance escrito, porque
+cuesta reglas nuevas, un camino de escritura nuevo y tests nuevos — y eso se
+decide, no se improvisa.
+
+---
+
+*Medido el 09-nov-2026 contra la API de IAM y la documentación oficial de Google
+Cloud y Firebase. Las citas llevan su URL.*
