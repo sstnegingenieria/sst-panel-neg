@@ -270,7 +270,7 @@ Tarea de mantenimiento independiente, agendada para después de cerrar F0 (o ant
 
 ### Descripción
 
-El deploy de Cloud Functions se hace manualmente vía `npm run deploy` (que ejecuta `firebase deploy --only functions`). El deploy del panel web sí tiene CI/CD vía Vercel (auto-deploy desde `main`), pero las Cloud Functions no.
+El deploy de Cloud Functions se hace manualmente vía `npm run deploy` (que ejecuta `firebase deploy --only functions:default` — acotado a nuestro codebase desde que firebase.json tiene varios). El deploy del panel web sí tiene CI/CD vía Vercel (auto-deploy desde `main`), pero las Cloud Functions no.
 
 ### Riesgo real
 
@@ -282,7 +282,7 @@ El deploy de Cloud Functions se hace manualmente vía `npm run deploy` (que ejec
 
 Agregar workflow de GitHub Actions que:
 1. En cada PR a `main` que toque `functions/`, corra los tests contra emulador.
-2. En cada merge a `main`, si `functions/` cambió, dispare `firebase deploy --only functions` con un service account.
+2. En cada merge a `main`, si `functions/` cambió, dispare `firebase deploy --only functions:default` con un service account.
 
 Requiere configurar credenciales de service account de Firebase en GitHub Secrets. Es tarea de una tarde de trabajo, con sus propias precauciones de seguridad.
 
