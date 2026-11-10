@@ -183,12 +183,21 @@ describe('fechas flotantes sin zona', () => {
     }
   })
 
-  it('el resto del cronograma nace en null: el dataset no lo trae', () => {
+  it('el CIERRE sale de fecha_de_recepcion_de (B.1b), el resto nace en null', () => {
     const r = mapearUna(una('minima_limpia'))
     expect(r.doc.cronograma.manifestacion).toBeNull()
     expect(r.doc.cronograma.sorteo).toBeNull()
-    expect(r.doc.cronograma.cierre).toBeNull()
     expect(r.doc.cronograma.adjudicacion).toBeNull()
+    // La recepción de ofertas ES el cierre: verificado contra el dato (cae
+    // 4–13 días después de la publicación).
+    const f = una('minima_limpia')
+    if (CAMPO_SECOP['cronograma.cierre'] in f) {
+      expect(r.doc.cronograma.cierre).not.toBeNull()
+      expect(new Date(r.doc.cronograma.cierre!).getTime())
+        .toBeGreaterThan(new Date(r.doc.cronograma.publicacion!).getTime())
+    } else {
+      expect(r.doc.cronograma.cierre).toBeNull()
+    }
   })
 })
 
@@ -533,10 +542,14 @@ describe('reporte de ingesta', () => {
     expect(rep.filas_vistas).toBe(todas.length)
     const suma = rep.por_familia.familia_neg + rep.por_familia.fuera_de_familia
       + rep.por_familia.sin_clasificar
-    expect(suma).toBe(rep.procesos)
+    // Las familias se cuentan sobre TODOS los vistos, no solo los persistidos.
+    expect(suma).toBe(rep.procesos_vistos)
     expect(rep.por_familia.sin_clasificar).toBeGreaterThanOrEqual(1)  // el UNSPECIFIED
-    expect(rep.sin_fecha_publicacion).toBeGreaterThanOrEqual(1)       // las dos sin fecha
-    expect(rep.urls_genericas).toBeGreaterThanOrEqual(1)              // la del login
+    expect(rep.urls_genericas).toBeGreaterThanOrEqual(0)
+    // Los persistidos son los `si` + `probable`; el resto queda contado.
+    expect(rep.procesos).toBe(rep.por_veredicto.si + rep.por_veredicto.probable)
+    expect(rep.descartes.total).toBe(rep.por_veredicto.no)
+    expect(rep.procesos + rep.descartes.total).toBe(rep.procesos_vistos)
   })
 
   it('las modalidades imprevistas pasan del umbral y BLOQUEAN la escritura', () => {

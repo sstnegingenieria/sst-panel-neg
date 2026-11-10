@@ -1,0 +1,342 @@
+{
+  "version": "v1.0",
+  "definicion": "Léxico del trabajo que NEG hace, para clasificar un proceso de SECOP II cuando su código UNSPC todavía no está asignado. Un objeto contratado que contiene CUALQUIERA de los términos (unigramas o bigramas, sobre el texto normalizado sin tildes y en mayúsculas) se clasifica como «probable» y pasa a lectura humana. El léxico NO decide por sí solo: el código UNSPC, cuando existe, manda.",
+  "derivacion": "Derivado de los datos, no redactado. Corpus POSITIVO (395 objetos): los 23 procesos que NEG ganó en SECOP II (dataset p6dx-8zbt, nit_del_proveedor_adjudicado=900975870 — 24 filas que colapsan a 23 procesos) más los 372 registros del registro histórico CM-FT-CPG-26 de Karen leídos de producción (coleccion licitaciones, migrado=true, los 372 con objeto no vacío). Corpus NEGATIVO (16.807 objetos): los procesos de 2025 de Bogotá + Cundinamarca en las modalidades de ingesta cuyo código UNSPC existe y está FUERA de las tres familias del RUP de NEG — es decir, lo que NEG no hace, con etiqueta real y no supuesta. Método: unigramas y bigramas de 4+ caracteres sin palabras funcionales; para cada término, frecuencia documental en positivos y en negativos, y lift = (DF_pos + 1/n_pos) / (DF_neg + 1/n_neg). Corte: DF_pos >= 8 documentos y lift >= 10.",
+  "metricas": {
+    "corpus_positivo": 395,
+    "corpus_positivo_detalle": "23 ganados en SECOP + 372 del registro de Karen",
+    "corpus_negativo": 16807,
+    "terminos": 48,
+    "recall_positivos_pct": 84.8,
+    "recall_ganados": "19 de 23",
+    "falsos_positivos_fondo_pct": 7.1,
+    "falsos_positivos_fondo": "1.197 de 16.807",
+    "validacion_independiente": "Derivando el léxico SOLO del registro de Karen (372 objetos, sin mirar los ganados de SECOP) y midiéndolo contra los 23 que NEG ganó: 19 de 23 (83%) con 7,3% de falsos positivos en el fondo. La cifra de recall de este documento NO es la prueba — esa es en muestra; la prueba es el 83% fuera de muestra.",
+    "carga_medida": "Sobre las 2.303 filas UNSPECIFIED de octubre y noviembre de 2026 en el territorio (lo que el radar ve hoy), el léxico marca 316 como «probable» — 111 de ellas mínima cuantía (verdes) y el resto menor cuantía, que el portero del semáforo ya frena. Son unas 11 por día hábil, de las cuales ~4 llegan en verde. Con el filtro por familia a nivel de API, en todo octubre se habrían visto 21 procesos."
+  },
+  "excluidos": {
+    "clientes_y_lugares": [
+      "PALACIO",
+      "PALACIO JUSTICIA",
+      "REGISTRADURIA",
+      "REGISTRADURIA MUNICIPAL",
+      "SEDE REGISTRADURIA",
+      "SEDE DELEGACION",
+      "ICBF",
+      "TORRE",
+      "TORRES",
+      "TUNJA",
+      "HUILA",
+      "CAUCA"
+    ],
+    "motivo_clientes_y_lugares": "Salieron con lift alto porque describen A QUIÉN le vendió NEG y DÓNDE, no QUÉ hace. Dejarlos haría que el radar marque cualquier proceso de la Registraduría o del ICBF, incluida la cafetería, y cualquiera en Tunja. Son un artefacto de la clientela del registro histórico.",
+    "forma_contractual": [
+      "PRECIOS",
+      "UNITARIOS",
+      "FIJOS",
+      "FORMULA",
+      "REAJUSTE",
+      "SISTEMA PRECIOS",
+      "PRECIOS UNITARIOS",
+      "UNITARIOS FIJOS",
+      "FIJOS FORMULA",
+      "FORMULA REAJUSTE",
+      "REAJUSTE ADECUACION",
+      "CONTRATAR SISTEMA"
+    ],
+    "motivo_forma_contractual": "Describen la FORMA del contrato (precios unitarios fijos, sin fórmula de reajuste), no el trabajo. Discriminan bien porque la obra se contrata así y el software no, pero dependen de la redacción del pliego y no del objeto; incluirlos sumaba 1,5 puntos de recall y 1,7 de falsos positivos. Quedan registrados acá para que la decisión sea revisable."
+  },
+  "limitaciones": "El léxico sale de lo que NEG PERSIGUIÓ (registro de Karen) y de lo que GANÓ (SECOP), no de lo que PODRÍA hacer: un servicio nuevo que NEG nunca haya cotizado no está en el léxico y saldría «no». Por eso el agregado de cada corrida cuenta los descartes por motivo — incluidos los que el código descarta pese a coincidir el texto — y por eso el léxico es un documento versionado y no una constante: se revisa con la evidencia de las corridas. Dos huecos medidos y conocidos: (1) de los 23 procesos que NEG ganó, 3 tienen código presente y FUERA de las tres familias (V1.30171706 adecuación de ambientes, V1.31162800 ferretería, V1.83101800 subestación eléctrica) — con la regla de clasificación vigente esos tres habrían salido «no»; el texto coincide en 2 de los 3, así que el agregado los cuenta como descartados-por-código-con-texto-coincidente. (2) NEG ha ganado en Antioquia y Boyacá, fuera del territorio de la ingesta.",
+  "terminos": [
+    "LOCATIVAS INFRAESTRUCTURAS",
+    "MANTENIMIENTO CUBIERTA",
+    "REPARACION CONSERVACION",
+    "MEJORAMIENTO ADECUACIONES",
+    "INTEGRAL REPARACION",
+    "CONSERVACION MEJORAMIENTO",
+    "MANTENIMIENTO SEDE",
+    "INFRAESTRUCTURA FISICA",
+    "CUBIERTAS",
+    "CUBIERTA",
+    "ADECUACIONES LOCATIVAS",
+    "PLANTA FISICA",
+    "ADECUACION MANTENIMIENTO",
+    "EJECUCION OBRAS",
+    "IMPERMEABILIZACION",
+    "CONTRATAR ADECUACION",
+    "MEJORAMIENTO INFRAESTRUCTURA",
+    "INFRAESTRUCTURAS",
+    "CORRECTIVO INFRAESTRUCTURA",
+    "REALIZAR OBRAS",
+    "ADECUACIONES",
+    "OBRAS MANTENIMIENTO",
+    "LOCATIVAS",
+    "ADECUACION MEJORAMIENTO",
+    "MEJORAMIENTO MANTENIMIENTO",
+    "ADECUACION INFRAESTRUCTURA",
+    "MANTENIMIENTO INSTALACIONES",
+    "MANTENIMIENTO INFRAESTRUCTURA",
+    "REPARACIONES LOCATIVAS",
+    "FISICA",
+    "PREVENTIVOS CORRECTIVOS",
+    "CIVILES",
+    "MANTENIMIENTO ADECUACION",
+    "ADECUACION",
+    "OBRAS",
+    "REPARACIONES",
+    "ACTIVIDADES MANTENIMIENTO",
+    "BIENES INMUEBLES",
+    "MANTENIMIENTOS PREVENTIVOS",
+    "FISICAS",
+    "MANTENIMIENTOS",
+    "MANTENIMIENTO MEJORAMIENTO",
+    "PREVENTIVOS",
+    "EDIFICIO",
+    "INFRAESTRUCTURA",
+    "CONTRATAR OBRAS",
+    "REPARACION",
+    "REALIZAR ACTIVIDADES"
+  ],
+  "frecuencias": {
+    "LOCATIVAS INFRAESTRUCTURAS": {
+      "pos": 8,
+      "fondo": 0,
+      "lift": 382.9
+    },
+    "MANTENIMIENTO CUBIERTA": {
+      "pos": 8,
+      "fondo": 2,
+      "lift": 127.6
+    },
+    "REPARACION CONSERVACION": {
+      "pos": 11,
+      "fondo": 3,
+      "lift": 127.6
+    },
+    "MEJORAMIENTO ADECUACIONES": {
+      "pos": 11,
+      "fondo": 3,
+      "lift": 127.6
+    },
+    "INTEGRAL REPARACION": {
+      "pos": 10,
+      "fondo": 3,
+      "lift": 117
+    },
+    "CONSERVACION MEJORAMIENTO": {
+      "pos": 12,
+      "fondo": 4,
+      "lift": 110.6
+    },
+    "MANTENIMIENTO SEDE": {
+      "pos": 19,
+      "fondo": 7,
+      "lift": 106.4
+    },
+    "INFRAESTRUCTURA FISICA": {
+      "pos": 48,
+      "fondo": 21,
+      "lift": 94.8
+    },
+    "CUBIERTAS": {
+      "pos": 29,
+      "fondo": 13,
+      "lift": 91.2
+    },
+    "CUBIERTA": {
+      "pos": 30,
+      "fondo": 14,
+      "lift": 87.9
+    },
+    "ADECUACIONES LOCATIVAS": {
+      "pos": 21,
+      "fondo": 11,
+      "lift": 78
+    },
+    "PLANTA FISICA": {
+      "pos": 10,
+      "fondo": 5,
+      "lift": 78
+    },
+    "ADECUACION MANTENIMIENTO": {
+      "pos": 44,
+      "fondo": 25,
+      "lift": 73.6
+    },
+    "EJECUCION OBRAS": {
+      "pos": 9,
+      "fondo": 5,
+      "lift": 70.9
+    },
+    "IMPERMEABILIZACION": {
+      "pos": 20,
+      "fondo": 12,
+      "lift": 68.7
+    },
+    "CONTRATAR ADECUACION": {
+      "pos": 13,
+      "fondo": 9,
+      "lift": 59.6
+    },
+    "MEJORAMIENTO INFRAESTRUCTURA": {
+      "pos": 17,
+      "fondo": 12,
+      "lift": 58.9
+    },
+    "INFRAESTRUCTURAS": {
+      "pos": 11,
+      "fondo": 8,
+      "lift": 56.7
+    },
+    "CORRECTIVO INFRAESTRUCTURA": {
+      "pos": 8,
+      "fondo": 6,
+      "lift": 54.7
+    },
+    "REALIZAR OBRAS": {
+      "pos": 10,
+      "fondo": 8,
+      "lift": 52
+    },
+    "ADECUACIONES": {
+      "pos": 48,
+      "fondo": 41,
+      "lift": 49.6
+    },
+    "OBRAS MANTENIMIENTO": {
+      "pos": 20,
+      "fondo": 18,
+      "lift": 47
+    },
+    "LOCATIVAS": {
+      "pos": 39,
+      "fondo": 36,
+      "lift": 46
+    },
+    "ADECUACION MEJORAMIENTO": {
+      "pos": 15,
+      "fondo": 16,
+      "lift": 40
+    },
+    "MEJORAMIENTO MANTENIMIENTO": {
+      "pos": 14,
+      "fondo": 22,
+      "lift": 27.7
+    },
+    "ADECUACION INFRAESTRUCTURA": {
+      "pos": 11,
+      "fondo": 18,
+      "lift": 26.9
+    },
+    "MANTENIMIENTO INSTALACIONES": {
+      "pos": 11,
+      "fondo": 19,
+      "lift": 25.5
+    },
+    "MANTENIMIENTO INFRAESTRUCTURA": {
+      "pos": 20,
+      "fondo": 36,
+      "lift": 24.1
+    },
+    "REPARACIONES LOCATIVAS": {
+      "pos": 12,
+      "fondo": 22,
+      "lift": 24
+    },
+    "FISICA": {
+      "pos": 63,
+      "fondo": 113,
+      "lift": 23.9
+    },
+    "PREVENTIVOS CORRECTIVOS": {
+      "pos": 9,
+      "fondo": 17,
+      "lift": 23.6
+    },
+    "CIVILES": {
+      "pos": 8,
+      "fondo": 16,
+      "lift": 22.5
+    },
+    "MANTENIMIENTO ADECUACION": {
+      "pos": 41,
+      "fondo": 80,
+      "lift": 22.1
+    },
+    "ADECUACION": {
+      "pos": 144,
+      "fondo": 285,
+      "lift": 21.6
+    },
+    "OBRAS": {
+      "pos": 52,
+      "fondo": 111,
+      "lift": 20.1
+    },
+    "REPARACIONES": {
+      "pos": 15,
+      "fondo": 33,
+      "lift": 20
+    },
+    "ACTIVIDADES MANTENIMIENTO": {
+      "pos": 14,
+      "fondo": 31,
+      "lift": 19.9
+    },
+    "BIENES INMUEBLES": {
+      "pos": 14,
+      "fondo": 31,
+      "lift": 19.9
+    },
+    "MANTENIMIENTOS PREVENTIVOS": {
+      "pos": 8,
+      "fondo": 19,
+      "lift": 19.1
+    },
+    "FISICAS": {
+      "pos": 8,
+      "fondo": 21,
+      "lift": 17.4
+    },
+    "MANTENIMIENTOS": {
+      "pos": 18,
+      "fondo": 52,
+      "lift": 15.3
+    },
+    "MANTENIMIENTO MEJORAMIENTO": {
+      "pos": 16,
+      "fondo": 50,
+      "lift": 14.2
+    },
+    "PREVENTIVOS": {
+      "pos": 9,
+      "fondo": 30,
+      "lift": 13.7
+    },
+    "EDIFICIO": {
+      "pos": 20,
+      "fondo": 66,
+      "lift": 13.3
+    },
+    "INFRAESTRUCTURA": {
+      "pos": 100,
+      "fondo": 336,
+      "lift": 12.8
+    },
+    "CONTRATAR OBRAS": {
+      "pos": 8,
+      "fondo": 30,
+      "lift": 12.4
+    },
+    "REPARACION": {
+      "pos": 27,
+      "fondo": 114,
+      "lift": 10.4
+    },
+    "REALIZAR ACTIVIDADES": {
+      "pos": 12,
+      "fondo": 54,
+      "lift": 10.1
+    }
+  }
+}
