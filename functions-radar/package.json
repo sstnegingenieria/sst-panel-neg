@@ -1,0 +1,24 @@
+{
+  "name": "sst-panel-functions-radar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Codebase de Cloud Functions del RADAR DE LICITACIONES (SECOP II). Separado del codebase `default` a propósito: este necesita un paso de build y el otro no.",
+  "main": "lib/index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "build": "npm run typecheck && node build.mjs",
+    "serve": "npm run build && firebase emulators:start --only functions:radar"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0",
+    "typescript": "^5.4.5",
+    "@types/node": "^20.0.0"
+  },
+  "engines": {
+    "node": "22"
+  }
+}

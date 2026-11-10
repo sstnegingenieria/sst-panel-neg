@@ -42,10 +42,12 @@ export const GUARDA_VOLUMEN = {
   /**
    * Tope de documentos que una corrida automática puede crear. Calibrado
    * contra lo medido: el territorio produce ~12,7 procesos reconocidos por
-   * día hábil y el léxico marca ~11 probables por día, así que una corrida
-   * diaria normal mueve decenas. Doscientos deja margen para un lunes con
-   * fin de semana acumulado y para el solape, y sigue siendo una bandeja que
-   * una persona puede mirar.
+   * día hábil y el léxico marca ~11 probables por día. Con DOS corridas
+   * diarias (06:30 y 14:00) cada una mueve menos todavía — la de la tarde
+   * suele crear casi nada, porque lo de la mañana ya está escrito y el
+   * compare-before-write no reescribe lo que no cambió. Doscientos deja
+   * margen para un lunes con fin de semana acumulado y para el solape, y
+   * sigue siendo una bandeja que una persona puede mirar.
    */
   MAX_CREADOS_POR_CORRIDA: 200,
   /**
@@ -170,6 +172,11 @@ export const CAMPOS_REFRESCABLES = [
  * decide una persona.
  */
 export const CAMPOS_PROTEGIDOS = [
+  // `radar` es la PROCEDENCIA DEL NACIMIENTO: por qué el radar trajo este
+  // proceso. Es historia, no estado — si se refrescara, la pregunta "¿alguno
+  // de los que entraron por clase sin texto se trabajó?" dejaría de tener
+  // respuesta, que es justamente para lo que existe el campo.
+  'radar',
   'consecutivo', 'id_secop', 'origen', 'numero_proceso', 'modalidad',
   'semaforo', 'semaforo_motivos', 'semaforo_version', 'override_manual',
   'estado', 'motivo_descarte', 'oferta_neg', 'manifestaciones',
@@ -239,6 +246,73 @@ export function patchRadarSobreExistente(
 
 /** ¿Hay algo que escribir? */
 export const hayQueEscribir = (p: PatchRadar): boolean => p.cambios.length > 0
+
+// ── 2-bis. El sello del escritor ─────────────────────────────────────────────
+
+/**
+ * Campos que el DOCUMENTO de `licitaciones` exige y que el mapeo no puede
+ * conocer: quién lo creó, cuándo, y de qué corrida salió. El mapeo es puro y
+ * no tiene reloj; el escritor sí.
+ *
+ * `responsable_uid` nace VACÍO a propósito: nadie es responsable de un proceso
+ * que todavía nadie miró, y poner al sistema ahí sería mentir en un campo que
+ * la bandeja usa para repartir trabajo.
+ */
+export interface SelloEscritura {
+  /** Id de la corrida que lo trajo. */
+  corrida: string
+  /** Momento de la escritura, en el tipo que use el escritor. */
+  ahora: unknown
+  /** Quién escribe. Para el radar, un identificador de sistema. */
+  actor: string
+}
+
+export const ACTOR_RADAR = 'radar_secop'
+
+/**
+ * Agrega al documento lo que solo el escritor sabe. PURA: el `ahora` y el id de
+ * corrida entran por parámetro, así que un test puede comparar el resultado
+ * campo por campo.
+ */
+export function sellarParaEscritura(
+  doc: Readonly<LicitacionDetectada>, sello: SelloEscritura,
+): Record<string, unknown> {
+  return {
+    ...doc,
+    radar: { ...doc.radar, corrida: sello.corrida },
+    responsable_uid: '',
+    creado_por: sello.actor,
+    creado_en: sello.ahora,
+    actualizado_por: sello.actor,
+    actualizado_en: sello.ahora,
+  }
+}
+
+/**
+ * Convierte a `Timestamp` las fechas que el mapeo dejó en ISO.
+ *
+ * El mapeo devuelve ISO porque es puro y no toca el SDK (mismo reparto que el
+ * importador histórico); la conversión es del escritor, y va acá para que
+ * también tenga test. `hacer` se inyecta: `Timestamp.fromDate` en la CF,
+ * cualquier cosa en el test.
+ */
+export function fechasATimestamp<T>(
+  doc: Readonly<LicitacionDetectada>, hacer: (iso: string) => T,
+): Omit<LicitacionDetectada, 'cronograma'> & {
+  cronograma: Record<keyof LicitacionDetectada['cronograma'], T | null>
+} {
+  const c = doc.cronograma
+  return {
+    ...doc,
+    cronograma: {
+      publicacion: c.publicacion === null ? null : hacer(c.publicacion),
+      manifestacion: null,
+      sorteo: null,
+      cierre: c.cierre === null ? null : hacer(c.cierre),
+      adjudicacion: null,
+    },
+  }
+}
 
 // ── 3. El plan de escritura y el registro de la corrida ─────────────────────
 
@@ -349,6 +423,122 @@ export function resumenLegible(r: RegistroCorridaRadar): string {
     partes.push(`habrían calificado fuera del territorio: ${r.observados.habrian_calificado}`)
   }
   return partes.join(' · ')
+}
+
+// ── 4. El estado del radar: la marca, el historial y el acumulado ───────────
+
+/**
+ * UN SOLO DOCUMENTO para todo el estado del radar: `configuracion/radar_secop`.
+ *
+ * ── POR QUÉ UN DOC DE `configuracion` Y NO UNA COLECCIÓN NUEVA ──────────────
+ *
+ * Precedente de la casa: `configuracion/censo_consecutivos`, que escribe solo
+ * su CF con Admin SDK y el panel LEE por el match genérico de `configuracion`
+ * (`accesoSIGP`). Consecuencia práctica: **NO hace falta regla nueva**, o sea
+ * un deploy menos de reglas. Una colección `corridas_radar` habría exigido su
+ * propia regla de lectura sin dar nada que este documento no dé.
+ *
+ * El precio es el límite de 1 MB, y de ahí la forma: el REGISTRO COMPLETO solo
+ * de la última corrida, un historial ACOTADO de resúmenes, y un ACUMULADO
+ * monótono que sobrevive a la poda. Así la pregunta de los tres meses
+ * —"¿cuántos entraron por evidencia sin texto?"— se responde con el acumulado,
+ * y "¿alguno se trabajó?" con `licitaciones.radar.senal`, que vive en cada
+ * documento.
+ */
+export interface EstadoRadar {
+  /** Marca de la última corrida que SÍ escribió. `null` = nunca corrió. */
+  marca: string | null
+  solape_dias: number
+  /** Escotilla de la guarda de volumen. La pone una persona, no la CF. */
+  autorizado_manual?: boolean
+  /** El registro completo de la última corrida. */
+  ultima_corrida: RegistroCorridaRadar | null
+  /** Historial acotado: lo justo para ver la tendencia. */
+  corridas: {
+    ejecutada_en: string
+    resumen: string
+    procesos_vistos: number
+    persistidos: number
+    escribio: boolean
+  }[]
+  /** Totales monótonos, que sobreviven a la poda del historial. */
+  acumulado: {
+    corridas: number
+    corridas_detenidas: number
+    procesos_vistos: number
+    creados: number
+    refrescados: number
+    /** Los que entraron por clase sin que el texto lo dijera. */
+    evidencia_sin_texto: number
+    /** Los que habrían calificado fuera del territorio. */
+    observados_habrian_calificado: number
+    /** Descartados por código aunque el léxico los reconoce. */
+    descartados_con_texto: number
+  }
+}
+
+/** Cuántas corridas se guardan en el historial del documento. */
+export const MAX_CORRIDAS_EN_HISTORIAL = 30
+
+export const ESTADO_RADAR_INICIAL: EstadoRadar = {
+  marca: null,
+  solape_dias: 45,
+  ultima_corrida: null,
+  corridas: [],
+  acumulado: {
+    corridas: 0, corridas_detenidas: 0, procesos_vistos: 0, creados: 0,
+    refrescados: 0, evidencia_sin_texto: 0, observados_habrian_calificado: 0,
+    descartados_con_texto: 0,
+  },
+}
+
+/**
+ * Nuevo estado del radar tras una corrida. PURA.
+ *
+ * El acumulado suma SIEMPRE —incluso si la corrida se detuvo— porque lo que
+ * mide es lo que el radar VIO, no lo que escribió; y `corridas_detenidas` deja
+ * ver cuántas veces la guarda tuvo que intervenir. La marca la decide
+ * `marcaSiguiente`, que no avanza si no se escribió.
+ */
+export function avanzarEstadoRadar(
+  actual: Readonly<EstadoRadar> | null | undefined,
+  registro: RegistroCorridaRadar,
+  max = MAX_CORRIDAS_EN_HISTORIAL,
+): EstadoRadar {
+  const base = actual ?? ESTADO_RADAR_INICIAL
+  const escribio = registro.escritura !== null
+  const e = registro.escritura
+  const entrada = {
+    ejecutada_en: registro.ejecutada_en,
+    resumen: resumenLegible(registro),
+    procesos_vistos: registro.procesos_vistos,
+    persistidos: e ? e.creados + e.refrescados : 0,
+    escribio,
+  }
+  const a = base.acumulado
+  return {
+    marca: registro.marca_nueva ?? base.marca,
+    solape_dias: base.solape_dias,
+    ...(base.autorizado_manual !== undefined
+      // La escotilla se CONSUME: si alguien autorizó un volcado, no queda
+      // autorizado para siempre.
+      ? { autorizado_manual: false }
+      : {}),
+    ultima_corrida: registro,
+    corridas: [entrada, ...base.corridas].slice(0, max),
+    acumulado: {
+      corridas: a.corridas + 1,
+      corridas_detenidas: a.corridas_detenidas + (escribio ? 0 : 1),
+      procesos_vistos: a.procesos_vistos + registro.procesos_vistos,
+      creados: a.creados + (e?.creados ?? 0),
+      refrescados: a.refrescados + (e?.refrescados ?? 0),
+      evidencia_sin_texto: a.evidencia_sin_texto + registro.evidencia_sin_texto.total,
+      observados_habrian_calificado:
+        a.observados_habrian_calificado + registro.observados.habrian_calificado,
+      descartados_con_texto:
+        a.descartados_con_texto + registro.descartes.con_texto_coincidente,
+    },
+  }
 }
 
 /** Reporte de ingesta + plan, para que el caller no recalcule nada. */

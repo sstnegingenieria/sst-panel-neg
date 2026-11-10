@@ -284,12 +284,24 @@ describe('las tres CLASES con adjudicación probada (B.1c)', () => {
     expect(CATALOGO_UNSPC_NEG.clases).toBe(CLASES_CON_ADJUDICACION_NEG)
   })
 
-  it('un código de la clase entra como SI, con su propia señal', () => {
-    const c = clasificarProceso('V1.31162800', 'SUMINISTRO DE FERRETERIA', TERMINOS_NEG,
-      { departamento: 'Cundinamarca' })
+  it('clase SIN que el léxico diga nada: entra por evidencia, con señal aparte', () => {
+    // Los 24 de ferretería pura de 2025: NEG ganó bajo ese código, así que
+    // entran; pero el texto no habla de mantenimiento y eso queda marcado.
+    const c = clasificarProceso('V1.31162800', 'ADQUISICION DE ELEMENTOS DE ENCIERRO',
+      TERMINOS_NEG, { departamento: 'Cundinamarca' })
     expect(c.veredicto).toBe('si')
-    expect(c.senal).toBe('codigo_en_clase_adjudicada')
+    expect(c.senal).toBe('codigo_en_clase_sin_texto')
     expect(c.origen_codigo).toBe('clase')
+    expect(c.terminos).toEqual([])
+  })
+
+  it('clase CON el léxico de acuerdo: señal distinta, para poder separarlos', () => {
+    const c = clasificarProceso('V1.31162800',
+      'SUMINISTRO DE FERRETERIA PARA EL MANTENIMIENTO DE LA INFRAESTRUCTURA FISICA',
+      TERMINOS_NEG, { departamento: 'Cundinamarca' })
+    expect(c.veredicto).toBe('si')
+    expect(c.senal).toBe('codigo_en_clase_con_texto')
+    expect(c.terminos.length).toBeGreaterThan(0)
   })
 
   it('la familia del RUP conserva su señal: el aporte de B.1c es medible aparte', () => {
@@ -321,12 +333,13 @@ describe('las tres CLASES con adjudicación probada (B.1c)', () => {
     expect(rep.por_senal.codigo_fuera_de_familia).toBe(0)
     // …pero uno está en Boyacá y el territorio lo deja afuera: 2 persistidos.
     expect(rep.procesos).toBe(2)
-    expect(rep.por_senal.codigo_en_clase_adjudicada).toBe(2)
+    const porClase = rep.por_senal.codigo_en_clase_con_texto + rep.por_senal.codigo_en_clase_sin_texto
+    expect(porClase).toBe(2)
     expect(rep.descartes.fuera_de_territorio).toBe(1)
     expect(rep.observados.total).toBe(1)
     expect(rep.observados.habrian_calificado).toBe(1)
     expect(rep.observados.ejemplos[0].departamento).toBe('Boyacá')
-    expect(rep.observados.ejemplos[0].senal_previa).toBe('codigo_en_clase_adjudicada')
+    expect(rep.observados.ejemplos[0].senal_previa).toMatch(/^codigo_en_clase_/)
   })
 
   it('los 3 que ganó SIN código entran como PROBABLE', () => {
@@ -342,6 +355,59 @@ describe('las tres CLASES con adjudicación probada (B.1c)', () => {
       expect(r.meta.clasificacion.senal).toBe('texto_coincide')
       expect(r.doc.categoria_unspsc).toBeNull()
     }
+  })
+})
+
+describe('los que entran por evidencia sin que el texto lo diga', () => {
+  const ferreteriaPura = (i: number): FilaSecop => ({
+    ...una('minima_limpia'),
+    id_del_proceso: `CO1.REQ.FERR${i}`,
+    codigo_principal_de_categoria: 'V1.31162800',
+    descripci_n_del_procedimiento: 'ADQUISICION DE ELEMENTOS DE ENCIERRO PARA EL CENTRO',
+  })
+
+  it('se persisten, con su señal, y el reporte los SEPARA con muestra', () => {
+    const rep = ingerirSecop([ferreteriaPura(1), ferreteriaPura(2)], hash)
+    expect(rep.procesos).toBe(2)                         // entran
+    expect(rep.por_senal.codigo_en_clase_sin_texto).toBe(2)
+    expect(rep.por_senal.codigo_en_clase_con_texto).toBe(0)
+    expect(rep.evidencia_sin_texto.total).toBe(2)
+    expect(rep.evidencia_sin_texto.ejemplos).toHaveLength(2)
+    expect(rep.evidencia_sin_texto.ejemplos[0].categoria).toBe('V1.31162800')
+    // La identidad que importa: el total del bloque es el de la señal.
+    expect(rep.evidencia_sin_texto.total).toBe(rep.por_senal.codigo_en_clase_sin_texto)
+  })
+
+  it('la muestra está acotada aunque sean muchos', () => {
+    const muchas = Array.from({ length: 30 }, (_, i) => ferreteriaPura(i))
+    const rep = ingerirSecop(muchas, hash)
+    expect(rep.evidencia_sin_texto.total).toBe(30)
+    expect(rep.evidencia_sin_texto.ejemplos).toHaveLength(10)
+  })
+
+  it('EL DOCUMENTO guarda por qué entró: la pregunta de los tres meses', () => {
+    // Sin esto, "¿alguno de los que entraron por clase sin texto se trabajó?"
+    // solo se podría responder con la muestra de 10 del registro de la corrida.
+    const rep = ingerirSecop([ferreteriaPura(7)], hash)
+    const doc = rep.registros[0].doc
+    expect(doc.radar.senal).toBe('codigo_en_clase_sin_texto')
+    expect(doc.radar.terminos).toEqual([])
+    expect(doc.radar.vocabulario_version).toBe('v1.0')
+    expect(doc.radar.corrida, 'lo sella el escritor, no el mapeo').toBeNull()
+  })
+
+  it('un probable guarda los términos que lo trajeron', () => {
+    const rep = ingerirSecop(caso('ganados_neg_sin_codigo'), hash)
+    const doc = rep.registros[0].doc
+    expect(doc.radar.senal).toBe('texto_coincide')
+    expect(doc.radar.terminos.length).toBeGreaterThan(0)
+  })
+
+  it('la versión del léxico inyectada queda en el documento', () => {
+    const rep = ingerirSecop(caso('ganados_neg_sin_codigo'), hash, {
+      terminos: ['MANTENIMIENTO'], vocabulario_version: 'v2.0 (documento)',
+    })
+    expect(rep.registros[0].doc.radar.vocabulario_version).toBe('v2.0 (documento)')
   })
 })
 
