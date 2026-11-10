@@ -396,29 +396,68 @@ $lectorExports = Join-Path $tmp 'leer-exports.js'
 const [, , entry] = process.argv
 const PROYECTO = 'neg-sst-app'
 process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || PROYECTO
+const { createRequire } = require('module')
+// El SDK se resuelve DESDE EL ENTRY, no desde este script: cada codebase trae
+// su propio node_modules. Con las CLASES REALES la clasificacion es exacta y
+// no depende de `typeof` ni de nombres de constructor.
+const reqEntry = createRequire(entry)
+let Expression = null
+let RESET_VALUE = null
+try {
+  Expression = reqEntry('firebase-functions/params').Expression
+  RESET_VALUE = reqEntry('firebase-functions').RESET_VALUE
+} catch (e) { /* sin clases: todo objeto cae en `desconocidas` y el script aborta */ }
 const m = require(entry)
 const nombres = []
 const sinEndpoint = []
 const cuentas = new Set()
-// La CUENTA DE RUNTIME tambien se deriva del endpoint: firebase-functions
-// copia la opcion `serviceAccount` a `__endpoint.serviceAccountEmail`. Puede
-// venir en forma corta ('nombre@'), que es la que el propio SDK expande con
-// el proyecto; si el codebase no declara ninguna, el conjunto queda vacio y
-// significa "corre con la cuenta de computo por defecto".
+const porParametro = []
+const desconocidas = []
+// LA CUENTA DE RUNTIME se deriva del endpoint igual que la lista de funciones:
+// firebase-functions copia la opcion `serviceAccount` a
+// `__endpoint.serviceAccountEmail`. Pero ese campo tiene CUATRO formas, y
+// medirlas costo dos errores que vale la pena no repetir:
+//
+//  1. Ausente            -> corre con la cuenta de computo por defecto.
+//  2. `RESET_VALUE`      -> el centinela del SDK para "vuelve al default".
+//     Es un OBJETO TRUTHY cuyo `toJSON()` devuelve null, asi que parece null
+//     al imprimirlo y no lo es. Los 16 exports del codebase `default` lo
+//     traen: una guarda por `typeof` los reporto a TODOS como cuenta
+//     dedicada. Se compara por IDENTIDAD contra el valor del SDK.
+//  3. Cadena             -> el correo, o la forma corta 'nombre@' que el
+//     propio SDK expande con el proyecto.
+//  4. `Expression`       -> definido por PARAMETRO (`defineString` y cia.,
+//     hallazgo del frente SIGP). Se resuelve al desplegar, asi que leyendo el
+//     artefacto NO se sabe cual es. Descartarlo en silencio seria el mismo
+//     pecado que este chequeo vino a corregir: diria "cero cuentas
+//     dedicadas" sobre un codebase que si corre con cuenta propia.
+//
+// Cualquier otra forma va a `desconocidas` y ABORTA el deploy: ante un campo
+// que no sabemos leer, callar es peor que parar.
 for (const k of Object.keys(m)) {
   const v = m[k]
-  if (v && v.__endpoint) {
-    nombres.push(k)
-    let sa = v.__endpoint.serviceAccountEmail || v.__endpoint.serviceAccount || ''
-    if (typeof sa === 'string' && sa) {
-      if (sa.endsWith('@')) sa = sa + PROYECTO + '.iam.gserviceaccount.com'
-      if (sa.includes('@')) cuentas.add(sa)
-    }
+  if (!(v && v.__endpoint)) {
+    if (typeof v === 'function' || (v && typeof v === 'object')) sinEndpoint.push(k)
     continue
   }
-  if (typeof v === 'function' || (v && typeof v === 'object')) sinEndpoint.push(k)
+  nombres.push(k)
+  const e = v.__endpoint
+  const sa = e.serviceAccountEmail !== undefined ? e.serviceAccountEmail : e.serviceAccount
+  if (!sa) continue
+  if (RESET_VALUE !== null && sa === RESET_VALUE) continue
+  if (typeof sa === 'string') {
+    const email = sa.endsWith('@') ? sa + PROYECTO + '.iam.gserviceaccount.com' : sa
+    if (email.includes('@')) cuentas.add(email)
+    else desconocidas.push(k + ': cadena sin arroba (' + sa + ')')
+    continue
+  }
+  if (Expression !== null && sa instanceof Expression) { porParametro.push(k); continue }
+  const clase = (sa.constructor && sa.constructor.name) || typeof sa
+  desconocidas.push(k + ': forma no reconocida (' + clase + ')')
 }
-console.log(JSON.stringify({ nombres, sinEndpoint, cuentas: [...cuentas] }))
+console.log(JSON.stringify({
+  nombres, sinEndpoint, cuentas: [...cuentas], porParametro, desconocidas,
+}))
 '@ | Set-Content -Path $lectorExports -Encoding UTF8
 
 $declaradasJson = & node $lectorExports $entryAbs
@@ -455,9 +494,42 @@ Write-Host ("Declaradas por el codigo ({0}): {1}" -f $declaradas.Count, ($declar
 # esta desplegando, igual que la lista de funciones. Si el codebase declara
 # varias, se comprueban todas.
 $cuentasRuntime = @($lectura.cuentas)
-if ($cuentasRuntime.Count -eq 0) {
+$cuentasPorParametro = @($lectura.porParametro)
+$cuentasDesconocidas = @($lectura.desconocidas)
+
+# ANTE UN CAMPO QUE NO SABEMOS LEER, PARAR. Si el `serviceAccountEmail` de un
+# endpoint tiene una forma que esta lectura no reconoce, no se puede afirmar ni
+# que hay cuenta dedicada ni que no la hay — y seguir seria desplegar con un
+# chequeo que mira para otro lado.
+if ($cuentasDesconocidas.Count -gt 0) {
+  Remove-Item $tmp -Recurse -Force
+  Abortar ("no se pudo leer la cuenta de runtime de estas funciones:`n" +
+    '    ' + ($cuentasDesconocidas -join "`n    ") + "`n`n" +
+    "Puede ser un cambio de forma del SDK (firebase-functions). Hasta que esta`n" +
+    "lectura sepa clasificarlo, el chequeo del actAs no puede responder, y un`n" +
+    "chequeo que no responde no debe dejar pasar un deploy.`n`n" +
+    'QUE HACER: revisa el paso 2-bis de este script contra la version del SDK.')
+}
+
+# Lo que NO se puede verificar se DICE, no se omite: un chequeo que calla
+# cuando no sabe da confianza falsa, que es peor que no tenerlo.
+if ($cuentasPorParametro.Count -gt 0) {
+  Write-Host ''
+  Write-Host '*** CUENTA DE RUNTIME DEFINIDA POR PARAMETRO: NO VERIFICABLE AQUI ***' -ForegroundColor Red
+  Write-Host ('    Funciones: ' + ($cuentasPorParametro -join ', ')) -ForegroundColor Yellow
+  Write-Host '    Su serviceAccount es una Expression (defineString y cia.), no un correo:' -ForegroundColor Yellow
+  Write-Host '    se resuelve al desplegar, asi que leyendo el artefacto no se sabe cual es.' -ForegroundColor Yellow
+  Write-Host '    VERIFICA A MANO, con el correo real de esa cuenta:' -ForegroundColor Yellow
+  Write-Host '        gcloud iam service-accounts get-iam-policy <SA> --project=neg-sst-app' -ForegroundColor Yellow
+  Write-Host ("          (busca a $quien con roles/iam.serviceAccountUser)") -ForegroundColor Yellow
+  Write-Host '        gcloud run services get-iam-policy <servicio> --region=<region> --project=neg-sst-app' -ForegroundColor Yellow
+  Write-Host '          (si la funcion es programada, busca a la SA con roles/run.invoker)' -ForegroundColor Yellow
+  Write-Host ''
+}
+
+if ($cuentasRuntime.Count -eq 0 -and $cuentasPorParametro.Count -eq 0) {
   Write-Host 'Cuenta de runtime: la de computo por defecto (el codigo no declara otra).' -ForegroundColor DarkGray
-} else {
+} elseif ($cuentasRuntime.Count -gt 0) {
   $verifActAs = Join-Path $tmp 'permisos-actas.js'
   ($PreludioToken + @'
 const [, , ...cuentas] = process.argv
