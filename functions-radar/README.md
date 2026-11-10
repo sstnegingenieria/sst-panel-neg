@@ -5,9 +5,11 @@ APARTE del de siempre (`functions/`, codebase `default`) a propósito.
 
 ## Para los otros frentes: su codebase no cambió
 
-`firebase deploy --only functions:default` despliega las 12 funciones de
+`firebase deploy --only functions:default` despliega las funciones de
 `functions/` **exactamente como antes**: sin build, sin paso nuevo, sin tocar
-nada de esta carpeta. El `predeploy` del build vive dentro de la entrada
+nada de esta carpeta. (De paso, una corrección medida: ese codebase declara hoy
+**16 exports**, no 12 — el número de 12 venía de los avisos anteriores y de la
+documentación, no de contarlos.) El `predeploy` del build vive dentro de la entrada
 `radar` de `firebase.json`, y el CLI resuelve los hooks por codebase.
 
 Lo único que cambia para ustedes: `firebase deploy --only functions` (sin

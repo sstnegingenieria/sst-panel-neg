@@ -437,11 +437,11 @@ por los tres frentes, así que esto es lo que hay que saber:
 
 | codebase | carpeta | build | funciones |
 |---|---|---|---|
-| `default` | `functions/` | **ninguno** | las 12 existentes |
+| `default` | `functions/` | **ninguno** | las existentes (16 exports declarados al 09-nov-2026) |
 | `radar` | `functions-radar/` | esbuild (`npm run build`) | `ingerirRadarSecopManana` (06:30 L–V) y `ingerirRadarSecopTarde` (14:00 L–V), Bogotá |
 
 - **El codebase `default` NO cambió y no necesita build.** `firebase deploy
-  --only functions:default` despliega las 12 funciones exactamente como antes.
+  --only functions:default` lo despliega exactamente como antes.
 - El `predeploy` del build vive **dentro de la entrada `radar`**, y el CLI
   resuelve los hooks por codebase (`lib/deploy/lifecycleHooks.js` de
   firebase-tools, verificado sobre la 15.22.4 que declara el repo): desplegar
