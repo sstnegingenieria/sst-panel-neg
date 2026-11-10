@@ -589,7 +589,16 @@ export type VeredictoRadar = 'si' | 'probable' | 'no'
 /** Qué señal produjo el veredicto. Un veredicto sin señal no es auditable. */
 export type SenalClasificacion =
   | 'codigo_en_familia'
-  | 'codigo_en_clase_adjudicada'
+  /** Clase con adjudicación probada Y el objeto habla del trabajo de NEG. */
+  | 'codigo_en_clase_con_texto'
+  /**
+   * Clase con adjudicación probada pero el léxico NO reconoce el objeto: los
+   * 24 de ferretería pura de 2025. Entran por EVIDENCIA (NEG ganó bajo ese
+   * código), no porque el texto lo diga, así que llevan señal aparte y el
+   * reporte de cada corrida los separa — para que en tres meses se pueda ver
+   * si alguno se trabajó o si entraron para nada.
+   */
+  | 'codigo_en_clase_sin_texto'
   | 'codigo_fuera_de_familia'
   | 'texto_coincide'
   | 'sin_codigo_ni_texto'
@@ -606,15 +615,35 @@ export type SenalClasificacion =
  *
  * Pero una decisión así tiene que ser revisable con número: estos procesos se
  * clasifican igual, se marcan `fuera_de_territorio` con `habria_calificado`, y
- * el agregado de la corrida los cuenta con muestra. Si el contador dice que se
- * está dejando pasar demasiado, se revisa con el dato en la mano.
+ * el agregado de la corrida los cuenta con muestra.
  *
- * ⚠ Referencia medida al fijar esto (09-nov-2026), para que nadie se sorprenda:
- * en 2025 Antioquia + Boyacá tuvieron **1.696 procesos reconocidos por código**
- * en las modalidades de ingesta, más 1.600 sin clasificar. El orden de magnitud
- * del "qué estamos dejando pasar" es de millares al año, no de centenas — y
- * eso NO cambia la decisión, porque lo que decide es cuántos de esos NEG podría
- * ganar y atender, no cuántos existen. El contador medirá lo primero.
+ * ── EL UMBRAL DE REVISIÓN ───────────────────────────────────────────────────
+ *
+ * ⚠ **El conteo bruto NO es el umbral.** Referencia medida al fijar esto
+ * (09-nov-2026): en 2025 Antioquia + Boyacá tuvieron **1.696 procesos
+ * reconocidos por código** en las modalidades de ingesta, más 1.600 sin
+ * clasificar. O sea que este contador va a reportar **millares al año, no
+ * centenas**, y cruzaría cualquier umbral de conteo bruto en la primera semana
+ * sin decir nada útil.
+ *
+ * El umbral se expresa sobre algo **más fino que el conteo**: cuántos de esos
+ * procesos NEG habría podido GANAR y ATENDER. Dos formas medibles, en orden de
+ * preferencia:
+ *
+ *  1. **Adjudicables**: de los que habrían calificado, cuántos terminaron
+ *     adjudicados a un proveedor de perfil comparable al de NEG —tamaño de
+ *     contrato y tipo de trabajo— en vez de a un actor local grande. El
+ *     dataset trae `nit_del_proveedor_adjudicado` y `valor_total_adjudicacion`,
+ *     así que es una consulta, no una encuesta.
+ *  2. **Ganados por competidores comparables**: los mismos NIT que hoy le
+ *     ganan a NEG en Bogotá, apareciendo allá. Si los competidores que NEG ya
+ *     enfrenta están facturando en Antioquia, la pregunta cambia de naturaleza.
+ *
+ * Mientras no haya una de esas dos medidas, el contador sirve para VER, no para
+ * decidir. Lo que lo haría revisable es que la medida fina muestre volumen
+ * adjudicable sostenido, no que el conteo bruto sea grande — ya sabemos que lo
+ * es, y la decisión se tomó igual porque la restricción real es la capacidad de
+ * atender, no la de encontrar.
  */
 export const DEPARTAMENTOS_OBSERVADOS = ['Antioquia', 'Boyacá'] as const
 
@@ -638,6 +667,12 @@ export interface Clasificacion {
    * aplicado a la frontera geográfica.
    */
   habria_calificado: boolean
+  /**
+   * La señal que el proceso TENÍA antes de que el territorio lo dejara afuera.
+   * Se conserva en vez de re-derivarse: re-derivar es una segunda
+   * implementación de la misma decisión, y las dos pueden divergir.
+   */
+  senal_previa?: SenalClasificacion
 }
 
 /**
@@ -669,9 +704,13 @@ export function clasificarProceso(
     v = {
       ...base,
       veredicto: 'si',
-      // La señal distingue familia del RUP de clase con adjudicación probada,
-      // para poder medir el aporte de la decisión de B.1c corrida por corrida.
-      senal: origen_codigo === 'clase' ? 'codigo_en_clase_adjudicada' : 'codigo_en_familia',
+      // Tres señales distintas y no una: familia del RUP, clase con el texto
+      // de acuerdo, y clase SIN que el texto diga nada (los de ferretería
+      // pura, que entran por evidencia). Así el aporte de cada decisión se
+      // mide por separado corrida por corrida.
+      senal: origen_codigo === 'clase'
+        ? (coincide ? 'codigo_en_clase_con_texto' : 'codigo_en_clase_sin_texto')
+        : 'codigo_en_familia',
       terminos: hallados,
       descartado_con_texto_coincidente: false,
     }
@@ -712,6 +751,7 @@ export function clasificarProceso(
       ...v,
       veredicto: 'no',
       senal: 'fuera_de_territorio',
+      senal_previa: v.senal,
       habria_calificado: sePersiste(v.veredicto),
     }
   }
@@ -974,6 +1014,24 @@ export interface LicitacionDetectada {
   migrado: false
   capacidad_manual: null
   activa: true
+  /**
+   * PROCEDENCIA DEL NACIMIENTO: por qué el radar trajo este proceso.
+   *
+   * Se escribe UNA vez, al nacer, y el radar NO la refresca — es historia, no
+   * estado. Sin esto, la pregunta "de los que entraron por clase sin que el
+   * texto lo dijera, ¿alguno se trabajó?" solo se podría responder con la
+   * muestra de 10 del registro de la corrida; con esto es una consulta a
+   * `licitaciones`.
+   */
+  radar: {
+    senal: SenalClasificacion
+    /** Términos del léxico que lo trajeron. Vacío si entró por código. */
+    terminos: string[]
+    /** Con qué versión del léxico se clasificó. */
+    vocabulario_version: string
+    /** Id de la corrida que lo creó. Lo sella el escritor, no el mapeo. */
+    corrida: string | null
+  }
 }
 
 /** Metadatos del acto de ingesta — para el reporte y el triage, no para el doc. */
@@ -1037,6 +1095,7 @@ export function entradaSemaforoSecop(d: {
 export function mapearProceso(
   p: ProcesoColapsado, hash: (s: string) => string,
   terminos: readonly string[] = TERMINOS_NEG,
+  vocabulario_version: string = VOCABULARIO_NEG_VERSION,
 ): RegistroIngesta | null {
   const f = p.representante
   const id_secop = p.id_secop.trim()
@@ -1098,6 +1157,12 @@ export function mapearProceso(
     migrado: false,
     capacidad_manual: null,
     activa: true,
+    radar: {
+      senal: clasificacion.senal,
+      terminos: clasificacion.terminos,
+      vocabulario_version,
+      corrida: null,
+    },
   }
 
   const meta: MetaIngesta = {
@@ -1218,6 +1283,17 @@ export interface ObservadosIngesta {
   }[]
 }
 
+/**
+ * Los que entraron por CLASE sin que el léxico reconozca el objeto — los 24 de
+ * ferretería pura. Se separan en el reporte de cada corrida, con muestra, para
+ * que en tres meses se pueda ver si alguno se trabajó o si entraron para nada.
+ * `total` tiene que coincidir con `por_senal.codigo_en_clase_sin_texto`.
+ */
+export interface EvidenciaSinTexto {
+  total: number
+  ejemplos: { id_secop: string; categoria: string | null; objeto: string }[]
+}
+
 export interface ReporteIngestaSecop {
   /** SOLO los persistibles: veredicto `si` o `probable` (trampa 13). */
   registros: RegistroIngesta[]
@@ -1236,6 +1312,8 @@ export interface ReporteIngestaSecop {
    */
   por_senal: Record<SenalClasificacion, number>
   descartes: DescartesIngesta
+  /** Entraron por evidencia de clase, sin que el texto lo dijera. */
+  evidencia_sin_texto: EvidenciaSinTexto
   /** Los departamentos observados sin abrir (B.1c). */
   observados: ObservadosIngesta
   /** Conteo por tri-estado de familia (trampa 5), sobre los vistos. */
@@ -1274,7 +1352,8 @@ export function ingerirSecop(
   const por_veredicto: Record<VeredictoRadar, number> = { si: 0, probable: 0, no: 0 }
   const por_senal: Record<SenalClasificacion, number> = {
     codigo_en_familia: 0,
-    codigo_en_clase_adjudicada: 0,
+    codigo_en_clase_con_texto: 0,
+    codigo_en_clase_sin_texto: 0,
     codigo_fuera_de_familia: 0,
     texto_coincide: 0,
     sin_codigo_ni_texto: 0,
@@ -1292,6 +1371,7 @@ export function ingerirSecop(
     ejemplos_con_texto_coincidente: [],
   }
   const observados: ObservadosIngesta = { total: 0, habrian_calificado: 0, ejemplos: [] }
+  const evidencia_sin_texto: EvidenciaSinTexto = { total: 0, ejemplos: [] }
 
   // Se mapea TODO (el veredicto necesita el objeto ya leído) y se persiste
   // solo lo que da `si` o `probable`. Los `no` no producen documento pero SÍ
@@ -1300,13 +1380,23 @@ export function ingerirSecop(
   const registros: RegistroIngesta[] = []
   let procesos_vistos = 0
   for (const p of colapsados) {
-    const r = mapearProceso(p, hash, terminos)
+    const r = mapearProceso(p, hash, terminos, opciones?.vocabulario_version)
     if (!r) continue
     procesos_vistos++
     const c = r.meta.clasificacion
     por_veredicto[c.veredicto]++
     por_senal[c.senal]++
     por_familia[c.familia]++
+    if (c.senal === 'codigo_en_clase_sin_texto') {
+      evidencia_sin_texto.total++
+      if (evidencia_sin_texto.ejemplos.length < MAX_EJEMPLOS_DESCARTE) {
+        evidencia_sin_texto.ejemplos.push({
+          id_secop: r.doc.id_secop,
+          categoria: r.doc.categoria_unspsc,
+          objeto: r.doc.objeto.slice(0, 200),
+        })
+      }
+    }
     if (sePersiste(c.veredicto)) { registros.push(r); continue }
     descartes.total++
     if (c.senal === 'codigo_fuera_de_familia') descartes.codigo_fuera_de_familia++
@@ -1322,9 +1412,7 @@ export function ingerirSecop(
             departamento: r.doc.entidad.departamento,
             categoria: r.doc.categoria_unspsc,
             objeto: r.doc.objeto.slice(0, 200),
-            senal_previa: c.origen_codigo !== null
-              ? (c.origen_codigo === 'clase' ? 'codigo_en_clase_adjudicada' : 'codigo_en_familia')
-              : 'texto_coincide',
+            senal_previa: c.senal_previa ?? c.senal,
           })
         }
       }
@@ -1410,6 +1498,7 @@ export function ingerirSecop(
     por_veredicto,
     por_senal,
     descartes,
+    evidencia_sin_texto,
     observados,
     por_familia,
     por_origen_fecha,
@@ -1453,6 +1542,8 @@ export interface ResumenCorridaRadar {
   por_veredicto: Record<VeredictoRadar, number>
   por_senal: Record<SenalClasificacion, number>
   descartes: DescartesIngesta
+  /** Los que entraron por evidencia de clase sin texto, separados. */
+  evidencia_sin_texto: EvidenciaSinTexto
   /** Qué se está dejando pasar por no abrir Antioquia y Boyacá (B.1c). */
   observados: ObservadosIngesta
   por_familia: Record<FamiliaRup, number>
@@ -1484,6 +1575,7 @@ export function construirResumenCorrida(
     por_veredicto: r.por_veredicto,
     por_senal: r.por_senal,
     descartes: r.descartes,
+    evidencia_sin_texto: r.evidencia_sin_texto,
     observados: r.observados,
     por_familia: r.por_familia,
     por_origen_fecha: r.por_origen_fecha,

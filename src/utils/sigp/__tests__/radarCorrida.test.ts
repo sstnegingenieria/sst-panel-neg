@@ -14,6 +14,8 @@ import {
   CAMPOS_REFRESCABLES, CAMPOS_PROTEGIDOS,
   patchRadarSobreExistente, hayQueEscribir, planearEscritura,
   construirRegistroCorrida, marcaSiguiente, resumenLegible, cuantosCrearia,
+  sellarParaEscritura, fechasATimestamp, ACTOR_RADAR,
+  avanzarEstadoRadar, MAX_CORRIDAS_EN_HISTORIAL, ESTADO_RADAR_INICIAL,
 } from '../radarCorrida'
 import {
   ingerirSecop, construirResumenCorrida, colapsarPorProceso, mapearProceso,
@@ -191,6 +193,44 @@ describe('re-escritura: el radar no pisa el trabajo humano', () => {
   })
 })
 
+describe('el sello del escritor', () => {
+  it('agrega lo que el mapeo no puede saber, y nada más', () => {
+    const doc = docDe('minima_limpia')
+    const sellado = sellarParaEscritura(doc, { corrida: 'corr-1', ahora: 'T', actor: ACTOR_RADAR })
+    expect(sellado.creado_por).toBe('radar_secop')
+    expect(sellado.actualizado_por).toBe('radar_secop')
+    expect(sellado.creado_en).toBe('T')
+    expect(sellado.actualizado_en).toBe('T')
+    expect((sellado.radar as { corrida: string }).corrida).toBe('corr-1')
+    // Lo demás queda intacto.
+    expect(sellado.id_secop).toBe(doc.id_secop)
+    expect(sellado.estado).toBe('detectada')
+  })
+
+  it('`responsable_uid` nace VACÍO: nadie es dueño de lo que nadie miró', () => {
+    const sellado = sellarParaEscritura(docDe('minima_limpia'),
+      { corrida: 'c', ahora: 0, actor: ACTOR_RADAR })
+    expect(sellado.responsable_uid).toBe('')
+  })
+
+  it('las fechas ISO se convierten con la fábrica que inyecte el escritor', () => {
+    const doc = docDe('minima_limpia')
+    expect(typeof doc.cronograma.publicacion).toBe('string')
+    const conv = fechasATimestamp(doc, iso => ({ ts: iso }))
+    expect(conv.cronograma.publicacion).toEqual({ ts: '2025-01-20T05:00:00.000Z' })
+    expect(conv.cronograma.manifestacion).toBeNull()
+    expect(conv.cronograma.sorteo).toBeNull()
+    expect(conv.cronograma.adjudicacion).toBeNull()
+  })
+
+  it('un cronograma sin fechas no inventa Timestamps', () => {
+    const doc = docDe('sin_fecha_publicacion')
+    const conv = fechasATimestamp(doc, iso => ({ ts: iso }))
+    expect(conv.cronograma.publicacion).toBeNull()
+    expect(conv.cronograma.cierre).toBeNull()
+  })
+})
+
 // ── 3. Plan de escritura ─────────────────────────────────────────────────────
 
 describe('plan de escritura', () => {
@@ -289,6 +329,46 @@ describe('registro de la corrida', () => {
     // clavada re-leyendo lo mismo para siempre.
     const v = { desde: '2026-09-25', hasta: '2026-11-09', solape_dias: 45, primera_corrida: false }
     expect(marcaSiguiente(v, true, null)).toBe('2026-11-09')
+  })
+
+  it('el estado del radar acumula, poda el historial y consume la escotilla', () => {
+    const { registro } = armar(true)
+    let estado = avanzarEstadoRadar(null, registro)
+    expect(estado.acumulado.corridas).toBe(1)
+    expect(estado.acumulado.creados).toBe(registro.escritura!.creados)
+    expect(estado.corridas).toHaveLength(1)
+    expect(estado.marca).toBe('2026-11-09')
+
+    // Una corrida detenida suma a lo VISTO y a las detenidas, no a lo escrito.
+    const { registro: detenido } = armar(false)
+    estado = avanzarEstadoRadar(estado, detenido)
+    expect(estado.acumulado.corridas).toBe(2)
+    expect(estado.acumulado.corridas_detenidas).toBe(1)
+    expect(estado.acumulado.procesos_vistos).toBe(registro.procesos_vistos * 2)
+    expect(estado.marca, 'la marca no retrocede ni avanza con una detenida').toBe('2026-11-09')
+
+    // El historial se poda y el acumulado sobrevive.
+    for (let i = 0; i < 40; i++) estado = avanzarEstadoRadar(estado, registro)
+    expect(estado.corridas).toHaveLength(MAX_CORRIDAS_EN_HISTORIAL)
+    expect(estado.acumulado.corridas).toBe(42)
+
+    // La escotilla se consume: autorizar un volcado no autoriza los siguientes.
+    const conEscotilla = avanzarEstadoRadar(
+      { ...estado, autorizado_manual: true }, registro)
+    expect(conEscotilla.autorizado_manual).toBe(false)
+  })
+
+  it('el acumulado lleva los tres contadores que se revisan en tres meses', () => {
+    const { registro } = armar(true)
+    const estado = avanzarEstadoRadar(null, registro)
+    expect(estado.acumulado).toHaveProperty('evidencia_sin_texto')
+    expect(estado.acumulado).toHaveProperty('observados_habrian_calificado')
+    expect(estado.acumulado).toHaveProperty('descartados_con_texto')
+    expect(estado.acumulado.evidencia_sin_texto).toBe(registro.evidencia_sin_texto.total)
+    // Y el estado inicial arranca todo en cero, sin marca.
+    expect(ESTADO_RADAR_INICIAL.marca).toBeNull()
+    expect(ESTADO_RADAR_INICIAL.acumulado.corridas).toBe(0)
+    expect(ESTADO_RADAR_INICIAL.solape_dias).toBe(45)
   })
 
   it('el resumen legible dice lo que importa en una línea', () => {

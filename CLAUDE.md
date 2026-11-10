@@ -430,6 +430,32 @@ Mecánica:
 - `.claude/worktrees/**` está excluido de la suite de Vitest (no pertenece
   al repo lógico).
 
+### Codebases de Cloud Functions (dos, desde 09-nov-2026)
+
+`firebase.json` declara **dos codebases** de Functions. Es un archivo compartido
+por los tres frentes, así que esto es lo que hay que saber:
+
+| codebase | carpeta | build | funciones |
+|---|---|---|---|
+| `default` | `functions/` | **ninguno** | las 12 existentes |
+| `radar` | `functions-radar/` | esbuild (`npm run build`) | el radar de licitaciones |
+
+- **El codebase `default` NO cambió y no necesita build.** `firebase deploy
+  --only functions:default` despliega las 12 funciones exactamente como antes.
+- El `predeploy` del build vive **dentro de la entrada `radar`**, y el CLI
+  resuelve los hooks por codebase (`lib/deploy/lifecycleHooks.js` de
+  firebase-tools, verificado sobre la 15.22.4 que declara el repo): desplegar
+  `default` no ejecuta nada del radar, y al revés tampoco.
+- **Desplegar TODO (`--only functions`, sin codebase) sí corre los dos**,
+  incluido el build del radar. Para no tocar el radar, usar
+  `--only functions:default`.
+- Por qué separado: el radar importa la lógica TypeScript de `src/` (léxico,
+  clasificación, guardas) y necesita empaquetarla. Portarla a CJS serían dos
+  copias del mismo criterio — el defecto que A.2b vino a eliminar.
+- El codebase del radar tiene su propio `package.json`, su `tsconfig.json` y su
+  `node_modules`; `lib/` y `.env` están gitignoreados. Su build hace
+  `tsc --noEmit` antes del bundle, porque esbuild no verifica tipos.
+
 ### Commits
 
 Convención: `<área>: <acción imperativa>` en español.

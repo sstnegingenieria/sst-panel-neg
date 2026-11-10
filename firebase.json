@@ -9,6 +9,24 @@
         "firebase-debug.log",
         "firebase-functions-debug.log"
       ]
+    },
+    {
+      "source": "functions-radar",
+      "codebase": "radar",
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ],
+      "ignore": [
+        "node_modules",
+        "src",
+        "build.mjs",
+        "tsconfig.json",
+        ".env",
+        ".env.*",
+        ".git",
+        "firebase-debug.log",
+        "firebase-functions-debug.log"
+      ]
     }
   ],
   "firestore": {
