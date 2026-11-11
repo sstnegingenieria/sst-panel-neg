@@ -201,6 +201,12 @@ describe('el sello del escritor', () => {
     expect(sellado.actualizado_por).toBe('radar_secop')
     expect(sellado.creado_en).toBe('T')
     expect(sellado.actualizado_en).toBe('T')
+    // El CUARTO campo del grupo del semaforo. El mapeo escribe valor, motivos y
+    // version; la FECHA es del escritor, porque el mapeo es puro y no tiene
+    // reloj. Faltaba, y `Licitacion` la declara obligatoria.
+    expect(sellado.semaforo_calculado_en).toBe('T')
+    expect(sellado.semaforo).toBe(doc.semaforo)
+    expect(sellado.semaforo_version).toBe(doc.semaforo_version)
     expect((sellado.radar as { corrida: string }).corrida).toBe('corr-1')
     // Lo demás queda intacto.
     expect(sellado.id_secop).toBe(doc.id_secop)
@@ -209,7 +215,7 @@ describe('el sello del escritor', () => {
 
   it('`responsable_uid` nace VACÍO: nadie es dueño de lo que nadie miró', () => {
     const sellado = sellarParaEscritura(docDe('minima_limpia'),
-      { corrida: 'c', ahora: 0, actor: ACTOR_RADAR })
+      { corrida: 'c', ahora: 'T0', actor: ACTOR_RADAR })
     expect(sellado.responsable_uid).toBe('')
   })
 

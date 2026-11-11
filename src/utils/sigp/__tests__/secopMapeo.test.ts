@@ -294,7 +294,9 @@ describe('departamento_entidad = "No Definido"', () => {
 
   it('el ganador con nit centinela conserva el nombre y pierde el nit', () => {
     const { doc } = mapearUna(una('departamento_no_definido'))
-    expect(doc.ganador).toEqual({ nombre: 'EDGAR CARPIO SOLANO', nit: null })
+    // El documento usa la CADENA VACIA como centinela de "no se sabe" (el tipo
+    // de la coleccion pide `nit: string`); el `null` vive en la fuente SECOP.
+    expect(doc.ganador).toEqual({ nombre: 'EDGAR CARPIO SOLANO', nit: '' })
     expect(doc.oferta_ganador).toBe(94_733_598)
   })
 })
@@ -304,14 +306,14 @@ describe('presupuesto inservible', () => {
     const f = una('precio_base_cero')
     expect(f[CAMPO_SECOP.presupuesto_oficial]).toBe('0')
     const { doc, meta } = mapearUna(f)
-    expect(doc.presupuesto_oficial).toBeNull()
+    expect(doc.presupuesto_oficial).toBe(0)
     expect(meta.problema_presupuesto).toBe('cero')
     expect(meta.presupuesto_crudo).toBe(0)
   })
 
   it('NEGATIVO (caso real −$35.272.818): a null, marcado como negativo', () => {
     const { doc, meta } = mapearUna(una('precio_base_negativo'))
-    expect(doc.presupuesto_oficial).toBeNull()
+    expect(doc.presupuesto_oficial).toBe(0)
     expect(meta.problema_presupuesto).toBe('negativo')
     expect(meta.presupuesto_crudo).toBe(-35_272_818)
   })
@@ -321,7 +323,7 @@ describe('presupuesto inservible', () => {
     expect(meta.presupuesto_crudo).toBe(11_111_111_111_111_111)
     expect(meta.presupuesto_crudo! > TOPE_PRESUPUESTO_COP).toBe(true)
     expect(meta.problema_presupuesto).toBe('absurdo')
-    expect(doc.presupuesto_oficial).toBeNull()
+    expect(doc.presupuesto_oficial).toBe(0)
   })
 
   it('un presupuesto sano pasa igual', () => {

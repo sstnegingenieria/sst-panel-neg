@@ -129,7 +129,9 @@
  *     publicación — inconsistencia del origen; se mapea verbatim y el
  *     cronograma queda con las dos fechas, sin corregir ninguna a mano.
  */
-import type { ModalidadLicitacion, MotivoSemaforo, Semaforo } from '../../types/sigp/licitacion'
+import type {
+  GanadorLicitacion, ModalidadLicitacion, MotivoSemaforo, Semaforo,
+} from '../../types/sigp/licitacion'
 import { calcularSemaforo, esTerritorioNeg } from './semaforo'
 import type { EntradaSemaforo } from './semaforo'
 import {
@@ -988,7 +990,18 @@ export interface LicitacionDetectada {
   categoria_unspsc: string | null
   modalidad: ModalidadLicitacion
   /** `null` cuando el origen trae cero, negativo o absurdo (trampa 8). */
-  presupuesto_oficial: number | null
+  /**
+   * EL CENTINELA DE LA COLECCION ES 0, NO null. `Licitacion` lo declara
+   * `number` y TODOS sus lectores usan `> 0` / `<= 0` como "no hay dato":
+   * `pctNeg` y `pctGanador` (licitacion.ts), el detalle y la bandeja. El
+   * importador historico ya escribe `?? 0` por lo mismo.
+   *
+   * No se pierde informacion: POR QUE no hay cifra sigue en
+   * `meta.problema_presupuesto` (ausente / cero / negativo / absurdo) y contado
+   * en el reporte de la corrida. El documento dice "no hay cifra usable"; el
+   * reporte dice de que clase era el problema.
+   */
+  presupuesto_oficial: number
   lotes: number
   cronograma: {
     /** ISO con zona; `null` si el origen no la trae (trampa 7). */
@@ -1007,7 +1020,15 @@ export interface LicitacionDetectada {
   motivo_descarte: null
   oferta_neg: null
   oferta_ganador: number | null
-  ganador: GanadorSecop | null
+  /**
+   * EL DOCUMENTO PIDE `nit: string`; la FUENTE lo da como `string | null`
+   * (`GanadorSecop`), porque SECOP a veces no lo trae. El centinela de "no se
+   * sabe" en esta colección es la CADENA VACÍA —`consecutivo`,
+   * `responsable_uid` y las propias reglas usan `!= ''`—, no `null`.
+   * La conversión va donde se arma el documento, no en `GanadorSecop`: ahí
+   * `null` es honesto, porque describe lo que el origen entregó.
+   */
+  ganador: GanadorLicitacion | null
   /** Siempre `null`: el origen no tiene el dato (trampa 6). */
   manifestaciones: null
   ofertas_recibidas: number | null
@@ -1134,7 +1155,8 @@ export function mapearProceso(
     objeto,
     categoria_unspsc,
     modalidad: mod.modalidad,
-    presupuesto_oficial: problema === null ? presupuesto_crudo : null,
+    presupuesto_oficial: problema === null && presupuesto_crudo !== null
+      ? presupuesto_crudo : 0,
     lotes: numeroSecop(f, CAMPO_SECOP.lotes) ?? 0,
     cronograma: {
       publicacion,
@@ -1151,7 +1173,9 @@ export function mapearProceso(
     motivo_descarte: null,
     oferta_neg: null,
     oferta_ganador: p.oferta_ganador,
-    ganador: p.ganador,
+    ganador: p.ganador === null
+      ? null
+      : { nombre: p.ganador.nombre, nit: p.ganador.nit ?? '' },
     manifestaciones: null,
     ofertas_recibidas: numeroSecop(f, CAMPO_SECOP.ofertas_recibidas),
     migrado: false,
