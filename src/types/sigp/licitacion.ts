@@ -61,11 +61,52 @@ export const ESTADOS_LICITACION = [
 ] as const
 export type EstadoLicitacion = typeof ESTADOS_LICITACION[number]
 
+/**
+ * Por qué se descartó. VOCABULARIO CERRADO: el texto libre no se cuenta, y lo
+ * que no se cuenta no responde "¿el radar sirve?" ni "¿por qué dejamos pasar
+ * 117 procesos el año pasado?".
+ *
+ * LOS OCHO PRIMEROS SON MEDIDOS, no diseñados: salen del registro real de
+ * Karen, normalizados en `mapearMotivoDescarte` con sus erratas incluidas
+ * (`MYPIME`, `PRESUPUESTTO`). Los cinco de arriba explican el 94 % de 121
+ * descartes (sorteo 26 % · MiPyme 24 % · experiencia 20 % · presupuesto 17 % ·
+ * indicadores 7 %).
+ *
+ * LOS CUATRO ÚLTIMOS son del mundo del RADAR (B.3) y no existían porque el
+ * radar no existía. Nunca vienen del registro histórico, así que
+ * `mapearMotivoDescarte` no los conoce ni tiene por qué.
+ */
 export const MOTIVOS_DESCARTE = [
   'SORTEO', 'LIMITACION_MIPYME', 'EXPERIENCIA', 'INDICADORES',
-  'BAJO_PRESUPUESTO', 'UBICACION', 'CAPACIDAD', 'OTRO',
+  'BAJO_PRESUPUESTO', 'UBICACION', 'CAPACIDAD',
+  // ── Del radar (B.3) ──
+  'RUIDO_LEXICO', 'FUERA_DE_ALCANCE', 'PLAZO_IMPOSIBLE', 'DUPLICADO',
+  'OTRO',
 ] as const
 export type MotivoDescarte = typeof MOTIVOS_DESCARTE[number]
+
+/**
+ * LOS DOS QUE SE CONFUNDEN, y por qué son dos y no uno.
+ *
+ * `RUIDO_LEXICO` es un defecto DEL INSTRUMENTO: el léxico trajo algo que no
+ * debía. `FUERA_DE_ALCANCE` es una detección CORRECTA con un "no" de negocio.
+ *
+ * El caso que los separa: un proceso de transmisión a 230 kV cuyo objeto dice
+ * "redes eléctricas". El léxico ACERTÓ —ese término es vocabulario de NEG— y
+ * NEG igual no lo hace. Si eso se marca como ruido, la métrica dice que el
+ * léxico es peor de lo que es, y el "arreglo" sería borrar términos que
+ * funcionan: el inverso de para qué existe el motivo.
+ *
+ * La prueba para quien descarta cabe en una línea, y el formulario la HACE en
+ * vez de confiar en que alguien se acuerde (`ModalDescartar`):
+ *     ¿el léxico se equivocó, o acertó y aun así no lo queremos?
+ *
+ * ⚠ CONDICIÓN DE REVISIÓN (acordada con Giovanny el 11-nov-2026): si a los
+ * TRES MESES los dos motivos se usan de forma intercambiable, SE FUSIONAN. Eso
+ * se mide con número —la distribución de ambos sobre los descartes del radar—,
+ * no con impresiones.
+ */
+export const MOTIVOS_DESCARTE_DEL_LEXICO: MotivoDescarte[] = ['RUIDO_LEXICO', 'FUERA_DE_ALCANCE']
 
 export const MOTIVOS_SEMAFORO = [
   'MODALIDAD_SIN_HISTORIAL', 'SORTEO', 'LIMITACION_MIPYME', 'REQUIERE_LECTURA',
@@ -109,6 +150,112 @@ export interface GanadorLicitacion {
   nit: string
 }
 
+// ── Procedencia: cómo llegó el proceso a la colección ───────────────────────
+
+/**
+ * Qué señal produjo el veredicto del radar. Un veredicto sin señal no es
+ * auditable.
+ *
+ * VIVE AQUÍ Y NO EN `utils/sigp/secopMapeo.ts`, donde nació: el DOCUMENTO
+ * persiste este valor, así que su dueño es el tipo del documento. Tenerlo en
+ * utils obligaba a que `types/` importara de `utils/` para declarar el campo
+ * —la dependencia al revés, y circular, porque el mapeo ya importa de aquí—.
+ */
+export type SenalClasificacion =
+  | 'codigo_en_familia'
+  /** Clase con adjudicación probada Y el objeto habla del trabajo de NEG. */
+  | 'codigo_en_clase_con_texto'
+  /**
+   * Clase con adjudicación probada pero el léxico NO reconoce el objeto: los
+   * 24 de ferretería pura de 2025. Entran por EVIDENCIA (NEG ganó bajo ese
+   * código), no porque el texto lo diga, así que llevan señal aparte y el
+   * reporte de cada corrida los separa — para que en tres meses se pueda ver
+   * si alguno se trabajó o si entraron para nada.
+   */
+  | 'codigo_en_clase_sin_texto'
+  | 'codigo_fuera_de_familia'
+  | 'texto_coincide'
+  | 'sin_codigo_ni_texto'
+  | 'fuera_de_territorio'
+
+/**
+ * De dónde salió la fecha con la que se ubica el proceso en el tiempo
+ * (trampa 12 del mapeo). Vive en el tipo del DOCUMENTO porque desde el PR #252
+ * el documento lo persiste; `utils/sigp/secopMapeo.ts` lo re-exporta para no
+ * romper a quien ya lo importaba de ahí.
+ */
+export type OrigenFecha = 'publicacion' | 'recepcion_de_ofertas' | 'ninguna'
+
+/**
+ * Por qué el radar trajo este proceso. `null` en todo lo que no vino del radar
+ * —tecleado a mano o importado del registro histórico—, y ESO ES LA DECISIÓN
+ * que reparte la bandeja (D1): la procedencia decide, no el estado. Una
+ * `detectada` escrita a mano es trabajo que alguien eligió; lo que el radar
+ * trajo solo todavía no es de nadie.
+ *
+ * El bloque ya se escribía en Firestore desde la primera corrida del radar y
+ * el panel no lo declaraba: el dato estaba ahí y era invisible para la UI.
+ */
+export interface ProcedenciaRadar {
+  senal: SenalClasificacion
+  /** Términos del léxico que lo trajeron. Vacío si entró por código. */
+  terminos: string[]
+  /** Con qué versión del léxico se clasificó. */
+  vocabulario_version: string
+  /** Id de la corrida que lo creó. Lo sella el escritor, no el mapeo. */
+  corrida: string | null
+  /**
+   * DE DÓNDE SALIÓ LA FECHA DEL PROCESO, en el DOCUMENTO y no solo en la meta.
+   *
+   * Hasta la corrida de noviembre `origen_fecha` vivía únicamente en
+   * `MetaIngesta` —"para el reporte y el triage, no para el doc"—, y eso
+   * bastaba mientras las dos poblaciones entraban juntas. Desde que la corrida
+   * automática excluye las filas sin ninguna fecha (`incluir_sin_fecha: false`,
+   * PR #252), un `'ninguna'` SOLO puede venir del BARRIDO AUTORIZADO del
+   * backlog: el campo es la marca que distingue esas filas de las del flujo
+   * normal, y es lo que la bandeja muestra en el chip de procedencia.
+   */
+  origen_fecha: OrigenFecha
+}
+
+/**
+ * ¿EL LÉXICO PARTICIPÓ en que este proceso entrara?
+ *
+ * No es lo mismo que `esDelRadar`, y la diferencia importa en un solo lugar
+ * pero importa mucho: la pregunta del descarte («¿el léxico se equivocó, o
+ * acertó y aun así no lo queremos?») solo tiene sentido si hubo léxico.
+ *
+ * Un proceso que entró por CÓDIGO sin que el texto dijera nada —señal
+ * `codigo_en_clase_sin_texto`, los de ferretería pura— vino por EVIDENCIA de
+ * adjudicación, no porque el vocabulario reconociera el objeto. Marcarlo
+ * `RUIDO_LEXICO` diría que el léxico falló en algo donde el léxico no opinó, y
+ * arruinaría exactamente la métrica que `RUIDO_LEXICO` existe para dar — el
+ * mismo daño que D4 vino a evitar, una capa más abajo.
+ *
+ * El predicado es `terminos.length > 0` y no una lista de señales: los
+ * términos SON la huella de que el vocabulario coincidió. Una señal nueva no
+ * obliga a acordarse de actualizar esto.
+ */
+export function lexicoParticipo(radar: ProcedenciaRadar | null | undefined): boolean {
+  return radar != null && radar.terminos.length > 0
+}
+
+/**
+ * ¿Lo trajo el radar?
+ *
+ * COMPARA CONTRA `null` CON `!=` A PROPÓSITO (no `!== null`): los documentos
+ * que ya están en producción —los ~350 del registro histórico y los tecleados
+ * antes de este bloque— NO TIENEN el campo, así que al leerlos llega
+ * `undefined`. Con `!== null` un histórico daría `true` y la bandeja lo
+ * mandaría a la sección del radar, que es exactamente al revés.
+ *
+ * Los caminos de creación sí escriben `null` explícito desde este bloque; esta
+ * guarda es para lo que se escribió antes y no se va a reescribir.
+ */
+export function esDelRadar(l: { radar?: ProcedenciaRadar | null }): boolean {
+  return l.radar != null
+}
+
 // ── Documento de la colección `licitaciones` ─────────────────────────────────
 
 export interface Licitacion {
@@ -129,6 +276,8 @@ export interface Licitacion {
   numero_proceso: string
   id_secop: string | null
   origen: OrigenLicitacion
+  /** Por qué lo trajo el radar, o `null` si no vino de ahí. Ver `esDelRadar`. */
+  radar: ProcedenciaRadar | null
   url_proceso: string
   entidad: EntidadLicitacion
   objeto: string
@@ -192,6 +341,25 @@ export interface Licitacion {
   } | null
 
   // ── Trazabilidad ──
+
+  /**
+
+   * TRIAGE DEL RADAR (D3): quién sacó este proceso de la sección del radar,
+
+   * admitiéndolo o descartándolo, y cuándo. `null` en todo lo que no pasó por
+
+   * ese triage — incluidas las licitaciones tecleadas a mano, donde no hay
+
+   * nada que revisar. Distinto de `actualizado_por`, que se mueve con cada
+
+   * escritura y a los dos meses ya no responde quién hizo el triage.
+
+   */
+
+  revisado_por: string | null
+
+  revisado_en: Timestamp | null
+
   responsable_uid: string
   creado_por: string
   creado_en: Timestamp
@@ -234,7 +402,47 @@ export const MOTIVO_DESCARTE_LABEL: Record<MotivoDescarte, string> = {
   BAJO_PRESUPUESTO: 'Presupuesto no rentable',
   UBICACION: 'Ubicación fuera de cobertura',
   CAPACIDAD: 'Capacidad operativa',
+
+  RUIDO_LEXICO: 'El léxico lo trajo por error',
+
+  FUERA_DE_ALCANCE: 'No es el trabajo de NEG',
+
+  PLAZO_IMPOSIBLE: 'Cierra antes de poder armarlo',
+
+  DUPLICADO: 'Ya estaba por otra vía',
+
   OTRO: 'Otro',
+}
+
+/**
+ * Por qué el radar lo trajo, en palabras.
+ *
+ * Solo CUATRO de las siete pueden aparecer en un documento: las otras tres son
+ * veredictos `no` y no se persisten. Se etiquetan igual —el tipo las admite y
+ * una lectura defensiva no debe quedarse sin texto—, pero no se van a ver.
+ */
+export const SENAL_LABEL: Record<SenalClasificacion, string> = {
+  codigo_en_familia: 'Código de la familia del RUP',
+  codigo_en_clase_con_texto: 'Código con adjudicación probada, y el objeto concuerda',
+  codigo_en_clase_sin_texto: 'Código con adjudicación probada — el texto no dice nada',
+  texto_coincide: 'El objeto coincide con el léxico',
+  codigo_fuera_de_familia: 'Código fuera de la familia',
+  sin_codigo_ni_texto: 'Ni código ni texto',
+  fuera_de_territorio: 'Fuera del territorio',
+}
+
+/**
+ * De dónde salió la fecha con la que el proceso se ubica en el tiempo.
+ *
+ * `ninguna` NO es un detalle técnico: desde el PR #252 la corrida automática
+ * excluye esas filas, así que una que lo diga entró por el BARRIDO AUTORIZADO
+ * del backlog. La bandeja lo dice con todas las letras porque es lo único que
+ * explica por qué esa fila no tiene reloj.
+ */
+export const ORIGEN_FECHA_LABEL: Record<OrigenFecha, string> = {
+  publicacion: 'fecha de publicación',
+  recepcion_de_ofertas: 'fecha de recepción de ofertas',
+  ninguna: 'sin fecha en el origen',
 }
 
 export const MOTIVO_SEMAFORO_LABEL: Record<MotivoSemaforo, string> = {
@@ -437,6 +645,59 @@ const sello = (actor: ActorLicitacion, ahora: Timestamp): SelloPatch => ({
 })
 
 /**
+
+ * SELLO DEL TRIAGE DEL RADAR (D3).
+
+ *
+
+ * Quién sacó un proceso de la sección del radar — admitiéndolo o descartándolo
+
+ * — y cuándo. NO es lo mismo que `actualizado_por`: ese se mueve con cada
+
+ * escritura posterior y a los dos meses ya no dice quién hizo el triage, que es
+
+ * justamente la pregunta ("¿quién metió esto a la semana de alguien?").
+
+ *
+
+ * SOLO se sella cuando el proceso VINO DEL RADAR y está en `detectada`: en una
+
+ * licitación tecleada a mano no hay triage que registrar, y poner "revisada"
+
+ * sobre algo que nadie revisó sería un campo que miente.
+
+ *
+
+ * Quién PUEDE hacerlo no se restringe aquí: cualquiera con
+
+ * `gestionaLicitaciones()`, que es la misma puerta por la que ya lee la
+
+ * colección. No se inventa un dueño que las reglas no pueden sostener, y
+
+ * restringirlo solo en la UI no sería un control — es la lección de SGI/SST.
+
+ * Lo que sí queda es la traza.
+
+ */
+
+function selloTriage(
+
+  l: Pick<Licitacion, 'estado'> & Partial<Pick<Licitacion, 'radar'>>,
+
+  actor: ActorLicitacion, ahora: Timestamp,
+
+): Partial<{ revisado_por: string; revisado_en: Timestamp }> {
+
+  if (l.estado !== 'detectada' || !esDelRadar(l)) return {}
+
+  return { revisado_por: actor.uid, revisado_en: ahora }
+
+}
+
+
+
+/**
+
  * Avance normal por la máquina de estados. NO cubre `descartada` (la dueña
  * de la invariante 1 es `patchDescartarLicitacion`) ni la reapertura desde
  * descartada (`patchReabrirLicitacion`) — cada invariante tiene un solo
@@ -477,9 +738,19 @@ export function patchAvanzarLicitacion(
     activa: esLicitacionActiva(destino),             // invariante 2
     motivo_descarte: null,                           // invariante 1
     // Solo aparece en la asignación inicial; si ya lo tenía, ni se toca.
+
     ...(propuesto !== undefined ? { consecutivo: propuesto } : {}),
+
+    // ADMITIR una fila del radar ES el triage: sale de la sección del radar y
+
+    // entra a competir por el cupo de la semana. Vacio en cualquier otro caso.
+
+    ...selloTriage(l, actor, ahora),
+
     ...sello(actor, ahora),
+
   }
+
 }
 
 /**
@@ -496,6 +767,13 @@ export function patchDescartarLicitacion(
     estado: 'descartada' as EstadoLicitacion,
     activa: esLicitacionActiva('descartada'),        // false, invariante 2
     motivo_descarte: motivo,                         // invariante 1
+
+    // DESCARTAR desde `detectada` tambien es triage. Desde otro estado no:
+
+    // ahi el proceso ya habia sido admitido y revisado por alguien.
+
+    ...selloTriage(l, actor, ahora),
+
     ...sello(actor, ahora),
   }
 }

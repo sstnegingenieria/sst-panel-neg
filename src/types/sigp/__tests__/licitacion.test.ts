@@ -13,7 +13,11 @@ import {
   patchOverrideSemaforo, patchRecalcularSemaforo,
   patchPresentarLicitacion, patchCerrarConResultado,
   datosPresentacionCompletos, datosResultadoCompletos,
+  MOTIVOS_DESCARTE_DEL_LEXICO, MOTIVO_DESCARTE_LABEL,
+  SENAL_LABEL, ORIGEN_FECHA_LABEL, esDelRadar, lexicoParticipo,
+  type ProcedenciaRadar, type SenalClasificacion, type OrigenFecha,
   type Licitacion, type EstadoLicitacion, type OverrideSemaforo,
+  type MotivoDescarte,
   type ResultadoSemaforoLicitacion,
 } from '../licitacion'
 import { puedePresentar } from '../../../utils/sigp/cumplimiento'
@@ -31,6 +35,8 @@ const base = (extra?: Partial<Licitacion>): Licitacion => ({
   // Consecutivo DIFERIDO (1.2b): el documento nace sin número.
   consecutivo: '',
   numero_proceso: 'MC-DNP-004-2026',
+  // Tecleada a mano en el fixture: no vino del radar (D1).
+  radar: null,
   id_secop: 'CO1.BDOS.1234567',
   origen: 'secop_ii',
   url_proceso: 'https://community.secop.gov.co/Public/Tendering/x',
@@ -62,6 +68,8 @@ const base = (extra?: Partial<Licitacion>): Licitacion => ({
   ganador: null,
   manifestaciones: null,
   ofertas_recibidas: null,
+  revisado_por: null,
+  revisado_en: null,
   responsable_uid: 'uid-karen',
   creado_por: 'uid-karen',
   creado_en: ANTES,
@@ -1013,5 +1021,116 @@ describe('INVARIANTE 8 — no se presenta con el checklist abierto', () => {
     expect(patch.manifestaciones).toBe(22)
     expect(patch.ofertas_recibidas).toBe(8)
     expect(activaConsistente(patch.estado, patch.activa)).toBe(true)
+  })
+})
+
+describe('triage del radar (D3): revisado_por / revisado_en', () => {
+  const delRadar = () => base({
+    estado: 'detectada',
+    radar: { senal: 'texto_coincide' as const, terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'publicacion' as const },
+  })
+
+  it('ADMITIR una fila del radar sella quien hizo el triage', () => {
+    const patch = patchAvanzarLicitacion(delRadar(), 'en_evaluacion', ACTOR, AHORA)
+    expect(patch).not.toBeNull()
+    expect(patch!.revisado_por).toBe(ACTOR.uid)
+    expect(patch!.revisado_en).toBe(AHORA)
+  })
+
+  it('DESCARTAR desde detectada tambien es triage', () => {
+    const patch = patchDescartarLicitacion(delRadar(), ACTOR, AHORA, 'RUIDO_LEXICO')
+    expect(patch!.revisado_por).toBe(ACTOR.uid)
+    expect(patch!.revisado_en).toBe(AHORA)
+  })
+
+  it('una TECLEADA A MANO no sella nada: no hubo triage que registrar', () => {
+    const patch = patchAvanzarLicitacion(base({ estado: 'detectada', radar: null }), 'en_evaluacion', ACTOR, AHORA)
+    expect(patch).not.toHaveProperty('revisado_por')
+    expect(patch).not.toHaveProperty('revisado_en')
+  })
+
+  it('un HISTORICO sin el campo `radar` tampoco (llega undefined)', () => {
+    const sinCampo = base({ estado: 'detectada' }) as unknown as Record<string, unknown>
+    delete sinCampo.radar
+    const patch = patchAvanzarLicitacion(sinCampo as unknown as Licitacion, 'en_evaluacion', ACTOR, AHORA)
+    expect(patch).not.toHaveProperty('revisado_por')
+  })
+
+  it('DESCARTAR desde otro estado NO es triage: ya habia sido revisada', () => {
+    const patch = patchDescartarLicitacion(
+      base({ estado: 'en_evaluacion', radar: { senal: 'texto_coincide' as const, terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'publicacion' as const } }), ACTOR, AHORA, 'CAPACIDAD')
+    expect(patch).not.toBeNull()
+    expect(patch).not.toHaveProperty('revisado_por')
+  })
+
+  it('los cuatro motivos del radar son legales', () => {
+    for (const m of ['RUIDO_LEXICO', 'FUERA_DE_ALCANCE', 'PLAZO_IMPOSIBLE', 'DUPLICADO'] as MotivoDescarte[]) {
+      expect(patchDescartarLicitacion(delRadar(), ACTOR, AHORA, m), m).not.toBeNull()
+    }
+  })
+
+  it('los dos del lexico estan declarados como el par que se confunde', () => {
+    expect(MOTIVOS_DESCARTE_DEL_LEXICO).toEqual(['RUIDO_LEXICO', 'FUERA_DE_ALCANCE'])
+    // Y los dos tienen label: el selector los pinta, no muestra la constante.
+    for (const m of MOTIVOS_DESCARTE_DEL_LEXICO) {
+      expect(MOTIVO_DESCARTE_LABEL[m], m).toBeTruthy()
+    }
+  })
+})
+
+// ── Sub-bloque 4: el léxico participó, que no es lo mismo que vino del radar ──
+
+const procedencia = (extra?: Partial<ProcedenciaRadar>): ProcedenciaRadar => ({
+  senal: 'texto_coincide', terminos: ['redes'],
+  vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'publicacion',
+  ...extra,
+})
+
+describe('lexicoParticipo', () => {
+  it('con términos: el vocabulario coincidió y la pregunta tiene sentido', () => {
+    expect(lexicoParticipo(procedencia({ terminos: ['redes', 'subestación'] }))).toBe(true)
+  })
+
+  it('tecleada a mano: no hubo radar ni léxico', () => {
+    expect(lexicoParticipo(null)).toBe(false)
+    expect(lexicoParticipo(undefined)).toBe(false)
+  })
+
+  it('EL CASO QUE LO JUSTIFICA: vino del radar POR CÓDIGO y el texto calló', () => {
+    // `codigo_en_clase_sin_texto` — los de ferretería pura. `esDelRadar` dice
+    // que sí vino del radar, y es cierto; pero el vocabulario no opinó sobre
+    // él, así que `RUIDO_LEXICO` no tendría sobre qué fallar. Si el gate de la
+    // pregunta fuera `esDelRadar`, la UI invitaría a mentirle a la métrica.
+    const porCodigo = procedencia({ senal: 'codigo_en_clase_sin_texto', terminos: [] })
+    expect(esDelRadar({ radar: porCodigo })).toBe(true)
+    expect(lexicoParticipo(porCodigo)).toBe(false)
+  })
+
+  it('el predicado son los TÉRMINOS, no una lista de señales', () => {
+    // Una señal nueva no obliga a acordarse de actualizar nada.
+    const inventada = procedencia({
+      senal: 'señal_que_no_existe_todavia' as unknown as SenalClasificacion,
+      terminos: ['redes'],
+    })
+    expect(lexicoParticipo(inventada)).toBe(true)
+  })
+})
+
+describe('etiquetas de la procedencia', () => {
+  it('toda señal tiene texto: la bandeja no muestra la constante cruda', () => {
+    const senales: SenalClasificacion[] = [
+      'codigo_en_familia', 'codigo_en_clase_con_texto', 'codigo_en_clase_sin_texto',
+      'codigo_fuera_de_familia', 'texto_coincide', 'sin_codigo_ni_texto',
+      'fuera_de_territorio',
+    ]
+    for (const s of senales) expect(SENAL_LABEL[s], s).toBeTruthy()
+    expect(Object.keys(SENAL_LABEL).sort()).toEqual([...senales].sort())
+  })
+
+  it('los tres orígenes de fecha tienen texto, y "ninguna" lo dice sin tecnicismo', () => {
+    const origenes: OrigenFecha[] = ['publicacion', 'recepcion_de_ofertas', 'ninguna']
+    for (const o of origenes) expect(ORIGEN_FECHA_LABEL[o], o).toBeTruthy()
+    expect(Object.keys(ORIGEN_FECHA_LABEL).sort()).toEqual([...origenes].sort())
+    expect(ORIGEN_FECHA_LABEL.ninguna).toMatch(/sin fecha/i)
   })
 })

@@ -130,7 +130,8 @@
  *     cronograma queda con las dos fechas, sin corregir ninguna a mano.
  */
 import type {
-  GanadorLicitacion, ModalidadLicitacion, MotivoSemaforo, Semaforo,
+  GanadorLicitacion, ModalidadLicitacion, MotivoSemaforo, OrigenFecha,
+  ProcedenciaRadar, SenalClasificacion, Semaforo,
 } from '../../types/sigp/licitacion'
 import { calcularSemaforo, esTerritorioNeg } from './semaforo'
 import type { EntradaSemaforo } from './semaforo'
@@ -444,8 +445,13 @@ export function fechaSecopAIso(fila: FilaSecop, campo: CampoSecop): string | nul
   return d.toISOString()
 }
 
-/** De dónde salió la fecha con la que se ubica el proceso en el tiempo. */
-export type OrigenFecha = 'publicacion' | 'recepcion_de_ofertas' | 'ninguna'
+/**
+ * De dónde salió la fecha del proceso. Vive en el TIPO DEL DOCUMENTO
+ * (`types/sigp/licitacion.ts`), porque desde el PR #252 el documento la
+ * persiste dentro de `radar`. Se re-exporta aquí para no romper a quien ya la
+ * importaba de este módulo — mismo trato que `SenalClasificacion`.
+ */
+export type { OrigenFecha } from '../../types/sigp/licitacion'
 
 export interface FechaReferencia {
   /** ISO con zona, o `null` si el origen no trae ninguna fecha utilizable. */
@@ -588,23 +594,12 @@ export function familiaRup(categoria: string | null): FamiliaRup {
 /** Qué se hace con el proceso. Solo `si` y `probable` se persisten. */
 export type VeredictoRadar = 'si' | 'probable' | 'no'
 
-/** Qué señal produjo el veredicto. Un veredicto sin señal no es auditable. */
-export type SenalClasificacion =
-  | 'codigo_en_familia'
-  /** Clase con adjudicación probada Y el objeto habla del trabajo de NEG. */
-  | 'codigo_en_clase_con_texto'
-  /**
-   * Clase con adjudicación probada pero el léxico NO reconoce el objeto: los
-   * 24 de ferretería pura de 2025. Entran por EVIDENCIA (NEG ganó bajo ese
-   * código), no porque el texto lo diga, así que llevan señal aparte y el
-   * reporte de cada corrida los separa — para que en tres meses se pueda ver
-   * si alguno se trabajó o si entraron para nada.
-   */
-  | 'codigo_en_clase_sin_texto'
-  | 'codigo_fuera_de_familia'
-  | 'texto_coincide'
-  | 'sin_codigo_ni_texto'
-  | 'fuera_de_territorio'
+/**
+ * La señal del veredicto vive en el TIPO DEL DOCUMENTO
+ * (`types/sigp/licitacion.ts`), porque el documento es quien la persiste. Se
+ * re-exporta aquí para no romper a quien ya la importaba de este módulo.
+ */
+export type { SenalClasificacion } from '../../types/sigp/licitacion'
 
 /**
  * Departamentos que NO entran a la bandeja pero SÍ se cuentan (B.1c).
@@ -1044,26 +1039,8 @@ export interface LicitacionDetectada {
    * muestra de 10 del registro de la corrida; con esto es una consulta a
    * `licitaciones`.
    */
-  radar: {
-    senal: SenalClasificacion
-    /** Términos del léxico que lo trajeron. Vacío si entró por código. */
-    terminos: string[]
-    /** Con qué versión del léxico se clasificó. */
-    vocabulario_version: string
-    /** Id de la corrida que lo creó. Lo sella el escritor, no el mapeo. */
-    corrida: string | null
-    /**
-     * DE DÓNDE SALIÓ LA FECHA DEL PROCESO, en el DOCUMENTO y no solo en la meta.
-     *
-     * Hasta ahora `origen_fecha` vivía únicamente en `MetaIngesta` —"para el
-     * reporte y el triage, no para el doc"—, y eso bastaba mientras las dos
-     * poblaciones entraban juntas. Desde que la corrida automática excluye las
-     * sin fecha (`incluir_sin_fecha: false`), un `'ninguna'` solo puede venir
-     * del BARRIDO AUTORIZADO del backlog: el campo es la marca que distingue
-     * esas filas de las del flujo normal, en la bandeja y en una consulta.
-     */
-    origen_fecha: OrigenFecha
-  }
+  /** Por qué lo trajo el radar. La forma vive en el tipo del documento. */
+  radar: ProcedenciaRadar
 }
 
 /** Metadatos del acto de ingesta — para el reporte y el triage, no para el doc. */

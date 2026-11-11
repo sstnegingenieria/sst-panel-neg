@@ -23,6 +23,7 @@ import {
   ESTADO_LICITACION_LABEL, MODALIDAD_LICITACION_LABEL,
   MOTIVO_DESCARTE_LABEL, MOTIVO_SEMAFORO_LABEL,
   TRANSICIONES_LICITACION,
+  lexicoParticipo,
   patchAvanzarLicitacion, patchDescartarLicitacion, patchReabrirLicitacion,
   patchOverrideSemaforo, patchPresentarLicitacion, patchCerrarConResultado,
   exigeConsecutivo, pctNeg, pctGanador,
@@ -195,7 +196,7 @@ export default function LicitacionDetalle() {
         </div>
         <p className="mt-2 text-sm text-gray-800">{lic.objeto || '—'}</p>
         <p className="text-xs text-gray-500 mt-1">
-          {lic.entidad.nombre ?? 'Entidad sin registrar'}
+          {lic.entidad.nombre || 'Entidad sin registrar'}
           {lic.entidad.orden ? ` · ${lic.entidad.orden}` : ''}
           {lic.entidad.ciudad ? ` · ${lic.entidad.ciudad}` : ''}
         </p>
@@ -516,8 +517,11 @@ export default function LicitacionDetalle() {
           if (ok) setModal(null)
         }}
       />
+      {/* La pregunta del lexico solo tiene sentido si el lexico estuvo: el gate
+          son los TERMINOS, no la procedencia (ver lexicoParticipo). */}
       <ModalDescartar
         abierto={modal === 'descartar'}
+        lexicoParticipo={lexicoParticipo(lic.radar)}
         onCerrar={() => setModal(null)}
         onConfirmar={async motivo => {
           if (!user?.uid) return

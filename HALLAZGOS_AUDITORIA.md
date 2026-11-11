@@ -536,6 +536,65 @@ Las heurísticas de import sobre documentos de clientes deben asumir **plantilla
 
 ---
 
+## H-010 · Escritores no tipados contra el documento: cuatro desalineaciones silenciosas en `licitaciones`
+
+**Fase:** B.2/B.3 (Licitaciones — radar SECOP) · **Fecha:** 11-nov-2026 · **Severidad:** Media (dato, latente)
+
+### Qué pasó
+
+Al preparar la primera corrida del radar se detectó que el camino de escritura **omitía `semaforo_calculado_en`**, un campo que `Licitacion` declara obligatorio y no nulable. Al cerrar ese hueco **tipando la salida del escritor contra `Licitacion`**, el compilador destapó **tres desalineaciones más** en el primer `tsc`:
+
+| campo | escribía | el tipo pide | quién estaba mal |
+|---|---|---|---|
+| `semaforo_calculado_en` | *nada* | `Timestamp` | el escritor |
+| `presupuesto_oficial` | `null` | `number` | el escritor (centinela de la colección: `0`) |
+| `ganador.nit` | `null` | `string` | el escritor (centinela: `''`) |
+| `entidad.nombre` | `''` (radar) / `null` (formulario) | `string` | **los dos escritores entre sí**, y los lectores |
+
+### Por qué nada lo atrapó
+
+Dos capas que debían verlo, y ninguna podía:
+
+1. **El tipo de retorno era `Record<string, unknown>`** y el sitio de la llamada remataba con `as unknown as LicitacionDetectada`. Un doble cast lava el contrato: el compilador deja de comparar lo que se escribe con lo que la colección exige.
+2. **El formulario manual escribía un literal suelto en `addDoc`**, que acepta cualquier objeto. Mismo agujero, otro escritor.
+
+Y las reglas Firestore no cubren esto: exigen `numero_proceso` y `semaforo_version` no vacíos, no la forma completa. El radar, además, escribe con el **Admin SDK**, que omite las reglas por completo.
+
+### Lo que lo hacía caro, no grave
+
+Ninguna de las cuatro rompía nada el día que se escribió: nadie leía `semaforo_calculado_en` ni `ganador.nit`, y el `null` del presupuesto **funcionaba por coincidencia de la coerción de JS** (`null <= 0` es `true`). El agravante real es el primero: **el camino de recálculo sí escribe la fecha**, así que una fila se "arregla sola" la primera vez que alguien la recalcula — el fallo habría quedado **intermitente y con forma de "solo algunas filas viejas del radar"**, el perfil más caro de diagnosticar.
+
+La cuarta sí tenía consecuencia visible: con dos centinelas para el mismo "no se sabe" y lectores que solo cubrían `null` con `??`, **una fila del radar sin entidad se pintaba en blanco** en lugar de "Entidad sin registrar".
+
+### Corrección aplicada
+
+- **Tipo**: el escritor del radar devuelve `DocumentoRadar<T>` (`Licitacion` completa con las fechas en el tipo del escritor). Desaparece el doble cast: la salida de `fechasATimestamp` *es* lo que el sello recibe.
+- **Formulario manual**: su literal queda anotado `const nuevo: Licitacion = {...}` antes de `addDoc`.
+- **Centinelas unificados**: `0` para presupuesto, `''` para `ganador.nit` y `entidad.nombre`. El *por qué* del presupuesto no se pierde: sigue en `meta.problema_presupuesto` y contado en el reporte de la corrida.
+- **Lectores de `entidad.nombre`**: `??` → `||`, con lo que las filas viejas con `null` siguen mostrando el texto — **sin reparación de datos**.
+- `presupuesto_oficial` se corrigió **en el mapeo y no en el sello** porque es un campo **refrescable**: por el sello solo pasan los documentos nuevos, y el `null` también salía por el camino de actualización.
+
+### Lección
+
+**Lo que un tipo compra no son los campos que arregla hoy: es que el próximo campo que se agregue al documento y un escritor no escriba falle al compilar.** Todo camino que persista un documento de una colección debe estar anotado con el tipo de ese documento — `addDoc`, `set` y un helper que devuelva `Record<string, unknown>` aceptan cualquier cosa, y un `as unknown as` cancela la única verificación que quedaba.
+
+Corolario de método: **cuatro de cuatro aparecieron al medir, ninguna al revisar el diseño.**
+
+### Vinculación ISO
+
+- ISO 9001 cláusula 7.5.3 (control de la información documentada: integridad del registro) — un documento al que le falta un campo declarado obligatorio no es un registro completo, aunque la UI no lo note.
+
+---
+
+## Nota de técnica · leer un campo que se agregó después del documento
+
+Al añadir `radar: ProcedenciaRadar | null` a `Licitacion` (B.3), el predicado que decide si una licitación vino del radar se escribió **`l.radar != null`, no `!== null`**, y la razón quedó escrita en el propio helper (`esDelRadar`):
+
+Los ~350 documentos del registro histórico y los tecleados antes de ese bloque **no tienen el campo**, así que al leerlos llega `undefined`. Con el estricto, `undefined !== null` da `true` y **un histórico aterrizaría en la sección del radar** — exactamente al revés de lo que la sección existe para hacer.
+
+Los caminos de creación sí escriben `null` explícito desde ese bloque; la guarda es para lo que ya está escrito y no se va a reescribir. Hay un test que lo fija: *"un histórico sin el campo `radar` NO se va al radar"*.
+
+**Regla general**: cuando un campo se agrega a un documento que ya existe en producción, el tipo puede declararlo obligatorio, pero **todo predicado que lo lea tiene que tolerar su ausencia** — y la razón va junto al código, no en el PR, porque la próxima persona que vea un `!=` va a querer "arreglarlo".
 ## Nota de técnica · `ConvertFrom-Json` + StrictMode: el array que parece elemento
 
 El 11-nov-2026 el simulacro del radar abortó con *"No se encuentra la propiedad 'error' en este objeto"* justo después del paso 4. La causa no era la propiedad: era **sobre qué objeto se leía**.
@@ -722,5 +781,6 @@ Seguimiento abierto post-F0: **H-001** (refinamiento opcional), **H-004** (bump 
 | H-007 | 05-jul-2026 | Resuelto | 06-jul-2026 | commit F0 0.6.a-bis |
 | H-008 | 07-jul-2026 | Resuelto (técnico: gate cross-service removido → auth-only) + observación de proceso registrada; hardening por custom claims **abierto** | 07-jul-2026 | commit F1.1 (`sigp/f1.1-clientes-lpu`) |
 | H-009 | 10-jul-2026 | Resuelto (heurística bilingüe + tests; backfill de `unidad` 536/536 en prod autorizado y verificado) | 11-jul-2026 | commit F1.4-A (`sigp/f1.4a-cotizaciones`) |
+| H-010 | 11-nov-2026 | Resuelto (escritores tipados contra `Licitacion`; cuatro centinelas unificados; sin reparación de datos) | 11-nov-2026 | PR #245 + B.3 sub-bloque 1 |
 
 Cuando cada hallazgo se resuelva, actualizar esta bitácora con la fecha y el commit/PR que lo cerró.
