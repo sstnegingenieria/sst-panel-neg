@@ -564,6 +564,49 @@ itera **una vez**, con `$c` = el array completo, no sus elementos.
 
 ---
 
+## Nota de técnica · «existe» no significa «se ejecuta» — sexta ocurrencia del patrón
+
+**Fecha:** 11-nov-2026 · **Hallazgo:** una constante de guarda, con comentario cuidado y test propio, que **ningún camino de ejecución puede alcanzar**.
+
+`GUARDA_VOLUMEN.MAX_CREADOS_PRIMERA_CORRIDA = 50` existe para que *"la primera corrida no vuelque el histórico"*. Es inalcanzable, y la demostración es corta:
+
+1. `evaluarVolumen` lo elige solo cuando `ventana.primera_corrida === true`.
+2. `ventanaIngesta` pone `primera_corrida: true` **únicamente** cuando no hay marca o está corrupta — y en las dos ramas devuelve también `desde: null`.
+3. Con `desde: null`, la guarda de ventana detiene **antes** de llegar al tope.
+4. La única salida de la guarda de ventana es `autorizado_manual: true`… y esa rama retorna `procede: true` **sin mirar el tope**.
+
+Así que el 50 no gobierna nada: ni la primera corrida real (que ya tiene marca, y entonces el tope es 200), ni el barrido autorizado (que saltea el tope por completo). Estaba así desde su commit original; el refactor que partió la guarda en ventana + volumen **preservó el comportamiento exacto**, incluido este.
+
+### Los cinco antecedentes
+
+Esta es la sexta vez en el bloque que un mecanismo existe, parece correcto, y no hace lo que promete:
+
+| # | qué era | por qué no se veía |
+|---|---|---|
+| 1 | el `limitaciones` omitido | el campo estaba, el filtro no lo leía |
+| 2 | el `docId` que colapsó 372 en 368 | la función corría y devolvía menos de lo que entraba |
+| 3 | el `$1` del replace | el patrón casaba; el reemplazo escribía el literal |
+| 4 | el `grep -c` contando líneas | el número salía, pero contaba otra cosa |
+| 5 | el `ConvertFrom-Json` que no desenrollaba | `$c.sa` funcionaba por *member enumeration* sobre el array |
+| **6** | **esta constante** | **el código está escrito, comentado y testeado; ninguna rama lo alcanza** |
+
+### La regla, y su variante nueva
+
+La regla que salió de los cinco primeros:
+
+> **«no falló» y «funcionó» no son lo mismo.**
+
+El sexto agrega una variante, porque aquí no hubo ni fallo ni ejecución:
+
+> **«existe» tampoco significa «se ejecuta».**
+
+Leer el código no basta para saber si una guarda protege: hay que preguntarse **qué entrada la alcanza**. Las cinco primeras se encontraron corriendo algo; ésta se encontró al responder *"¿cuál de los dos topes aplica?"* — una pregunta que nadie había hecho en voz alta porque los dos topes estaban ahí, escritos, y parecía obvio que alguno aplicaba.
+
+### Qué se hace con ella
+
+Nada todavía, a propósito. La constante no causa daño: el camino que debería gobernar —el barrido autorizado del backlog— hoy no tiene tope, y **ése** es el problema real. Cuando llegue el turno del backlog de las 125 filas sin fecha se decide si `autorizado_manual` debe respetar un tope; si la respuesta es sí, el 50 deja de ser letra muerta y el barrido entra en pasadas acotadas en vez de un volcado. Decisión de Giovanny, planteada en su momento y no antes.
+
+---
 ## Nota de configuración · APIs habilitadas en `neg-sst-app`
 
 El 05-jul-2026, durante el pre-flight del deploy de `generarConsecutivo`, el CLI de Firebase habilitó automáticamente dos APIs de Google Cloud necesarias para Cloud Functions 2ª gen:
