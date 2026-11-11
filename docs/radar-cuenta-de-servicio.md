@@ -103,50 +103,64 @@ Y en el código de la función, una línea en las opciones de `onSchedule`:
 serviceAccount: 'radar-secop@neg-sst-app.iam.gserviceaccount.com',
 ```
 
-### ⚠ Paso 4, DESPUÉS del deploy: `run.invoker`, o el radar no corre nunca
+### Paso 4: el `run.invoker` lo pone el CLI. Lo que falta es un permiso DE QUIEN DESPLIEGA
 
-Medido el 10-nov-2026 en `firebase-tools` 15.22.4, el que despliega:
+> **CORRECCIÓN del 11-nov-2026.** La versión anterior de esta sección decía que
+> `createV2Function` "no tiene rama para `schedule`" y que había que conceder el
+> `run.invoker` a mano después del deploy. **Es falso**, y el error fue mío: leí
+> un tramo incompleto de la cadena de ramas del invoker y di por ausente la que
+> sí existe. Se corrige midiendo el archivo completo. Queda escrito porque la
+> conclusión equivocada ya había viajado a una secuencia de despliegue.
+
+Medido el 11-nov-2026 contra `firebase-tools` **15.22.4** —la versión instalada,
+que es la que resuelve `npx firebase` (`^15.22.4` en el `package.json` raíz)—:
 
 | dónde | qué hace |
 |---|---|
-| `gcp/cloudscheduler.js:136` | el job de Cloud Scheduler usa como identidad OIDC `endpoint.serviceAccount ?? computo por defecto` → **`radar-secop@`** |
-| `release/fabricator.js` (`createV2Function`) | otorga invoker a https, callable, taskQueue y dataConnect — **no hay rama para `schedule`** |
-| `upsertScheduleV2` | solo crea el job. Ningún permiso. |
-| `checkIam.js:105-114` | el `roles/run.invoker` automático está **cableado a la cuenta de cómputo por defecto** |
+| `gcp/cloudscheduler.js:136` | la identidad OIDC del job es `endpoint.serviceAccount ?? computo por defecto` → **`radar-secop@`** |
+| `fabricator.js`, `createV2Function`, rama `isScheduleTriggered` | `invoker = endpoint.serviceAccount ? [endpoint.serviceAccount] : [computo por defecto]` → **`setInvokerCreate` SOBRE EL SERVICIO** |
+| `fabricator.js`, `updateV2Function`, misma rama | lo mismo vía `setInvokerUpdate`: **cada deploy reafirma el binding** |
+| `discovery/v1alpha1.js:336` | `endpoint.serviceAccount` sale de `__endpoint.serviceAccountEmail`, así que esa rama ve la cuenta declarada en el código |
+| `checkIam.js:105-114` | **no es** el invoker de la función: es un *ensure* A NIVEL DE PROYECTO para el **agente** de cómputo (`run.invoker` + `eventarc.eventReceiver`), que usan las funciones de evento. Confundirlo con el otro fue el origen del error |
 
-Hoy esto funciona por accidente: la cuenta de cómputo trae `roles/editor`, que
-ya incluye invocar. Con una cuenta dedicada que solo tenga `datastore.user`, el
-deploy sale bien, el job queda creado **y cada disparo devuelve 403**. No falla
-nada visible: a las 6:30 y a las 14:00 simplemente no pasa nada.
+Conclusión: **nadie tiene que conceder el `run.invoker` a `radar-secop@` a mano.**
+El CLI lo concede solo, acotado al servicio, derivándolo de la cuenta que declara
+el código — exactamente el criterio que queríamos.
 
-El permiso se concede **acotado al servicio**, que no existe hasta el primer
-deploy. El margen lo dan las propias horas del `onSchedule`:
+**Lo que sí falta, y es de otro orden:** para poder conceder ese binding, QUIEN
+DESPLIEGA necesita `run.services.setIamPolicy`. Y `roles/cloudfunctions.developer`
+**no lo trae**: de sus 226 permisos tiene `run.services.get` y
+`run.services.getIamPolicy` (leer la política), no escribirla. Medido contra la
+API de IAM.
+
+Sin ese permiso el deploy **falla a mitad de camino y lo dice**: `setInvokerCreate`
+corre *después* de crear la función y su fallo se propaga (`rethrowAs(endpoint,
+"set invoker")`), así que `setTrigger` nunca llega a crear el job. El estado que
+queda es **función creada, sin invoker y sin horario**, con `firebase deploy`
+saliendo en código distinto de cero — que `scripts/deploy-funciones.ps1` aborta.
+No es un radar mudo en silencio, pero sí un codebase a medio desplegar.
+
+El comando de abajo **ya no es un paso de la secuencia**: queda solo como
+**reparación**, si alguna vez hay que rehacer el binding a mano.
 
 ```bash
-gcloud run services add-iam-policy-binding <servicio-de-la-funcion> \
-  --region=us-central1 \
-  --member="serviceAccount:radar-secop@neg-sst-app.iam.gserviceaccount.com" \
-  --role="roles/run.invoker" \
-  --project=neg-sst-app
+gcloud run services add-iam-policy-binding <servicio-de-la-funcion>   --region=us-central1   --member="serviceAccount:radar-secop@neg-sst-app.iam.gserviceaccount.com"   --role="roles/run.invoker"   --project=neg-sst-app
 ```
 
-La alternativa —darlo a nivel de proyecto antes de desplegar— lo deja
-invocando cualquier servicio del proyecto. Se descarta: el paso extra es más
-barato que la superficie.
 
 **Verificación después** (que no quede en "quedó asignado"):
 
 ```bash
 # Que la cuenta tenga EXACTAMENTE un rol A NIVEL DE PROYECTO
-# (el run.invoker del paso 4 va sobre el SERVICIO, no aqui: esta lista
+# (el run.invoker vive sobre el SERVICIO, no aqui: esta lista
 #  debe seguir imprimiendo una sola fila, datastore.user)
 gcloud projects get-iam-policy neg-sst-app \
   --flatten="bindings[].members" \
   --filter="bindings.members:radar-secop@neg-sst-app.iam.gserviceaccount.com" \
   --format="table(bindings.role)"
 
-# Que el job del scheduler pueda invocar (si esto sale vacio, el radar
-# no corre y NADA lo avisa)
+# Que el CLI haya puesto el invoker sobre el servicio (si sale vacio, el
+# binding no quedo y el radar no corre)
 gcloud run services get-iam-policy <servicio-de-la-funcion> \
   --region=us-central1 --project=neg-sst-app \
   --flatten="bindings[].members" \

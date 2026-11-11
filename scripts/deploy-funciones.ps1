@@ -414,6 +414,7 @@ const cuentas = new Set()
 const porParametro = []
 const desconocidas = []
 const conHorario = []
+const conInvoker = []
 // LA CUENTA DE RUNTIME se deriva del endpoint igual que la lista de funciones:
 // firebase-functions copia la opcion `serviceAccount` a
 // `__endpoint.serviceAccountEmail`. Pero ese campo tiene CUATRO formas, y
@@ -446,6 +447,13 @@ for (const k of Object.keys(m)) {
   // El horario tambien se DERIVA: `scheduleTrigger` lo pone el propio SDK
   // al declarar `onSchedule`. De aqui sale la condicion del paso 2-ter.
   if (e.scheduleTrigger) conHorario.push(k)
+  // LAS RAMAS DEL INVOKER, copiadas de `createV2Function` de firebase-tools:
+  // el CLI llama a `setInvokerCreate` SOBRE EL SERVICIO para https, callable,
+  // programadas, blocking de auth, y taskQueue solo si declara invoker. Para
+  // las de EVENTO no lo llama. De aqui sale si el deploy va a escribir una
+  // politica de IAM de Cloud Run, que es un permiso que no todos tienen.
+  if (e.httpsTrigger || e.callableTrigger || e.scheduleTrigger || e.blockingTrigger ||
+      (e.taskQueueTrigger && e.taskQueueTrigger.invoker)) conInvoker.push(k)
   const sa = e.serviceAccountEmail !== undefined ? e.serviceAccountEmail : e.serviceAccount
   if (!sa) continue
   if (RESET_VALUE !== null && sa === RESET_VALUE) continue
@@ -460,7 +468,7 @@ for (const k of Object.keys(m)) {
   desconocidas.push(k + ': forma no reconocida (' + clase + ')')
 }
 console.log(JSON.stringify({
-  nombres, sinEndpoint, cuentas: [...cuentas], porParametro, desconocidas, conHorario,
+  nombres, sinEndpoint, cuentas: [...cuentas], porParametro, desconocidas, conHorario, conInvoker,
 }))
 '@ | Set-Content -Path $lectorExports -Encoding UTF8
 
@@ -588,32 +596,51 @@ const [, , ...cuentas] = process.argv
 }
 
 
-# -- 2-ter. Si el codebase tiene funciones PROGRAMADAS, Cloud Scheduler ------
-# POR QUE ESTE CHEQUEO EXISTE APARTE: el job del horario NO lo crea la funcion
-# ni un agente de servicio. Lo crea firebase-tools CON TU SESION, llamando a
-# la API de Cloud Scheduler (`createOrReplaceJob`: un get, y luego create o
-# update). Y `setTrigger` corre en CREATE **y en UPDATE** (medido en
-# fabricator.js de firebase-tools), asi que lo necesita TODO deploy de un
-# codebase con horario, no solo el primero.
+# -- 2-ter. Permisos DE PROYECTO que dependen de lo que declara el codigo -----
+# Dos permisos que el deploy usa, que NO estan en el chequeo base del paso
+# 1-bis, y que solo se pueden pedir DESPUES del build porque dependen de lo que
+# el codebase declara. Los dos se midieron contra la API de IAM, y los dos los
+# tiene en su lista de ausencias `roles/cloudfunctions.developer`:
 #
-# EL HUECO QUE CIERRA: `roles/cloudfunctions.developer` trae 226 permisos y
-# NINGUNO de `cloudscheduler.*` (medido contra la API de IAM; `firebase.viewer`
-# tampoco). Sin este chequeo el deploy sube la funcion, falla al crear su job
-# y deja el codebase a medio camino: funcion VIVA y SIN HORARIO, que es la peor
-# de las dos formas de estar roto, porque desde afuera parece desplegada.
+#  (a) `cloudscheduler.jobs.{get,create,update}` -- el job del horario NO lo crea
+#      la funcion ni un agente de servicio: lo crea firebase-tools CON TU SESION
+#      (`createOrReplaceJob` = un get, y luego create o update). Y `setTrigger`
+#      corre en CREATE **y en UPDATE** (fabricator.js), asi que lo necesita todo
+#      deploy de un codebase con horario, no solo el primero.
+#      `cloudfunctions.developer` trae 226 permisos y NINGUNO de
+#      `cloudscheduler.*`; `firebase.viewer` (298) tampoco.
 #
-# La condicion tampoco se cablea: sale del `scheduleTrigger` del MISMO
-# `__endpoint` del commit que se esta desplegando.
-$conHorario = @($lectura.conHorario)
+#  (b) `run.services.setIamPolicy` -- el CLI concede el `run.invoker` SOBRE EL
+#      SERVICIO a la cuenta de servicio que declara el codigo (rama
+#      `isScheduleTriggered` de `createV2Function`, y la misma en
+#      `updateV2Function`). Es decir: ese invoker NO hay que darlo a mano. Pero
+#      para que el CLI pueda darlo, QUIEN DESPLIEGA tiene que poder ESCRIBIR la
+#      politica del servicio, y `cloudfunctions.developer` solo trae
+#      `run.services.get` y `run.services.getIamPolicy` -- leerla, no escribirla.
+#      Sin ese permiso el deploy crea la funcion, revienta en `set invoker` (el
+#      fallo se propaga, no se traga) y `setTrigger` nunca llega a crear el job:
+#      queda funcion viva, sin invoker y sin horario.
+#
+# NINGUNO SE CABLEA: las dos condiciones salen del `__endpoint` del commit que se
+# esta desplegando -- `scheduleTrigger` para (a), y para (b) las mismas ramas del
+# invoker que usa el CLI. Un codebase de puras funciones de evento no paga ninguno.
+$permisosDerivados = [ordered]@{}
 if ($conHorario.Count -gt 0) {
   Write-Host ("Funciones PROGRAMADAS en este codebase: " + ($conHorario -join ', ')) -ForegroundColor DarkGray
-  $verifSched = Join-Path $tmp 'permisos-scheduler.js'
+  foreach ($p in @('cloudscheduler.jobs.get', 'cloudscheduler.jobs.create', 'cloudscheduler.jobs.update')) {
+    $permisosDerivados[$p] = 'crear el horario de: ' + ($conHorario -join ', ')
+  }
+}
+$conInvoker = @($lectura.conInvoker)
+if ($conInvoker.Count -gt 0) {
+  Write-Host ("Funciones a las que el CLI les pone invoker: " + ($conInvoker -join ', ')) -ForegroundColor DarkGray
+  $permisosDerivados['run.services.setIamPolicy'] = 'que el CLI conceda el invoker de: ' + ($conInvoker -join ', ')
+}
+
+if ($permisosDerivados.Count -gt 0) {
+  $verifDeriv = Join-Path $tmp 'permisos-derivados.js'
   ($PreludioToken + @'
-const PERMISOS = [
-  'cloudscheduler.jobs.get',
-  'cloudscheduler.jobs.create',
-  'cloudscheduler.jobs.update',
-]
+const PERMISOS = process.argv.slice(2)
 ;(async () => {
   const token = await accessToken()
   const r = await fetch('https://cloudresourcemanager.googleapis.com/v1/projects/neg-sst-app:testIamPermissions', {
@@ -626,26 +653,36 @@ const PERMISOS = [
   const tiene = j.permissions || []
   console.log(JSON.stringify({ faltan: PERMISOS.filter(p => !tiene.includes(p)) }))
 })().catch(e => { console.error('ERROR: ' + e.message); process.exit(1) })
-'@) | Set-Content -Path $verifSched -Encoding UTF8
+'@) | Set-Content -Path $verifDeriv -Encoding UTF8
 
-  $schedJson = & node $verifSched
+  $derivJson = & node $verifDeriv @($permisosDerivados.Keys)
   if ($LASTEXITCODE -ne 0) {
     Remove-Item $tmp -Recurse -Force
-    Abortar ('no pude comprobar tus permisos de Cloud Scheduler, que este codebase necesita por tener funciones programadas.')
+    Abortar 'no pude comprobar los permisos que este codebase necesita por lo que declara (scheduler / invoker).'
   }
-  $schedFaltan = @(($schedJson | Out-String | ConvertFrom-Json).faltan)
-  if ($schedFaltan.Count -gt 0) {
+  $derivFaltan = @(($derivJson | Out-String | ConvertFrom-Json).faltan)
+  if ($derivFaltan.Count -gt 0) {
+    $rolDe = [ordered]@{}
+    $detalle = ''
+    foreach ($p in $derivFaltan) {
+      $detalle += "    $p  ->  $($permisosDerivados[$p])`n"
+      if ($p -like 'cloudscheduler.*') { $rolDe['roles/cloudscheduler.admin'] = $true }
+      if ($p -eq 'run.services.setIamPolicy') { $rolDe['roles/run.admin'] = $true }
+    }
+    $comandos = ''
+    foreach ($r in $rolDe.Keys) {
+      $comandos += "    gcloud projects add-iam-policy-binding neg-sst-app --member=user:$quien --role=$r`n"
+    }
     Remove-Item $tmp -Recurse -Force
-    Abortar ("la cuenta $quien NO puede crear el horario de las funciones programadas.`n" +
-      'Permisos que faltan: ' + ($schedFaltan -join ', ') + "`n`n" +
-      "El job del horario lo crea firebase-tools con TU sesion, no el proyecto,`n" +
-      "y cloudfunctions.developer no trae ningun permiso de Cloud Scheduler.`n`n" +
-      "QUE HACER (acto de IAM; lo ejecuta alguien con propiedad del proyecto):`n" +
-      "    gcloud projects add-iam-policy-binding neg-sst-app --member=user:$quien --role=roles/cloudscheduler.admin`n`n" +
-      'Sin eso el deploy sube la funcion y FALLA al crear su horario: quedaria viva y sin correr nunca.')
+    Abortar ("la cuenta $quien NO tiene todo lo que este codebase necesita para desplegarse.`n`n" +
+      "PERMISOS QUE FALTAN, y para que los usa el deploy:`n" + $detalle + "`n" +
+      "QUE HACER (acto de IAM; lo ejecuta alguien con propiedad del proyecto):`n" + $comandos + "`n" +
+      "Sin esto el deploy NO se cae al principio: crea la funcion y revienta`n" +
+      'despues, dejandola viva, sin invoker y sin horario.')
   }
-  Write-Host 'OK: puedes crear y actualizar el horario de Cloud Scheduler.' -ForegroundColor Green
+  Write-Host 'OK: tienes los permisos de scheduler/invoker que este codebase necesita.' -ForegroundColor Green
 }
+
 # El PREFIJO del codebase (firebase.json) cambia el nombre DESPLEGADO:
 # firebase-tools renombra cada endpoint a `<prefijo>-<export>` (applyPrefix).
 # Sin esto, la comparacion contra prod veria "sobra lic-x / falta x" en cada
