@@ -1052,6 +1052,17 @@ export interface LicitacionDetectada {
     vocabulario_version: string
     /** Id de la corrida que lo creó. Lo sella el escritor, no el mapeo. */
     corrida: string | null
+    /**
+     * DE DÓNDE SALIÓ LA FECHA DEL PROCESO, en el DOCUMENTO y no solo en la meta.
+     *
+     * Hasta ahora `origen_fecha` vivía únicamente en `MetaIngesta` —"para el
+     * reporte y el triage, no para el doc"—, y eso bastaba mientras las dos
+     * poblaciones entraban juntas. Desde que la corrida automática excluye las
+     * sin fecha (`incluir_sin_fecha: false`), un `'ninguna'` solo puede venir
+     * del BARRIDO AUTORIZADO del backlog: el campo es la marca que distingue
+     * esas filas de las del flujo normal, en la bandeja y en una consulta.
+     */
+    origen_fecha: OrigenFecha
   }
 }
 
@@ -1186,6 +1197,7 @@ export function mapearProceso(
       terminos: clasificacion.terminos,
       vocabulario_version,
       corrida: null,
+      origen_fecha: fecha.origen,
     },
   }
 
