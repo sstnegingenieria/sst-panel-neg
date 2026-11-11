@@ -672,7 +672,15 @@ if ($soloProd.Count -gt 0) {
   Remove-Item $tmp -Recurse -Force
   Abortar ("el deploy de '$Codebase' BORRARIA esas funciones.`n" +
     "Esto pasa cuando main esta atras de lo desplegado, o cuando otro frente desplego algo que no esta en main.`n" +
-    'Resuelve primero que main declare lo que esta vivo (o retira esas funciones a proposito, en un PR) y vuelve a correr.')
+    "QUE HACER: resuelve que main declare lo que esta vivo, y vuelve a correr.`n`n" +
+    "RETIRAR UNA FUNCION A PROPOSITO NO SE HACE CON ESTE SCRIPT. Quitarla del`n" +
+    "codigo y volver a correr tampoco sirve: la guarda vuelve a verla viva en`n" +
+    "prod y sin declarar, y aborta igual. Es deliberado: un borrado es un acto`n" +
+    "distinto de un despliegue, y este script nunca borra.`n`n" +
+    "Por eso el paso 2-ter NO exige cloudscheduler.jobs.delete: ese permiso lo`n" +
+    "necesitaria el camino de RETIRO (deleteScheduleV2 de firebase-tools propaga`n" +
+    "el fallo), y quien construya ese camino tiene que traer su propio chequeo.`n" +
+    '(Borde reportado por el frente SIGP sobre el commit 98dedbf.)')
 }
 
 # Commits que tocaron la carpeta del codebase desde el ultimo deploy registrado.
