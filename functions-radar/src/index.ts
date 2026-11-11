@@ -90,7 +90,7 @@ import {
   RUTA_ESTADO_RADAR, RUTA_VOCABULARIO_NEG, rutaLicitacion, validarRutaEscritura,
 } from '../../src/utils/sigp/radarRutas'
 import {
-  evaluarVolumen, cuantosCrearia, planearEscritura, construirRegistroCorrida,
+  evaluarVentana, evaluarVolumen, cuantosCrearia, planearEscritura, construirRegistroCorrida,
   marcaSiguiente, sellarParaEscritura, fechasATimestamp, avanzarEstadoRadar,
   resumenLegible, ACTOR_RADAR, ESTADO_RADAR_INICIAL,
 } from '../../src/utils/sigp/radarCorrida'
@@ -251,6 +251,39 @@ async function corridaDelRadar(): Promise<void> {
   const ventana = ventanaIngesta(estado.marca, inicio, estado.solape_dias)
   const consulta = { modo: MODO_INGESTA_DEFECTO, desde: ventana.desde, hasta: ventana.hasta }
   logger.info('radar: arranca', { ventana, vocabulario_version, con_token: token !== '' })
+
+  // ── 1-bis. GUARDA DE VENTANA, ANTES DE LA PRIMERA PETICIÓN ──
+  //
+  // Esto estaba aguas abajo de la cosecha, y era un defecto. Con `desde: null`
+  // la ventana abarca TODO el dataset: 319.531 filas medidas contra la API real,
+  // en páginas de 50.000, contra una función de 512 MiB. La corrida moría por
+  // memoria o por tiempo ANTES de llegar a la guarda, así que la guarda no
+  // impedía nada — solo habría explicado, si hubiera llegado a hablar.
+  //
+  // Lo único que necesitan las reglas de ventana es la ventana, así que se
+  // evalúan acá: sin contar, sin cosechar, sin una sola petición. El registro
+  // queda igual que siempre, con `escritura: null` y el motivo — y con los
+  // contadores en cero, que es la verdad: no se leyó nada.
+  const ventanaOk = evaluarVentana(ventana, { autorizado_manual: estado.autorizado_manual === true })
+  if (!ventanaOk.procede) {
+    // El resumen vacío se DERIVA de un reporte sin filas, no se escribe a mano:
+    // así su forma no puede divergir de la del resumen real.
+    const resumen = construirResumenCorrida(
+      ingerirSecop([], hash, { terminos, vocabulario_version }),
+      {
+        ejecutada_en: corridaId,
+        modo: MODO_INGESTA_DEFECTO,
+        ventana: { desde: ventana.desde, hasta: ventana.hasta, solape_dias: ventana.solape_dias },
+      },
+    )
+    const registro = construirRegistroCorrida(resumen, ventanaOk, null,
+      marcaSiguiente(ventana, false, estado.marca))
+    await refEscritura(db, RUTA_ESTADO_RADAR).set(avanzarEstadoRadar(estado, registro), { merge: false })
+    logger.warn('radar: NO se consultó la API', {
+      motivo: ventanaOk.motivo, sugerencia: ventanaOk.sugerencia,
+    })
+    return
+  }
 
   // ── 2. Cosecha verificada ──
   const total = await contar(consulta, token)

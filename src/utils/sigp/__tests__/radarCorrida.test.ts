@@ -10,7 +10,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createHash } from 'node:crypto'
 import FIXTURES from './fixtures/secop.p6dx-8zbt.json'
 import {
-  GUARDA_VOLUMEN, evaluarVolumen, diasDeVentana,
+  GUARDA_VOLUMEN, evaluarVolumen, evaluarVentana, diasDeVentana,
   CAMPOS_REFRESCABLES, CAMPOS_PROTEGIDOS,
   patchRadarSobreExistente, hayQueEscribir, planearEscritura,
   construirRegistroCorrida, marcaSiguiente, resumenLegible, cuantosCrearia,
@@ -46,6 +46,51 @@ function docDe(k: string): LicitacionDetectada {
 const AHORA = new Date('2026-11-09T12:00:00.000Z')
 
 // ── 1. Guarda de volumen ─────────────────────────────────────────────────────
+
+describe('guarda de VENTANA — antes de la primera petición', () => {
+  // Esto vivía aguas abajo de la cosecha, y con `desde: null` la corrida moría
+  // por memoria trayendo 319.531 filas antes de poder decir su propia razón.
+  const sinInicio = { desde: null, hasta: '2026-11-11' }
+
+  it('sin inicio NO procede, y lo dice sin haber consultado nada', () => {
+    const r = evaluarVentana(sinInicio)
+    expect(r.procede).toBe(false)
+    expect(r.motivo).toContain('VENTANA SIN INICIO')
+    expect(r.consultada).toBe(false)
+    // LA FORMA ES PARTE DE LA HONESTIDAD: sin `crearia`, el registro no puede
+    // leerse como "la API no trajo nada".
+    expect(r).not.toHaveProperty('crearia')
+    expect(r).not.toHaveProperty('tope')
+  })
+
+  it('una ventana de 45 días procede', () => {
+    expect(evaluarVentana({ desde: '2026-09-27', hasta: '2026-11-11' }).procede).toBe(true)
+  })
+
+  it('más de 120 días no procede', () => {
+    const r = evaluarVentana({ desde: '2026-01-01', hasta: '2026-11-11' })
+    expect(r.procede).toBe(false)
+    expect(r.motivo).toContain('VENTANA DEMASIADO ANCHA')
+  })
+
+  it('la escotilla autorizada pasa igual, pero tiene que decirlo', () => {
+    expect(evaluarVentana(sinInicio, { autorizado_manual: true }).procede).toBe(true)
+  })
+
+  it('`evaluarVolumen` DELEGA las reglas de ventana: un solo nacimiento', () => {
+    // Si alguien vuelve a copiar las reglas en el evaluador de abajo, este test
+    // lo atrapa en cuanto los dos textos dejen de coincidir.
+    const v = { ...sinInicio, primera_corrida: true }
+    const arriba = evaluarVentana(v)
+    const abajo = evaluarVolumen(999, v)
+    expect(abajo.procede).toBe(false)
+    expect(abajo.motivo).toBe(arriba.motivo)
+    expect(abajo.sugerencia).toBe(arriba.sugerencia)
+    // Y el de abajo SÍ trae lo contado, porque ahí ya se consultó.
+    expect(abajo.consultada).toBe(true)
+    expect(abajo.crearia).toBe(999)
+  })
+})
 
 describe('guarda de volumen — que la primera corrida no vuelque el histórico', () => {
   it('una corrida diaria normal pasa', () => {
