@@ -219,6 +219,28 @@ export interface ProcedenciaRadar {
 }
 
 /**
+ * ¿EL LÉXICO PARTICIPÓ en que este proceso entrara?
+ *
+ * No es lo mismo que `esDelRadar`, y la diferencia importa en un solo lugar
+ * pero importa mucho: la pregunta del descarte («¿el léxico se equivocó, o
+ * acertó y aun así no lo queremos?») solo tiene sentido si hubo léxico.
+ *
+ * Un proceso que entró por CÓDIGO sin que el texto dijera nada —señal
+ * `codigo_en_clase_sin_texto`, los de ferretería pura— vino por EVIDENCIA de
+ * adjudicación, no porque el vocabulario reconociera el objeto. Marcarlo
+ * `RUIDO_LEXICO` diría que el léxico falló en algo donde el léxico no opinó, y
+ * arruinaría exactamente la métrica que `RUIDO_LEXICO` existe para dar — el
+ * mismo daño que D4 vino a evitar, una capa más abajo.
+ *
+ * El predicado es `terminos.length > 0` y no una lista de señales: los
+ * términos SON la huella de que el vocabulario coincidió. Una señal nueva no
+ * obliga a acordarse de actualizar esto.
+ */
+export function lexicoParticipo(radar: ProcedenciaRadar | null | undefined): boolean {
+  return radar != null && radar.terminos.length > 0
+}
+
+/**
  * ¿Lo trajo el radar?
  *
  * COMPARA CONTRA `null` CON `!=` A PROPÓSITO (no `!== null`): los documentos
@@ -390,6 +412,37 @@ export const MOTIVO_DESCARTE_LABEL: Record<MotivoDescarte, string> = {
   DUPLICADO: 'Ya estaba por otra vía',
 
   OTRO: 'Otro',
+}
+
+/**
+ * Por qué el radar lo trajo, en palabras.
+ *
+ * Solo CUATRO de las siete pueden aparecer en un documento: las otras tres son
+ * veredictos `no` y no se persisten. Se etiquetan igual —el tipo las admite y
+ * una lectura defensiva no debe quedarse sin texto—, pero no se van a ver.
+ */
+export const SENAL_LABEL: Record<SenalClasificacion, string> = {
+  codigo_en_familia: 'Código de la familia del RUP',
+  codigo_en_clase_con_texto: 'Código con adjudicación probada, y el objeto concuerda',
+  codigo_en_clase_sin_texto: 'Código con adjudicación probada — el texto no dice nada',
+  texto_coincide: 'El objeto coincide con el léxico',
+  codigo_fuera_de_familia: 'Código fuera de la familia',
+  sin_codigo_ni_texto: 'Ni código ni texto',
+  fuera_de_territorio: 'Fuera del territorio',
+}
+
+/**
+ * De dónde salió la fecha con la que el proceso se ubica en el tiempo.
+ *
+ * `ninguna` NO es un detalle técnico: desde el PR #252 la corrida automática
+ * excluye esas filas, así que una que lo diga entró por el BARRIDO AUTORIZADO
+ * del backlog. La bandeja lo dice con todas las letras porque es lo único que
+ * explica por qué esa fila no tiene reloj.
+ */
+export const ORIGEN_FECHA_LABEL: Record<OrigenFecha, string> = {
+  publicacion: 'fecha de publicación',
+  recepcion_de_ofertas: 'fecha de recepción de ofertas',
+  ninguna: 'sin fecha en el origen',
 }
 
 export const MOTIVO_SEMAFORO_LABEL: Record<MotivoSemaforo, string> = {

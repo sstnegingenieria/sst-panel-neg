@@ -17,8 +17,16 @@
 // Que la distinción se aplique bien tiene que ser el camino fácil, no el que
 // requiere acordarse.
 //
-// Y en una licitación TECLEADA A MANO no hubo léxico: ahí `RUIDO_LEXICO` no se
+// Y donde NO HUBO LÉXICO la pregunta no se hace: ahí `RUIDO_LEXICO` no se
 // ofrece siquiera, y `FUERA_DE_ALCANCE` es un motivo normal de la lista.
+//
+// «No hubo léxico» NO es lo mismo que «no vino del radar» (B.3, sub-bloque 4).
+// Un proceso que entró por CÓDIGO con el texto en silencio —señal
+// `codigo_en_clase_sin_texto`, los de ferretería pura— vino del radar y aun así
+// el vocabulario no opinó sobre él. Hacerle la pregunta invitaría a marcar
+// `RUIDO_LEXICO` sobre algo donde el léxico no falló, que es el mismo daño que
+// esta pregunta vino a evitar. El gate es `lexicoParticipo()`, cuyo predicado
+// son los TÉRMINOS: ellos son la huella de que el vocabulario coincidió.
 import { useEffect, useState } from 'react'
 import Modal from '../../shared/Modal'
 import SelectField from '../../shared/SelectField'
@@ -32,27 +40,35 @@ const ABRE_PREGUNTA = '__LEXICO__'
 
 interface Props {
   abierto: boolean
-  /** ¿Lo trajo el radar? Decide si la pregunta del léxico tiene sentido. */
-  delRadar: boolean
+  /**
+   * ¿El léxico participó en que este proceso entrara? Decide si la pregunta
+   * tiene sentido. Se calcula con `lexicoParticipo(lic.radar)` — no con
+   * `esDelRadar`, que es más ancho de lo que la pregunta soporta.
+   */
+  lexicoParticipo: boolean
   onCerrar: () => void
   onConfirmar: (motivo: MotivoDescarte) => void
 }
 
-export default function ModalDescartar({ abierto, delRadar, onCerrar, onConfirmar }: Props) {
+export default function ModalDescartar(
+  { abierto, lexicoParticipo, onCerrar, onConfirmar }: Props,
+) {
   const [eleccion, setEleccion] = useState('')
   const [respuesta, setRespuesta] = useState<MotivoDescarte | ''>('')
 
   useEffect(() => { if (abierto) { setEleccion(''); setRespuesta('') } }, [abierto])
 
-  const opciones = delRadar
-    // Del radar: los dos del léxico salen de la lista y entran por la pregunta.
+  const opciones = lexicoParticipo
+    // Hubo léxico: los dos motivos del léxico salen de la lista y entran por
+    // la pregunta, que es la única forma de que la distinción se aplique bien.
     ? [
       ...MOTIVOS_DESCARTE
         .filter(m => !MOTIVOS_DESCARTE_DEL_LEXICO.includes(m))
         .map(m => ({ value: m as string, label: MOTIVO_DESCARTE_LABEL[m] })),
       { value: ABRE_PREGUNTA, label: 'El léxico lo trajo y no nos sirve…' },
     ]
-    // Tecleada a mano: no hubo léxico, así que `RUIDO_LEXICO` no aplica.
+    // Sin léxico de por medio —tecleada a mano, o traída por código con el
+    // texto en silencio—: `RUIDO_LEXICO` no tiene sobre qué opinar.
     : MOTIVOS_DESCARTE
       .filter(m => m !== 'RUIDO_LEXICO')
       .map(m => ({ value: m as string, label: MOTIVO_DESCARTE_LABEL[m] }))

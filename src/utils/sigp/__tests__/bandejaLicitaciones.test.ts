@@ -4,11 +4,14 @@ import {
   SECCIONES_BANDEJA, CAPACIDAD_SEMANAL_DEFAULT,
   seccionDe, compitePorCupo, ordenarPorCierre, repartirPorCapacidad,
   planIntercambioCupo, patchLiberarCupo, coincideBusqueda, contarSecciones,
-  ESTADOS_ACTIVOS_BANDEJA, SEMAFORO_CHIP,
+  ESTADOS_ACTIVOS_BANDEJA, SEMAFORO_CHIP, SENAL_CHIP,
+  ordenarRadar, sinFechaEnElOrigen,
 } from '../bandejaLicitaciones'
 import type { LicitacionConId } from '../bandejaLicitaciones'
-import { ESTADOS_LICITACION } from '../../../types/sigp/licitacion'
-import type { EstadoLicitacion, Licitacion, Semaforo } from '../../../types/sigp/licitacion'
+import { ESTADOS_LICITACION, SENAL_LABEL } from '../../../types/sigp/licitacion'
+import type {
+  EstadoLicitacion, Licitacion, OrigenFecha, SenalClasificacion, Semaforo,
+} from '../../../types/sigp/licitacion'
 
 const ts = (ms: number) => ({ toMillis: () => ms } as unknown as Timestamp)
 const AHORA = ts(1_000_000)
@@ -332,5 +335,86 @@ describe('SEMAFORO_CHIP — manual de marca', () => {
     const clases = Object.values(SEMAFORO_CHIP).join(' ')
     expect(Object.keys(SEMAFORO_CHIP).sort()).toEqual(['amarillo', 'rojo', 'verde'])
     expect(clases).not.toMatch(/blue|indigo|sky|cyan/)
+  })
+})
+
+// ── Sub-bloque 4: la cola del radar ────────────────────────────────────────
+
+const delRadar = (
+  origen_fecha: OrigenFecha, dias: number | null, extra?: Partial<Licitacion> & { id?: string },
+) => {
+  const radar = {
+    senal: 'texto_coincide' as const, terminos: ['redes'],
+    vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha,
+  }
+  return dias === null
+    ? lic({ ...extra, estado: 'detectada', radar })
+    : conCierre(dias, { ...extra, estado: 'detectada', radar })
+}
+
+describe('sinFechaEnElOrigen', () => {
+  it('es true solo cuando el origen no dio ninguna fecha', () => {
+    expect(sinFechaEnElOrigen(delRadar('ninguna', null))).toBe(true)
+    expect(sinFechaEnElOrigen(delRadar('publicacion', 3))).toBe(false)
+    expect(sinFechaEnElOrigen(delRadar('recepcion_de_ofertas', 3))).toBe(false)
+  })
+
+  it('lo tecleado a mano no tiene origen de fecha: false, no "sin fecha"', () => {
+    expect(sinFechaEnElOrigen(lic({ radar: null }))).toBe(false)
+  })
+
+  it('un histórico sin el campo tampoco: la ausencia no es "ninguna"', () => {
+    const historico = lic()
+    delete (historico as { radar?: unknown }).radar
+    expect(sinFechaEnElOrigen(historico)).toBe(false)
+  })
+})
+
+describe('ordenarRadar', () => {
+  it('LAS SIN FECHA VAN PRIMERO, aunque las otras cierren mañana', () => {
+    const urgente = delRadar('publicacion', 1, { id: 'urgente' })
+    const sinFecha = delRadar('ninguna', null, { id: 'sin-fecha' })
+    const lejana = delRadar('publicacion', 60, { id: 'lejana' })
+    const orden = [urgente, lejana, sinFecha].sort(ordenarRadar).map(l => l.id)
+    expect(orden).toEqual(['sin-fecha', 'urgente', 'lejana'])
+  })
+
+  it('es exactamente al revés que el orden de las activas — ese es el punto', () => {
+    const conReloj = delRadar('publicacion', 5, { id: 'con-reloj' })
+    const sinFecha = delRadar('ninguna', null, { id: 'sin-fecha' })
+    // `ordenarPorCierre` manda al FINAL lo que no tiene reloj: correcto para
+    // las activas, y es justo lo que hundiría la cola del barrido autorizado.
+    expect([sinFecha, conReloj].sort(ordenarPorCierre).map(l => l.id))
+      .toEqual(['con-reloj', 'sin-fecha'])
+    expect([conReloj, sinFecha].sort(ordenarRadar).map(l => l.id))
+      .toEqual(['sin-fecha', 'con-reloj'])
+  })
+
+  it('dentro de cada grupo delega en el orden por cierre', () => {
+    const a = delRadar('publicacion', 2, { id: 'a' })
+    const b = delRadar('publicacion', 9, { id: 'b' })
+    const c = delRadar('publicacion', 5, { id: 'c' })
+    expect([b, c, a].sort(ordenarRadar).map(l => l.id)).toEqual(['a', 'c', 'b'])
+  })
+
+  it('entre dos sin fecha el orden es estable (número de proceso)', () => {
+    const x = delRadar('ninguna', null, { id: 'x' })
+    const y = delRadar('ninguna', null, { id: 'y' })
+    const esperado = [x, y].sort(ordenarRadar).map(l => l.id)
+    expect([y, x].sort(ordenarRadar).map(l => l.id)).toEqual(esperado)
+  })
+})
+
+describe('SENAL_CHIP — manual de marca', () => {
+  it('cubre todas las señales que el tipo admite y no usa azul', () => {
+    const senales = Object.keys(SENAL_LABEL) as SenalClasificacion[]
+    for (const s of senales) expect(SENAL_CHIP[s], s).toBeTruthy()
+    expect(Object.values(SENAL_CHIP).join(' ')).not.toMatch(/blue|indigo|sky|cyan/)
+  })
+
+  it('la señal que entró por evidencia con el texto en silencio se distingue', () => {
+    // No es un detalle estético: es la fila donde `RUIDO_LEXICO` no aplica.
+    expect(SENAL_CHIP.codigo_en_clase_sin_texto)
+      .not.toBe(SENAL_CHIP.codigo_en_clase_con_texto)
   })
 })

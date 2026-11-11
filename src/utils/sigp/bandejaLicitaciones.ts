@@ -10,7 +10,9 @@
  * el tope se muestra igual —abajo y atenuado— porque esconderlo sería peor:
  * el trabajo que no cabe sigue existiendo.
  */
-import type { EstadoLicitacion, Licitacion, Semaforo, Timestamp } from '../../types/sigp/licitacion'
+import type {
+  EstadoLicitacion, Licitacion, SenalClasificacion, Semaforo, Timestamp,
+} from '../../types/sigp/licitacion'
 import { esDelRadar, esLicitacionTerminal } from '../../types/sigp/licitacion'
 
 /** Licitación con su id de documento (lo que consume la UI). */
@@ -88,6 +90,36 @@ export function ordenarPorCierre(a: LicitacionConId, b: LicitacionConId): number
   if (mb === null) return -1
   if (ma !== mb) return ma - mb
   return a.numero_proceso.localeCompare(b.numero_proceso, 'es')
+}
+
+/**
+ * ¿El origen no le dio ninguna fecha a este proceso?
+ *
+ * Desde el PR #252 la corrida automática excluye estas filas, así que una que
+ * esté en la colección entró por el BARRIDO AUTORIZADO del backlog.
+ */
+export function sinFechaEnElOrigen(l: Pick<Licitacion, 'radar'>): boolean {
+  return l.radar?.origen_fecha === 'ninguna'
+}
+
+/**
+ * Orden de la cola del radar: LAS SIN FECHA PRIMERO.
+ *
+ * `ordenarPorCierre` manda al FINAL lo que no tiene reloj, y para las activas
+ * eso es correcto —no se puede priorizar por urgencia lo que no tiene fecha—.
+ * En el radar el mismo criterio hace daño: hunde al fondo de la cola justo las
+ * filas que nadie puede priorizar solo, que además entraron por un acto
+ * deliberado. Lo que no tiene reloj no se ordena solo: hay que mirarlo.
+ *
+ * Dentro de cada grupo DELEGA en `ordenarPorCierre`, que ya resuelve el empate
+ * por número de proceso y mantiene el orden estable entre renders. Reescribir
+ * ese desempate acá sería un segundo criterio del mismo orden.
+ */
+export function ordenarRadar(a: LicitacionConId, b: LicitacionConId): number {
+  const sa = sinFechaEnElOrigen(a)
+  const sb = sinFechaEnElOrigen(b)
+  if (sa !== sb) return sa ? -1 : 1
+  return ordenarPorCierre(a, b)
 }
 
 export interface RepartoCapacidad {
@@ -223,6 +255,26 @@ export function contarSecciones(ls: LicitacionConId[]): Record<SeccionBandeja, n
 export const ESTADOS_ACTIVOS_BANDEJA: EstadoLicitacion[] = [
   'detectada', 'en_evaluacion', 'en_preparacion', 'manifestada', 'presentada',
 ]
+
+/**
+ * Color del chip de la SEÑAL del radar (Tailwind). Sin azules.
+ *
+ * El color dice CUÁNTO respalda la entrada, no qué tan urgente es:
+ *  · verde  — el código lo respalda (familia del RUP, o clase con el texto de
+ *             acuerdo).
+ *  · ámbar  — entró por EVIDENCIA de adjudicación y el texto no dijo nada:
+ *             merece una segunda mirada, y `RUIDO_LEXICO` no aplica.
+ *  · gris   — solo el texto, o una señal que no se persiste.
+ */
+export const SENAL_CHIP: Record<SenalClasificacion, string> = {
+  codigo_en_familia: 'bg-emerald-100 text-emerald-800',
+  codigo_en_clase_con_texto: 'bg-emerald-50 text-emerald-700',
+  codigo_en_clase_sin_texto: 'bg-amber-100 text-amber-800',
+  texto_coincide: 'bg-gray-100 text-gray-700',
+  codigo_fuera_de_familia: 'bg-gray-100 text-gray-600',
+  sin_codigo_ni_texto: 'bg-gray-100 text-gray-600',
+  fuera_de_territorio: 'bg-gray-100 text-gray-600',
+}
 
 /** Color del chip del semáforo (Tailwind). Sin azules — manual de marca. */
 export const SEMAFORO_CHIP: Record<Semaforo, string> = {

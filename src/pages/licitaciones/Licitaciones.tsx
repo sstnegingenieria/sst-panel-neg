@@ -22,12 +22,16 @@ import { gestionaLicitacionesUI } from '../../types/sigp/permisos'
 import {
   MODALIDAD_LICITACION_LABEL, ESTADO_LICITACION_LABEL,
   MOTIVO_DESCARTE_LABEL, MOTIVOS_DESCARTE,
+  ORIGEN_FECHA_LABEL, SENAL_LABEL,
+  lexicoParticipo, patchAvanzarLicitacion, patchDescartarLicitacion,
 } from '../../types/sigp/licitacion'
 import { probabilidadSorteo } from '../../utils/sigp/semaforo'
-import type { MotivoDescarte } from '../../types/sigp/licitacion'
+import type { MotivoDescarte, ProcedenciaRadar } from '../../types/sigp/licitacion'
+import ModalDescartar from '../../components/sigp/licitaciones/ModalDescartar'
 import {
-  SECCIONES_BANDEJA, SECCION_LABEL, SEMAFORO_CHIP,
-  seccionDe, ordenarPorCierre, repartirPorCapacidad, coincideBusqueda,
+  SECCIONES_BANDEJA, SECCION_LABEL, SEMAFORO_CHIP, SENAL_CHIP,
+  seccionDe, ordenarPorCierre, ordenarRadar, sinFechaEnElOrigen,
+  repartirPorCapacidad, coincideBusqueda,
   contarSecciones, planIntercambioCupo, patchLiberarCupo,
 } from '../../utils/sigp/bandejaLicitaciones'
 import type { LicitacionConId, SeccionBandeja } from '../../utils/sigp/bandejaLicitaciones'
@@ -89,9 +93,17 @@ export default function Licitaciones() {
   // La cola de entrada del radar. NO pasa por `repartirPorCapacidad`: lo que
   // el radar trajo solo no compite por el cupo de la semana hasta que alguien
   // lo admita, y admitirlo es justamente lo que lo pone a competir.
+  //
+  // Orden propio (`ordenarRadar`): LAS SIN FECHA PRIMERO. Con el orden de las
+  // activas —por cierre, y sin reloj al final— quedarían hundidas al fondo
+  // justo las que nadie puede priorizar por su cuenta.
   const delRadar = useMemo(
-    () => (seccion === 'radar' ? [...filtradas].sort(ordenarPorCierre) : []),
+    () => (seccion === 'radar' ? [...filtradas].sort(ordenarRadar) : []),
     [filtradas, seccion],
+  )
+  const sinFechaEnRadar = useMemo(
+    () => delRadar.filter(sinFechaEnElOrigen).length,
+    [delRadar],
   )
 
   const cerradas = useMemo(
@@ -140,6 +152,52 @@ export default function Licitaciones() {
       toast('Cupo liberado — vuelve al orden por fecha de cierre')
       await recargar()
     } catch { toast('No se pudo liberar el cupo', 'error') }
+  }
+
+  // ── Triage del radar ──
+  // Se decide DESDE LA FILA y no solo desde el detalle: la cola de la primera
+  // cosecha son 111 procesos, y obligar a abrir uno por uno para decir "esto
+  // no" convierte el radar en trabajo en vez de ahorrarlo. Los dos caminos
+  // usan los MISMOS patch builders que el detalle —ahí vive la máquina de
+  // estados y el sello del triage—; la bandeja no improvisa writes.
+  const [descartando, setDescartando] = useState<LicitacionConId | null>(null)
+
+  const persistirTriage = async (
+    l: LicitacionConId, patch: Record<string, unknown> | null, exito: string,
+  ) => {
+    if (!patch) { toast('El movimiento no es válido', 'error'); return }
+    setGuardando(true)
+    try {
+      const batch = writeBatch(db)
+      batch.update(doc(db, 'licitaciones', l.id), patch)
+      await batch.commit()
+      toast(exito)
+      await recargar()
+    } catch {
+      toast('No se pudo guardar — reintenta', 'error')
+    } finally { setGuardando(false) }
+  }
+
+  const admitir = async (l: LicitacionConId) => {
+    if (!user?.uid) return
+    // `en_evaluacion` no quema consecutivo: el LIC se gasta al comprometerse
+    // con horas de trabajo (`en_preparacion`), no al mirar.
+    await persistirTriage(
+      l,
+      patchAvanzarLicitacion(l, 'en_evaluacion', { uid: user.uid }, Timestamp.now()),
+      `${l.numero_proceso} pasa a evaluación`,
+    )
+  }
+
+  const descartar = async (motivo: MotivoDescarte) => {
+    const l = descartando
+    if (!l || !user?.uid) return
+    setDescartando(null)
+    await persistirTriage(
+      l,
+      patchDescartarLicitacion(l, { uid: user.uid }, Timestamp.now(), motivo),
+      `${l.numero_proceso} descartado · ${MOTIVO_DESCARTE_LABEL[motivo]}`,
+    )
   }
 
   return (
@@ -294,9 +352,32 @@ export default function Licitaciones() {
       {/* ══════════════════ RADAR ══════════════════ */}
       {seccion === 'radar' && !cargando && (
         <div className="space-y-2">
+          <p className="text-xs text-gray-500">
+            Lo que el radar trajo y todavía no es de nadie. No compite por el cupo
+            de la semana: admitir uno es justamente lo que lo pone a competir.
+          </p>
+          {sinFechaEnRadar > 0 && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+              {/* La frase queda impersonal después del conteo: con la redacción
+                  en plural, el caso de UNO sonaba a error de la propia bandeja. */}
+              <strong>{sinFechaEnRadar}</strong>{' '}
+              {sinFechaEnRadar === 1 ? 'proceso va arriba' : 'procesos van arriba'}: el origen
+              no trae ninguna fecha. Sin reloj que marque urgencia, el orden por cierre manda
+              al fondo de la cola justo lo que entró por un barrido autorizado y no por la
+              corrida de todos los días.
+            </p>
+          )}
           {delRadar.length === 0
             ? <Vacio texto="El radar no ha traído procesos sin revisar." />
-            : delRadar.map(l => <Fila key={l.id} l={l} hoy={hoy} horasUtilesDia={horasUtilesDia} puedeGestionar={puedeGestionar} />)}
+            : delRadar.map(l => (
+                <Fila
+                  key={l.id} l={l} hoy={hoy} horasUtilesDia={horasUtilesDia}
+                  puedeGestionar={puedeGestionar} enRadar
+                  onAdmitir={puedeGestionar ? () => admitir(l) : undefined}
+                  onDescartar={puedeGestionar ? () => setDescartando(l) : undefined}
+                  ocupado={guardando}
+                />
+              ))}
         </div>
       )}
 
@@ -308,6 +389,14 @@ export default function Licitaciones() {
             : cerradas.map(l => <Fila key={l.id} l={l} hoy={hoy} horasUtilesDia={horasUtilesDia} puedeGestionar={puedeGestionar} />)}
         </div>
       )}
+
+      {/* ── Descartar desde la bandeja ── */}
+      <ModalDescartar
+        abierto={!!descartando}
+        lexicoParticipo={lexicoParticipo(descartando?.radar)}
+        onCerrar={() => setDescartando(null)}
+        onConfirmar={descartar}
+      />
 
       {/* ── Modal de intercambio ── */}
       <Modal
@@ -376,6 +465,47 @@ function Vacio({ texto }: { texto: string }) {
   )
 }
 
+/**
+ * POR QUÉ EL RADAR LO TRAJO, en la fila y no escondido en el detalle.
+ *
+ * La decisión de triage es "¿esto es nuestro?", y se toma mucho mejor sabiendo
+ * si entró porque el vocabulario reconoció el objeto o porque el código tiene
+ * una adjudicación probada con el texto en silencio. Sin esto, 111 filas se
+ * ven todas iguales y la única forma de distinguirlas es abrirlas.
+ *
+ * Los términos se muestran COMPLETOS: son la evidencia de la coincidencia, y
+ * esconderlos detrás de un tooltip obliga a pasar el mouse por cada fila para
+ * enterarse de lo único que explica por qué está ahí.
+ */
+function Procedencia({ radar }: { radar: ProcedenciaRadar }) {
+  const sinFecha = radar.origen_fecha === 'ninguna'
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+      <span className={`px-2 py-0.5 rounded font-medium ${SENAL_CHIP[radar.senal]}`}>
+        {SENAL_LABEL[radar.senal]}
+      </span>
+      {radar.terminos.length > 0 && (
+        <span className="text-gray-600">
+          <span className="text-gray-400">términos:</span> {radar.terminos.join(' · ')}
+        </span>
+      )}
+      <span
+        className={sinFecha
+          ? 'px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-medium'
+          : 'text-gray-500'}
+        title={sinFecha
+          ? 'El origen no trae ninguna fecha utilizable. Estas filas no entran por la corrida automática: llegaron por un barrido autorizado del backlog.'
+          : undefined}
+      >
+        {sinFecha ? '⏳ ' : ''}{ORIGEN_FECHA_LABEL[radar.origen_fecha]}
+      </span>
+      <span className="ml-auto text-gray-400" title={radar.corrida ?? 'corrida sin sellar'}>
+        léxico {radar.vocabulario_version}
+      </span>
+    </div>
+  )
+}
+
 interface FilaProps {
   l: LicitacionConId
   hoy: string
@@ -384,11 +514,20 @@ interface FilaProps {
   enCapacidad?: boolean
   atenuada?: boolean
   puedeGestionar: boolean
+  /** En la sección del radar la fila muestra la procedencia y el triage. */
+  enRadar?: boolean
   onSubir?: () => void
   onLiberar?: () => void
+  onAdmitir?: () => void
+  onDescartar?: () => void
+  /** Hay una escritura en vuelo: no se acepta un segundo clic. */
+  ocupado?: boolean
 }
 
-function Fila({ l, hoy, horasUtilesDia, enCapacidad, atenuada, onSubir, onLiberar }: FilaProps) {
+function Fila({
+  l, hoy, horasUtilesDia, enCapacidad, atenuada, enRadar,
+  onSubir, onLiberar, onAdmitir, onDescartar, ocupado,
+}: FilaProps) {
   const ventana = evaluarVentana(isoDe(l.cronograma.cierre), l.modalidad, hoy, horasUtilesDia)
   const haySorteo = l.cronograma.sorteo !== null
   const sorteo = haySorteo ? frasesSorteo(l.manifestaciones, probabilidadSorteo(l.manifestaciones)) : null
@@ -439,6 +578,22 @@ function Fila({ l, hoy, horasUtilesDia, enCapacidad, atenuada, onSubir, onLibera
               Subir a capacidad
             </button>
           )}
+          {onDescartar && (
+            <button onClick={onDescartar} disabled={ocupado}
+              className="px-2.5 py-1 rounded border border-gray-300 text-gray-600 text-xs
+                         font-medium hover:border-red-400 hover:text-red-700 disabled:opacity-50"
+              title="Descartar con motivo. Es reversible: se puede reabrir en evaluación.">
+              Descartar
+            </button>
+          )}
+          {onAdmitir && (
+            <button onClick={onAdmitir} disabled={ocupado}
+              className="px-2.5 py-1 rounded bg-brand-600 hover:bg-brand-700 text-white
+                         text-xs font-semibold disabled:opacity-50"
+              title="Pasa a evaluación y entra a competir por el cupo de la semana. No gasta consecutivo.">
+              Admitir
+            </button>
+          )}
         </div>
       </div>
 
@@ -448,6 +603,8 @@ function Fila({ l, hoy, horasUtilesDia, enCapacidad, atenuada, onSubir, onLibera
         {l.entidad.ciudad ? ` · ${l.entidad.ciudad}` : ''}
         {l.presupuesto_oficial > 0 ? ` · ${fmtMoney(l.presupuesto_oficial)}` : ''}
       </p>
+
+      {enRadar && l.radar && <Procedencia radar={l.radar} />}
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
         <span className="text-gray-500">Cierra {fFecha(l.cronograma.cierre)}</span>
