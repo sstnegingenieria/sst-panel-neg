@@ -595,6 +595,31 @@ Los ~350 documentos del registro histórico y los tecleados antes de ese bloque 
 Los caminos de creación sí escriben `null` explícito desde ese bloque; la guarda es para lo que ya está escrito y no se va a reescribir. Hay un test que lo fija: *"un histórico sin el campo `radar` NO se va al radar"*.
 
 **Regla general**: cuando un campo se agrega a un documento que ya existe en producción, el tipo puede declararlo obligatorio, pero **todo predicado que lo lea tiene que tolerar su ausencia** — y la razón va junto al código, no en el PR, porque la próxima persona que vea un `!=` va a querer "arreglarlo".
+## Nota de técnica · `ConvertFrom-Json` + StrictMode: el array que parece elemento
+
+El 11-nov-2026 el simulacro del radar abortó con *"No se encuentra la propiedad 'error' en este objeto"* justo después del paso 4. La causa no era la propiedad: era **sobre qué objeto se leía**.
+
+**El mecanismo.** `ConvertFrom-Json` en PowerShell 5.1 emite un array JSON como **un solo objeto** por el pipeline — no lo desenrolla. Así que
+
+```powershell
+foreach ($c in @($json | Out-String | ConvertFrom-Json)) { ... }
+```
+
+itera **una vez**, con `$c` = el array completo, no sus elementos.
+
+**Por qué funcionaba igual.** PowerShell hace *member enumeration* sobre arrays: `$c.sa` devuelve el `sa` del elemento aunque `$c` sea el array. El código parecía correcto y los datos salían bien.
+
+**Por qué reventaba.** Esa misma enumeración, bajo `Set-StrictMode -Version Latest`, **lanza** cuando la propiedad no existe en los elementos. El emisor devolvía `{ sa, error }` al fallar y `{ sa, puede }` al salir bien; en el camino de error `$c.error` existía y pasaba, en el feliz no existía y mataba el script. **El chequeo funcionaba exactamente en el camino que se había probado.**
+
+**La corrección, en tres capas:**
+
+1. **Desenrollar de verdad**: asignar primero (`$x = ConvertFrom-Json -InputObject ...`) y recorrer eso. La asignación no pasa por la rareza del pipeline.
+2. **Contrato de forma única** en el emisor: las mismas claves siempre, `error: null` para "sin error". Un payload que cambia de forma según la rama obliga al consumidor a adivinar.
+3. **Preguntar por la propiedad** (`$c.PSObject.Properties.Name -contains 'x'`) en vez de asumirla, porque bajo StrictMode una clave ausente no da `$null`: lanza.
+
+**Auditoría del resto del script**: de los siete cruces Node→PowerShell, ese era el **único** con un array en el nivel superior; los otros seis emiten objetos y se consumen por acceso a propiedad, donde la enumeración no aplica. Los dos que leen JSON de disco (`firebase.json`, `package.json`) ya usaban la guarda de `PSObject.Properties.Name` para sus claves opcionales.
+
+**Y la lección de método, que es la que vale**: el chequeo llevaba tres commits y una revisión de otro frente, y nadie lo vio — porque **solo se había ejercitado el camino de error**. Un simulacro que únicamente se prueba cuando falta un permiso es un simulacro probado a medias. De ahí sale `scripts/pruebas/prueba-chequeos-iam.ps1`: extrae el tramo de chequeos del propio script (no lo copia, para que no envejezca), sustituye **solo la frontera** —token falso y `fetch` interceptado— y corre cuatro escenarios, el feliz incluido. El arnés reprodujo el fallo literal de producción antes de arreglarlo, y atrapó dos errores míos mientras lo hacía.
 
 ---
 

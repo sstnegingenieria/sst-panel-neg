@@ -581,11 +581,19 @@ const [, , ...cuentas] = process.argv
       body: JSON.stringify({ permissions: ['iam.serviceAccounts.actAs'] }),
     })
     const j = await r.json()
+    // UNA SOLA FORMA, SIEMPRE LAS TRES CLAVES. Antes este emisor devolvia
+    // `{ sa, error }` al fallar y `{ sa, puede }` al salir bien, y el lado
+    // PowerShell leia la propiedad `error` en los dos casos. Con
+    // `Set-StrictMode -Version Latest`, leer una propiedad que NO EXISTE lanza:
+    // el chequeo funcionaba en el camino de error -el unico que se habia
+    // probado- y reventaba en el feliz. Un contrato que cambia de forma segun
+    // la rama obliga al consumidor a adivinar; este emite la misma forma
+    // siempre y `error: null` significa "sin error".
     if (!r.ok) {
-      salida.push({ sa, error: (j.error && j.error.status) || ('HTTP ' + r.status) })
+      salida.push({ sa, error: (j.error && j.error.status) || ('HTTP ' + r.status), puede: false })
       continue
     }
-    salida.push({ sa, puede: (j.permissions || []).includes('iam.serviceAccounts.actAs') })
+    salida.push({ sa, error: null, puede: (j.permissions || []).includes('iam.serviceAccounts.actAs') })
   }
   console.log(JSON.stringify(salida))
 })().catch(e => { console.error('ERROR: ' + e.message); process.exit(1) })
@@ -597,8 +605,26 @@ const [, , ...cuentas] = process.argv
     Abortar ("no pude comprobar el actAs sobre la(s) cuenta(s) de runtime que declara el codigo: " +
       ($cuentasRuntime -join ', '))
   }
-  foreach ($c in @($actAsJson | Out-String | ConvertFrom-Json)) {
-    if ($c.error) {
+  # ── LA CAUSA RAIZ DEL SIMULACRO ABORTADO (11-nov-2026) ────────────────────
+  # `ConvertFrom-Json` en PowerShell 5.1 emite un array JSON como UN SOLO
+  # objeto por el pipeline: NO lo desenrolla. Asi que
+  # `@($json | ConvertFrom-Json)` devuelve un array de UN elemento que ES el
+  # array, y el `foreach` iteraba una vez con `$c` = el ARRAY COMPLETO.
+  #
+  # Funcionaba por accidente: PowerShell hace *member enumeration* sobre
+  # arrays, asi que `$c.sa` devolvia el `sa` del elemento. Pero esa misma
+  # enumeracion, bajo `Set-StrictMode -Version Latest`, LANZA cuando la
+  # propiedad no existe en los elementos — y ese fue el aborto literal del
+  # simulacro del radar: "No se encuentra la propiedad 'error' en este objeto".
+  #
+  # Se arregla desenrollando de verdad: asignar primero (la asignacion no pasa
+  # por la rareza del pipeline) y recorrer ESO.
+  $chequeosActAs = ConvertFrom-Json -InputObject ($actAsJson | Out-String)
+  foreach ($c in @($chequeosActAs)) {
+    # Y aun con el desenrollado correcto, se PREGUNTA por la propiedad en vez
+    # de asumirla: bajo StrictMode una clave ausente no da $null, lanza.
+    $tieneError = ($c.PSObject.Properties.Name -contains 'error') -and $c.error
+    if ($tieneError) {
       $pista = ''
       if ($c.error -eq 'NOT_FOUND') {
         $pista = "`nLa cuenta NO EXISTE todavia en el proyecto. Creala ANTES de desplegar este codebase:`n" +
@@ -607,7 +633,7 @@ const [, , ...cuentas] = process.argv
       Remove-Item $tmp -Recurse -Force
       Abortar ("no pude leer los permisos sobre la cuenta de runtime $($c.sa): $($c.error).$pista")
     }
-    if (-not $c.puede) {
+    if (-not (($c.PSObject.Properties.Name -contains 'puede') -and $c.puede)) {
       Remove-Item $tmp -Recurse -Force
       Abortar ("la cuenta $quien NO puede desplegar CON la cuenta de runtime $($c.sa).`n" +
         "Falta: iam.serviceAccounts.actAs SOBRE ESA CUENTA (no sobre el proyecto, no sobre otra cuenta).`n`n" +
