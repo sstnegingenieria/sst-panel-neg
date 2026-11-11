@@ -4,21 +4,23 @@ Estado operativo del radar de licitaciones: qué está implementado, qué falta,
 en qué orden. Se escribe acá y no en un mensaje porque **lo que no está en el
 repositorio, no existe**.
 
-**Última actualización:** 11-nov-2026.
+**Última actualización:** 11-nov-2026 (tras cerrar B.3).
 
 ---
 
 ## 1. En una línea
 
 El radar **está desplegado y verificado en producción, y todavía no escribe**.
-No le falta un arreglo: le faltan cuatro puertas, y una de ellas (B.3) tiene que
-estar en producción **antes** de que el radar escriba, o hace daño.
+No le falta un arreglo: le faltan actos. Los dos cambios que necesita ya están
+en `main` esperando un deploy, y B.3 —la pieza del panel que tiene que estar
+**antes** de que el radar escriba, o hace daño— espera el visto de su PR.
 
 ---
 
 ## 2. Las puertas, todas
 
-Siete cerradas y verificadas contra producción; siete abiertas.
+Siete cerradas y verificadas contra producción; siete abiertas, de las cuales
+dos ya están en `main` esperando deploy y una espera el visto de su PR.
 
 ### Cerradas ✅
 
@@ -36,10 +38,10 @@ Siete cerradas y verificadas contra producción; siete abiertas.
 
 | # | qué | estado |
 |---|---|---|
-| 8 | **Separar las dos poblaciones** (`incluir_sin_fecha: false`) | implementado, **PR #252** |
-| 9 | **La guarda de ventana aguas arriba** | implementado y mergeado, **`a0b24a1`** (PR #251) — *necesita deploy* |
-| 10 | **Deploy del codebase `radar`** con #251 + #252 | pendiente |
-| 11 | **B.3 en producción** (Vercel) | sub-bloques 1-3 hechos en `sigp/b3-bandeja-radar`; falta el sub-bloque 4, su PR y el deploy |
+| 8 | **Separar las dos poblaciones** (`incluir_sin_fecha: false`) | en `main`, **`40a98e2`** (PR #252) — *necesita deploy* |
+| 9 | **La guarda de ventana aguas arriba** | en `main`, **`a0b24a1`** (PR #251) — *necesita deploy* |
+| 10 | **B.3 en producción** (Vercel) | los cuatro sub-bloques hechos, **PR #254** |
+| 11 | **Deploy del codebase `radar`** con #251 + #252 | pendiente — acto de Giovanny |
 | 12 | **Acto de la marca** — `{ marca, solape_dias: 14 }` | preparado con dry-run; **no se corre hasta que 10 y 11 estén** |
 | 13 | **Acto de restitución** — `solape_dias: 45` | después de la primera cosecha |
 | 14 | **Barrido del backlog** de las filas sin fecha | diseño pendiente; ver §6 |
@@ -49,28 +51,33 @@ Siete cerradas y verificadas contra producción; siete abiertas.
 ## 3. El orden, y por qué ese orden
 
 ```
-  #252 (visto + merge)
+  B.3  (#254: visto → merge → Vercel despliega solo)
      ↓
-  deploy del codebase radar   ← con #251 y #252 juntos
-     ↓
-  B.3: sub-bloque 4 → PR → merge → Vercel
-     ↓
-  acto de la marca  { marca: hoy, solape_dias: 14 }
+  GIOVANNY, EN UNA SOLA SESIÓN:
+      deploy del codebase radar  (#251 + #252)
+         ↓
+      acto de la marca  { marca: hoy, solape_dias: 14 }
      ↓
   (primera cosecha: 111 documentos)
      ↓
   acto de restitución  { solape_dias: 45 }
 ```
 
-**Por qué B.3 va antes del acto de la marca, y no al revés.** `main` no tiene la
-sección del radar ni el campo `radar` en el tipo: `seccionDe` manda cualquier
-`detectada` a `activas`. Si el radar escribe antes de que B.3 esté en Vercel,
+**Los dos actos de Giovanny van en una sentada, y la razón no es técnica.**
+Lleva cuatro actos de IAM, un despliegue, dos sesiones y la llave del token en
+un solo día; el deploy y la marca juntos le ahorran volver mañana. El orden
+interno no cambia: primero desplegar, después marcar.
+
+**Por qué B.3 va primero.** Sin él, `seccionDe` manda cualquier `detectada` a
+`activas`. Si el radar escribe antes de que B.3 esté en Vercel,
 los 111 documentos **entran a competir por el cupo semanal de 5** y desplazan
 licitaciones reales de Karen. **Escribir antes de B.3 es peor que no escribir.**
 
-**La red de seguridad**: si el deploy del radar sale antes que B.3, no pasa nada
-mientras no se corra el acto de la marca — sin marca, la guarda de ventana
-detiene la corrida sin consultar la API.
+**La red de seguridad**, que se mantiene escrita porque es la que permite mover
+el orden sin miedo: aunque el deploy del radar saliera antes que B.3, no pasa
+nada mientras no se corra el acto de la marca — **sin marca, la guarda de
+ventana detiene la corrida sin consultar la API**. El radar no puede hacer daño
+por su cuenta.
 
 ---
 
