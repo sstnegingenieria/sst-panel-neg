@@ -326,7 +326,38 @@ gcloud projects add-iam-policy-binding neg-sst-app   --member="user:giovanny.mon
 #    personalizado que nadie va a mantener y que envejece en silencio — es el
 #    mismo patron que este proyecto viene corrigiendo en otros frentes.
 gcloud projects add-iam-policy-binding neg-sst-app   --member="user:giovanny.montes@negingenieria.com"   --role="roles/run.admin"
+
+# 5. Permiso de usar el proyecto como QUOTA PROJECT.
+#    Con UNA sola funcion de 2a generacion, el CLI llama a
+#    `generateServiceIdentity` para pubsub y eventarc (prepare.js, condicion
+#    `platform === 'gcfv2'`, SIN mirar el disparador) y manda la cabecera
+#    `x-goog-user-project`. Esa cabecera es la que exige
+#    `serviceusage.services.use` a un principal de PERSONA.
+#
+#    MEDIDO el 11-nov-2026, y corrige el diagnostico facil: el METODO no exige
+#    permiso elevado. Llamado con la llave de solo LECTURA del proyecto devuelve
+#    HTTP 200 en los dos servicios, con las identidades ya existentes
+#    (`service-777787585167@gcp-sa-pubsub` y `@gcp-sa-eventarc`). Lo que falla
+#    con una sesion de persona es la CABECERA, no la operacion.
+#
+#    POR ESO `serviceUsageConsumer` Y NO `serviceUsageAdmin`: el primero son 19
+#    permisos, trae `use` y NO trae `enable` — no puede habilitar ni
+#    deshabilitar APIs del proyecto. El segundo son 27 y si puede: superficie de
+#    costo que este permiso no necesita. Si `serviceUsageAdmin` quedo como
+#    puente en algun momento, RETIRARLO: el amplio no migra al grupo.
+gcloud projects add-iam-policy-binding neg-sst-app   --member="user:giovanny.montes@negingenieria.com"   --role="roles/serviceusage.serviceUsageConsumer"
 ```
+
+> **El modelo migra a GRUPO, y son SEIS roles.** `desplegadores@negingenieria.com`
+> recibe los cinco de arriba más `roles/serviceusage.serviceUsageConsumer`, y
+> los bindings directos por persona se retiran en el mismo acto. El sexto se
+> descubrió **desplegando**, no leyendo: la derivación del frente SIGP (19
+> permisos, PR #243) partió del `requirePermissions` del propio CLI y también lo
+> perdió — porque esa lista declara **seis** permisos para un deploy de
+> functions y el CLI usa al menos **cuatro familias** que nunca declara
+> (`iam.serviceAccounts.actAs`, `cloudscheduler.jobs.*`,
+> `run.services.setIamPolicy`, `serviceusage.*`). El límite de la guarda quedó
+> declarado en `scripts/deploy-funciones.ps1`.
 
 **Verificación**: correr el script en simulacro. Si el chequeo previo pasa, los
 permisos comprobables están; si falta alguno, el mensaje lo nombra.
