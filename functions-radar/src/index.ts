@@ -178,6 +178,27 @@ async function cosechar(
  * cambia entre las dos es la hora.
  */
 const OPCIONES_CORRIDA = {
+  /**
+   * CUENTA DE SERVICIO DEDICADA, con el unico rol que necesita:
+   * `roles/datastore.user`. Sin esto, una CF de 2a generacion corre con la
+   * cuenta de computo por defecto, que en este proyecto trae `roles/editor`:
+   * **12.497 permisos** sobre todo el proyecto, medidos contra la API de IAM,
+   * contra los **23** de datastore.user.
+   *
+   * ⚠ LO QUE ESTO **NO** HACE, dicho con las palabras del hallazgo:
+   * `datastore.user` es **todo-o-nada sobre la base de datos**. No acota a
+   * `licitaciones` ni a `configuracion/radar_secop` — IAM no llega a nivel de
+   * coleccion (Firestore no acepta *conditional role bindings*) y los
+   * clientes de servidor OMITEN las Security Rules. Lo que acota las rutas es
+   * `radarRutas.ts` y su test, que lee este archivo.
+   *
+   * Todo medido y citado en `docs/radar-cuenta-de-servicio.md`.
+   *
+   * Si la cuenta NO existe en el proyecto, el deploy FALLA con un error de
+   * IAM — por eso esta linea entro en su propio PR, despues de crearla, y no
+   * junto con el codebase.
+   */
+  serviceAccount: 'radar-secop@neg-sst-app.iam.gserviceaccount.com',
   timeZone: 'America/Bogota',
   timeoutSeconds: 540,
   memory: '512MiB' as const,
