@@ -87,6 +87,30 @@ Set-Location $RepoRoot
 # habilita nada solo deja el agujero abierto.
 $CuentasCompartidas = @('sstnegingenieria@gmail.com')
 
+# EL REMEDIO SE DICE EN LOS DOS MODELOS DE IAM, a proposito.
+#
+# El proyecto migra de bindings por PERSONA a un GRUPO
+# (`desplegadores@negingenieria.com`, que recibe los roles; los bindings
+# directos se retiran en el mismo acto). Un mensaje que recete solo el binding
+# directo envejece el dia que corra ese acto. Uno que recete solo el grupo
+# miente hasta que corra. Decir los dos es correcto antes y despues.
+#
+# Y no se resuelve "preguntandole al proyecto en que modelo esta": leer la
+# politica de IAM pide `resourcemanager.projects.getIamPolicy`, y quien esta
+# leyendo este mensaje es precisamente alguien al que le faltan permisos. Un
+# chequeo que necesita permisos para explicar como conseguir permisos es un
+# circulo. Mejor dos caminos nombrados que una adivinanza.
+$NotaModeloIam =
+  "`n  a) MODELO POR GRUPO (al que migra el proyecto): basta la MEMBRESIA en`n" +
+  "     desplegadores@negingenieria.com  --  admin.google.com > Grupos.`n" +
+  "     El grupo ya trae los roles; la propagacion tarda un par de minutos.`n" +
+  "     En ese modelo un binding directo nuevo es DEUDA: el acto del grupo`n" +
+  "     los retira.`n" +
+  "`n  b) MODELO POR PERSONA (vigente mientras ese acto no haya corrido):`n"
+$NotaActoCanonico =
+  "El acto de IAM canonico, con sus comandos y el porque de cada rol, vive en`n" +
+  "docs/radar-cuenta-de-servicio.md.`n`n"
+
 function Abortar([string]$msg) {
   Write-Host ''
   Write-Host "ABORTADO: $msg" -ForegroundColor Red
@@ -213,8 +237,8 @@ if ($permFaltan.Count -gt 0) {
   $rolFn = 'roles/cloudfunctions.developer'
   Abortar ("la cuenta $quien NO tiene permisos para desplegar funciones.`n" +
     'Permisos que faltan: ' + ($permFaltan -join ', ') + "`n`n" +
-    "QUE HACER (acto de IAM; lo ejecuta alguien con propiedad del proyecto):`n" +
-    "    gcloud projects add-iam-policy-binding neg-sst-app --member=user:$quien --role=$rolFn`n`n" +
+    "QUE HACER (acto de IAM; lo ejecuta alguien con propiedad del proyecto):`n" + $NotaModeloIam +
+    "    gcloud projects add-iam-policy-binding neg-sst-app --member=user:$quien --role=$rolFn`n`n" + $NotaActoCanonico +
     "(El actAs sobre la cuenta de runtime es OTRO permiso, sobre OTRO recurso;`n" +
     " si tambien falta, el paso 2-bis te lo dira con su propio comando.)`n`n" +
     'Sin eso el deploy fallaria DESPUES de pedirte el PR y la confirmacion, a mitad de camino.')
@@ -587,8 +611,8 @@ const [, , ...cuentas] = process.argv
       Remove-Item $tmp -Recurse -Force
       Abortar ("la cuenta $quien NO puede desplegar CON la cuenta de runtime $($c.sa).`n" +
         "Falta: iam.serviceAccounts.actAs SOBRE ESA CUENTA (no sobre el proyecto, no sobre otra cuenta).`n`n" +
-        "QUE HACER (acto de IAM; lo ejecuta alguien con propiedad del proyecto):`n" +
-        "    gcloud iam service-accounts add-iam-policy-binding $($c.sa) --member=user:$quien --role=roles/iam.serviceAccountUser --project=neg-sst-app`n`n" +
+        "QUE HACER (acto de IAM; lo ejecuta alguien con propiedad del proyecto):`n" + $NotaModeloIam +
+        "    gcloud iam service-accounts add-iam-policy-binding $($c.sa) --member=user:$quien --role=roles/iam.serviceAccountUser --project=neg-sst-app`n`n" + $NotaActoCanonico +
         'Sin eso el deploy fallaria DESPUES de pedirte el PR y la confirmacion, a mitad de camino.')
     }
     Write-Host ("OK: puedes desplegar con la cuenta de runtime $($c.sa).") -ForegroundColor Green
@@ -687,7 +711,8 @@ const PERMISOS = process.argv.slice(2)
     Remove-Item $tmp -Recurse -Force
     Abortar ("la cuenta $quien NO tiene todo lo que este codebase necesita para desplegarse.`n`n" +
       "PERMISOS QUE FALTAN, y para que los usa el deploy:`n" + $detalle + "`n" +
-      "QUE HACER (acto de IAM; lo ejecuta alguien con propiedad del proyecto):`n" + $comandos + "`n" +
+      "QUE HACER (acto de IAM; lo ejecuta alguien con propiedad del proyecto):`n" + $NotaModeloIam +
+      $comandos + "`n" + $NotaActoCanonico +
       "Sin esto el deploy NO se cae al principio: crea la funcion y revienta`n" +
       'despues, dejandola viva, sin invoker y sin horario.')
   }

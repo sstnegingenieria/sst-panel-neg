@@ -261,6 +261,23 @@ acuerdo. Por ese camino nadie desplegaba funciones — ni el radar ni el codebas
 
 ### El acto de IAM que falta (lo ejecuta alguien con propiedad del proyecto)
 
+> **⚠ EL MODELO MIGRA A GRUPO (11-nov-2026, mandato de Giovanny).** Los roles
+> pasan a `desplegadores@negingenieria.com` y **los bindings directos por
+> persona se RETIRAN en el mismo acto**. Mientras ese acto no haya corrido, los
+> comandos de abajo siguen siendo el camino; después, el remedio es la
+> **membresía en el grupo** (admin.google.com → Grupos; la propagación tarda un
+> par de minutos) y un binding directo nuevo sería deuda.
+>
+> Por eso los mensajes de aborto de `scripts/deploy-funciones.ps1` nombran **los
+> dos caminos** en vez de recetar uno: el script no puede leer en qué modelo
+> está el proyecto sin `resourcemanager.projects.getIamPolicy`, y quien lee ese
+> mensaje es precisamente alguien al que le faltan permisos.
+>
+> El conjunto completo de permisos de despliegue —19 de proyecto + `actAs`
+> sobre las dos cuentas de runtime— lo derivó el frente SIGP del CLI completo
+> (PR #243), junto con `scripts/verifica-permisos-despliegue.mjs`, un pre-vuelo
+> que los comprueba sin desplegar.
+
 ✅ Con Cloud Identity activo (09-nov-2026), el
 `--member="user:giovanny.montes@negingenieria.com"` de abajo **funciona tal
 como está**. Ya no hay que sustituirlo por nada.
