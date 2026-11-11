@@ -303,7 +303,8 @@ async function corridaDelRadar(): Promise<void> {
   for (const grupo of trozos(plan.crear, LOTE_ESCRITURA)) {
     const lote = db.batch()
     for (const { doc_id, doc } of grupo) {
-      const conTs = fechasATimestamp(doc, aTs) as unknown as LicitacionDetectada
+      // Sin casts: la salida de `fechasATimestamp` ES lo que el sello recibe.
+      const conTs = fechasATimestamp(doc, aTs)
       lote.create(refEscritura(db, rutaLicitacion(doc_id)),
         sellarParaEscritura(conTs, { corrida: corridaId, ahora, actor: ACTOR_RADAR }))
     }

@@ -34,6 +34,7 @@
 import type {
   LicitacionDetectada, ReporteIngestaSecop, ResumenCorridaRadar,
 } from './secopMapeo'
+import type { CronogramaLicitacion, Licitacion } from '../../types/sigp/licitacion'
 import type { VentanaIngesta } from './secopConsulta'
 
 // ── 1. Guarda de volumen ─────────────────────────────────────────────────────
@@ -258,11 +259,11 @@ export const hayQueEscribir = (p: PatchRadar): boolean => p.cambios.length > 0
  * que todavía nadie miró, y poner al sistema ahí sería mentir en un campo que
  * la bandeja usa para repartir trabajo.
  */
-export interface SelloEscritura {
+export interface SelloEscritura<T> {
   /** Id de la corrida que lo trajo. */
   corrida: string
   /** Momento de la escritura, en el tipo que use el escritor. */
-  ahora: unknown
+  ahora: T
   /** Quién escribe. Para el radar, un identificador de sistema. */
   actor: string
 }
@@ -270,16 +271,63 @@ export interface SelloEscritura {
 export const ACTOR_RADAR = 'radar_secop'
 
 /**
+ * El documento que el escritor del radar PONE en `licitaciones`: `Licitacion`
+ * completa, con las fechas en el tipo del escritor (`T`) en vez de `Timestamp`
+ * —`Timestamp` en la CF, cualquier cosa en el test— más el bloque `radar`.
+ *
+ * ── POR QUÉ ESTE TIPO EXISTE ────────────────────────────────────────────────
+ * Porque el sello devolvía `Record<string, unknown>` y el sitio de la llamada
+ * remataba con `as unknown as LicitacionDetectada`. Entre las dos cosas, el
+ * compilador dejaba de comparar lo que el radar escribe contra lo que la
+ * colección exige — y así se perdió `semaforo_calculado_en`, que `Licitacion`
+ * declara OBLIGATORIO y el camino del radar no escribía.
+ *
+ * El campo no rompía nada el día que faltó: hoy nadie lo lee. Lo rompía después,
+ * y de la peor forma. El camino de recálculo (`recalcularSemaforo`) SÍ lo
+ * escribe, así que una fila se "arregla sola" la primera vez que alguien la
+ * recalcula: el fallo habría quedado intermitente y con forma de "solo algunas
+ * filas viejas del radar", que es lo más caro de diagnosticar que hay.
+ *
+ * Lo que este tipo compra no es el campo —ese es una línea— sino que el
+ * PRÓXIMO campo que se agregue a `Licitacion` y el radar no escriba **falle al
+ * compilar**, en vez de llegar a producción y esperar a que algo lo lea.
+ *
+ * `radar` se toma de `LicitacionDetectada` porque ahí vive su forma hoy; cuando
+ * B.3 lo declare en `Licitacion` (decisión D2), este `Pick` se cae solo.
+ */
+export type DocumentoRadar<T> =
+  Omit<Licitacion, 'cronograma' | 'semaforo_calculado_en' | 'creado_en' | 'actualizado_en'>
+  & Pick<LicitacionDetectada, 'radar'>
+  & {
+    cronograma: Record<keyof CronogramaLicitacion, T | null>
+    semaforo_calculado_en: T
+    creado_en: T
+    actualizado_en: T
+  }
+
+/** Lo que el sello recibe: el documento del mapeo con las fechas ya convertidas
+ *  (la salida exacta de `fechasATimestamp`). */
+export type DetectadaConFechas<T> =
+  Omit<LicitacionDetectada, 'cronograma'>
+  & { cronograma: Record<keyof CronogramaLicitacion, T | null> }
+
+/**
  * Agrega al documento lo que solo el escritor sabe. PURA: el `ahora` y el id de
  * corrida entran por parámetro, así que un test puede comparar el resultado
  * campo por campo.
+ *
+ * `semaforo_calculado_en` se sella AQUÍ y no en el mapeo a propósito: el mapeo
+ * es puro y no toca el SDK (lo dice su propia cabecera), las fechas le salen en
+ * ISO y la conversión es del escritor. El instante en que se calculó el
+ * semáforo ES el instante de la corrida, el mismo `creado_en`.
  */
-export function sellarParaEscritura(
-  doc: Readonly<LicitacionDetectada>, sello: SelloEscritura,
-): Record<string, unknown> {
+export function sellarParaEscritura<T>(
+  doc: Readonly<DetectadaConFechas<T>>, sello: SelloEscritura<T>,
+): DocumentoRadar<T> {
   return {
     ...doc,
     radar: { ...doc.radar, corrida: sello.corrida },
+    semaforo_calculado_en: sello.ahora,
     responsable_uid: '',
     creado_por: sello.actor,
     creado_en: sello.ahora,
@@ -298,9 +346,7 @@ export function sellarParaEscritura(
  */
 export function fechasATimestamp<T>(
   doc: Readonly<LicitacionDetectada>, hacer: (iso: string) => T,
-): Omit<LicitacionDetectada, 'cronograma'> & {
-  cronograma: Record<keyof LicitacionDetectada['cronograma'], T | null>
-} {
+): DetectadaConFechas<T> {
   const c = doc.cronograma
   return {
     ...doc,
