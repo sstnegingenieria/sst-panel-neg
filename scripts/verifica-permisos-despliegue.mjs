@@ -1,15 +1,25 @@
-// VERIFICADOR SIN DESPLEGAR — ¿esta sesión puede desplegar funciones y reglas?
+// VERIFICADOR SIN DESPLEGAR — ¿esta sesión tiene lo que ESTE SCRIPT CONOCE
+// que un despliegue exige?
 //
-// Responde ANTES de cualquier deploy (y sin tocar nada: testIamPermissions
-// es de solo consulta) si la sesión activa de firebase-tools tiene el
-// CONJUNTO COMPLETO que un despliegue real exige. El conjunto se derivó el
-// 10-nov-2026 del código de firebase-tools 15.22.4 (la versión del repo):
-// requirePermissions del comando deploy, prepare.js (APIs), fabricator.js
-// (gcfV2 create/update, invokers de Cloud Run, job de Cloud Scheduler) y
-// release/index.js (política de limpieza de Artifact Registry), y se midió
-// contra la API de IAM. Cubre los dos codebases: `default` (triggers
+// QUÉ CUBRE Y DE DÓNDE SALE: los permisos de abajo se derivaron el
+// 10/11-nov-2026 leyendo el código de firebase-tools 15.22.4 (la versión del
+// repo) — requirePermissions del comando deploy, prepare.js (APIs +
+// generateServiceIdentity), fabricator.js (gcfV2 create/update, invokers de
+// Cloud Run, job de Cloud Scheduler), release/index.js (política de limpieza
+// de Artifact Registry) — más los huecos encontrados en DESPLIEGUES REALES
+// (el quota project del 11-nov). Cubre los dos codebases: `default` (triggers
 // Firestore + callables + censoConsecutivos programada) y `radar` (2
 // programadas con cuenta dedicada).
+//
+// ⚠ LA FUENTE ES INCOMPLETA POR NATURALEZA — esta lista NO puede declararse
+// completa, solo puede declarar qué cubre. El propio CLI declara 6 permisos
+// (TARGET_PERMISSIONS de commands/deploy.js) y usa al menos cuatro familias
+// que nunca declara (actAs, cloudscheduler.*, run.services.setIamPolicy,
+// serviceusage.*): dos derivaciones independientes del mismo código perdieron
+// el mismo permiso — no fue coincidencia, fue la fuente. Un resultado limpio
+// de este script prueba LO QUE EL SCRIPT CONOCE, no más: si un deploy real
+// falla por un permiso que no está abajo, el remedio incluye AGREGARLO aquí
+// con su porqué.
 //
 // USO (con TU sesión — la misma con la que desplegarías):
 //   npx firebase login     (si no hay sesión)
@@ -47,6 +57,12 @@ const REQUERIDOS = {
   'cloudscheduler.jobs.update': ['job del horario, TODO re-deploy (setTrigger corre en update)', 'cloudscheduler.admin'],
   'cloudscheduler.locations.list': ['resolución de la región del job', 'cloudscheduler.admin'],
   'artifactregistry.repositories.get': ['chequeo de política de limpieza de imágenes (no-fatal, pero evita el warning)', 'cloudfunctions.developer'],
+  // El 6º permiso (hallazgo Licitaciones 11-nov, dos deploys abortados): con
+  // UNA función de 2ª gen, prepare.js genera las identidades de pubsub y
+  // eventarc con la cabecera x-goog-user-project — a un principal de PERSONA
+  // esa cabecera le exige `use` (el método en sí no pide permiso elevado:
+  // con cuenta de servicio del proyecto devuelve 200 — medido).
+  'serviceusage.services.use': ['quota project de generateServiceIdentity (pubsub/eventarc), todo deploy con 2ª gen', 'serviceusage.serviceUsageConsumer'],
   'firebaserules.rulesets.create': ['deploy de reglas (scripts/deploy-reglas.ps1)', 'firebaserules.admin'],
   'firebaserules.releases.update': ['deploy de reglas', 'firebaserules.admin'],
   'firebaserules.releases.get': ['deploy de reglas (pre/post-verificación)', 'firebaserules.admin'],
@@ -91,7 +107,9 @@ for (const [sa, quees] of SAS) {
 }
 
 if (!faltan.length && !faltanActAs.length) {
-  console.log('\nCONJUNTO COMPLETO: esta sesión puede desplegar funciones (default y radar) y reglas.')
+  console.log('\nCOBERTURA LIMPIA: la sesión tiene todo lo que este script conoce (derivado de')
+  console.log('firebase-tools 15.22.4 + huecos de despliegues reales). La fuente es incompleta')
+  console.log('por naturaleza: esto prueba lo conocido, no más — ver el encabezado del script.')
   process.exit(0)
 }
 console.log('\nFALTA:')

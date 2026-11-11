@@ -96,6 +96,33 @@ describe('cláusulas del filtro', () => {
   })
 })
 
+describe('las DOS POBLACIONES: con fecha y sin fecha', () => {
+  // La corrida automática excluye las sin fecha, y no por volumen: son un pozo
+  // FIJO que entra entero en cualquier ventana (1.818 filas medidas contra la
+  // API, idénticas a 4/14/21/45 días). Mezcladas, `MAX_PCT_SIN_FECHA` compara
+  // un conjunto constante contra uno variable y nunca puede bajar del 10 %.
+  const rango = { desde: '2026-10-28', hasta: '2026-11-11' }
+
+  it('por defecto SÍ las trae: un `IS NULL` aparte de la ventana', () => {
+    expect(whereIngesta(rango)).toContain('IS NULL')
+  })
+
+  it('con `incluir_sin_fecha: false` NO hay `IS NULL`: solo lo que la ventana eligió', () => {
+    const w = whereIngesta({ ...rango, incluir_sin_fecha: false })
+    expect(w).not.toContain('IS NULL')
+    // Y la ventana sigue intacta: no se perdió el filtro de fechas de paso.
+    expect(w).toContain("'2026-10-28'")
+    expect(w).toContain("'2026-11-11'")
+  })
+
+  it('el resto del filtro no cambia: territorio y modalidades siguen iguales', () => {
+    const con = whereIngesta(rango)
+    const sin = whereIngesta({ ...rango, incluir_sin_fecha: false })
+    const recorte = (w: string) => w.slice(0, w.indexOf('coalesce('))
+    expect(recorte(sin)).toBe(recorte(con))
+  })
+})
+
 describe('whereIngesta', () => {
   it('el DEFECTO es modo RADAR: la familia sale de la consulta (B.1b)', () => {
     expect(MODO_INGESTA_DEFECTO).toBe('radar')

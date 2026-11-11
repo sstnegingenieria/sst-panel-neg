@@ -60,7 +60,7 @@ if ($null -eq $n1 -or $null -eq $n2) { throw 'no pude ubicar las notas del remed
 $Notas = ($lineas[([int]$n1.LineNumber - 1)..([int]$n2.LineNumber - 1)]) -join [Environment]::NewLine
 Write-Host ("Notas del remedio extraidas: lineas {0}-{1}" -f $n1.LineNumber, $n2.LineNumber) -ForegroundColor DarkGray
 
-$PERM_PROY_OK = "'cloudscheduler.jobs.get','cloudscheduler.jobs.create','cloudscheduler.jobs.update','run.services.setIamPolicy'"
+$PERM_PROY_OK = "'cloudscheduler.jobs.get','cloudscheduler.jobs.create','cloudscheduler.jobs.update','run.services.setIamPolicy','serviceusage.services.use'"
 
 $escenarios = @(
   [ordered]@{
@@ -105,6 +105,19 @@ $escenarios = @(
     noEspera = @('TRAMO COMPLETO')
   },
   [ordered]@{
+    nombre = 'falta SOLO el quota project (el hueco del 11-nov: generateServiceIdentity)'
+    actAsOk = $true
+    actAsPerm = "'iam.serviceAccounts.actAs'"
+    actAsEstado = ''
+    proyPerm = "'cloudscheduler.jobs.get','cloudscheduler.jobs.create','cloudscheduler.jobs.update','run.services.setIamPolicy'"
+    codigo = 9
+    espera = @(
+      'serviceusage.services.use  ->  el quota project de generateServiceIdentity',
+      '--role=roles/serviceusage.serviceUsageConsumer'
+    )
+    noEspera = @('TRAMO COMPLETO', '--role=roles/cloudscheduler.admin')
+  },
+  [ordered]@{
     nombre = 'faltan los permisos de scheduler y de invoker'
     actAsOk = $true
     actAsPerm = "'iam.serviceAccounts.actAs'"
@@ -115,7 +128,8 @@ $escenarios = @(
       'cloudscheduler.jobs.create  ->  crear el horario de',
       'run.services.setIamPolicy  ->  que el CLI conceda el invoker de',
       '--role=roles/cloudscheduler.admin',
-      '--role=roles/run.admin'
+      '--role=roles/run.admin',
+      '--role=roles/serviceusage.serviceUsageConsumer'
     )
     noEspera = @('TRAMO COMPLETO')
   }
@@ -123,7 +137,7 @@ $escenarios = @(
 
 # Lo que el lector de exports devuelve para el codebase `radar` REAL:
 # dos programadas, una cuenta de runtime dedicada.
-$LecturaRadar = '{ "nombres": ["ingerirRadarSecopManana","ingerirRadarSecopTarde"], "sinEndpoint": [], "cuentas": ["radar-secop@neg-sst-app.iam.gserviceaccount.com"], "porParametro": [], "desconocidas": [], "conHorario": ["ingerirRadarSecopManana","ingerirRadarSecopTarde"], "conInvoker": ["ingerirRadarSecopManana","ingerirRadarSecopTarde"] }'
+$LecturaRadar = '{ "nombres": ["ingerirRadarSecopManana","ingerirRadarSecopTarde"], "sinEndpoint": [], "cuentas": ["radar-secop@neg-sst-app.iam.gserviceaccount.com"], "porParametro": [], "desconocidas": [], "conHorario": ["ingerirRadarSecopManana","ingerirRadarSecopTarde"], "conInvoker": ["ingerirRadarSecopManana","ingerirRadarSecopTarde"], "plataformaV2": ["ingerirRadarSecopManana","ingerirRadarSecopTarde"] }'
 
 $tmpRaiz = Join-Path $env:TEMP ('prueba-iam-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path $tmpRaiz | Out-Null

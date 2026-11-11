@@ -90,7 +90,7 @@ import {
   RUTA_ESTADO_RADAR, RUTA_VOCABULARIO_NEG, rutaLicitacion, validarRutaEscritura,
 } from '../../src/utils/sigp/radarRutas'
 import {
-  evaluarVolumen, cuantosCrearia, planearEscritura, construirRegistroCorrida,
+  evaluarVentana, evaluarVolumen, cuantosCrearia, planearEscritura, construirRegistroCorrida,
   marcaSiguiente, sellarParaEscritura, fechasATimestamp, avanzarEstadoRadar,
   resumenLegible, ACTOR_RADAR, ESTADO_RADAR_INICIAL,
 } from '../../src/utils/sigp/radarCorrida'
@@ -249,8 +249,70 @@ async function corridaDelRadar(): Promise<void> {
   const vocabulario_version = versionVocabularioVigente(registroVocab)
 
   const ventana = ventanaIngesta(estado.marca, inicio, estado.solape_dias)
-  const consulta = { modo: MODO_INGESTA_DEFECTO, desde: ventana.desde, hasta: ventana.hasta }
+  // ── DOS POBLACIONES, DOS CAMINOS ────────────────────────────────────────────
+  //
+  // `incluir_sin_fecha: false` es lo único que separa la corrida automática del
+  // barrido autorizado, y la razón NO es el volumen: son poblaciones con
+  // comportamiento distinto.
+  //
+  //  · Las que TIENEN fecha entran por ventana incremental y crecen con el
+  //    tiempo: la ventana las selecciona y el solape las vuelve a leer mientras
+  //    el dataset las completa.
+  //  · Las que NO tienen ninguna entran por `IS NULL`, así que entran ENTERAS en
+  //    CUALQUIER ventana. Son un pozo fijo: 1.818 filas medidas contra la API,
+  //    idénticas a 4, 14, 21 y 45 días.
+  //
+  // Mezclarlas rompe el guard de calidad: `MAX_PCT_SIN_FECHA` compara un
+  // conjunto constante contra uno variable, así que la proporción no puede
+  // bajar del 10 % en ninguna ventana (medido: 96,2 % a 4 días, 24,6 % a 45) y
+  // `puede_escribir` quedaba en `false` para siempre. El guard medía algo que no
+  // podía variar — o sea, no medía nada.
+  //
+  // Separadas, el guard recupera su sentido: si algún día la consulta empieza a
+  // traer basura de verdad, el porcentaje sube y detiene.
+  //
+  // El pozo no se pierde: entra por un BARRIDO AUTORIZADO aparte, y se reconoce
+  // en el documento por `radar.origen_fecha === 'ninguna'`.
+  const consulta = {
+    modo: MODO_INGESTA_DEFECTO,
+    desde: ventana.desde,
+    hasta: ventana.hasta,
+    incluir_sin_fecha: false,
+  }
   logger.info('radar: arranca', { ventana, vocabulario_version, con_token: token !== '' })
+
+  // ── 1-bis. GUARDA DE VENTANA, ANTES DE LA PRIMERA PETICIÓN ──
+  //
+  // Esto estaba aguas abajo de la cosecha, y era un defecto. Con `desde: null`
+  // la ventana abarca TODO el dataset: 319.531 filas medidas contra la API real,
+  // en páginas de 50.000, contra una función de 512 MiB. La corrida moría por
+  // memoria o por tiempo ANTES de llegar a la guarda, así que la guarda no
+  // impedía nada — solo habría explicado, si hubiera llegado a hablar.
+  //
+  // Lo único que necesitan las reglas de ventana es la ventana, así que se
+  // evalúan acá: sin contar, sin cosechar, sin una sola petición. El registro
+  // queda igual que siempre, con `escritura: null` y el motivo — y con los
+  // contadores en cero, que es la verdad: no se leyó nada.
+  const ventanaOk = evaluarVentana(ventana, { autorizado_manual: estado.autorizado_manual === true })
+  if (!ventanaOk.procede) {
+    // El resumen vacío se DERIVA de un reporte sin filas, no se escribe a mano:
+    // así su forma no puede divergir de la del resumen real.
+    const resumen = construirResumenCorrida(
+      ingerirSecop([], hash, { terminos, vocabulario_version }),
+      {
+        ejecutada_en: corridaId,
+        modo: MODO_INGESTA_DEFECTO,
+        ventana: { desde: ventana.desde, hasta: ventana.hasta, solape_dias: ventana.solape_dias },
+      },
+    )
+    const registro = construirRegistroCorrida(resumen, ventanaOk, null,
+      marcaSiguiente(ventana, false, estado.marca))
+    await refEscritura(db, RUTA_ESTADO_RADAR).set(avanzarEstadoRadar(estado, registro), { merge: false })
+    logger.warn('radar: NO se consultó la API', {
+      motivo: ventanaOk.motivo, sugerencia: ventanaOk.sugerencia,
+    })
+    return
+  }
 
   // ── 2. Cosecha verificada ──
   const total = await contar(consulta, token)

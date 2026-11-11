@@ -130,8 +130,8 @@
  *     cronograma queda con las dos fechas, sin corregir ninguna a mano.
  */
 import type {
-  GanadorLicitacion, ModalidadLicitacion, MotivoSemaforo, ProcedenciaRadar,
-  SenalClasificacion, Semaforo,
+  GanadorLicitacion, ModalidadLicitacion, MotivoSemaforo, OrigenFecha,
+  ProcedenciaRadar, SenalClasificacion, Semaforo,
 } from '../../types/sigp/licitacion'
 import { calcularSemaforo, esTerritorioNeg } from './semaforo'
 import type { EntradaSemaforo } from './semaforo'
@@ -445,8 +445,13 @@ export function fechaSecopAIso(fila: FilaSecop, campo: CampoSecop): string | nul
   return d.toISOString()
 }
 
-/** De dónde salió la fecha con la que se ubica el proceso en el tiempo. */
-export type OrigenFecha = 'publicacion' | 'recepcion_de_ofertas' | 'ninguna'
+/**
+ * De dónde salió la fecha del proceso. Vive en el TIPO DEL DOCUMENTO
+ * (`types/sigp/licitacion.ts`), porque desde el PR #252 el documento la
+ * persiste dentro de `radar`. Se re-exporta aquí para no romper a quien ya la
+ * importaba de este módulo — mismo trato que `SenalClasificacion`.
+ */
+export type { OrigenFecha } from '../../types/sigp/licitacion'
 
 export interface FechaReferencia {
   /** ISO con zona, o `null` si el origen no trae ninguna fecha utilizable. */
@@ -1169,6 +1174,7 @@ export function mapearProceso(
       terminos: clasificacion.terminos,
       vocabulario_version,
       corrida: null,
+      origen_fecha: fecha.origen,
     },
   }
 

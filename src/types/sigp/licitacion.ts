@@ -179,6 +179,14 @@ export type SenalClasificacion =
   | 'fuera_de_territorio'
 
 /**
+ * De dónde salió la fecha con la que se ubica el proceso en el tiempo
+ * (trampa 12 del mapeo). Vive en el tipo del DOCUMENTO porque desde el PR #252
+ * el documento lo persiste; `utils/sigp/secopMapeo.ts` lo re-exporta para no
+ * romper a quien ya lo importaba de ahí.
+ */
+export type OrigenFecha = 'publicacion' | 'recepcion_de_ofertas' | 'ninguna'
+
+/**
  * Por qué el radar trajo este proceso. `null` en todo lo que no vino del radar
  * —tecleado a mano o importado del registro histórico—, y ESO ES LA DECISIÓN
  * que reparte la bandeja (D1): la procedencia decide, no el estado. Una
@@ -196,6 +204,18 @@ export interface ProcedenciaRadar {
   vocabulario_version: string
   /** Id de la corrida que lo creó. Lo sella el escritor, no el mapeo. */
   corrida: string | null
+  /**
+   * DE DÓNDE SALIÓ LA FECHA DEL PROCESO, en el DOCUMENTO y no solo en la meta.
+   *
+   * Hasta la corrida de noviembre `origen_fecha` vivía únicamente en
+   * `MetaIngesta` —"para el reporte y el triage, no para el doc"—, y eso
+   * bastaba mientras las dos poblaciones entraban juntas. Desde que la corrida
+   * automática excluye las filas sin ninguna fecha (`incluir_sin_fecha: false`,
+   * PR #252), un `'ninguna'` SOLO puede venir del BARRIDO AUTORIZADO del
+   * backlog: el campo es la marca que distingue esas filas de las del flujo
+   * normal, y es lo que la bandeja muestra en el chip de procedencia.
+   */
+  origen_fecha: OrigenFecha
 }
 
 /**

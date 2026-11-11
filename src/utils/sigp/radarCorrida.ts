@@ -67,6 +67,8 @@ export interface VeredictoVolumen {
   procede: boolean
   /** Cuántos documentos NUEVOS crearía la corrida. */
   crearia: number
+  /** Se consultó la API: `crearia` y `tope` son datos reales. */
+  consultada: true
   tope: number
   /** Días que abarca la ventana, o `null` si es un barrido completo. */
   dias_ventana: number | null
@@ -87,6 +89,77 @@ export function diasDeVentana(v: Pick<VentanaIngesta, 'desde' | 'hasta'>): numbe
 }
 
 /**
+ * VEREDICTO DE LA VENTANA — lo único que se puede saber ANTES de pedir nada.
+ *
+ * ── POR QUÉ EXISTE SEPARADO (11-nov-2026) ───────────────────────────────────
+ * La guarda de volumen vivía COMPLETA aguas abajo de la cosecha: se evaluaba
+ * después de contar y traer las filas. Con `desde: null` eso son **319.531
+ * filas medidas contra la API real**, en páginas de 50.000, dentro de una
+ * función de 512 MiB: la corrida muere por memoria o por tiempo ANTES de poder
+ * decir su propia razón, y lo único que queda es un error opaco en los logs.
+ *
+ * Una guarda que solo se evalúa después de traer 319.531 filas no es una
+ * guarda: es una etiqueta. Explica lo que ya pasó en vez de impedirlo.
+ *
+ * Así que las reglas se parten por lo que cada una NECESITA:
+ *  · Las de VENTANA (sin inicio, demasiado ancha) solo miran la ventana → se
+ *    evalúan antes de la primera petición. Son estas.
+ *  · La de VOLUMEN (demasiados documentos nuevos) necesita la clasificación →
+ *    sigue aguas abajo, en `evaluarVolumen`, que DELEGA en esta para que la
+ *    misma regla no tenga dos nacimientos.
+ *
+ * `consultada: false` no es decoración: es lo que impide leer mal el registro.
+ * Un veredicto sin `crearia` dice "no se contó nada porque no se preguntó", y
+ * no puede confundirse con "la API no trajo nada".
+ */
+export interface VeredictoVentana {
+  procede: boolean
+  dias_ventana: number | null
+  motivo: string | null
+  sugerencia: string | null
+  /** No se consultó la API: no hay nada contado. */
+  consultada: false
+}
+
+/**
+ * ¿Vale la pena consultar siquiera? PURA, y sin red.
+ *
+ * `autorizado_manual` es la escotilla: un barrido histórico deliberado pasa
+ * igual, pero tiene que decirlo. Nada de que el tope se evapore solo.
+ */
+export function evaluarVentana(
+  ventana: Pick<VentanaIngesta, 'desde' | 'hasta'>,
+  opciones?: { autorizado_manual?: boolean },
+): VeredictoVentana {
+  const dias_ventana = diasDeVentana(ventana)
+  const base = { dias_ventana, consultada: false as const }
+
+  if (opciones?.autorizado_manual) {
+    return { ...base, procede: true, motivo: null, sugerencia: null }
+  }
+  if (dias_ventana === null) {
+    return {
+      ...base,
+      procede: false,
+      motivo: 'VENTANA SIN INICIO: la corrida abarcaría todo el histórico del dataset.',
+      sugerencia: 'Primer arranque: correr con una ventana explícita (por ejemplo '
+        + 'los últimos 45 días) y, si se quiere el histórico, hacerlo como barrido '
+        + 'manual autorizado y acotado por tramos.',
+    }
+  }
+  if (dias_ventana > GUARDA_VOLUMEN.MAX_DIAS_VENTANA) {
+    return {
+      ...base,
+      procede: false,
+      motivo: `VENTANA DEMASIADO ANCHA: ${dias_ventana} días (tope ${GUARDA_VOLUMEN.MAX_DIAS_VENTANA}).`,
+      sugerencia: 'Una ventana así es un barrido histórico: va por tramos y con '
+        + 'autorización, no en la corrida automática.',
+    }
+  }
+  return { ...base, procede: true, motivo: null, sugerencia: null }
+}
+
+/**
  * ¿Puede esta corrida escribir, o hay que parar?
  *
  * `autorizado_manual` es la escotilla: un barrido histórico deliberado pasa
@@ -97,46 +170,34 @@ export function evaluarVolumen(
   ventana: Pick<VentanaIngesta, 'desde' | 'hasta' | 'primera_corrida'>,
   opciones?: { autorizado_manual?: boolean },
 ): VeredictoVolumen {
-  const dias_ventana = diasDeVentana(ventana)
   const tope = ventana.primera_corrida
     ? GUARDA_VOLUMEN.MAX_CREADOS_PRIMERA_CORRIDA
     : GUARDA_VOLUMEN.MAX_CREADOS_POR_CORRIDA
 
+  // LAS REGLAS DE VENTANA NO SE REPITEN AQUÍ: se delegan. Son las mismas que
+  // corren antes de la primera petición, y dos copias divergirían el día que
+  // alguien toque una. Lo único propio de este evaluador es el tope de
+  // documentos, que necesita la clasificación y por eso vive aguas abajo.
+  const v = evaluarVentana(ventana, opciones)
+  const dias_ventana = v.dias_ventana
+  const base = { crearia, tope, dias_ventana, consultada: true as const }
+  if (!v.procede) {
+    return { ...base, procede: false, motivo: v.motivo, sugerencia: v.sugerencia }
+  }
   if (opciones?.autorizado_manual) {
-    return {
-      procede: true, crearia, tope, dias_ventana,
-      motivo: null,
-      sugerencia: null,
-    }
-  }
-
-  if (dias_ventana === null) {
-    return {
-      procede: false, crearia, tope, dias_ventana,
-      motivo: 'VENTANA SIN INICIO: la corrida abarcaría todo el histórico del dataset.',
-      sugerencia: 'Primer arranque: correr con una ventana explícita (por ejemplo '
-        + 'los últimos 45 días) y, si se quiere el histórico, hacerlo como barrido '
-        + 'manual autorizado y acotado por tramos.',
-    }
-  }
-  if (dias_ventana > GUARDA_VOLUMEN.MAX_DIAS_VENTANA) {
-    return {
-      procede: false, crearia, tope, dias_ventana,
-      motivo: `VENTANA DEMASIADO ANCHA: ${dias_ventana} días (tope ${GUARDA_VOLUMEN.MAX_DIAS_VENTANA}).`,
-      sugerencia: 'Una ventana así es un barrido histórico: va por tramos y con '
-        + 'autorización, no en la corrida automática.',
-    }
+    return { ...base, procede: true, motivo: null, sugerencia: null }
   }
   if (crearia > tope) {
     return {
-      procede: false, crearia, tope, dias_ventana,
+      ...base,
+      procede: false,
       motivo: `DEMASIADOS DOCUMENTOS NUEVOS: ${crearia} (tope ${tope}`
         + `${ventana.primera_corrida ? ', primera corrida' : ''}).`,
       sugerencia: 'La bandeja no se llena de golpe: acotar la ventana y repetir, '
         + 'o autorizar el volcado a propósito.',
     }
   }
-  return { procede: true, crearia, tope, dias_ventana, motivo: null, sugerencia: null }
+  return { ...base, procede: true, motivo: null, sugerencia: null }
 }
 
 // ── 2. Re-escritura idempotente ──────────────────────────────────────────────
@@ -417,7 +478,8 @@ export interface ResultadoEscritura {
 
 /** El registro de la corrida: el agregado de la ingesta + lo que se escribió. */
 export interface RegistroCorridaRadar extends ResumenCorridaRadar {
-  volumen: VeredictoVolumen
+  /** El de VOLUMEN si se consultó; el de VENTANA si se detuvo antes de pedir. */
+  volumen: VeredictoVolumen | VeredictoVentana
   escritura: ResultadoEscritura | null
   /** Marca que queda para la próxima corrida. */
   marca_nueva: string | null
@@ -430,7 +492,7 @@ export interface RegistroCorridaRadar extends ResumenCorridaRadar {
  */
 export function construirRegistroCorrida(
   resumen: ResumenCorridaRadar,
-  volumen: VeredictoVolumen,
+  volumen: VeredictoVolumen | VeredictoVentana,
   escritura: ResultadoEscritura | null,
   marca_nueva: string | null,
 ): RegistroCorridaRadar {

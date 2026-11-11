@@ -182,6 +182,37 @@ Write-Host "Sesion de Firebase: $quien" -ForegroundColor Green
 # chequeo (paso 2-bis), despues del build, porque antes del build no se sabe
 # con que cuenta va a correr el codebase.
 #
+# ── EL LIMITE DE ESTA GUARDA, DICHO EN VOZ ALTA ─────────────────────────────
+# Estos chequeos NO pueden prometer que el deploy no falle por permisos. Lo que
+# hacen es preguntar por una lista de permisos que se fue armando a golpes, y la
+# razon de que se arme a golpes esta medida:
+#
+#   El propio CLI DECLARA SEIS permisos para un deploy de functions
+#   (`TARGET_PERMISSIONS.functions` en commands/deploy.js), los seis de
+#   `cloudfunctions.*`. Y durante el deploy usa, al menos, cuatro familias que
+#   NUNCA declara:
+#       · `run.services.setIamPolicy`     (el invoker, fabricator.js)
+#       · `cloudscheduler.jobs.*`         (el horario, cloudscheduler.js)
+#       · `iam.serviceAccounts.actAs`     (la cuenta de runtime, otro recurso)
+#       · `serviceusage.*`                (generateServiceIdentity, prepare.js)
+#
+# O sea: la lista autoritativa del CLI es una fraccion de lo que el CLI hace.
+# Por eso cada hueco de esta guarda se encontro INTENTANDO un deploy, no leyendo
+# el codigo — y el quinto (11-nov-2026, `generating the service identity for
+# pubsub.googleapis.com`) aparecio despues de que el simulacro pasara limpio.
+#
+# Lo que esto significa para quien despliega:
+#   · Simulacro limpio = los permisos QUE ESTE SCRIPT CONOCE estan.
+#   · NO significa que el deploy no vaya a abortar por un permiso que la lista
+#     todavia no incluye.
+#   · Si aborta por permisos a mitad de camino, el `firebase-debug.log` del clon
+#     trae el error ORIGINAL (el CLI envuelve el suyo y la consola solo muestra
+#     la envoltura). Ese log es el que dice QUE permiso falta.
+#   · Y cuando se sepa, el permiso se AGREGA aqui con su condicion derivada, que
+#     es como entraron los cuatro anteriores.
+#
+# Una guarda que promete mas de lo que cubre es peor que una que declara su
+# limite. Esto es la declaracion.
 # El prologo que cambia el refresh token de la sesion de firebase-tools por un
 # access token vive en UNA sola variable porque lo usan LOS DOS chequeos de
 # IAM. Duplicar el client_id en dos heredocs seria pedir que uno envejezca.
@@ -245,6 +276,7 @@ if ($permFaltan.Count -gt 0) {
 }
 Write-Host ('OK: la sesion tiene los permisos de proyecto para desplegar (' + ($perm.tiene -join ', ') + ').') -ForegroundColor Green
 Write-Host '   (el actAs va en el paso 2-bis: es otro recurso; el horario, en el 2-ter)' -ForegroundColor DarkGray
+Write-Host '   (esta lista NO es completa: ver el limite declarado arriba del paso 1-bis)' -ForegroundColor DarkGray
 
 $bitacora = Join-Path $RepoRoot 'docs\bitacora-deploys-funciones.md'
 $bitacoraRel = 'docs/bitacora-deploys-funciones.md'
@@ -439,6 +471,7 @@ const porParametro = []
 const desconocidas = []
 const conHorario = []
 const conInvoker = []
+const plataformaV2 = []
 // LA CUENTA DE RUNTIME se deriva del endpoint igual que la lista de funciones:
 // firebase-functions copia la opcion `serviceAccount` a
 // `__endpoint.serviceAccountEmail`. Pero ese campo tiene CUATRO formas, y
@@ -471,6 +504,9 @@ for (const k of Object.keys(m)) {
   // El horario tambien se DERIVA: `scheduleTrigger` lo pone el propio SDK
   // al declarar `onSchedule`. De aqui sale la condicion del paso 2-ter.
   if (e.scheduleTrigger) conHorario.push(k)
+  // 2a GENERACION: con una sola, el CLI llama a `generateServiceIdentity`
+  // para pubsub y eventarc (prepare.js), sin mirar el disparador.
+  if (e.platform === 'gcfv2') plataformaV2.push(k)
   // LAS RAMAS DEL INVOKER, copiadas de `createV2Function` de firebase-tools:
   // el CLI llama a `setInvokerCreate` SOBRE EL SERVICIO para https, callable,
   // programadas, blocking de auth, y taskQueue solo si declara invoker. Para
@@ -492,7 +528,7 @@ for (const k of Object.keys(m)) {
   desconocidas.push(k + ': forma no reconocida (' + clase + ')')
 }
 console.log(JSON.stringify({
-  nombres, sinEndpoint, cuentas: [...cuentas], porParametro, desconocidas, conHorario, conInvoker,
+  nombres, sinEndpoint, cuentas: [...cuentas], porParametro, desconocidas, conHorario, conInvoker, plataformaV2,
 }))
 '@ | Set-Content -Path $lectorExports -Encoding UTF8
 
@@ -687,6 +723,23 @@ if ($conInvoker.Count -gt 0) {
   Write-Host ("Funciones a las que el CLI les pone invoker: " + ($conInvoker -join ', ')) -ForegroundColor DarkGray
   $permisosDerivados['run.services.setIamPolicy'] = 'que el CLI conceda el invoker de: ' + ($conInvoker -join ', ')
 }
+$plataformaV2 = @($lectura.plataformaV2)
+if ($plataformaV2.Count -gt 0) {
+  # (c) `serviceusage.services.use` -- EL QUOTA PROJECT. Con una sola funcion de
+  # 2a generacion, el CLI llama a `generateServiceIdentity` para pubsub y
+  # eventarc (prepare.js, condicion `platform === gcfv2`, sin mirar el
+  # disparador) Y manda la cabecera `x-goog-user-project`. Esa cabecera es la
+  # que exige `serviceusage.services.use` sobre el proyecto de cuota.
+  #
+  # MEDIDO el 11-nov-2026, y corrige un diagnostico previo: el METODO no exige
+  # un permiso elevado -llamado con la llave de solo-LECTURA devuelve 200 y las
+  # identidades de este proyecto ya existen-. Lo que falla con una sesion de
+  # PERSONA sin `use` es la cabecera, no la operacion. Por eso el rol correcto
+  # es `serviceUsageConsumer` (19 permisos, NO puede habilitar APIs) y no
+  # `serviceUsageAdmin` (27, si puede).
+  Write-Host ('Funciones de 2a generacion: ' + ($plataformaV2 -join ', ')) -ForegroundColor DarkGray
+  $permisosDerivados['serviceusage.services.use'] = 'el quota project de generateServiceIdentity (pubsub y eventarc), por: ' + ($plataformaV2 -join ', ')
+}
 
 if ($permisosDerivados.Count -gt 0) {
   $verifDeriv = Join-Path $tmp 'permisos-derivados.js'
@@ -719,6 +772,7 @@ const PERMISOS = process.argv.slice(2)
       $detalle += "    $p  ->  $($permisosDerivados[$p])`n"
       if ($p -like 'cloudscheduler.*') { $rolDe['roles/cloudscheduler.admin'] = $true }
       if ($p -eq 'run.services.setIamPolicy') { $rolDe['roles/run.admin'] = $true }
+      if ($p -like 'serviceusage.*') { $rolDe['roles/serviceusage.serviceUsageConsumer'] = $true }
     }
     $comandos = ''
     foreach ($r in $rolDe.Keys) {

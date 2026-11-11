@@ -301,6 +301,22 @@ describe('departamento_entidad = "No Definido"', () => {
   })
 })
 
+describe('`radar.origen_fecha` — la marca que distingue las dos poblaciones', () => {
+  it('va en el DOCUMENTO, no solo en la meta, y coincide con ella', () => {
+    const { doc, meta } = mapearUna(una('minima_limpia'))
+    expect(doc.radar.origen_fecha).toBe(meta.origen_fecha)
+    // Con fecha real no puede ser 'ninguna': eso solo sale del barrido del backlog.
+    expect(doc.radar.origen_fecha).not.toBe('ninguna')
+  })
+
+  it('el resto del bloque `radar` sigue igual', () => {
+    const { doc } = mapearUna(una('minima_limpia'))
+    expect(doc.radar.corrida).toBeNull()
+    expect(typeof doc.radar.vocabulario_version).toBe('string')
+    expect(Array.isArray(doc.radar.terminos)).toBe(true)
+  })
+})
+
 describe('presupuesto inservible', () => {
   it('CERO: a null, y el reporte dice que era cero (no "ausente")', () => {
     const f = una('precio_base_cero')
