@@ -31,6 +31,7 @@ const lic = (extra?: Partial<Licitacion> & { id?: string }): LicitacionConId => 
     oferta_neg: null, oferta_ganador: null, ganador: null,
     manifestaciones: null, ofertas_recibidas: null,
     migrado: false, capacidad_manual: null,
+    radar: null,
     responsable_uid: 'u', creado_por: 'u', creado_en: AHORA,
     actualizado_por: 'u', actualizado_en: AHORA, activa: true,
     ...extra,
@@ -51,6 +52,28 @@ describe('seccionDe', () => {
   it('descartada tiene sección propia — no es "cerrada"', () => {
     // Se reabre, y su motivo es lo que se quiere poder filtrar.
     expect(seccionDe({ estado: 'descartada' })).toBe('descartadas')
+  })
+
+  it('la PROCEDENCIA decide: una detectada del radar va a su propia sección', () => {
+    const delRadar = {
+      estado: 'detectada' as EstadoLicitacion,
+      radar: {
+        senal: 'texto_coincide' as const, terminos: ['redes'],
+        vocabulario_version: 'v1.0', corrida: 'corr-1',
+      },
+    }
+    expect(seccionDe(delRadar)).toBe('radar')
+  })
+
+  it('una detectada TECLEADA A MANO se queda en activas: alguien la escribió a propósito', () => {
+    expect(seccionDe({ estado: 'detectada', radar: null })).toBe('activas')
+  })
+
+  it('un HISTÓRICO sin el campo `radar` NO se va al radar (llega undefined)', () => {
+    // Los ~350 del registro de Karen se escribieron antes de que el campo
+    // existiera. Con `!== null` en `esDelRadar` darían true y aterrizarían en
+    // la sección del radar, que es exactamente al revés.
+    expect(seccionDe({ estado: 'detectada' })).toBe('activas')
   })
 
   it('los cinco terminales duros son cerradas', () => {
@@ -107,6 +130,35 @@ describe('ordenarPorCierre', () => {
 })
 
 describe('repartirPorCapacidad', () => {
+  it('una fila del RADAR ya no empuja fuera del cupo a una licitación real', () => {
+    // EL DAÑO MEDIDO, reproducido: `repartirPorCapacidad` recibe las activas, y
+    // las filas del radar nacen con `capacidad_manual: null`, así que entraban a
+    // `libres`, se ordenaban por cierre y con el cupo lleno desplazaban trabajo
+    // real. Aquí la del radar cierra ANTES, que es el caso que hacía daño.
+    const real = conCierre(10, { id: 'real' })
+    const traida = conCierre(1, {
+      id: 'del_radar',
+      estado: 'detectada',
+      radar: { senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1' },
+    })
+
+    // Lo que hace la página: filtrar por sección y repartir SOLO las activas.
+    const todas = [real, traida]
+    const activas = todas.filter(l => seccionDe(l) === 'activas')
+    const r = repartirPorCapacidad(activas, 1)
+
+    expect(seccionDe(traida)).toBe('radar')
+    expect(activas.map(l => l.id)).toEqual(['real'])
+    expect(r.dentro.map(l => l.id)).toEqual(['real'])
+    expect(r.fuera).toHaveLength(0)
+
+    // Y la prueba de que el cupo era el problema: con la del radar DENTRO de
+    // las activas —el comportamiento viejo— la real se habría ido fuera.
+    const viejo = repartirPorCapacidad(todas, 1)
+    expect(viejo.dentro.map(l => l.id)).toEqual(['del_radar'])
+    expect(viejo.fuera.map(l => l.id)).toEqual(['real'])
+  })
+
   it('el default documentado es 5', () => {
     expect(CAPACIDAD_SEMANAL_DEFAULT).toBe(5)
   })
@@ -260,14 +312,18 @@ describe('coincideBusqueda / contarSecciones', () => {
     expect(coincideBusqueda(lic(), '   ')).toBe(true)
   })
 
-  it('los conteos cubren las tres secciones', () => {
+  it('los conteos cubren las CUATRO secciones', () => {
     const c = contarSecciones([
       lic({ estado: 'en_evaluacion' }),
+      lic({
+        estado: 'detectada',
+        radar: { senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1' },
+      }),
       lic({ estado: 'descartada', motivo_descarte: 'SORTEO', activa: false }),
       lic({ estado: 'perdida', activa: false }),
       lic({ estado: 'adjudicada', activa: false }),
     ])
-    expect(c).toEqual({ activas: 1, descartadas: 1, cerradas: 2 })
+    expect(c).toEqual({ radar: 1, activas: 1, descartadas: 1, cerradas: 2 })
   })
 })
 

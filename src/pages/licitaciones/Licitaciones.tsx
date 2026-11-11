@@ -86,6 +86,14 @@ export default function Licitaciones() {
     return [...f].sort(ordenarPorCierre)
   }, [filtradas, seccion, filtroMotivo])
 
+  // La cola de entrada del radar. NO pasa por `repartirPorCapacidad`: lo que
+  // el radar trajo solo no compite por el cupo de la semana hasta que alguien
+  // lo admita, y admitirlo es justamente lo que lo pone a competir.
+  const delRadar = useMemo(
+    () => (seccion === 'radar' ? [...filtradas].sort(ordenarPorCierre) : []),
+    [filtradas, seccion],
+  )
+
   const cerradas = useMemo(
     () => (seccion === 'cerradas' ? [...filtradas].sort(ordenarPorCierre) : []),
     [filtradas, seccion],
@@ -280,6 +288,15 @@ export default function Licitaciones() {
           {descartadas.length === 0
             ? <Vacio texto="Sin descartadas con ese filtro." />
             : descartadas.map(l => <Fila key={l.id} l={l} hoy={hoy} horasUtilesDia={horasUtilesDia} puedeGestionar={puedeGestionar} />)}
+        </div>
+      )}
+
+      {/* ══════════════════ RADAR ══════════════════ */}
+      {seccion === 'radar' && !cargando && (
+        <div className="space-y-2">
+          {delRadar.length === 0
+            ? <Vacio texto="El radar no ha traído procesos sin revisar." />
+            : delRadar.map(l => <Fila key={l.id} l={l} hoy={hoy} horasUtilesDia={horasUtilesDia} puedeGestionar={puedeGestionar} />)}
         </div>
       )}
 

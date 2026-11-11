@@ -11,16 +11,18 @@
  * el trabajo que no cabe sigue existiendo.
  */
 import type { EstadoLicitacion, Licitacion, Semaforo, Timestamp } from '../../types/sigp/licitacion'
-import { esLicitacionTerminal } from '../../types/sigp/licitacion'
+import { esDelRadar, esLicitacionTerminal } from '../../types/sigp/licitacion'
 
 /** Licitación con su id de documento (lo que consume la UI). */
 export type LicitacionConId = Licitacion & { id: string }
 
-export type SeccionBandeja = 'activas' | 'descartadas' | 'cerradas'
+export type SeccionBandeja = 'radar' | 'activas' | 'descartadas' | 'cerradas'
 
-export const SECCIONES_BANDEJA: SeccionBandeja[] = ['activas', 'descartadas', 'cerradas']
+/** El radar va PRIMERO: es la cola de entrada, lo que todavia no es de nadie. */
+export const SECCIONES_BANDEJA: SeccionBandeja[] = ['radar', 'activas', 'descartadas', 'cerradas']
 
 export const SECCION_LABEL: Record<SeccionBandeja, string> = {
+  radar: 'Radar',
   activas: 'Activas',
   descartadas: 'Descartadas',
   cerradas: 'Cerradas',
@@ -35,10 +37,29 @@ export const CAPACIDAD_SEMANAL_DEFAULT = 5
  * `descartada` va a su propia sección (no es "cerrada": se reabre, y su
  * motivo es lo que se quiere poder filtrar). Los cinco terminales duros son
  * "cerradas". Todo lo demás está en juego.
+ *
+ * ── LA PROCEDENCIA DECIDE, NO EL ESTADO (D1) ────────────────────────────────
+ * Una `detectada` QUE TRAJO EL RADAR va a `radar`; una `detectada` tecleada a
+ * mano se queda en `activas`, porque alguien la escribió a propósito.
+ *
+ * El daño que esto repara estaba medido: `repartirPorCapacidad` recibe las
+ * `activas`, y las filas del radar nacen con `capacidad_manual: null`, así que
+ * entraban a competir, se ordenaban por fecha de cierre y **empujaban fuera del
+ * cupo semanal a licitaciones reales de Karen**. Un radar que le reordena la
+ * semana a quien debía ayudar no es un radar. Sacarlas de `activas` es lo único
+ * que lo arregla: un filtro cambia lo que se ve, no lo que compite.
+ *
+ * `radar` es OPCIONAL en el parámetro a propósito: los ~350 del registro
+ * histórico no tienen el campo, y su ausencia significa "no vino del radar" —
+ * la misma convención que `esDelRadar`. Así un caller que solo conoce el estado
+ * sigue funcionando y cae del lado seguro.
  */
-export function seccionDe(l: Pick<Licitacion, 'estado'>): SeccionBandeja {
+export function seccionDe(
+  l: Pick<Licitacion, 'estado'> & Partial<Pick<Licitacion, 'radar'>>,
+): SeccionBandeja {
   if (l.estado === 'descartada') return 'descartadas'
   if (esLicitacionTerminal(l.estado)) return 'cerradas'
+  if (l.estado === 'detectada' && esDelRadar(l)) return 'radar'
   return 'activas'
 }
 
@@ -193,7 +214,7 @@ export function coincideBusqueda(l: LicitacionConId, q: string): boolean {
 
 /** Conteo por sección, para los pills con contador. */
 export function contarSecciones(ls: LicitacionConId[]): Record<SeccionBandeja, number> {
-  const out: Record<SeccionBandeja, number> = { activas: 0, descartadas: 0, cerradas: 0 }
+  const out: Record<SeccionBandeja, number> = { radar: 0, activas: 0, descartadas: 0, cerradas: 0 }
   for (const l of ls) out[seccionDe(l)]++
   return out
 }
