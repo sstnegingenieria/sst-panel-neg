@@ -195,7 +195,7 @@ export default function LicitacionDetalle() {
         </div>
         <p className="mt-2 text-sm text-gray-800">{lic.objeto || '—'}</p>
         <p className="text-xs text-gray-500 mt-1">
-          {lic.entidad.nombre ?? 'Entidad sin registrar'}
+          {lic.entidad.nombre || 'Entidad sin registrar'}
           {lic.entidad.orden ? ` · ${lic.entidad.orden}` : ''}
           {lic.entidad.ciudad ? ` · ${lic.entidad.ciudad}` : ''}
         </p>

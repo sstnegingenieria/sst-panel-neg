@@ -109,6 +109,70 @@ export interface GanadorLicitacion {
   nit: string
 }
 
+// ── Procedencia: cómo llegó el proceso a la colección ───────────────────────
+
+/**
+ * Qué señal produjo el veredicto del radar. Un veredicto sin señal no es
+ * auditable.
+ *
+ * VIVE AQUÍ Y NO EN `utils/sigp/secopMapeo.ts`, donde nació: el DOCUMENTO
+ * persiste este valor, así que su dueño es el tipo del documento. Tenerlo en
+ * utils obligaba a que `types/` importara de `utils/` para declarar el campo
+ * —la dependencia al revés, y circular, porque el mapeo ya importa de aquí—.
+ */
+export type SenalClasificacion =
+  | 'codigo_en_familia'
+  /** Clase con adjudicación probada Y el objeto habla del trabajo de NEG. */
+  | 'codigo_en_clase_con_texto'
+  /**
+   * Clase con adjudicación probada pero el léxico NO reconoce el objeto: los
+   * 24 de ferretería pura de 2025. Entran por EVIDENCIA (NEG ganó bajo ese
+   * código), no porque el texto lo diga, así que llevan señal aparte y el
+   * reporte de cada corrida los separa — para que en tres meses se pueda ver
+   * si alguno se trabajó o si entraron para nada.
+   */
+  | 'codigo_en_clase_sin_texto'
+  | 'codigo_fuera_de_familia'
+  | 'texto_coincide'
+  | 'sin_codigo_ni_texto'
+  | 'fuera_de_territorio'
+
+/**
+ * Por qué el radar trajo este proceso. `null` en todo lo que no vino del radar
+ * —tecleado a mano o importado del registro histórico—, y ESO ES LA DECISIÓN
+ * que reparte la bandeja (D1): la procedencia decide, no el estado. Una
+ * `detectada` escrita a mano es trabajo que alguien eligió; lo que el radar
+ * trajo solo todavía no es de nadie.
+ *
+ * El bloque ya se escribía en Firestore desde la primera corrida del radar y
+ * el panel no lo declaraba: el dato estaba ahí y era invisible para la UI.
+ */
+export interface ProcedenciaRadar {
+  senal: SenalClasificacion
+  /** Términos del léxico que lo trajeron. Vacío si entró por código. */
+  terminos: string[]
+  /** Con qué versión del léxico se clasificó. */
+  vocabulario_version: string
+  /** Id de la corrida que lo creó. Lo sella el escritor, no el mapeo. */
+  corrida: string | null
+}
+
+/**
+ * ¿Lo trajo el radar?
+ *
+ * COMPARA CONTRA `null` CON `!=` A PROPÓSITO (no `!== null`): los documentos
+ * que ya están en producción —los ~350 del registro histórico y los tecleados
+ * antes de este bloque— NO TIENEN el campo, así que al leerlos llega
+ * `undefined`. Con `!== null` un histórico daría `true` y la bandeja lo
+ * mandaría a la sección del radar, que es exactamente al revés.
+ *
+ * Los caminos de creación sí escriben `null` explícito desde este bloque; esta
+ * guarda es para lo que se escribió antes y no se va a reescribir.
+ */
+export function esDelRadar(l: { radar?: ProcedenciaRadar | null }): boolean {
+  return l.radar != null
+}
+
 // ── Documento de la colección `licitaciones` ─────────────────────────────────
 
 export interface Licitacion {
@@ -129,6 +193,8 @@ export interface Licitacion {
   numero_proceso: string
   id_secop: string | null
   origen: OrigenLicitacion
+  /** Por qué lo trajo el radar, o `null` si no vino de ahí. Ver `esDelRadar`. */
+  radar: ProcedenciaRadar | null
   url_proceso: string
   entidad: EntidadLicitacion
   objeto: string

@@ -31,6 +31,8 @@ const base = (extra?: Partial<Licitacion>): Licitacion => ({
   // Consecutivo DIFERIDO (1.2b): el documento nace sin número.
   consecutivo: '',
   numero_proceso: 'MC-DNP-004-2026',
+  // Tecleada a mano en el fixture: no vino del radar (D1).
+  radar: null,
   id_secop: 'CO1.BDOS.1234567',
   origen: 'secop_ii',
   url_proceso: 'https://community.secop.gov.co/Public/Tendering/x',

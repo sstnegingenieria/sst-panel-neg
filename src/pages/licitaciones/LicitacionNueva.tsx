@@ -20,7 +20,7 @@ import {
   MODALIDADES_LICITACION, MODALIDAD_LICITACION_LABEL,
   ORIGENES_LICITACION,
 } from '../../types/sigp/licitacion'
-import type { ModalidadLicitacion, OrigenLicitacion } from '../../types/sigp/licitacion'
+import type { Licitacion, ModalidadLicitacion, OrigenLicitacion } from '../../types/sigp/licitacion'
 import { calcularSemaforo } from '../../utils/sigp/semaforo'
 import { SEMAFORO_CHIP } from '../../utils/sigp/bandejaLicitaciones'
 import { evaluarVentana, isoLocal } from '../../utils/sigp/ventanaLicitacion'
@@ -85,15 +85,24 @@ export default function LicitacionNueva() {
         departamento: f.entidad_departamento,
         requiere_lectura: f.requiere_lectura,
       })
-      const ref = await addDoc(collection(db, 'licitaciones'), {
+      // TIPADO CONTRA EL DOCUMENTO a proposito: `addDoc` acepta cualquier
+      // objeto, asi que sin esta anotacion el compilador no compara lo que este
+      // formulario escribe con lo que la coleccion exige — que es como el camino
+      // del radar perdio `semaforo_calculado_en` sin que nada se quejara.
+      const nuevo: Licitacion = {
         // Nace SIN número: el LIC se quema al materializar (invariante 6).
         consecutivo: '',
         numero_proceso: f.numero_proceso.trim(),
         id_secop: f.id_secop.trim() || null,
         origen: f.origen,
+        // Tecleada a mano: no vino del radar (D1 — la procedencia decide).
+        radar: null,
         url_proceso: f.url_proceso.trim(),
         entidad: {
-          nombre: f.entidad_nombre.trim() || null,
+          // UN SOLO CENTINELA. El tipo pide `string` y el radar escribe ''
+          // cuando SECOP no trae la entidad; este formulario escribia `null`.
+          // Dos centinelas para el mismo "no se sabe" es el defecto de siempre.
+          nombre: f.entidad_nombre.trim(),
           nit: f.entidad_nit.trim(),
           orden: f.entidad_orden.trim(),
           departamento: f.entidad_departamento.trim(),
@@ -131,7 +140,8 @@ export default function LicitacionNueva() {
         actualizado_por: user.uid,
         actualizado_en: ahora,
         activa: true,
-      })
+      }
+      const ref = await addDoc(collection(db, 'licitaciones'), nuevo)
       toast(`Proceso registrado — semáforo ${s.semaforo}`)
       navigate(`/licitaciones/${ref.id}`)
     } catch {

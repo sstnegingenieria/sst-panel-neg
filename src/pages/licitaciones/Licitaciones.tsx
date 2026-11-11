@@ -427,7 +427,7 @@ function Fila({ l, hoy, horasUtilesDia, enCapacidad, atenuada, onSubir, onLibera
 
       <p className="mt-1.5 text-sm text-gray-800 line-clamp-2">{l.objeto || '—'}</p>
       <p className="text-xs text-gray-500">
-        {l.entidad.nombre ?? 'Entidad sin registrar'}
+        {l.entidad.nombre || 'Entidad sin registrar'}
         {l.entidad.ciudad ? ` · ${l.entidad.ciudad}` : ''}
         {l.presupuesto_oficial > 0 ? ` · ${fmtMoney(l.presupuesto_oficial)}` : ''}
       </p>
