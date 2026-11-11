@@ -276,6 +276,39 @@ gcloud iam service-accounts add-iam-policy-binding   radar-secop@neg-sst-app.iam
 
 #    Para el codebase `default`, la cuenta de computo por defecto:
 gcloud iam service-accounts add-iam-policy-binding   <NUMERO-DE-PROYECTO>-compute@developer.gserviceaccount.com   --member="user:giovanny.montes@negingenieria.com"   --role="roles/iam.serviceAccountUser" --project=neg-sst-app
+
+# 3. Permiso de crear el HORARIO de las funciones programadas.
+#    El job de Cloud Scheduler lo crea firebase-tools CON LA SESION DE QUIEN
+#    DESPLIEGA, y `roles/cloudfunctions.developer` trae 226 permisos y NINGUNO
+#    de `cloudscheduler.*` (`firebase.viewer`, 298, tampoco). Medido contra la
+#    API de IAM el 11-nov-2026.
+#    Aplica a los DOS codebases: `radar` (dos programadas) y `default`
+#    (`censoConsecutivos`).
+gcloud projects add-iam-policy-binding neg-sst-app   --member="user:giovanny.montes@negingenieria.com"   --role="roles/cloudscheduler.admin"
+
+# 4. Permiso de ESCRIBIR la politica de IAM de un servicio de Cloud Run.
+#    El `run.invoker` de la cuenta de runtime NO se concede a mano: lo concede
+#    el CLI, acotado al servicio (ver "Paso 4" mas arriba). Pero para poder
+#    concederlo, quien despliega tiene que poder escribir esa politica, y
+#    `cloudfunctions.developer` solo trae `run.services.get` y
+#    `run.services.getIamPolicy` — leerla, no escribirla.
+#    Aplica a los DOS codebases: al radar por sus programadas, y a `default`
+#    por sus tres callables mas `censoConsecutivos`.
+#
+#    POR QUE `roles/run.admin` Y NO UN ROL PERSONALIZADO (decision de Giovanny,
+#    11-nov-2026): entre los predefinidos, `run.admin` (97 permisos) es el mas
+#    acotado que trae `run.services.setIamPolicy` — `run.developer` (89) NO lo
+#    trae. Y sobre lo que la cuenta YA tiene con `cloudfunctions.developer`,
+#    `run.admin` agrega **8 permisos** y nada mas:
+#        run.services.setIamPolicy, run.jobs.setIamPolicy,
+#        run.instances.setIamPolicy, run.workerpools.setIamPolicy,
+#        run.services.createTagBinding, run.services.deleteTagBinding,
+#        run.jobs.createTagBinding, run.jobs.deleteTagBinding
+#    Todos sobre recursos de Cloud Run que `cloudfunctions.developer` ya le deja
+#    crear, actualizar y borrar. Ocho permisos de delta no justifican un rol
+#    personalizado que nadie va a mantener y que envejece en silencio — es el
+#    mismo patron que este proyecto viene corrigiendo en otros frentes.
+gcloud projects add-iam-policy-binding neg-sst-app   --member="user:giovanny.montes@negingenieria.com"   --role="roles/run.admin"
 ```
 
 **Verificación**: correr el script en simulacro. Si el chequeo previo pasa, los

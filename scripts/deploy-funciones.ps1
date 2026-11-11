@@ -625,6 +625,7 @@ const [, , ...cuentas] = process.argv
 # esta desplegando -- `scheduleTrigger` para (a), y para (b) las mismas ramas del
 # invoker que usa el CLI. Un codebase de puras funciones de evento no paga ninguno.
 $permisosDerivados = [ordered]@{}
+$conHorario = @($lectura.conHorario)
 if ($conHorario.Count -gt 0) {
   Write-Host ("Funciones PROGRAMADAS en este codebase: " + ($conHorario -join ', ')) -ForegroundColor DarkGray
   foreach ($p in @('cloudscheduler.jobs.get', 'cloudscheduler.jobs.create', 'cloudscheduler.jobs.update')) {
@@ -672,6 +673,16 @@ const PERMISOS = process.argv.slice(2)
     $comandos = ''
     foreach ($r in $rolDe.Keys) {
       $comandos += "    gcloud projects add-iam-policy-binding neg-sst-app --member=user:$quien --role=$r`n"
+    }
+    # La razon del rol, junto al rol: quien lee el aborto esta por correr el
+    # comando, no por buscar el documento.
+    if ($rolDe.Contains('roles/run.admin')) {
+      $comandos += "`n    (run.admin es el predefinido mas acotado que trae run.services.setIamPolicy:`n" +
+        "     run.developer, con 89 permisos, NO lo trae. Y sobre lo que`n" +
+        "     cloudfunctions.developer ya da, run.admin agrega 8 permisos y nada mas,`n" +
+        "     todos setIamPolicy y tag-bindings de recursos de Cloud Run que esa cuenta`n" +
+        "     ya puede crear, actualizar y borrar. Ocho de delta no justifican un rol`n" +
+        "     personalizado que nadie mantiene. El detalle, en docs/radar-cuenta-de-servicio.md)`n"
     }
     Remove-Item $tmp -Recurse -Force
     Abortar ("la cuenta $quien NO tiene todo lo que este codebase necesita para desplegarse.`n`n" +
