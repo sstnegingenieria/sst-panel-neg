@@ -97,6 +97,9 @@ export default function LicitacionNueva() {
         origen: f.origen,
         // Tecleada a mano: no vino del radar (D1 — la procedencia decide).
         radar: null,
+        // Tecleada a mano: no paso por el triage del radar, no hay nada que revisar.
+        revisado_por: null,
+        revisado_en: null,
         url_proceso: f.url_proceso.trim(),
         entidad: {
           // UN SOLO CENTINELA. El tipo pide `string` y el radar escribe ''

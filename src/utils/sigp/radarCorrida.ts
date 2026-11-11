@@ -329,6 +329,11 @@ export function sellarParaEscritura<T>(
     radar: { ...doc.radar, corrida: sello.corrida },
     semaforo_calculado_en: sello.ahora,
     responsable_uid: '',
+    // Recien traida por el radar: NADIE la ha revisado todavia. Que estos dos
+    // campos nazcan en null es justamente lo que hace que el triage signifique
+    // algo cuando alguien los llene (D3).
+    revisado_por: null,
+    revisado_en: null,
     creado_por: sello.actor,
     creado_en: sello.ahora,
     actualizado_por: sello.actor,

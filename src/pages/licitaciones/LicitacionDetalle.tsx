@@ -23,6 +23,7 @@ import {
   ESTADO_LICITACION_LABEL, MODALIDAD_LICITACION_LABEL,
   MOTIVO_DESCARTE_LABEL, MOTIVO_SEMAFORO_LABEL,
   TRANSICIONES_LICITACION,
+  esDelRadar,
   patchAvanzarLicitacion, patchDescartarLicitacion, patchReabrirLicitacion,
   patchOverrideSemaforo, patchPresentarLicitacion, patchCerrarConResultado,
   exigeConsecutivo, pctNeg, pctGanador,
@@ -516,8 +517,10 @@ export default function LicitacionDetalle() {
           if (ok) setModal(null)
         }}
       />
+      {/* `delRadar`: la pregunta del lexico solo tiene sentido si el lexico estuvo. */}
       <ModalDescartar
         abierto={modal === 'descartar'}
+        delRadar={esDelRadar(lic)}
         onCerrar={() => setModal(null)}
         onConfirmar={async motivo => {
           if (!user?.uid) return

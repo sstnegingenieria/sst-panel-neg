@@ -61,11 +61,52 @@ export const ESTADOS_LICITACION = [
 ] as const
 export type EstadoLicitacion = typeof ESTADOS_LICITACION[number]
 
+/**
+ * Por qué se descartó. VOCABULARIO CERRADO: el texto libre no se cuenta, y lo
+ * que no se cuenta no responde "¿el radar sirve?" ni "¿por qué dejamos pasar
+ * 117 procesos el año pasado?".
+ *
+ * LOS OCHO PRIMEROS SON MEDIDOS, no diseñados: salen del registro real de
+ * Karen, normalizados en `mapearMotivoDescarte` con sus erratas incluidas
+ * (`MYPIME`, `PRESUPUESTTO`). Los cinco de arriba explican el 94 % de 121
+ * descartes (sorteo 26 % · MiPyme 24 % · experiencia 20 % · presupuesto 17 % ·
+ * indicadores 7 %).
+ *
+ * LOS CUATRO ÚLTIMOS son del mundo del RADAR (B.3) y no existían porque el
+ * radar no existía. Nunca vienen del registro histórico, así que
+ * `mapearMotivoDescarte` no los conoce ni tiene por qué.
+ */
 export const MOTIVOS_DESCARTE = [
   'SORTEO', 'LIMITACION_MIPYME', 'EXPERIENCIA', 'INDICADORES',
-  'BAJO_PRESUPUESTO', 'UBICACION', 'CAPACIDAD', 'OTRO',
+  'BAJO_PRESUPUESTO', 'UBICACION', 'CAPACIDAD',
+  // ── Del radar (B.3) ──
+  'RUIDO_LEXICO', 'FUERA_DE_ALCANCE', 'PLAZO_IMPOSIBLE', 'DUPLICADO',
+  'OTRO',
 ] as const
 export type MotivoDescarte = typeof MOTIVOS_DESCARTE[number]
+
+/**
+ * LOS DOS QUE SE CONFUNDEN, y por qué son dos y no uno.
+ *
+ * `RUIDO_LEXICO` es un defecto DEL INSTRUMENTO: el léxico trajo algo que no
+ * debía. `FUERA_DE_ALCANCE` es una detección CORRECTA con un "no" de negocio.
+ *
+ * El caso que los separa: un proceso de transmisión a 230 kV cuyo objeto dice
+ * "redes eléctricas". El léxico ACERTÓ —ese término es vocabulario de NEG— y
+ * NEG igual no lo hace. Si eso se marca como ruido, la métrica dice que el
+ * léxico es peor de lo que es, y el "arreglo" sería borrar términos que
+ * funcionan: el inverso de para qué existe el motivo.
+ *
+ * La prueba para quien descarta cabe en una línea, y el formulario la HACE en
+ * vez de confiar en que alguien se acuerde (`ModalDescartar`):
+ *     ¿el léxico se equivocó, o acertó y aun así no lo queremos?
+ *
+ * ⚠ CONDICIÓN DE REVISIÓN (acordada con Giovanny el 11-nov-2026): si a los
+ * TRES MESES los dos motivos se usan de forma intercambiable, SE FUSIONAN. Eso
+ * se mide con número —la distribución de ambos sobre los descartes del radar—,
+ * no con impresiones.
+ */
+export const MOTIVOS_DESCARTE_DEL_LEXICO: MotivoDescarte[] = ['RUIDO_LEXICO', 'FUERA_DE_ALCANCE']
 
 export const MOTIVOS_SEMAFORO = [
   'MODALIDAD_SIN_HISTORIAL', 'SORTEO', 'LIMITACION_MIPYME', 'REQUIERE_LECTURA',
@@ -258,6 +299,25 @@ export interface Licitacion {
   } | null
 
   // ── Trazabilidad ──
+
+  /**
+
+   * TRIAGE DEL RADAR (D3): quién sacó este proceso de la sección del radar,
+
+   * admitiéndolo o descartándolo, y cuándo. `null` en todo lo que no pasó por
+
+   * ese triage — incluidas las licitaciones tecleadas a mano, donde no hay
+
+   * nada que revisar. Distinto de `actualizado_por`, que se mueve con cada
+
+   * escritura y a los dos meses ya no responde quién hizo el triage.
+
+   */
+
+  revisado_por: string | null
+
+  revisado_en: Timestamp | null
+
   responsable_uid: string
   creado_por: string
   creado_en: Timestamp
@@ -300,6 +360,15 @@ export const MOTIVO_DESCARTE_LABEL: Record<MotivoDescarte, string> = {
   BAJO_PRESUPUESTO: 'Presupuesto no rentable',
   UBICACION: 'Ubicación fuera de cobertura',
   CAPACIDAD: 'Capacidad operativa',
+
+  RUIDO_LEXICO: 'El léxico lo trajo por error',
+
+  FUERA_DE_ALCANCE: 'No es el trabajo de NEG',
+
+  PLAZO_IMPOSIBLE: 'Cierra antes de poder armarlo',
+
+  DUPLICADO: 'Ya estaba por otra vía',
+
   OTRO: 'Otro',
 }
 
@@ -503,6 +572,59 @@ const sello = (actor: ActorLicitacion, ahora: Timestamp): SelloPatch => ({
 })
 
 /**
+
+ * SELLO DEL TRIAGE DEL RADAR (D3).
+
+ *
+
+ * Quién sacó un proceso de la sección del radar — admitiéndolo o descartándolo
+
+ * — y cuándo. NO es lo mismo que `actualizado_por`: ese se mueve con cada
+
+ * escritura posterior y a los dos meses ya no dice quién hizo el triage, que es
+
+ * justamente la pregunta ("¿quién metió esto a la semana de alguien?").
+
+ *
+
+ * SOLO se sella cuando el proceso VINO DEL RADAR y está en `detectada`: en una
+
+ * licitación tecleada a mano no hay triage que registrar, y poner "revisada"
+
+ * sobre algo que nadie revisó sería un campo que miente.
+
+ *
+
+ * Quién PUEDE hacerlo no se restringe aquí: cualquiera con
+
+ * `gestionaLicitaciones()`, que es la misma puerta por la que ya lee la
+
+ * colección. No se inventa un dueño que las reglas no pueden sostener, y
+
+ * restringirlo solo en la UI no sería un control — es la lección de SGI/SST.
+
+ * Lo que sí queda es la traza.
+
+ */
+
+function selloTriage(
+
+  l: Pick<Licitacion, 'estado'> & Partial<Pick<Licitacion, 'radar'>>,
+
+  actor: ActorLicitacion, ahora: Timestamp,
+
+): Partial<{ revisado_por: string; revisado_en: Timestamp }> {
+
+  if (l.estado !== 'detectada' || !esDelRadar(l)) return {}
+
+  return { revisado_por: actor.uid, revisado_en: ahora }
+
+}
+
+
+
+/**
+
  * Avance normal por la máquina de estados. NO cubre `descartada` (la dueña
  * de la invariante 1 es `patchDescartarLicitacion`) ni la reapertura desde
  * descartada (`patchReabrirLicitacion`) — cada invariante tiene un solo
@@ -543,9 +665,19 @@ export function patchAvanzarLicitacion(
     activa: esLicitacionActiva(destino),             // invariante 2
     motivo_descarte: null,                           // invariante 1
     // Solo aparece en la asignación inicial; si ya lo tenía, ni se toca.
+
     ...(propuesto !== undefined ? { consecutivo: propuesto } : {}),
+
+    // ADMITIR una fila del radar ES el triage: sale de la sección del radar y
+
+    // entra a competir por el cupo de la semana. Vacio en cualquier otro caso.
+
+    ...selloTriage(l, actor, ahora),
+
     ...sello(actor, ahora),
+
   }
+
 }
 
 /**
@@ -562,6 +694,13 @@ export function patchDescartarLicitacion(
     estado: 'descartada' as EstadoLicitacion,
     activa: esLicitacionActiva('descartada'),        // false, invariante 2
     motivo_descarte: motivo,                         // invariante 1
+
+    // DESCARTAR desde `detectada` tambien es triage. Desde otro estado no:
+
+    // ahi el proceso ya habia sido admitido y revisado por alguien.
+
+    ...selloTriage(l, actor, ahora),
+
     ...sello(actor, ahora),
   }
 }
