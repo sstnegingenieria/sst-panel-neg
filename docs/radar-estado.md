@@ -49,7 +49,7 @@ son código que ya está en `main` y solo espera el deploy.
 | 10 | **La guarda de ventana aguas arriba** | en `main`, **`a0b24a1`** (PR #251) — *necesita deploy* |
 | 11 | **Deploy del codebase `radar`** con #251 + #252 | **acto de Giovanny** — §3-bis, paso 3 |
 | 12 | **Acto de la marca** — `{ marca, solape_dias: 14 }` | **acto de Giovanny** — §3-bis, paso 4. Se hace a mano en la consola — §3-bis, paso 4 |
-| 13 | **Acto de restitución** — `solape_dias: 45` | después de la primera cosecha |
+| 13 | **Restitución del solape** — la escalera `4 → 14 → 24 → 34 → 45` | el primer escalón va junto al acto de texto — §3-ter |
 | 14 | **Barrido del backlog** de las filas sin fecha | diseño pendiente; ver §6 |
 
 ---
@@ -381,6 +381,124 @@ cosecha completa son 1.911 filas y no es instantánea.
 
 ---
 
+## 3-ter. El acto combinado — una sola sentada, dos cosas
+
+Son dos cambios distintos que tocan dos documentos distintos de la misma
+colección. **Se hacen juntos** porque son una sola sentada.
+
+**Pero no se hacen igual**: el del criterio va con un script — su texto tiene
+que salir de la fuente única del repositorio — y el del solape va a mano en la
+consola, porque es un número.
+
+**La consola:** [console.firebase.google.com](https://console.firebase.google.com)
+→ proyecto **`neg-sst-app`** → **Firestore Database** → pestaña **Data**.
+
+---
+
+### Antes de empezar: la foto del antes
+
+```bash
+node scripts/sigp/verifica-marca-radar.mjs --llave <ruta de la llave de LECTURA>
+```
+
+**Qué debe responder:** `marca` con una fecha, `solape_dias` **4**, y
+`✓ LA MARCA ESTÁ BIEN ESCRITA`. Copiá esa salida al reporte: es el antes.
+
+---
+
+### Parte 1 de 2 · el criterio — **con un script, no en la consola**
+
+El texto que Karen lee cuando un proceso sale en rojo o en amarillo. Hoy está
+escrito para quien calibró la regla, no para quien decide si la trabaja.
+
+> ⚠ **CORREGIDO el 13-nov.** Esta parte decía «agregar dos campos a mano en la
+> consola». **No es así.** El registro del criterio tiene una fuente única en
+> `src/types/sigp/semaforoVersiones.ts`, un JSON derivado y un test que los
+> mantiene sincronizados carácter por carácter. Editar a mano habría
+> funcionado *y* habría dejado el repositorio mintiendo.
+
+```bash
+GOOGLE_APPLICATION_CREDENTIALS=<llave de LECTURA> node functions/scripts/adoptar-semaforo-v1.1.js
+```
+
+**Qué debe responder:** el plan completo — `ANTES version_actual v1.0`,
+`DESPUÉS version_actual v1.1`, y los seis textos de v1.1 — y terminar con
+`DRY-RUN: no se escribió nada.` **Leer los seis textos**: es la última
+oportunidad de ver qué va a decir el panel.
+
+Si el plan es el esperado:
+
+```bash
+GOOGLE_APPLICATION_CREDENTIALS=<llave de ESCRITURA> AUTOR_UID=<tu uid> node functions/scripts/adoptar-semaforo-v1.1.js --apply
+```
+
+**Qué debe responder:** `✓ ADOPCIÓN COMPLETA Y VERIFICADA.` El script relee lo
+que escribió antes de decirlo.
+
+**Qué NO hace, y conviene saberlo:** no toca `licitaciones`. Los 396 documentos
+guardados conservan su `semaforo` y su `semaforo_version` — cambiar el criterio
+y recalcular los documentos son **dos actos distintos** (invariante 5). El
+segundo tiene su propio script y su propia decisión.
+
+> **Esta parte SÍ necesita la llave de ESCRITURA de datos**, entregada para el
+> acto y retirada al terminar. No es como la marca: ahí eran dos campos en un
+> documento y la consola alcanzaba. Acá el texto tiene que salir de la fuente
+> única.
+
+---
+
+### Parte 2 de 2 · el solape — esta sí en la consola
+
+El primer escalón del solape: de **4 a 14**.
+
+| campo | tipo | valor ANTES | valor DESPUÉS |
+|---|---|---|---|
+| `solape_dias` | **number** | 4 | **14** |
+
+**Se edita ESE campo y nada más.** `marca` no se toca — la mueve la función en
+cada corrida. `ultima_corrida`, `corridas` y `acumulado` tampoco: son suyos.
+
+> **Por qué 14 y no 45 de una vez.** Medido con la lógica real: saltar directo
+> a 45 crearía **396 documentos** contra un tope de 200 por corrida — la
+> corrida se detiene y no escribe nada. La escalera aprobada es
+> **4 → 14 → 24 → 34 → 45**, cuatro escalones, ninguno por encima de 115
+> documentos nuevos. Cada escalón necesita una corrida en medio para que lo
+> cubierto quede guardado.
+
+---
+
+### Después: verificar
+
+```bash
+node scripts/sigp/verifica-marca-radar.mjs --llave <ruta de la llave de LECTURA>
+```
+
+**Qué debe responder:** `solape_dias **14**`, tipo `número entero`, y
+`✓ LA MARCA ESTÁ BIEN ESCRITA`.
+
+Si dice `cadena` en vez de `número entero`, el campo se guardó con el tipo
+equivocado: hay que volver y corregirlo.
+
+**Lo de `semaforo_versiones` no lo revisa ese script** — se verifica abriendo el
+panel: entrá a una licitación marcada en rojo y mirá el bloque de explicación.
+Tiene que leerse como el texto nuevo, no como el viejo.
+
+> Si la menor cuantía sigue saliendo en **rojo**, hay dos razones posibles y
+> conviene distinguirlas: o el panel todavía no tiene el deploy de v1.1 —el
+> dato quedó bien escrito igual—, o ese documento conserva su `semaforo`
+> guardado de v1.0, que es lo esperado hasta que se corra el recálculo. Las dos
+> se resuelven solas; ninguna significa que el acto haya fallado.
+
+---
+
+### A qué hora se nota
+
+El cambio del solape lo usa **la corrida siguiente** — 06:30 o 14:00, hora de
+Bogotá, de lunes a viernes. El del texto se ve **al instante** en el panel, sin
+esperar nada.
+
+---
+
 ## 4. Las mediciones que sostienen las decisiones
 
 Todas contra la API real del SECOP, filtro del modo `radar`, 11-nov-2026.
@@ -467,6 +585,38 @@ pasadas acotadas en vez de un volcado.
 
 ---
 
+## 6-bis. El contrafactual de calibración se REVISA, no se escribe una vez
+
+`evaluarRetroactivo` contesta una pregunta incomodísima y la contesta sola: **si
+este criterio hubiera estado vigente, ¿cuántas adjudicaciones reales habría
+matado?** Si la respuesta no es cero, el criterio no se aprueba. Está construido
+desde el 1.3 y tiene su test.
+
+**Y durante ocho meses nadie volvió a correrlo.**
+
+v1.0 marcaba en rojo toda menor cuantía. Las tres adjudicaciones más grandes de
+la historia de NEG fueron menores cuantías. El contrafactual decía que no desde
+el primer día — y lo decía en un test que pasaba en verde, porque el test
+comprobaba que la guarda *funcionaba*, no que su veredicto *fuera favorable*.
+
+> **La regla que sale de esto:** ante cualquier cambio de criterio del
+> semáforo, el contrafactual se vuelve a correr contra los datos del momento
+> y su veredicto se escribe en `calibracion` de la versión nueva. No alcanza
+> con que el test pase: hay que **leer el número**.
+>
+> Lo mismo para el otro lado del trueque, que v1.1 dejó escrito: cuántas
+> propuestas sin retorno deja pasar. v1.0 bloqueaba 12; v1.1 no bloquea
+> ninguna. Ese número también hay que mirarlo, no solo calcularlo.
+
+**El compromiso medible de v1.1, con su fecha:** si en seis semanas Karen
+trabajó menores cuantías y las perdió todas, el trueque salió mal y se vuelve a
+mirar. Los contadores existen — `modalidad` + `estado` dan presentadas y
+ganadas, `ofertas_recibidas` da la competencia de cada una, y
+`evaluarRetroactivo` vuelve a correr sobre los datos nuevos. Eso es justamente
+lo que v1.0 no tenía: no era peor, era **irrevisable**.
+
+---
+
 ## 7. Lo que vive en otros documentos
 
 - **El acto de IAM completo** (los seis roles, con el porqué medido de cada uno)
@@ -478,6 +628,12 @@ pasadas acotadas en vez de un volcado.
 - **El límite de la guarda del deploy** (qué cubre y qué no, y por qué el CLI
   declara seis permisos y usa cuatro familias más) → `scripts/deploy-funciones.ps1`.
 - **La prueba de los chequeos de IAM** sin desplegar → `scripts/pruebas/prueba-chequeos-iam.ps1`.
+- **El criterio del semáforo**, su historial de versiones y el script de
+  adopción → `src/types/sigp/semaforoVersiones.ts` y
+  `functions/scripts/adoptar-semaforo-v1.1.js`. El texto que Karen lee sale
+  de ahí, no de la consola.
+- **El inventario del texto de usuario**, con el antes y el después de cada
+  pantalla → `docs/inventario-lenguaje-licitaciones.md`.
 - **La verificación de la marca**, de SOLO LECTURA →
   `scripts/sigp/verifica-marca-radar.mjs`. La marca se escribe a mano en la
   consola para no crear una llave de escritura; este script revisa después que
