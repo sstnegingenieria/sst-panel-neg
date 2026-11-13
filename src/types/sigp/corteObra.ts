@@ -78,10 +78,15 @@ export function patchRegistrarAvance(
   fecha: Timestamp,
   nombre?: string,
   nota?: string,
+  /** 13-nov: la base congelada del último corte FACTURABLE para esta clave.
+   *  Un acumulado por debajo se RECHAZA (defensa en profundidad — la UI ya
+   *  bloquea con el mensaje de errorBajoBase): lo ya facturado no baja. */
+  base?: number,
 ): { avance_items: AvanceItem[]; sobreEjecutado: boolean; item: ItemAlcance } | null {
   const item = (p.snapshot.items_alcance ?? []).find(i => i.clave === clave)
   if (!item) return null
   if (!(cantidadAcum >= 0)) return null
+  if (base !== undefined && cantidadAcum < base) return null
   const registro: RegistroAvance = {
     fecha, por: uid, ...(nombre ? { por_nombre: nombre } : {}),
     cantidad: cantidadAcum, ...(nota?.trim() ? { nota: nota.trim() } : {}),
@@ -138,6 +143,32 @@ export const TIPO_CORTE_LABEL: Record<TipoCorte, string> = {
 }
 export const esCorteFacturable = (c: Pick<CorteObra, 'tipo'>): boolean =>
   c.tipo !== 'informativo'
+
+/** Base congelada POR CLAVE del último corte FACTURABLE — la MISMA fuente
+ *  contra la que construirCorte mide el delta (un informativo no la mueve).
+ *  Es la columna «Cortado» de la tabla de captura y el piso que un registro
+ *  de avance no puede contradecir (13-nov, caso 01.01.01 del PRY-2026-058:
+ *  la tabla pedía el acumulado sin mostrar contra qué, y 93,6 quedó en 2). */
+export function baseCortadaDe(
+  cortes: (Pick<CorteObra, 'numero_corte'> & { tipo?: TipoCorte; consecutivo?: string; items?: Pick<ItemCorte, 'clave' | 'cantidad_acum'>[] })[],
+): { consecutivo?: string; porClave: Map<string, number> } {
+  const fact = [...cortes].filter(c => esCorteFacturable(c)).sort((a, b) => b.numero_corte - a.numero_corte)[0]
+  if (!fact) return { porClave: new Map() }
+  return {
+    ...(fact.consecutivo ? { consecutivo: fact.consecutivo } : {}),
+    porClave: new Map((fact.items ?? []).map(i => [i.clave, i.cantidad_acum])),
+  }
+}
+
+/** El mensaje del bloqueo bajo-base, con LAS CIFRAS y la salida legítima —
+ *  el criterio del delta-negativo de la emisión traído al momento del tecleo
+ *  (bloqueo duro: lo ya facturado no baja; al emitir ya se rechaza sin
+ *  checkbox, y dos doctrinas para el mismo hecho serían una de más). */
+export const errorBajoBase = (cantidad: number, base: number, corte?: string): string =>
+  `El acumulado (${cantidad}) queda POR DEBAJO de lo ya congelado` +
+  `${corte ? ` en el corte facturable ${corte}` : ''} (${base}). Eso no es corregir el avance — es ` +
+  'contradecir un documento entregado al cliente. Si la cantidad realmente bajó, el camino es un ' +
+  'cambio de alcance o una corrección formal del corte, no un registro de avance'
 
 export interface CorteObra {
   consecutivo: string          // CRT-YYYY-NNN (al emitir)
