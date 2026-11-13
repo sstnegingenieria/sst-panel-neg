@@ -5,7 +5,8 @@ import {
   seccionDe, compitePorCupo, ordenarPorCierre, repartirPorCapacidad,
   planIntercambioCupo, patchLiberarCupo, coincideBusqueda, contarSecciones,
   ESTADOS_ACTIVOS_BANDEJA, SEMAFORO_CHIP, SENAL_CHIP,
-  repartirRadar, plazoVencido, sinFechaEnElOrigen,
+  repartirRadar, porQueNoAlcanza, manifestacionCerrada, sinFechaEnElOrigen,
+  nacioVencida, vencioEsperando, capacidadSemanal,
 } from '../bandejaLicitaciones'
 import type { LicitacionConId } from '../bandejaLicitaciones'
 import { ESTADOS_LICITACION, SENAL_LABEL } from '../../../types/sigp/licitacion'
@@ -62,7 +63,7 @@ describe('seccionDe', () => {
       estado: 'detectada' as EstadoLicitacion,
       radar: {
         senal: 'texto_coincide' as const, terminos: ['redes'],
-        vocabulario_version: 'v1.0', corrida: 'corr-1', fase: null, portafolio: null, origen_fecha: 'publicacion' as const,
+        vocabulario_version: 'v1.0', corrida: 'corr-1', fase: null, fases_previas: [], portafolio: null, origen_fecha: 'publicacion' as const,
       },
     }
     expect(seccionDe(delRadar)).toBe('radar')
@@ -142,7 +143,7 @@ describe('repartirPorCapacidad', () => {
     const traida = conCierre(1, {
       id: 'del_radar',
       estado: 'detectada',
-      radar: { senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', fase: null, portafolio: null, origen_fecha: 'publicacion' },
+      radar: { senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', fase: null, fases_previas: [], portafolio: null, origen_fecha: 'publicacion' },
     })
 
     // Lo que hace la página: filtrar por sección y repartir SOLO las activas.
@@ -320,7 +321,7 @@ describe('coincideBusqueda / contarSecciones', () => {
       lic({ estado: 'en_evaluacion' }),
       lic({
         estado: 'detectada',
-        radar: { senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', fase: null, portafolio: null, origen_fecha: 'publicacion' },
+        radar: { senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', fase: null, fases_previas: [], portafolio: null, origen_fecha: 'publicacion' },
       }),
       lic({ estado: 'descartada', motivo_descarte: 'SORTEO', activa: false }),
       lic({ estado: 'perdida', activa: false }),
@@ -345,7 +346,7 @@ const delRadar = (
 ) => {
   const radar = {
     senal: 'texto_coincide' as const, terminos: ['redes'],
-    vocabulario_version: 'v1.0', corrida: 'c1', fase: null, portafolio: null, origen_fecha,
+    vocabulario_version: 'v1.0', corrida: 'c1', fase: null, fases_previas: [], portafolio: null, origen_fecha,
   }
   return dias === null
     ? lic({ ...extra, estado: 'detectada', radar })
@@ -359,7 +360,7 @@ const conCierreIso = (iso: string, extra?: Partial<Licitacion> & { id?: string }
     estado: 'detectada',
     radar: extra?.radar ?? {
       senal: 'texto_coincide', terminos: ['redes'],
-      vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'publicacion',
+      vocabulario_version: 'v1.0', corrida: 'c1', fase: null, fases_previas: [], portafolio: null, origen_fecha: 'publicacion',
     },
     cronograma: {
       publicacion: null, manifestacion: null, sorteo: null, adjudicacion: null,
@@ -387,84 +388,194 @@ describe('sinFechaEnElOrigen', () => {
 })
 
 const HOY = '2026-11-12'
+const HU = 4   // horas útiles al día, el valor real de `configuracion/licitaciones`
 
-describe('plazoVencido', () => {
-  it('ayer está vencido, mañana no', () => {
-    expect(plazoVencido(conCierreIso('2026-11-11'), HOY)).toBe(true)
-    expect(plazoVencido(conCierreIso('2026-11-13'), HOY)).toBe(false)
+/** Una del radar con su fase y su historia de fases. */
+const conFase = (
+  iso: string, mod: 'minima_cuantia' | 'menor_cuantia',
+  fase: string | null, previas: string[], extra?: Partial<Licitacion> & { id?: string },
+) => conCierreIso(iso, {
+  ...extra,
+  modalidad: mod,
+  radar: {
+    senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0',
+    corrida: 'c1', fase, fases_previas: previas, portafolio: 'CO1.BDOS.1',
+    origen_fecha: 'publicacion',
+  },
+})
+
+describe('manifestacionCerrada', () => {
+  it('menor cuantía en fase de oferta que PASÓ por manifestación: cerró', () => {
+    expect(manifestacionCerrada(conFase('2026-11-20', 'menor_cuantia',
+      'Presentación de oferta', ['Manifestación de interés (Menor Cuantía)']))).toBe(true)
   })
 
-  it('HOY NO está vencido: el plazo corre hasta el final del día', () => {
-    // La comparación es por día civil, no por instante. Un proceso que cierra
-    // hoy a las 23:00 sigue vivo a las 09:00 de hoy.
-    expect(plazoVencido(conCierreIso('2026-11-12'), HOY)).toBe(false)
+  it('TODAVÍA en manifestación: la puerta sigue abierta', () => {
+    expect(manifestacionCerrada(conFase('2026-11-20', 'menor_cuantia',
+      'Manifestación de interés (Menor Cuantía)', []))).toBe(false)
   })
 
-  it('sin fecha de cierre NO está vencido', () => {
-    // No se puede declarar muerto lo que no tiene reloj.
-    expect(plazoVencido(lic(), HOY)).toBe(false)
+  it('EL CASO QUE EXIGE `fases_previas`: menor cuantía SIN manifestación', () => {
+    // `Seleccion Abreviada Menor Cuantia Sin Manifestacion Interes` también
+    // mapea a `menor_cuantia` (4.817 procesos). Mirar solo la modalidad
+    // marcaría mal a todos esos.
+    expect(manifestacionCerrada(conFase('2026-11-20', 'menor_cuantia',
+      'Presentación de oferta', []))).toBe(false)
+  })
+
+  it('una mínima cuantía está siempre en fase de oferta y nunca tuvo puerta', () => {
+    expect(manifestacionCerrada(conFase('2026-11-20', 'minima_cuantia',
+      'Presentación de oferta', []))).toBe(false)
+  })
+
+  it('un documento viejo sin `fases_previas` no rompe ni marca de más', () => {
+    const vieja = conFase('2026-11-20', 'menor_cuantia', 'Presentación de oferta', [])
+    delete (vieja.radar as unknown as Record<string, unknown>).fases_previas
+    expect(manifestacionCerrada(vieja)).toBe(false)
+  })
+
+  it('lo tecleado a mano no tiene fase', () => {
+    expect(manifestacionCerrada(lic({ radar: null }))).toBe(false)
+  })
+})
+
+describe('porQueNoAlcanza', () => {
+  it('el plazo pasado gana sobre todo lo demás', () => {
+    const l = conFase('2026-11-10', 'menor_cuantia',
+      'Presentación de oferta', ['Manifestación de interés (Menor Cuantía)'])
+    expect(porQueNoAlcanza(l, HOY, HU)?.motivo).toBe('plazo_vencido')
+  })
+
+  it('la manifestación cerrada se dice aunque el plazo siga abierto', () => {
+    // Es el caso que motiva todo el bloque: la fecha de cierre muestra días
+    // por delante y el proceso ya es inalcanzable.
+    const l = conFase('2026-11-30', 'menor_cuantia',
+      'Presentación de oferta', ['Manifestación de interés (Menor Cuantía)'])
+    const r = porQueNoAlcanza(l, HOY, HU)
+    expect(r?.motivo).toBe('manifestacion_cerrada')
+    expect(r?.frase).toMatch(/aunque el plazo siga abierto/)
+  })
+
+  it('cierra HOY: no está vencida y no da tiempo', () => {
+    // Medido sobre la cola real: 5 de 23 estaban así. No son vencidas —la
+    // distinción del día civil— y son igual de intrabajables.
+    const r = porQueNoAlcanza(conFase(HOY, 'minima_cuantia', 'Presentación de oferta', []), HOY, HU)
+    expect(r?.motivo).toBe('ventana_insuficiente')
+    expect(r?.frase).toBe('Cierra hoy: no da tiempo de armarla')
+  })
+
+  it('con tiempo de sobra devuelve null', () => {
+    expect(porQueNoAlcanza(conFase('2026-11-30', 'minima_cuantia', 'Presentación de oferta', []), HOY, HU))
+      .toBeNull()
+  })
+
+  it('EL UMBRAL NO SE INVENTA: sale de evaluarVentana y de las horas por modalidad', () => {
+    // Con 4 horas útiles al día, una mínima (4 h) necesita 1 día hábil y una
+    // menor (6 h) necesita 2. Mañana (13-nov, viernes) es 1 día hábil.
+    const manana = '2026-11-13'
+    expect(porQueNoAlcanza(conFase(manana, 'minima_cuantia', null, []), HOY, HU)).toBeNull()
+    expect(porQueNoAlcanza(conFase(manana, 'menor_cuantia', null, []), HOY, HU)?.motivo)
+      .toBe('ventana_insuficiente')
   })
 })
 
 describe('repartirRadar', () => {
   it('reparte en los tres grupos y en ese orden', () => {
     const sinFecha = delRadar('ninguna', null, { id: 'sin-fecha' })
-    const vigente = conCierreIso('2026-11-20', { id: 'vigente' })
-    const vencida = conCierreIso('2026-11-05', { id: 'vencida' })
-    const r = repartirRadar([vencida, vigente, sinFecha], HOY)
+    const vigente = conFase('2026-11-30', 'minima_cuantia', null, [], { id: 'vigente' })
+    const muerta = conFase('2026-11-05', 'minima_cuantia', null, [], { id: 'muerta' })
+    const r = repartirRadar([muerta, vigente, sinFecha], HOY, HU)
     expect(r.sinFecha.map(l => l.id)).toEqual(['sin-fecha'])
     expect(r.vigentes.map(l => l.id)).toEqual(['vigente'])
-    expect(r.vencidas.map(l => l.id)).toEqual(['vencida'])
+    expect(r.noAlcanza.map(x => x.l.id)).toEqual(['muerta'])
   })
 
-  it('EL CASO QUE LO MOTIVA: 12 de 24 vencidas no se mezclan con las vivas', () => {
-    // Medido en producción el 12-nov-2026. Un proceso muerto en la cola de
-    // trabajo es trabajo que alguien puede empezar a hacer para nada.
+  it('EL REPARTO MEDIDO: 2 vencidas + 5 que cierran hoy = 7 abajo', () => {
+    // La forma exacta de la cola real del 12-nov-2026.
     const docs = [
-      ...Array.from({ length: 12 }, (_, i) => conCierreIso('2026-11-10', { id: `muerta-${i}` })),
-      ...Array.from({ length: 12 }, (_, i) => conCierreIso('2026-11-20', { id: `viva-${i}` })),
+      ...Array.from({ length: 2 }, (_, i) => conFase('2026-11-10', 'minima_cuantia', null, [], { id: `venc-${i}` })),
+      ...Array.from({ length: 5 }, (_, i) => conFase(HOY, 'minima_cuantia', null, [], { id: `hoy-${i}` })),
+      ...Array.from({ length: 16 }, (_, i) => conFase('2026-11-24', 'minima_cuantia', null, [], { id: `viva-${i}` })),
     ]
-    const r = repartirRadar(docs, HOY)
-    expect(r.vencidas).toHaveLength(12)
-    expect(r.vigentes).toHaveLength(12)
-    expect(r.vigentes.every(l => l.id.startsWith('viva'))).toBe(true)
+    const r = repartirRadar(docs, HOY, HU)
+    expect(r.noAlcanza).toHaveLength(7)
+    expect(r.vigentes).toHaveLength(16)
+    const motivos = r.noAlcanza.map(x => x.porque.motivo)
+    expect(motivos.filter(m => m === 'plazo_vencido')).toHaveLength(2)
+    expect(motivos.filter(m => m === 'ventana_insuficiente')).toHaveLength(5)
   })
 
-  it('las SIN FECHA van arriba aunque las otras cierren mañana', () => {
-    const urgente = conCierreIso('2026-11-13', { id: 'urgente' })
-    const sinFecha = delRadar('ninguna', null, { id: 'sin-fecha' })
-    const r = repartirRadar([urgente, sinFecha], HOY)
-    expect([...r.sinFecha, ...r.vigentes].map(l => l.id)).toEqual(['sin-fecha', 'urgente'])
-  })
-
-  it('una SIN FECHA jamás cae en vencidas, tenga el cierre que tenga', () => {
+  it('las SIN FECHA van arriba y jamás caen abajo', () => {
     const rara = conCierreIso('2026-01-01', {
       id: 'rara',
       radar: {
-        senal: 'texto_coincide' as const, terminos: ['redes'],
-        vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'ninguna' as const,
+        senal: 'texto_coincide' as const, terminos: ['redes'], vocabulario_version: 'v1.0',
+        corrida: 'c1', fase: null, fases_previas: [], portafolio: null,
+        origen_fecha: 'ninguna' as const,
       },
     })
-    const r = repartirRadar([rara], HOY)
+    const r = repartirRadar([rara], HOY, HU)
     expect(r.sinFecha.map(l => l.id)).toEqual(['rara'])
-    expect(r.vencidas).toHaveLength(0)
-  })
-
-  it('las vigentes van por cierre ascendente; las vencidas, la más reciente primero', () => {
-    const docs = [
-      conCierreIso('2026-11-30', { id: 'lejana' }),
-      conCierreIso('2026-11-15', { id: 'pronto' }),
-      conCierreIso('2026-11-01', { id: 'murio-hace-mucho' }),
-      conCierreIso('2026-11-11', { id: 'murio-ayer' }),
-    ]
-    const r = repartirRadar(docs, HOY)
-    expect(r.vigentes.map(l => l.id)).toEqual(['pronto', 'lejana'])
-    expect(r.vencidas.map(l => l.id)).toEqual(['murio-ayer', 'murio-hace-mucho'])
+    expect(r.noAlcanza).toHaveLength(0)
   })
 
   it('con la lista vacía devuelve los tres grupos vacíos, no undefined', () => {
-    const r = repartirRadar([], HOY)
-    expect(r).toEqual({ sinFecha: [], vigentes: [], vencidas: [] })
+    expect(repartirRadar([], HOY, HU)).toEqual({ sinFecha: [], vigentes: [], noAlcanza: [] })
+  })
+})
+
+describe('la medición de capacidad', () => {
+  const nacida = (cierre: string, nacio: string, id: string) => {
+    const d = new Date(`${nacio}T12:00:00`)
+    return conCierreIso(cierre, {
+      id,
+      creado_en: { toMillis: () => d.getTime(), toDate: () => d } as unknown as Timestamp,
+    })
+  }
+
+  it('distingue la que nació muerta de la que murió esperando', () => {
+    const ruido = nacida('2026-11-08', '2026-11-10', 'nacio-muerta')
+    const perdida = nacida('2026-11-10', '2026-11-05', 'murio-esperando')
+    expect(nacioVencida(ruido)).toBe(true)
+    expect(vencioEsperando(ruido, HOY)).toBe(false)
+    expect(nacioVencida(perdida)).toBe(false)
+    expect(vencioEsperando(perdida, HOY)).toBe(true)
+  })
+
+  it('una que sigue viva no cuenta de ninguna de las dos formas', () => {
+    const viva = nacida('2026-11-30', '2026-11-05', 'viva')
+    expect(vencioEsperando(viva, HOY)).toBe(false)
+    expect(nacioVencida(viva)).toBe(false)
+  })
+
+  it('cuenta las dos cosas por separado en la ventana', () => {
+    const r = capacidadSemanal([
+      nacida('2026-11-10', '2026-11-05', 'a'),
+      nacida('2026-11-11', '2026-11-04', 'b'),
+      nacida('2026-11-09', '2026-11-10', 'ruido'),
+      nacida('2026-11-30', '2026-11-05', 'viva'),
+    ], HOY, 7)
+    expect(r.vencidas_esperando).toBe(2)
+    expect(r.nacieron_vencidas).toBe(1)
+    expect(r.dias).toBe(7)
+  })
+
+  it('lo que murió ANTES de la ventana no cuenta', () => {
+    const r = capacidadSemanal([nacida('2026-10-01', '2026-09-01', 'vieja')], HOY, 7)
+    expect(r.vencidas_esperando).toBe(0)
+  })
+
+  it('HOY la cifra es 0, y eso NO prueba nada todavía', () => {
+    // La colección tiene un día: nada ha tenido tiempo de esperar. El 0 es la
+    // ausencia de historia, no la ausencia del problema. Por eso la cifra se
+    // DERIVA — dentro de una semana dice algo, y se puede mirar hacia atrás.
+    const recién = [
+      nacida('2026-11-10', '2026-11-12', 'x'),
+      nacida('2026-11-11', '2026-11-12', 'y'),
+    ]
+    const r = capacidadSemanal(recién, HOY, 7)
+    expect(r.vencidas_esperando).toBe(0)
+    expect(r.nacieron_vencidas).toBe(2)
   })
 })
 

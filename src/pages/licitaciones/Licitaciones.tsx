@@ -30,11 +30,13 @@ import type { MotivoDescarte, ProcedenciaRadar } from '../../types/sigp/licitaci
 import ModalDescartar from '../../components/sigp/licitaciones/ModalDescartar'
 import {
   SECCIONES_BANDEJA, SECCION_LABEL, SEMAFORO_CHIP, SENAL_CHIP,
-  seccionDe, ordenarPorCierre, repartirRadar,
+  seccionDe, ordenarPorCierre, repartirRadar, capacidadSemanal,
   repartirPorCapacidad, coincideBusqueda,
   contarSecciones, planIntercambioCupo, patchLiberarCupo,
 } from '../../utils/sigp/bandejaLicitaciones'
-import type { LicitacionConId, SeccionBandeja } from '../../utils/sigp/bandejaLicitaciones'
+import type {
+  LicitacionConId, SeccionBandeja, NoAlcanza,
+} from '../../utils/sigp/bandejaLicitaciones'
 import { evaluarVentana, isoLocal, frasesSorteo } from '../../utils/sigp/ventanaLicitacion'
 import { fmtMoney } from '../../utils/sigp/formato'
 
@@ -97,10 +99,13 @@ export default function Licitaciones() {
   // La cola va en TRES grupos (`repartirRadar`, el único criterio de orden de
   // esta sección): sin fecha arriba, vigentes en el medio, VENCIDAS al final.
   const radar = useMemo(
-    () => repartirRadar(seccion === 'radar' ? filtradas : [], hoy),
-    [filtradas, seccion, hoy],
+    () => repartirRadar(seccion === 'radar' ? filtradas : [], hoy, horasUtilesDia),
+    [filtradas, seccion, hoy, horasUtilesDia],
   )
-  const hayEnRadar = radar.sinFecha.length + radar.vigentes.length + radar.vencidas.length
+  const hayEnRadar = radar.sinFecha.length + radar.vigentes.length + radar.noAlcanza.length
+  // La medición de capacidad se cuenta sobre TODA la colección, no sobre la
+  // cola: una que se venció esperando y después se descartó sigue contando.
+  const perdidas = useMemo(() => capacidadSemanal(licitaciones, hoy), [licitaciones, hoy])
 
   const cerradas = useMemo(
     () => (seccion === 'cerradas' ? [...filtradas].sort(ordenarPorCierre) : []),
@@ -376,29 +381,43 @@ export default function Licitaciones() {
             />
           ))}
 
-          {/* ── Lo que ya no se puede presentar ── */}
-          {radar.vencidas.length > 0 && (
+          {/* ── Lo que ya no alcanza ── */}
+          {radar.noAlcanza.length > 0 && (
             <section className="space-y-2 pt-4">
               <h2 className="text-sm font-semibold text-gray-500">
-                Ya no se puede presentar
-                <span className="ml-2 font-normal text-gray-400">{radar.vencidas.length}</span>
+                Ya no alcanza
+                <span className="ml-2 font-normal text-gray-400">{radar.noAlcanza.length}</span>
               </h2>
               <p className="text-xs text-gray-500">
-                El plazo de estos procesos venció. Siguen a la vista porque el radar los
-                trajo y eso cuenta, pero no hay nada que trabajar en ellos. Descartarlos
-                con <strong>«Cierra antes de poder armarlo»</strong> los saca de la cola
-                dejando el motivo escrito.
+                Estos procesos ya no se pueden trabajar — cada fila dice por qué. Siguen a
+                la vista porque el radar los trajo y eso cuenta, pero no hay nada que hacer
+                en ellos. Descartarlos con <strong>«Cierra antes de poder armarlo»</strong>
+                {' '}los saca de la cola dejando el motivo escrito.
               </p>
-              {radar.vencidas.map(l => (
+              {radar.noAlcanza.map(({ l, porque }) => (
                 <Fila
                   key={l.id} l={l} hoy={hoy} horasUtilesDia={horasUtilesDia}
-                  puedeGestionar={puedeGestionar} enRadar atenuada vencida
+                  puedeGestionar={puedeGestionar} enRadar atenuada noAlcanza={porque}
                   onDescartar={puedeGestionar ? () => setDescartando(l) : undefined}
                   ocupado={guardando}
                 />
               ))}
             </section>
           )}
+
+          {/* ── La medición de capacidad ── */}
+          <p className="text-xs text-gray-500 pt-3 border-t border-gray-200">
+            {/* Se DERIVA de `creado_en` y la fecha de cierre, no de un contador: se
+                puede mirar hacia atrás y no hay nada que acordarse de incrementar. */}
+            En los últimos {perdidas.dias} días se vencieron{' '}
+            <strong>{perdidas.vencidas_esperando}</strong>{' '}
+            esperando en la cola
+            {perdidas.nacieron_vencidas > 0 && (
+              <>, y <strong>{perdidas.nacieron_vencidas}</strong> llegaron ya vencidas</>
+            )}.
+            {perdidas.vencidas_esperando === 0 && perdidas.nacieron_vencidas === 0
+              && ' Nada se perdió por falta de tiempo.'}
+          </p>
         </div>
       )}
 
@@ -546,8 +565,8 @@ interface FilaProps {
   puedeGestionar: boolean
   /** En la sección del radar la fila muestra la procedencia y el triage. */
   enRadar?: boolean
-  /** El plazo ya pasó: se dice en la fila, no solo en el encabezado del grupo. */
-  vencida?: boolean
+  /** Ya no alcanza, y por qué. Se dice en la fila, no solo en el encabezado. */
+  noAlcanza?: NoAlcanza
   onSubir?: () => void
   onLiberar?: () => void
   onAdmitir?: () => void
@@ -557,7 +576,7 @@ interface FilaProps {
 }
 
 function Fila({
-  l, hoy, horasUtilesDia, enCapacidad, atenuada, enRadar, vencida,
+  l, hoy, horasUtilesDia, enCapacidad, atenuada, enRadar, noAlcanza,
   onSubir, onLiberar, onAdmitir, onDescartar, ocupado,
 }: FilaProps) {
   const ventana = evaluarVentana(isoDe(l.cronograma.cierre), l.modalidad, hoy, horasUtilesDia)
@@ -639,9 +658,12 @@ function Fila({
       {enRadar && l.radar && <Procedencia radar={l.radar} />}
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-        {vencida ? (
-          <span className="px-2 py-0.5 rounded bg-gray-200 text-gray-700 font-medium">
-            Cerró el {fFecha(l.cronograma.cierre)} — el plazo ya pasó
+        {noAlcanza ? (
+          <span
+            className="px-2 py-0.5 rounded bg-gray-200 text-gray-700 font-medium"
+            title={`Cierre: ${fFecha(l.cronograma.cierre)}`}
+          >
+            {noAlcanza.frase}
           </span>
         ) : (
           <span className="text-gray-500">Cierra {fFecha(l.cronograma.cierre)}</span>

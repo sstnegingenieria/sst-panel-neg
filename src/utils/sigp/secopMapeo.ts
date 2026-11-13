@@ -1150,9 +1150,35 @@ export const FASES_SECOP = [
  * es el último sufijo, y así una fase nueva se limpia aunque no esté en
  * `FASES_SECOP`.
  */
-export function limpiarReferencia(referencia: string, fase: string | null): string {
+export interface ReferenciaPartida {
+  /** El número, sin los sufijos de fase. */
+  numero: string
+  /**
+   * Las fases que la referencia traía ACUMULADAS, en orden cronológico. La
+   * fase actual NO está acá: esta es la historia, aquella es el presente y ya
+   * vive en `radar.fase`.
+   *
+   * ── PARA QUÉ SIRVE, Y POR QUÉ NO BASTA LA MODALIDAD ────────────────────
+   * `Seleccion Abreviada Menor Cuantia Sin Manifestacion Interes` también se
+   * mapea a `menor_cuantia` (4.817 procesos). Así que «es menor cuantía» NO
+   * implica «hubo manifestación de interés», y avisar mirando solo la
+   * modalidad marcaría mal a esos 4.817.
+   *
+   * Lo que sí lo dice es esta lista: si el proceso pasó por una fase de
+   * manifestación, la referencia lo trae escrito. Es el ORIGEN diciéndolo, no
+   * una inferencia nuestra. Y la evidencia hay que GUARDARLA acá justamente
+   * porque el número se limpia: al recortar los sufijos se borraba el único
+   * rastro que había.
+   */
+  fases_previas: string[]
+}
+
+export function separarFasesDeReferencia(
+  referencia: string, fase: string | null,
+): ReferenciaPartida {
   const candidatas = fase ? [fase, ...FASES_SECOP] : [...FASES_SECOP]
   let out = referencia.trim()
+  const quitadas: string[] = []
   for (let vuelta = 0; vuelta < candidatas.length + 2; vuelta++) {
     const sufijo = candidatas.find(f => {
       const s = ` (${f})`
@@ -1161,10 +1187,17 @@ export function limpiarReferencia(referencia: string, fase: string | null): stri
       return out.length > s.length && out.endsWith(s)
     })
     if (sufijo === undefined) break
+    quitadas.push(sufijo)
     out = out.slice(0, -(sufijo.length + 3)).trimEnd()
   }
-  return out === '' ? referencia.trim() : out
+  // Se quitaron de atrás hacia adelante; la historia va al derecho.
+  const fases_previas = quitadas.reverse().filter(f => f !== fase)
+  return { numero: out === '' ? referencia.trim() : out, fases_previas }
 }
+
+/** Solo el número. Azúcar sobre `separarFasesDeReferencia`. */
+export const limpiarReferencia = (referencia: string, fase: string | null): string =>
+  separarFasesDeReferencia(referencia, fase).numero
 
 export function mapearProceso(
   p: ProcesoColapsado, hash: (s: string) => string,
@@ -1199,10 +1232,11 @@ export function mapearProceso(
   const sem = calcularSemaforo(entradaSemaforoSecop({ modalidad: mod.modalidad, entidad }))
 
   const fase = textoONull(f, CAMPO_SECOP.fase)
+  const ref = separarFasesDeReferencia(texto(f, CAMPO_SECOP.numero_proceso), fase)
 
   const doc: LicitacionDetectada = {
     consecutivo: '',
-    numero_proceso: limpiarReferencia(texto(f, CAMPO_SECOP.numero_proceso), fase),
+    numero_proceso: ref.numero,
     id_secop,
     origen: 'secop_ii',
     url_proceso,
@@ -1242,6 +1276,7 @@ export function mapearProceso(
       vocabulario_version,
       corrida: null,
       fase,
+      fases_previas: ref.fases_previas,
       portafolio: textoONull(f, CAMPO_SECOP.portafolio),
       origen_fecha: fecha.origen,
     },
