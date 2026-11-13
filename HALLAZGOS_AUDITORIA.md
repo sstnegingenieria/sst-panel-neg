@@ -675,6 +675,8 @@ La prueba de que se sabía está escrita: el campo `limitaciones` de v1.0 nombra
 
 > **Corregido antes de dejarlo escrito.** La primera versión de esta nota decía *«ocho meses»*. Medido contra el repositorio: `LIMITACIONES_V1_0`, `evaluarRetroactivo`, su test y el panel que muestra el texto entraron **todos el 21-ago-2026, en el PR #99**, el mismo día en que el criterio se sembró en Firestore (`vigente_desde: 2026-08-21T19:55:47.690Z`). Son **2 meses y 3 semanas**, no ocho meses.
 > 
+> **Verificado también por contenido**, no solo por el nombre de la constante: la cadena `DESAJ Cundinamarca-Amazonas` aparece por primera vez en el repositorio el **21-ago-2026**, en ese mismo commit, y el texto es **idéntico** al que está hoy en producción — con las tres cifras, las ofertas competidoras y la hipótesis de la v1.1. No se agregó después.
+> 
 > La lección no cambia — 82 días es tiempo de sobra para que una guarda se vuelva decorativa — pero el número sí, y exagerarlo habría debilitado justo lo que la nota viene a defender: que la precisión es lo que sostiene las conclusiones. Una nota sobre no leer los datos no puede permitirse inventar los suyos.
 
 ### Los seis antecedentes
