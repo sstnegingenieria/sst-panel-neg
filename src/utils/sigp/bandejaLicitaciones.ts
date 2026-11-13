@@ -14,6 +14,7 @@ import type {
   EstadoLicitacion, Licitacion, SenalClasificacion, Semaforo, Timestamp,
 } from '../../types/sigp/licitacion'
 import { esDelRadar, esLicitacionTerminal } from '../../types/sigp/licitacion'
+import { evaluarVentana, isoLocal } from './ventanaLicitacion'
 
 /** Licitación con su id de documento (lo que consume la UI). */
 export type LicitacionConId = Licitacion & { id: string }
@@ -102,24 +103,94 @@ export function sinFechaEnElOrigen(l: Pick<Licitacion, 'radar'>): boolean {
   return l.radar?.origen_fecha === 'ninguna'
 }
 
-/**
- * ¿El plazo de este proceso YA VENCIÓ?
- *
- * Compara contra `hoy` en formato ISO `AAAA-MM-DD` —no contra `Date.now()`—
- * para que la función sea pura y testeable, y para que la comparación sea por
- * DÍA CIVIL y no por instante: un proceso que cierra hoy sigue vivo hasta el
- * final del día, aunque sean las 23:00.
- *
- * Sin fecha de cierre NO está vencido: no se puede declarar muerto lo que no
- * tiene reloj. Esas filas tienen su propio lugar, arriba de todo.
- */
-export function plazoVencido(
-  l: Pick<Licitacion, 'cronograma'>, hoy: string,
-): boolean {
+/** La fase en la que un proceso YA pasó la puerta de la manifestación. */
+export const FASE_PRESENTACION_OFERTA = 'Presentación de oferta'
+/** La fase de la puerta misma. Si está en `fases_previas`, la puerta existió. */
+export const FASE_MANIFESTACION = 'Manifestación de interés (Menor Cuantía)'
+
+export type MotivoNoAlcanza =
+  | 'plazo_vencido'
+  | 'manifestacion_cerrada'
+  | 'ventana_insuficiente'
+
+export interface NoAlcanza {
+  motivo: MotivoNoAlcanza
+  /** Lo que la fila dice, en una línea. */
+  frase: string
+}
+
+/** Fecha de cierre como `AAAA-MM-DD` local, o `null`. */
+export function cierreIsoDe(l: Pick<Licitacion, 'cronograma'>): string | null {
   const d = l.cronograma.cierre?.toDate?.()
-  if (!d) return false
-  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  return iso < hoy
+  return d ? isoLocal(d) : null
+}
+
+/**
+ * ¿La manifestación de interés ya cerró para este proceso?
+ *
+ * ── LO QUE NO SE PUEDE MIRAR ───────────────────────────────────────
+ * El límite de manifestación NO existe en datos abiertos: medido sobre 10.421
+ * procesos de 2026, `fecha_de_recepcion_de` vale lo mismo en la fila de
+ * manifestación y en la de oferta en el 85,8 % — es el límite de la OFERTA,
+ * estampado también sobre la otra. No hay fecha que comparar.
+ *
+ * ── LO QUE SÍ ──────────────────────────────────────────────────
+ * La FASE. Un proceso en «Presentación de oferta» que ANTES pasó por una fase
+ * de manifestación es un proceso cuya puerta ya se cerró. No es una
+ * estimación: es el origen diciendo por dónde pasó.
+ *
+ * Las dos condiciones son necesarias. `menor_cuantia` sola no alcanza —la
+ * modalidad «Sin Manifestacion Interes» también mapea ahí, 4.817 procesos— y
+ * «está en fase de oferta» sola tampoco: una mínima cuantía está siempre en
+ * esa fase y nunca tuvo manifestación.
+ */
+export function manifestacionCerrada(l: Pick<Licitacion, 'radar'>): boolean {
+  const r = l.radar
+  if (!r) return false
+  return r.fase === FASE_PRESENTACION_OFERTA
+    && (r.fases_previas ?? []).some(f => f === FASE_MANIFESTACION)
+}
+
+/**
+ * ¿Por qué este proceso ya no se puede trabajar? `null` si sí se puede.
+ *
+ * Tres razones, y el orden importa porque la fila muestra UNA:
+ *  1. el plazo pasó — el hecho más duro, no hay nada que agregar;
+ *  2. la manifestación cerró — explica más que «no alcanza», porque no es un
+ *     problema de tiempo sino de puerta;
+ *  3. no da el tiempo — lo mide `evaluarVentana`, que existe desde el 1.4 y ya
+ *     cuenta días hábiles contra horas de armado por modalidad. No se inventa
+ *     ningún umbral nuevo acá.
+ */
+export function porQueNoAlcanza(
+  l: Pick<Licitacion, 'cronograma' | 'modalidad' | 'radar'>,
+  hoy: string, horasUtilesDia: number,
+): NoAlcanza | null {
+  const v = evaluarVentana(cierreIsoDe(l), l.modalidad, hoy, horasUtilesDia)
+
+  if (v.vencida) return { motivo: 'plazo_vencido', frase: 'El plazo ya pasó' }
+  if (manifestacionCerrada(l)) {
+    return {
+      motivo: 'manifestacion_cerrada',
+      frase: 'La manifestación de interés ya cerró — no se puede presentar aunque el plazo siga abierto',
+    }
+  }
+  if (v.insuficiente) {
+    const d = v.dias_habiles ?? 0
+    return {
+      motivo: 'ventana_insuficiente',
+      frase: d === 0
+        ? 'Cierra hoy: no da tiempo de armarla'
+        : `Quedan ${d} día${d === 1 ? '' : 's'} hábil${d === 1 ? '' : 'es'} y hacen falta ${v.necesarios}`,
+    }
+  }
+  return null
+}
+
+/** Una fila de la cola que ya no se puede trabajar, con su razón. */
+export interface FilaSinSalida {
+  l: LicitacionConId
+  porque: NoAlcanza
 }
 
 export interface RepartoRadar {
@@ -127,49 +198,120 @@ export interface RepartoRadar {
   sinFecha: LicitacionConId[]
   /** Lo que todavía se puede trabajar, por fecha de cierre. */
   vigentes: LicitacionConId[]
-  /** El plazo ya pasó. NO se esconden: se muestran al final y se dicen muertas. */
-  vencidas: LicitacionConId[]
+  /** Ya no alcanza. NO se esconden: se muestran al final, con el porqué. */
+  noAlcanza: FilaSinSalida[]
 }
 
 /**
  * Reparte la cola del radar en tres, y es el ÚNICO criterio de orden de esa
  * sección.
  *
- * ── POR QUÉ LOS VENCIDOS VAN APARTE ────────────────────────────────────────
- * Medido el 12-nov-2026 sobre lo que el radar escribió en producción: **12 de
- * 24 documentos tenían el cierre YA PASADO**. La bandeja los mostraba mezclados
- * con los vivos y con la misma pinta. Un proceso muerto en la cola de trabajo
- * no es un detalle de orden: es trabajo que alguien puede empezar a hacer para
- * nada.
+ * ── POR QUÉ EL GRUPO DE ABAJO NO ES «VENCIDOS» ───────────────────────
+ * Porque «vencido» se queda corto. Medido sobre la cola real con
+ * `horas_utiles_dia = 4`: 2 tenían el plazo pasado, pero otros 5 cerraban el
+ * mismo día con CERO días hábiles por delante. Esos cinco no están vencidos y
+ * son igual de intrabajables. La consecuencia para Karen es la misma, así que
+ * el tratamiento es el mismo y lo que cambia es la frase.
  *
- * No se ocultan —esconderlos daría la impresión de que el radar no los trajo, y
- * el conteo de lo que llega es justamente lo que se quiere poder mirar—. Se
- * muestran al final, atenuados, y la sección lo dice con todas las letras.
+ * El umbral no se inventa: lo pone `evaluarVentana`, que existe desde el 1.4.
  *
- * ── POR QUÉ LAS SIN FECHA SIGUEN ARRIBA ────────────────────────────────────
+ * ── POR QUÉ NO SE OCULTAN ──────────────────────────────────────
+ * Esconderlos daría la impresión de que el radar no los trajo, y el conteo de
+ * lo que llega es justamente lo que se quiere poder mirar. Karen necesita
+ * poder CERRAR lo que ya no sirve, no que desaparezca sin que lo vea.
+ *
+ * ── POR QUÉ LAS SIN FECHA SIGUEN ARRIBA ───────────────────────────
  * `ordenarPorCierre` manda al FINAL lo que no tiene reloj, y para las activas
  * eso es correcto. En el radar hunde justo las filas que nadie puede priorizar
  * solo, y que entraron por un acto deliberado.
- *
- * Los tres grupos ordenan por dentro con `ordenarPorCierre`, que ya resuelve el
- * empate por número de proceso y mantiene el orden estable entre renders.
  */
-export function repartirRadar(ls: LicitacionConId[], hoy: string): RepartoRadar {
+export function repartirRadar(
+  ls: LicitacionConId[], hoy: string, horasUtilesDia: number,
+): RepartoRadar {
   const sinFecha: LicitacionConId[] = []
   const vigentes: LicitacionConId[] = []
-  const vencidas: LicitacionConId[] = []
+  const noAlcanza: FilaSinSalida[] = []
   for (const l of ls) {
-    if (sinFechaEnElOrigen(l)) sinFecha.push(l)
-    else if (plazoVencido(l, hoy)) vencidas.push(l)
+    if (sinFechaEnElOrigen(l)) { sinFecha.push(l); continue }
+    const porque = porQueNoAlcanza(l, hoy, horasUtilesDia)
+    if (porque) noAlcanza.push({ l, porque })
     else vigentes.push(l)
   }
   return {
     sinFecha: sinFecha.sort(ordenarPorCierre),
     vigentes: vigentes.sort(ordenarPorCierre),
-    // Las vencidas, la más reciente primero: la que acaba de morir es la que
-    // todavía puede importarle a alguien.
-    vencidas: vencidas.sort((a, b) => ordenarPorCierre(b, a)),
+    // La más reciente primero: la que acaba de quedar fuera es la que todavía
+    // puede importarle a alguien.
+    noAlcanza: noAlcanza.sort((a, b) => ordenarPorCierre(b.l, a.l)),
   }
+}
+
+// ── La medición de capacidad: cuántas se vencen ESPERANDO ───────────────
+
+/**
+ * ¿Este proceso llegó YA VENCIDO?
+ *
+ * Son dos casos distintos y conviene no mezclarlos:
+ *  · **nació vencido** — el plazo ya había pasado cuando el radar lo trajo.
+ *    Karen no pudo hacer nada: es ruido en su bandeja.
+ *  · **se venció esperando** — entró vivo y murió en la cola. Eso SÍ es
+ *    información suya.
+ */
+export function nacioVencida(l: Pick<Licitacion, 'cronograma' | 'creado_en'>): boolean {
+  const cierre = cierreIsoDe(l)
+  const nacio = l.creado_en?.toDate?.()
+  if (!cierre || !nacio) return false
+  return cierre < isoLocal(nacio)
+}
+
+/**
+ * ¿Se venció ESPERANDO en la cola? Entró viva y el plazo pasó mientras estaba.
+ *
+ * ── SE DERIVA, NO SE ACUMULA ────────────────────────────────────
+ * `creado_en` y `cronograma.cierre` ya están en el documento, así que esta
+ * cifra se calcula en cualquier momento y HACIA ATRÁS. No hace falta un
+ * contador que alguien tenga que acordarse de incrementar — y un contador
+ * incrementado es, además, un dato que no se puede auditar contra nada.
+ *
+ * Sobrevive al triage: una que se venció esperando y después se descartó sigue
+ * teniendo sus dos fechas, y sigue contando. Que es lo correcto: se venció.
+ */
+export function vencioEsperando(
+  l: Pick<Licitacion, 'cronograma' | 'creado_en'>, hoy: string,
+): boolean {
+  const cierre = cierreIsoDe(l)
+  if (!cierre || cierre >= hoy) return false
+  return !nacioVencida(l)
+}
+
+export interface CapacidadSemanal {
+  /** Se vencieron esperando dentro de la ventana mirada. */
+  vencidas_esperando: number
+  /** Llegaron ya vencidas en la misma ventana. Ruido, no capacidad. */
+  nacieron_vencidas: number
+  dias: number
+}
+
+/**
+ * Cuántas se vencieron esperando en los últimos `dias`, y cuántas llegaron ya
+ * muertas. Separadas a propósito: la primera mide si la bandeja se está
+ * trabajando o acumulando; la segunda mide el ruido del origen.
+ *
+ * Se cuenta sobre la fecha de CIERRE, que es cuando el proceso murió.
+ */
+export function capacidadSemanal(
+  ls: LicitacionConId[], hoy: string, dias = 7,
+): CapacidadSemanal {
+  const desde = isoLocal(new Date(Date.parse(`${hoy}T12:00:00`) - dias * 86_400_000))
+  let vencidas_esperando = 0
+  let nacieron_vencidas = 0
+  for (const l of ls) {
+    const cierre = cierreIsoDe(l)
+    if (!cierre || cierre >= hoy || cierre < desde) continue
+    if (nacioVencida(l)) nacieron_vencidas++
+    else vencidas_esperando++
+  }
+  return { vencidas_esperando, nacieron_vencidas, dias }
 }
 
 export interface RepartoCapacidad {

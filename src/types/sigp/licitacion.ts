@@ -225,6 +225,16 @@ export interface ProcedenciaRadar {
    */
   fase: string | null
   /**
+   * Las fases por las que el proceso YA pasó, en orden, tal como el origen las
+   * dejó escritas en la referencia.
+   *
+   * Es la evidencia de que hubo manifestación de interés — y hay que guardarla
+   * porque el número de proceso se limpia. `menor_cuantia` no alcanza para
+   * saberlo: la modalidad «Sin Manifestacion Interes» (4.817 procesos) también
+   * mapea ahí.
+   */
+  fases_previas: string[]
+  /**
    * `id_del_portafolio` — LO ÚNICO QUE UNE LAS FASES DE UN MISMO PROCESO.
    *
    * Las filas de un mismo proceso NO comparten `id_del_proceso` (cruzan 0 de
