@@ -49,7 +49,7 @@ son código que ya está en `main` y solo espera el deploy.
 | 10 | **La guarda de ventana aguas arriba** | en `main`, **`a0b24a1`** (PR #251) — *necesita deploy* |
 | 11 | **Deploy del codebase `radar`** con #251 + #252 | **acto de Giovanny** — §3-bis, paso 3 |
 | 12 | **Acto de la marca** — `{ marca, solape_dias: 14 }` | **acto de Giovanny** — §3-bis, paso 4. Se hace a mano en la consola — §3-bis, paso 4 |
-| 13 | **Acto de restitución** — `solape_dias: 45` | después de la primera cosecha |
+| 13 | **Restitución del solape** — la escalera `4 → 14 → 24 → 34 → 45` | el primer escalón va junto al acto de texto — §3-ter |
 | 14 | **Barrido del backlog** de las filas sin fecha | diseño pendiente; ver §6 |
 
 ---
@@ -378,6 +378,107 @@ terminado el paso 4**. No hay que disparar nada: ya están programadas.
 
 Los quince minutos de margen son para que la función termine de escribir: la
 cosecha completa son 1.911 filas y no es instantánea.
+
+---
+
+## 3-ter. El acto combinado — UNA visita a la consola, dos documentos
+
+Son dos cambios distintos que tocan dos documentos distintos de la misma
+colección. **Se hacen juntos** porque pedirle a Giovanny dos visitas a la
+consola por dos campos y un número no tiene sentido.
+
+**Dónde:** [consola de Firebase](https://console.firebase.google.com) →
+proyecto **`neg-sst-app`** → **Firestore Database** → pestaña **Data**.
+
+---
+
+### Antes de empezar: la foto del antes
+
+```bash
+node scripts/sigp/verifica-marca-radar.mjs --llave <ruta de la llave de LECTURA>
+```
+
+**Qué debe responder:** `marca` con una fecha, `solape_dias` **4**, y
+`✓ LA MARCA ESTÁ BIEN ESCRITA`. Copiá esa salida al reporte: es el antes.
+
+---
+
+### Documento 1 de 2 · `configuracion/semaforo_versiones`
+
+El texto que Karen lee cuando un proceso sale en rojo. Hoy está escrito para
+quien calibró la regla, no para quien decide si la trabaja.
+
+**No se borra ni se cambia nada de lo que hay.** Se AGREGAN dos campos.
+
+El documento tiene un mapa `versiones`, y dentro de él un mapa `v1.0`. **Los
+dos campos nuevos van dentro de `v1.0`**, al lado de `definicion` y
+`limitaciones`.
+
+| campo | tipo | valor |
+|---|---|---|
+| `resumen` | **string** | *(el texto aprobado — §0 del inventario)* |
+| `antes_de_descartar` | **string** | *(el texto aprobado — §0 del inventario)* |
+
+> ⚠ **Los dos son `string`.** Son párrafos largos y la consola los acepta tal
+> cual; no hay que partirlos ni usar `array`.
+
+> ⚠ **No tocar** `definicion`, `limitaciones`, `motivo`, `calibracion`,
+> `autor_uid`, `vigente_desde` ni `vigente_hasta`. Son el registro auditable de
+> con qué se calibró la regla, y siguen haciendo falta.
+
+El texto exacto de los dos campos vive en
+`docs/inventario-lenguaje-licitaciones.md`, §0. **Copiarlo de ahí**, no
+reescribirlo a mano.
+
+---
+
+### Documento 2 de 2 · `configuracion/radar_secop`
+
+El primer escalón del solape: de **4 a 14**.
+
+| campo | tipo | valor ANTES | valor DESPUÉS |
+|---|---|---|---|
+| `solape_dias` | **number** | 4 | **14** |
+
+**Se edita ESE campo y nada más.** `marca` no se toca — la mueve la función en
+cada corrida. `ultima_corrida`, `corridas` y `acumulado` tampoco: son suyos.
+
+> **Por qué 14 y no 45 de una vez.** Medido con la lógica real: saltar directo
+> a 45 crearía **396 documentos** contra un tope de 200 por corrida — la
+> corrida se detiene y no escribe nada. La escalera aprobada es
+> **4 → 14 → 24 → 34 → 45**, cuatro escalones, ninguno por encima de 115
+> documentos nuevos. Cada escalón necesita una corrida en medio para que lo
+> cubierto quede guardado.
+
+---
+
+### Después: verificar
+
+```bash
+node scripts/sigp/verifica-marca-radar.mjs --llave <ruta de la llave de LECTURA>
+```
+
+**Qué debe responder:** `solape_dias **14**`, tipo `número entero`, y
+`✓ LA MARCA ESTÁ BIEN ESCRITA`.
+
+Si dice `cadena` en vez de `número entero`, el campo se guardó con el tipo
+equivocado: hay que volver y corregirlo.
+
+**Lo de `semaforo_versiones` no lo revisa ese script** — se verifica abriendo el
+panel: entrá a una licitación marcada en rojo y mirá el bloque de explicación.
+Tiene que leerse como el texto nuevo, no como el viejo.
+
+> Si el bloque sigue mostrando el texto viejo, es que el panel todavía no tiene
+> el cambio de código que lee los campos nuevos. El dato queda bien escrito
+> igual: lo va a leer en cuanto salga el deploy.
+
+---
+
+### A qué hora se nota
+
+El cambio del solape lo usa **la corrida siguiente** — 06:30 o 14:00, hora de
+Bogotá, de lunes a viernes. El del texto se ve **al instante** en el panel, sin
+esperar nada.
 
 ---
 
