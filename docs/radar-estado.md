@@ -381,14 +381,17 @@ cosecha completa son 1.911 filas y no es instantánea.
 
 ---
 
-## 3-ter. El acto combinado — UNA visita a la consola, dos documentos
+## 3-ter. El acto combinado — una sola sentada, dos cosas
 
 Son dos cambios distintos que tocan dos documentos distintos de la misma
-colección. **Se hacen juntos** porque pedirle a Giovanny dos visitas a la
-consola por dos campos y un número no tiene sentido.
+colección. **Se hacen juntos** porque son una sola sentada.
 
-**Dónde:** [consola de Firebase](https://console.firebase.google.com) →
-proyecto **`neg-sst-app`** → **Firestore Database** → pestaña **Data**.
+**Pero no se hacen igual**: el del criterio va con un script — su texto tiene
+que salir de la fuente única del repositorio — y el del solape va a mano en la
+consola, porque es un número.
+
+**La consola:** [console.firebase.google.com](https://console.firebase.google.com)
+→ proyecto **`neg-sst-app`** → **Firestore Database** → pestaña **Data**.
 
 ---
 
@@ -403,36 +406,48 @@ node scripts/sigp/verifica-marca-radar.mjs --llave <ruta de la llave de LECTURA>
 
 ---
 
-### Documento 1 de 2 · `configuracion/semaforo_versiones`
+### Parte 1 de 2 · el criterio — **con un script, no en la consola**
 
-El texto que Karen lee cuando un proceso sale en rojo. Hoy está escrito para
-quien calibró la regla, no para quien decide si la trabaja.
+El texto que Karen lee cuando un proceso sale en rojo o en amarillo. Hoy está
+escrito para quien calibró la regla, no para quien decide si la trabaja.
 
-**No se borra ni se cambia nada de lo que hay.** Se AGREGAN dos campos.
+> ⚠ **CORREGIDO el 13-nov.** Esta parte decía «agregar dos campos a mano en la
+> consola». **No es así.** El registro del criterio tiene una fuente única en
+> `src/types/sigp/semaforoVersiones.ts`, un JSON derivado y un test que los
+> mantiene sincronizados carácter por carácter. Editar a mano habría
+> funcionado *y* habría dejado el repositorio mintiendo.
 
-El documento tiene un mapa `versiones`, y dentro de él un mapa `v1.0`. **Los
-dos campos nuevos van dentro de `v1.0`**, al lado de `definicion` y
-`limitaciones`.
+```bash
+GOOGLE_APPLICATION_CREDENTIALS=<llave de LECTURA> node functions/scripts/adoptar-semaforo-v1.1.js
+```
 
-| campo | tipo | valor |
-|---|---|---|
-| `resumen` | **string** | *(el texto aprobado — §0 del inventario)* |
-| `antes_de_descartar` | **string** | *(el texto aprobado — §0 del inventario)* |
+**Qué debe responder:** el plan completo — `ANTES version_actual v1.0`,
+`DESPUÉS version_actual v1.1`, y los seis textos de v1.1 — y terminar con
+`DRY-RUN: no se escribió nada.` **Leer los seis textos**: es la última
+oportunidad de ver qué va a decir el panel.
 
-> ⚠ **Los dos son `string`.** Son párrafos largos y la consola los acepta tal
-> cual; no hay que partirlos ni usar `array`.
+Si el plan es el esperado:
 
-> ⚠ **No tocar** `definicion`, `limitaciones`, `motivo`, `calibracion`,
-> `autor_uid`, `vigente_desde` ni `vigente_hasta`. Son el registro auditable de
-> con qué se calibró la regla, y siguen haciendo falta.
+```bash
+GOOGLE_APPLICATION_CREDENTIALS=<llave de ESCRITURA> AUTOR_UID=<tu uid> node functions/scripts/adoptar-semaforo-v1.1.js --apply
+```
 
-El texto exacto de los dos campos vive en
-`docs/inventario-lenguaje-licitaciones.md`, §0. **Copiarlo de ahí**, no
-reescribirlo a mano.
+**Qué debe responder:** `✓ ADOPCIÓN COMPLETA Y VERIFICADA.` El script relee lo
+que escribió antes de decirlo.
+
+**Qué NO hace, y conviene saberlo:** no toca `licitaciones`. Los 396 documentos
+guardados conservan su `semaforo` y su `semaforo_version` — cambiar el criterio
+y recalcular los documentos son **dos actos distintos** (invariante 5). El
+segundo tiene su propio script y su propia decisión.
+
+> **Esta parte SÍ necesita la llave de ESCRITURA de datos**, entregada para el
+> acto y retirada al terminar. No es como la marca: ahí eran dos campos en un
+> documento y la consola alcanzaba. Acá el texto tiene que salir de la fuente
+> única.
 
 ---
 
-### Documento 2 de 2 · `configuracion/radar_secop`
+### Parte 2 de 2 · el solape — esta sí en la consola
 
 El primer escalón del solape: de **4 a 14**.
 
@@ -468,9 +483,11 @@ equivocado: hay que volver y corregirlo.
 panel: entrá a una licitación marcada en rojo y mirá el bloque de explicación.
 Tiene que leerse como el texto nuevo, no como el viejo.
 
-> Si el bloque sigue mostrando el texto viejo, es que el panel todavía no tiene
-> el cambio de código que lee los campos nuevos. El dato queda bien escrito
-> igual: lo va a leer en cuanto salga el deploy.
+> Si la menor cuantía sigue saliendo en **rojo**, hay dos razones posibles y
+> conviene distinguirlas: o el panel todavía no tiene el deploy de v1.1 —el
+> dato quedó bien escrito igual—, o ese documento conserva su `semaforo`
+> guardado de v1.0, que es lo esperado hasta que se corra el recálculo. Las dos
+> se resuelven solas; ninguna significa que el acto haya fallado.
 
 ---
 
@@ -568,6 +585,38 @@ pasadas acotadas en vez de un volcado.
 
 ---
 
+## 6-bis. El contrafactual de calibración se REVISA, no se escribe una vez
+
+`evaluarRetroactivo` contesta una pregunta incomodísima y la contesta sola: **si
+este criterio hubiera estado vigente, ¿cuántas adjudicaciones reales habría
+matado?** Si la respuesta no es cero, el criterio no se aprueba. Está construido
+desde el 1.3 y tiene su test.
+
+**Y durante ocho meses nadie volvió a correrlo.**
+
+v1.0 marcaba en rojo toda menor cuantía. Las tres adjudicaciones más grandes de
+la historia de NEG fueron menores cuantías. El contrafactual decía que no desde
+el primer día — y lo decía en un test que pasaba en verde, porque el test
+comprobaba que la guarda *funcionaba*, no que su veredicto *fuera favorable*.
+
+> **La regla que sale de esto:** ante cualquier cambio de criterio del
+> semáforo, el contrafactual se vuelve a correr contra los datos del momento
+> y su veredicto se escribe en `calibracion` de la versión nueva. No alcanza
+> con que el test pase: hay que **leer el número**.
+>
+> Lo mismo para el otro lado del trueque, que v1.1 dejó escrito: cuántas
+> propuestas sin retorno deja pasar. v1.0 bloqueaba 12; v1.1 no bloquea
+> ninguna. Ese número también hay que mirarlo, no solo calcularlo.
+
+**El compromiso medible de v1.1, con su fecha:** si en seis semanas Karen
+trabajó menores cuantías y las perdió todas, el trueque salió mal y se vuelve a
+mirar. Los contadores existen — `modalidad` + `estado` dan presentadas y
+ganadas, `ofertas_recibidas` da la competencia de cada una, y
+`evaluarRetroactivo` vuelve a correr sobre los datos nuevos. Eso es justamente
+lo que v1.0 no tenía: no era peor, era **irrevisable**.
+
+---
+
 ## 7. Lo que vive en otros documentos
 
 - **El acto de IAM completo** (los seis roles, con el porqué medido de cada uno)
@@ -579,6 +628,12 @@ pasadas acotadas en vez de un volcado.
 - **El límite de la guarda del deploy** (qué cubre y qué no, y por qué el CLI
   declara seis permisos y usa cuatro familias más) → `scripts/deploy-funciones.ps1`.
 - **La prueba de los chequeos de IAM** sin desplegar → `scripts/pruebas/prueba-chequeos-iam.ps1`.
+- **El criterio del semáforo**, su historial de versiones y el script de
+  adopción → `src/types/sigp/semaforoVersiones.ts` y
+  `functions/scripts/adoptar-semaforo-v1.1.js`. El texto que Karen lee sale
+  de ahí, no de la consola.
+- **El inventario del texto de usuario**, con el antes y el después de cada
+  pantalla → `docs/inventario-lenguaje-licitaciones.md`.
 - **La verificación de la marca**, de SOLO LECTURA →
   `scripts/sigp/verifica-marca-radar.mjs`. La marca se escribe a mano en la
   consola para no crear una llave de escritura; este script revisa después que
