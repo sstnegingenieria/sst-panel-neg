@@ -5,7 +5,7 @@ import {
   seccionDe, compitePorCupo, ordenarPorCierre, repartirPorCapacidad,
   planIntercambioCupo, patchLiberarCupo, coincideBusqueda, contarSecciones,
   ESTADOS_ACTIVOS_BANDEJA, SEMAFORO_CHIP, SENAL_CHIP,
-  ordenarRadar, sinFechaEnElOrigen,
+  repartirRadar, plazoVencido, sinFechaEnElOrigen,
 } from '../bandejaLicitaciones'
 import type { LicitacionConId } from '../bandejaLicitaciones'
 import { ESTADOS_LICITACION, SENAL_LABEL } from '../../../types/sigp/licitacion'
@@ -352,6 +352,22 @@ const delRadar = (
     : conCierre(dias, { ...extra, estado: 'detectada', radar })
 }
 
+const conCierreIso = (iso: string, extra?: Partial<Licitacion> & { id?: string }) => {
+  const d = new Date(`${iso}T12:00:00`)
+  return lic({
+    ...extra,
+    estado: 'detectada',
+    radar: extra?.radar ?? {
+      senal: 'texto_coincide', terminos: ['redes'],
+      vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'publicacion',
+    },
+    cronograma: {
+      publicacion: null, manifestacion: null, sorteo: null, adjudicacion: null,
+      cierre: { toMillis: () => d.getTime(), toDate: () => d } as unknown as Timestamp,
+    },
+  })
+}
+
 describe('sinFechaEnElOrigen', () => {
   it('es true solo cuando el origen no dio ninguna fecha', () => {
     expect(sinFechaEnElOrigen(delRadar('ninguna', null))).toBe(true)
@@ -370,38 +386,85 @@ describe('sinFechaEnElOrigen', () => {
   })
 })
 
-describe('ordenarRadar', () => {
-  it('LAS SIN FECHA VAN PRIMERO, aunque las otras cierren mañana', () => {
-    const urgente = delRadar('publicacion', 1, { id: 'urgente' })
+const HOY = '2026-11-12'
+
+describe('plazoVencido', () => {
+  it('ayer está vencido, mañana no', () => {
+    expect(plazoVencido(conCierreIso('2026-11-11'), HOY)).toBe(true)
+    expect(plazoVencido(conCierreIso('2026-11-13'), HOY)).toBe(false)
+  })
+
+  it('HOY NO está vencido: el plazo corre hasta el final del día', () => {
+    // La comparación es por día civil, no por instante. Un proceso que cierra
+    // hoy a las 23:00 sigue vivo a las 09:00 de hoy.
+    expect(plazoVencido(conCierreIso('2026-11-12'), HOY)).toBe(false)
+  })
+
+  it('sin fecha de cierre NO está vencido', () => {
+    // No se puede declarar muerto lo que no tiene reloj.
+    expect(plazoVencido(lic(), HOY)).toBe(false)
+  })
+})
+
+describe('repartirRadar', () => {
+  it('reparte en los tres grupos y en ese orden', () => {
     const sinFecha = delRadar('ninguna', null, { id: 'sin-fecha' })
-    const lejana = delRadar('publicacion', 60, { id: 'lejana' })
-    const orden = [urgente, lejana, sinFecha].sort(ordenarRadar).map(l => l.id)
-    expect(orden).toEqual(['sin-fecha', 'urgente', 'lejana'])
+    const vigente = conCierreIso('2026-11-20', { id: 'vigente' })
+    const vencida = conCierreIso('2026-11-05', { id: 'vencida' })
+    const r = repartirRadar([vencida, vigente, sinFecha], HOY)
+    expect(r.sinFecha.map(l => l.id)).toEqual(['sin-fecha'])
+    expect(r.vigentes.map(l => l.id)).toEqual(['vigente'])
+    expect(r.vencidas.map(l => l.id)).toEqual(['vencida'])
   })
 
-  it('es exactamente al revés que el orden de las activas — ese es el punto', () => {
-    const conReloj = delRadar('publicacion', 5, { id: 'con-reloj' })
+  it('EL CASO QUE LO MOTIVA: 12 de 24 vencidas no se mezclan con las vivas', () => {
+    // Medido en producción el 12-nov-2026. Un proceso muerto en la cola de
+    // trabajo es trabajo que alguien puede empezar a hacer para nada.
+    const docs = [
+      ...Array.from({ length: 12 }, (_, i) => conCierreIso('2026-11-10', { id: `muerta-${i}` })),
+      ...Array.from({ length: 12 }, (_, i) => conCierreIso('2026-11-20', { id: `viva-${i}` })),
+    ]
+    const r = repartirRadar(docs, HOY)
+    expect(r.vencidas).toHaveLength(12)
+    expect(r.vigentes).toHaveLength(12)
+    expect(r.vigentes.every(l => l.id.startsWith('viva'))).toBe(true)
+  })
+
+  it('las SIN FECHA van arriba aunque las otras cierren mañana', () => {
+    const urgente = conCierreIso('2026-11-13', { id: 'urgente' })
     const sinFecha = delRadar('ninguna', null, { id: 'sin-fecha' })
-    // `ordenarPorCierre` manda al FINAL lo que no tiene reloj: correcto para
-    // las activas, y es justo lo que hundiría la cola del barrido autorizado.
-    expect([sinFecha, conReloj].sort(ordenarPorCierre).map(l => l.id))
-      .toEqual(['con-reloj', 'sin-fecha'])
-    expect([conReloj, sinFecha].sort(ordenarRadar).map(l => l.id))
-      .toEqual(['sin-fecha', 'con-reloj'])
+    const r = repartirRadar([urgente, sinFecha], HOY)
+    expect([...r.sinFecha, ...r.vigentes].map(l => l.id)).toEqual(['sin-fecha', 'urgente'])
   })
 
-  it('dentro de cada grupo delega en el orden por cierre', () => {
-    const a = delRadar('publicacion', 2, { id: 'a' })
-    const b = delRadar('publicacion', 9, { id: 'b' })
-    const c = delRadar('publicacion', 5, { id: 'c' })
-    expect([b, c, a].sort(ordenarRadar).map(l => l.id)).toEqual(['a', 'c', 'b'])
+  it('una SIN FECHA jamás cae en vencidas, tenga el cierre que tenga', () => {
+    const rara = conCierreIso('2026-01-01', {
+      id: 'rara',
+      radar: {
+        senal: 'texto_coincide' as const, terminos: ['redes'],
+        vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'ninguna' as const,
+      },
+    })
+    const r = repartirRadar([rara], HOY)
+    expect(r.sinFecha.map(l => l.id)).toEqual(['rara'])
+    expect(r.vencidas).toHaveLength(0)
   })
 
-  it('entre dos sin fecha el orden es estable (número de proceso)', () => {
-    const x = delRadar('ninguna', null, { id: 'x' })
-    const y = delRadar('ninguna', null, { id: 'y' })
-    const esperado = [x, y].sort(ordenarRadar).map(l => l.id)
-    expect([y, x].sort(ordenarRadar).map(l => l.id)).toEqual(esperado)
+  it('las vigentes van por cierre ascendente; las vencidas, la más reciente primero', () => {
+    const docs = [
+      conCierreIso('2026-11-30', { id: 'lejana' }),
+      conCierreIso('2026-11-15', { id: 'pronto' }),
+      conCierreIso('2026-11-01', { id: 'murio-hace-mucho' }),
+      conCierreIso('2026-11-11', { id: 'murio-ayer' }),
+    ]
+    const r = repartirRadar(docs, HOY)
+    expect(r.vigentes.map(l => l.id)).toEqual(['pronto', 'lejana'])
+    expect(r.vencidas.map(l => l.id)).toEqual(['murio-ayer', 'murio-hace-mucho'])
+  })
+
+  it('con la lista vacía devuelve los tres grupos vacíos, no undefined', () => {
+    const r = repartirRadar([], HOY)
+    expect(r).toEqual({ sinFecha: [], vigentes: [], vencidas: [] })
   })
 })
 
