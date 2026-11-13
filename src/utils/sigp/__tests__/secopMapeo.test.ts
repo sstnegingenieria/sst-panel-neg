@@ -248,11 +248,11 @@ describe('mínima cuantía limpia', () => {
 })
 
 describe('menor cuantía', () => {
-  it('mapea la modalidad y cae en ROJO por el portero', () => {
+  it('v1.1: mapea la modalidad y nace AMARILLA, con su lista de verificación', () => {
     const { doc } = mapearUna(una('menor_cuantia'))
     expect(doc.modalidad).toBe('menor_cuantia')
-    expect(doc.semaforo).toBe('rojo')
-    expect(doc.semaforo_motivos).toEqual(['MODALIDAD_SIN_HISTORIAL'])
+    expect(doc.semaforo).toBe('amarillo')
+    expect(doc.semaforo_motivos).toEqual(['MENOR_CUANTIA'])
     expect(doc.presupuesto_oficial).toBe(640_000_000)
   })
 
@@ -357,7 +357,7 @@ describe('modalidades', () => {
     const r = mapearModalidadSecop(f)
     expect(r.modalidad).toBe('menor_cuantia')
     expect(r.imprevista).toBe(false)
-    expect(mapearUna(f).doc.semaforo).toBe('rojo')
+    expect(mapearUna(f).doc.semaforo).toBe('amarillo')
   })
 
   it('las 17 modalidades medidas en el dataset están todas previstas', () => {
@@ -535,11 +535,14 @@ describe('multi-adjudicación: el producto cartesiano de proveedores × valores'
 // ── Semáforo ─────────────────────────────────────────────────────────────────
 
 describe('semáforo en la ingesta — consecuencia honesta', () => {
-  it('de SECOP salen VERDES las mínimas cuantías y ROJAS todas las demás', () => {
+  it('v1.1: de SECOP salen VERDES las mínimas y AMARILLAS las menores', () => {
     const verdes = ['minima_limpia', 'categoria_unspecified']
-    const rojas = ['menor_cuantia', 'departamento_no_definido', 'modalidad_sin_tildes', 'precio_base_cero']
+    const amarillas = [
+      'menor_cuantia', 'departamento_no_definido', 'modalidad_sin_tildes',
+      'precio_base_cero',
+    ]
     for (const k of verdes) expect(mapearUna(una(k)).doc.semaforo, k).toBe('verde')
-    for (const k of rojas) expect(mapearUna(una(k)).doc.semaforo, k).toBe('rojo')
+    for (const k of amarillas) expect(mapearUna(una(k)).doc.semaforo, k).toBe('amarillo')
   })
 
   it('las tres señales que el dataset no tiene entran en false, no inventadas', () => {
@@ -550,10 +553,24 @@ describe('semáforo en la ingesta — consecuencia honesta', () => {
     expect(e.departamento).toBe('Cundinamarca')
   })
 
-  it('NINGÚN registro de ingesta nace en amarillo: el amarillo lo pone la lectura', () => {
+  it('v1.1: EL AMARILLO AHORA SÍ NACE DE LA INGESTA, y solo por la modalidad', () => {
+    // Antes ninguno nacía amarillo: el amarillo lo ponía la lectura del pliego
+    // —sorteo, MiPyme, «requiere lectura»— y esas tres el dataset no las trae.
+    // Con v1.1 la menor cuantía nace amarilla por SER menor cuantía, y esa es
+    // la única razón que la ingesta puede producir sola.
     const todas = Object.values(casos).flatMap(c => c.filas)
     const rep = ingerirSecop(todas, hash)
-    expect(rep.registros.map(r => r.doc.semaforo)).not.toContain('amarillo')
+    const amarillos = rep.registros.filter(r => r.doc.semaforo === 'amarillo')
+    expect(amarillos.length).toBeGreaterThan(0)
+    for (const r of amarillos) {
+      expect(r.doc.modalidad).toBe('menor_cuantia')
+      expect(r.doc.semaforo_motivos).toEqual(['MENOR_CUANTIA'])
+    }
+    // Y NINGUNO nace con las tres señales que el dataset no tiene.
+    for (const r of rep.registros) {
+      expect(r.doc.semaforo_motivos).not.toContain('SORTEO')
+      expect(r.doc.semaforo_motivos).not.toContain('REQUIERE_LECTURA')
+    }
   })
 })
 

@@ -118,18 +118,18 @@ export default function ModalAdmitir({
                 En menor cuantía, quien no manifiesta interés antes del límite
                 <strong> no puede presentar oferta</strong>, aunque la fecha de cierre
                 siga vigente. Esa fecha no viene en los datos del SECOP — está en el
-                pliego, y si la anotás ahora el panel puede avisar a tiempo.
+                pliego, y anotarla acá es lo que le permite al panel avisar a tiempo.
               </p>
             </div>
           )}
 
           <div className="space-y-3">
             {campo('manifestacion', 'Límite de manifestación de interés',
-              'Del pliego. No viene en los datos abiertos — si no la anotás, nadie la va a tener.')}
+              'Del pliego. No viene en los datos abiertos: si no se anota acá, nadie la va a tener.')}
             {campo('sorteo', 'Sorteo',
               'Si el proceso tiene sorteo de consolidación. Tampoco viene en los datos.')}
             {campo('cierre', 'Presentación de la oferta',
-              'Viene del SECOP y ya está cargada. Corregila si el pliego dice otra cosa.')}
+              'Viene del SECOP y ya está cargada. Se puede corregir si el pliego dice otra cosa.')}
           </div>
 
           {!ordenOk && (
@@ -140,7 +140,7 @@ export default function ModalAdmitir({
           )}
 
           <p className="text-xs text-gray-500">
-            Las tres son opcionales. Podés admitirla ahora y anotarlas cuando leas el
+            Las tres son opcionales: se puede admitir ahora y anotarlas al leer el
             pliego — la ficha va a decir cuál falta.
           </p>
         </div>
