@@ -6,6 +6,8 @@ import type { Timestamp } from 'firebase/firestore'
 import {
   construirSemillaSemaforoVersiones, versionVigente, registroCoherente,
   DEFINICION_V1_0, MOTIVO_V1_0, CALIBRACION_V1_0, LIMITACIONES_V1_0, VERSION_INICIAL,
+  DEFINICION_V1_1, MOTIVO_V1_1, CALIBRACION_V1_1, LIMITACIONES_V1_1,
+  RESUMEN_V1_1, ANTES_DE_DESCARTAR_V1_1, VERSION_VIGENTE,
   type RegistroSemaforoVersiones, type VersionCriterioSemaforo,
 } from '../semaforoVersiones'
 import { SEMAFORO_VERSION } from '../../../utils/sigp/semaforo'
@@ -15,20 +17,59 @@ const ts = (ms: number) => ({ toMillis: () => ms, seconds: ms / 1000 } as unknow
 const AHORA = ts(1_000_000)
 const DESPUES = ts(2_000_000)
 
-describe('semilla de v1.0', () => {
-  it('construye el documento con la forma esperada', () => {
+describe('semilla del registro', () => {
+  it('trae las DOS versiones, con v1.1 vigente', () => {
     const doc = construirSemillaSemaforoVersiones('uid-giovanny', AHORA)
-    expect(doc.version_actual).toBe('v1.0')
-    expect(Object.keys(doc.versiones)).toEqual(['v1.0'])
+    expect(doc.version_actual).toBe('v1.1')
+    expect(Object.keys(doc.versiones).sort()).toEqual(['v1.0', 'v1.1'])
+  })
 
-    const v = doc.versiones['v1.0']
+  it('v1.0 se CONSERVA intacta y con su vigencia cerrada', () => {
+    // Los documentos que la llevan sellada siguen pudiendo explicarse. La
+    // historia no se reescribe: se cierra.
+    const v = construirSemillaSemaforoVersiones('uid-giovanny', AHORA).versiones['v1.0']
     expect(v.vigente_desde).toBe(AHORA)
-    expect(v.vigente_hasta).toBeNull()
-    expect(v.autor_uid).toBe('uid-giovanny')
+    expect(v.vigente_hasta).toBe(AHORA)
     expect(v.definicion).toBe(DEFINICION_V1_0)
     expect(v.motivo).toBe(MOTIVO_V1_0)
     expect(v.calibracion).toBe(CALIBRACION_V1_0)
     expect(v.limitaciones).toBe(LIMITACIONES_V1_0)
+    // Y NO gana los campos nuevos: no se le inventa un texto que nadie escribió.
+    expect(v.resumen).toBeUndefined()
+    expect(v.antes_de_descartar).toBeUndefined()
+  })
+
+  it('v1.1 trae los dos campos para quien decide, además de los de auditoría', () => {
+    const v = construirSemillaSemaforoVersiones('uid-giovanny', AHORA).versiones['v1.1']
+    expect(v.vigente_hasta).toBeNull()
+    expect(v.autor_uid).toBe('uid-giovanny')
+    expect(v.definicion).toBe(DEFINICION_V1_1)
+    expect(v.motivo).toBe(MOTIVO_V1_1)
+    expect(v.calibracion).toBe(CALIBRACION_V1_1)
+    expect(v.limitaciones).toBe(LIMITACIONES_V1_1)
+    expect(v.resumen).toBe(RESUMEN_V1_1)
+    expect(v.antes_de_descartar).toBe(ANTES_DE_DESCARTAR_V1_1)
+  })
+
+  it('los dos textos de Karen no usan vocabulario de sistema ni versiones', () => {
+    // Las reglas del inventario de lenguaje, aplicadas donde más se leen.
+    for (const t of [RESUMEN_V1_1, ANTES_DE_DESCARTAR_V1_1]) {
+      expect(t).not.toMatch(/v1\.\d|criterio|discriminante|hip\u00f3tesis|numerador|denominador|l\u00e9xico/i)
+    }
+  })
+
+  it('LA CORRECCI\u00d3N DE LA PREMISA FALSA queda escrita en limitaciones', () => {
+    // La idea de que la menor cuant\u00eda tiene menos competencia viaj\u00f3 a una
+    // decisi\u00f3n antes de medirse. Alguien la va a repetir: que encuentre el
+    // n\u00famero real al lado.
+    expect(LIMITACIONES_V1_1).toContain('5,04')
+    expect(LIMITACIONES_V1_1).toContain('5,68')
+    expect(LIMITACIONES_V1_1).toMatch(/NO SE SOSTIENE/)
+  })
+
+  it('y queda escrito el \u00edtem de la lista que se descart\u00f3 por no existir', () => {
+    expect(LIMITACIONES_V1_1).toContain('29.354')
+    expect(LIMITACIONES_V1_1).toMatch(/nunca se puede llenar/)
   })
 
   it('la semilla nace coherente', () => {
@@ -99,7 +140,9 @@ describe('sincronía TS <-> script de siembra', () => {
     // Si alguien sube SEMAFORO_VERSION sin registrar la versión nueva en el
     // registro, este test cae: es el recordatorio de que un criterio nuevo se
     // documenta, no solo se codifica (invariante 5 por el otro extremo).
-    expect(VERSION_INICIAL).toBe(SEMAFORO_VERSION)
+    expect(VERSION_VIGENTE).toBe(SEMAFORO_VERSION)
+    // Y la inicial se conserva como lo que es: la primera, no la vigente.
+    expect(VERSION_INICIAL).toBe('v1.0')
   })
 })
 

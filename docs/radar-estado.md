@@ -110,7 +110,7 @@ que quedó bien— se hace después, en el paso 6, con la llave de solo lectura.
 ### Paso 1 · Actualizar el clon de despliegue
 
 Los despliegues salen de un **clon propio**, no del directorio donde se
-trabaja. Abrí PowerShell en ese clon y:
+trabaja. Abrir PowerShell en ese clon y:
 
 ```bash
 git checkout main; git pull --ff-only
@@ -162,12 +162,12 @@ Si el simulacro salió limpio, el de verdad:
 .\scripts\deploy-funciones.ps1 -Codebase radar
 ```
 
-**Qué te va a preguntar, en este orden:**
+**Qué pregunta, en este orden:**
 
-1. `PR(s) que se despliegan` → escribí **`251, 252`**
+1. `PR(s) que se despliegan` → escribir **`251, 252`**
    (son los dos cambios que trae este deploy: la guarda de ventana aguas
    arriba, y la separación de las dos poblaciones)
-2. `Escribe DESPLEGAR para continuar` → escribí **`DESPLEGAR`** en mayúsculas.
+2. `Escribe DESPLEGAR para continuar` → escribir **`DESPLEGAR`** en mayúsculas.
    Cualquier otra cosa cancela, y cancelar no rompe nada.
 
 **Qué debe responder al final:** la post-verificación dice que las dos
@@ -194,7 +194,7 @@ script.**
 
 #### 4.a — Dejar escrito el ANTES
 
-Antes de tocar nada, corré esto. No escribe: solo lee y deja constancia de cómo
+Antes de tocar nada, correr esto. No escribe: solo lee y deja constancia de cómo
 estaba el documento.
 
 ```bash
@@ -209,7 +209,7 @@ node scripts/sigp/verifica-marca-radar.mjs --llave <ruta de la llave de LECTURA>
 ```
 
 **Eso es lo correcto en este punto.** Que diga que no existe es la foto del
-antes. Copiá esa salida al reporte.
+antes. Copiar esa salida al reporte.
 
 > Si en cambio ya muestra una `marca`, **parar**: alguien ya hizo el acto, y
 > hacerlo de nuevo movería la ventana sin querer.
@@ -230,7 +230,7 @@ proyecto **`neg-sst-app`** → menú izquierdo **Build / Compilación** →
 | documento | **`radar_secop`** |
 
 La colección `configuracion` **ya existe** (ahí viven `indicadores`, `horario`,
-`licitaciones`). Hacé clic en ella; el documento `radar_secop` **no existe
+`licitaciones`). Hacer clic en ella; el documento `radar_secop` **no existe
 todavía**, así que hay que crearlo con **`+ Agregar documento`** y escribir el
 ID a mano: `radar_secop`, exactamente así, en minúsculas y con guion bajo.
 
@@ -260,7 +260,7 @@ día, poné ese día. El `14` de `solape_dias` **no se cambia**: está medido �
 Con 4 días serían 5 documentos, que no prueban nada; con 45, serían 384, que se
 pasa del tope y la corrida se detiene.
 
-Guardá con **Guardar / Save**.
+Guardar con **Guardar / Save**.
 
 ---
 
@@ -321,7 +321,7 @@ node scripts/sigp/verifica-marca-radar.mjs --llave <ruta de la llave de LECTURA>
     y la ventana que abren cabe en la guarda.
 ```
 
-Mirá **las dos líneas de `tipo`**: tienen que decir `cadena` y `número entero`.
+Mirar **las dos líneas de `tipo`**: tienen que decir `cadena` y `número entero`.
 Es lo único que no se ve a simple vista en la consola.
 
 **Si responde con una `✗`**, el mensaje dice exactamente qué está mal y qué
@@ -346,7 +346,7 @@ Después de la hora que dice la sección de abajo: panel →
 por qué entró. El número exacto puede moverse un poco: la medición es del
 11-nov y el SECOP sigue publicando.
 
-Si querés el dato duro en vez de la pantalla, el mismo verificador del paso 6
+Si se quiere el dato duro en vez de la pantalla, el mismo verificador del paso 6
 vuelve a servir: después de la primera corrida, la línea `Otros campos en el
 documento` tiene que incluir **`ultima_corrida`, `corridas` y `acumulado`** —
 los escribe la función, así que si están, la función corrió.
@@ -369,10 +369,10 @@ El radar corre **dos veces por día hábil, hora de Bogotá**:
 La primera corrida útil es **la primera de esas dos que caiga después de
 terminado el paso 4**. No hay que disparar nada: ya están programadas.
 
-- Si el acto termina **antes de las 14:00 de un día hábil** → mirá a partir de
+- Si el acto termina **antes de las 14:00 de un día hábil** → mirar a partir de
   las **14:15 de ese mismo día**.
 - Si termina **después de las 14:00** → la siguiente es a las **06:30 del
-  próximo día hábil**; mirá a partir de las **06:45**.
+  próximo día hábil**; mirar a partir de las **06:45**.
 - Si termina **un viernes después de las 14:00** → la siguiente es el **lunes a
   las 06:30**.
 

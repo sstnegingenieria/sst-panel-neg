@@ -26,7 +26,7 @@
 import type { ModalidadLicitacion, MotivoSemaforo, Semaforo } from '../../types/sigp/licitacion'
 
 /** Versión del CRITERIO. Subir al cambiar reglas, no al refactorizar. */
-export const SEMAFORO_VERSION = 'v1.0'
+export const SEMAFORO_VERSION = 'v1.1'
 
 /**
  * Departamentos donde NEG sí compite bajo limitación MiPyme territorial.
@@ -89,7 +89,9 @@ export function esTerritorioNeg(departamento: string): boolean {
  */
 export function calcularSemaforo(input: EntradaSemaforo): ResultadoSemaforo {
   // ── ROJO: corta seco ──
-  if (input.modalidad !== 'minima_cuantia') {
+  // Las modalidades donde NEG no tiene historia siguen cortando. La MENOR
+  // CUANTÍA salió de acá en la v1.1 — ver el bloque de abajo.
+  if (input.modalidad !== 'minima_cuantia' && input.modalidad !== 'menor_cuantia') {
     return {
       semaforo: 'rojo',
       motivos: ['MODALIDAD_SIN_HISTORIAL'],
@@ -97,8 +99,37 @@ export function calcularSemaforo(input: EntradaSemaforo): ResultadoSemaforo {
     }
   }
 
-  // ── AMARILLO: banderas acumulables sobre una mínima cuantía ──
+  // ── AMARILLO: banderas acumulables ──
   const motivos: MotivoSemaforo[] = []
+
+  // ── v1.1: LA MENOR CUANTÍA DEJA DE CORTAR ───────────────────────────
+  //
+  // Tres razones medidas, ninguna de ellas la competencia:
+  //
+  //  1. EL CUPO YA PROTEGE. Medido sobre los 396 documentos reales: con la
+  //     regla vieja entran 5 al cupo de la semana; con esta, también 5. Lo que
+  //     cambia es cuántas COMPITEN (de 9 a 36), no cuántas entran.
+  //
+  //  2. LA REGLA HACÍA DOS VECES EL MISMO TRABAJO. Frenaba 30 de las 39 de la
+  //     bandeja cuando el cupo ya limita lo que se puede trabajar — y la
+  //     segunda vez a ciegas, porque una frenada ni siquiera se ordena por
+  //     fecha de cierre.
+  //
+  //  3. LOS TRES CONTRATOS MÁS GRANDES de la historia de NEG fueron menores
+  //     cuantías: DESAJ ($315M), CNSC ($67M) e INM ($102M), los tres de 2023.
+  //
+  // LO QUE NO SOSTIENE EL CAMBIO, y conviene que quede escrito porque la
+  // premisa ya viajó a una decisión: la idea de que la menor cuantía tiene
+  // MENOS competencia. Medido sobre SECOP, procesos adjudicados desde 2025 en
+  // Bogotá y Cundinamarca: 5,04 competidores en mínima contra 5,68 en menor.
+  // Prácticamente igual, y en el orden contrario al que se suponía.
+  //
+  // El amarillo no es duda: es una lista corta de verificación. Dos ítems, no
+  // tres — «cuántos manifestaron interés» se midió y NO EXISTE antes de
+  // decidir (0 de 349 en el registro, y `proveedores_que_manifestaron` está en
+  // cero en las 29.354 filas del filtro). Una lista con un ítem que nunca se
+  // puede llenar enseña a ignorar la lista entera.
+  if (input.modalidad === 'menor_cuantia') motivos.push('MENOR_CUANTIA')
 
   if (input.tiene_sorteo) motivos.push('SORTEO')
 
