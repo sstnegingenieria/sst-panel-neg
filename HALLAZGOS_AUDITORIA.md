@@ -663,7 +663,7 @@ El sexto agrega una variante, porque aquí no hubo ni fallo ni ejecución:
 
 ## Nota de técnica · «se ejecuta» no significa «alguien lee el resultado» — séptima ocurrencia
 
-**Fecha:** 13-nov-2026 · **Hallazgo:** una guarda que corría, pasaba en verde y **decía que no** desde el primer día. Durante ocho meses nadie leyó su veredicto.
+**Fecha:** 13-nov-2026 · **Hallazgo:** una guarda que corría, pasaba en verde y **decía que no** desde el primer día. Durante **82 días** nadie leyó su veredicto.
 
 `evaluarRetroactivo` contesta la pregunta más incomoda que se le puede hacer a un criterio: **si hubiera estado vigente, ¿cuántas adjudicaciones reales habría matado?** Si la respuesta no es cero, `criterio_aprobado` sale `false`. Existe desde el sub-bloque 1.3, tiene su test, y el test pasaba.
 
@@ -671,7 +671,13 @@ El criterio v1.0 marcaba en rojo **toda** menor cuantía. Las tres adjudicacione
 
 Y el test que lo cubría se llamaba *«CLAVE: activa el criterio de cancelación si el filtro mata una adjudicación»*. Comprobaba que **la guarda funcionara**, con un caso sintético, y lo comprobaba bien. Lo que nadie hizo fue correrla contra los datos reales y **mirar el número**. En verde quedó la mecánica; el veredicto no lo leía nadie.
 
-La prueba de que se sabía está escrita: el campo `limitaciones` de v1.0 nombra las tres adjudicaciones de 2023 y dice, con todas las letras, que *«v1.0 las habría marcado en rojo»*. El dato estuvo a la vista ocho meses, en el texto que la pantalla del rojo informado mostraba a quien descartaba.
+La prueba de que se sabía está escrita: el campo `limitaciones` de v1.0 nombra las tres adjudicaciones de 2023 y dice, con todas las letras, que *«v1.0 las habría marcado en rojo»*. El dato estuvo a la vista **82 días** — del 21-ago al 12-nov — en el texto que la pantalla del rojo informado mostraba a quien descartaba.
+
+> **Corregido antes de dejarlo escrito.** La primera versión de esta nota decía *«ocho meses»*. Medido contra el repositorio: `LIMITACIONES_V1_0`, `evaluarRetroactivo`, su test y el panel que muestra el texto entraron **todos el 21-ago-2026, en el PR #99**, el mismo día en que el criterio se sembró en Firestore (`vigente_desde: 2026-08-21T19:55:47.690Z`). Son **2 meses y 3 semanas**, no ocho meses.
+> 
+> **Verificado también por contenido**, no solo por el nombre de la constante: la cadena `DESAJ Cundinamarca-Amazonas` aparece por primera vez en el repositorio el **21-ago-2026**, en ese mismo commit, y el texto es **idéntico** al que está hoy en producción — con las tres cifras, las ofertas competidoras y la hipótesis de la v1.1. No se agregó después.
+> 
+> La lección no cambia — 82 días es tiempo de sobra para que una guarda se vuelva decorativa — pero el número sí, y exagerarlo habría debilitado justo lo que la nota viene a defender: que la precisión es lo que sostiene las conclusiones. Una nota sobre no leer los datos no puede permitirse inventar los suyos.
 
 ### Los seis antecedentes
 
@@ -701,7 +707,7 @@ Lo mismo para el otro lado del trueque, que v1.1 dejó escrito en su `calibracio
 
 ### El corolario que esto le deja a v1.1
 
-v1.1 no es mejor que v1.0 por ser más permisiva. Es mejor porque **tiene fecha de revisión y con qué revisarla**: seis semanas, y si Karen trabajó menores cuantías y las perdió todas, el trueque salió mal y se vuelve a mirar. v1.0 se calibró una vez, en agosto, y no volvió a mirarse. No era peor: era **irrevisable**.
+v1.1 no es mejor que v1.0 por ser más permisiva. Es mejor porque **tiene fecha de revisión y con qué revisarla**: seis semanas, y si Karen trabajó menores cuantías y las perdió todas, el trueque salió mal y se vuelve a mirar. v1.0 se calibró una vez, el 21-ago, y no volvió a mirarse en 82 días. No era peor: era **irrevisable**.
 
 Leer el código no basta para saber si una guarda protege: hay que preguntarse **qué entrada la alcanza**. Las cinco primeras se encontraron corriendo algo; ésta se encontró al responder *"¿cuál de los dos topes aplica?"* — una pregunta que nadie había hecho en voz alta porque los dos topes estaban ahí, escritos, y parecía obvio que alguno aplicaba.
 
