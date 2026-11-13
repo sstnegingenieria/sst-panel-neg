@@ -27,14 +27,24 @@
  *   · El texto NO vive aquí: viene de `semaforo-v1.1.json`, que se genera
  *     desde `src/types/sigp/semaforoVersiones.ts` y está fijado por tests.
  *
- * ── QUÉ LLAVE PARA QUÉ (modelo de tres llaves) ─────────────────────────────
- *   · LEER — el dry-run:   `_credenciales\neg-sst-app-lectura.json`
- *   · ESCRIBIR — `--apply`: la llave de ESCRITURA DE DATOS, entregada para el
- *     acto y RETIRADA al terminar. No queda en el equipo.
+ * ── CON QUÉ CREDENCIAL ─────────────────────────────────────────
+ * Con las CREDENCIALES POR DEFECTO de la cuenta propietaria — entrar, correr,
+ * revocar. No se crea ninguna llave descargable, y no hace falta concederle a
+ * nadie escritura permanente sobre toda la base de datos.
  *
- * ── USO ─────────────────────────────────────────────────────────────────────
- *   node functions/scripts/adoptar-semaforo-v1.1.js                 (dry-run)
+ * ── USO ─────────────────────────────────────────────────────────
+ *   gcloud auth application-default login      ← con la cuenta PROPIETARIA
+ *   node functions/scripts/adoptar-semaforo-v1.1.js            (dry-run)
  *   AUTOR_UID=<uid> node functions/scripts/adoptar-semaforo-v1.1.js --apply
+ *   gcloud auth application-default revoke     ← al terminar, siempre
+ *
+ * NO definir `GOOGLE_APPLICATION_CREDENTIALS` para el acto: si está definida,
+ * GANA sobre las credenciales por defecto y el acto correría con otra
+ * identidad sin avisar.
+ *
+ * El dry-run también corre con la llave de solo LECTURA, apuntada por esa
+ * misma variable, porque solo hace `get`. El `--apply` no: esa llave no
+ * escribe, y el fallo sería un 403 a mitad del acto.
  */
 const admin = require('firebase-admin');
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
@@ -42,6 +52,28 @@ const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const NUEVA = require('./semaforo-v1.1.json');
 const REF = 'configuracion/semaforo_versiones';
 const APLICAR = process.argv.includes('--apply');
+
+/**
+ * EL PROYECTO VA EXPLÍCITO, y no es una precaución de más.
+ *
+ * `initializeApp()` sin argumentos resuelve el proyecto en este orden
+ * (`firebase-admin/lib/utils/index.js`, `getExplicitProjectId`):
+ *   1. `options.projectId`
+ *   2. el `project_id` de la credencial — **solo si es una llave de cuenta de
+ *      servicio** (`ServiceAccountCredential`)
+ *   3. `GOOGLE_CLOUD_PROJECT` o `GCLOUD_PROJECT`
+ *
+ * Con las credenciales por defecto de un USUARIO (`gcloud auth
+ * application-default login`) la credencial es un `RefreshTokenCredential`, no
+ * una de cuenta de servicio: el paso 2 NO dispara. Sin esta línea el script
+ * moriría con «Unable to detect a Project Id» justo en el acto, y ese mensaje
+ * no dice que lo que falta es una variable de entorno.
+ *
+ * Declararlo acá cierra además el accidente inverso: un `GOOGLE_CLOUD_PROJECT`
+ * olvidado apuntando a otro proyecto. Este script escribe en `neg-sst-app` y
+ * en ninguna otra parte.
+ */
+const PROYECTO = 'neg-sst-app';
 
 /** Campos que la entrada nueva DEBE traer. Uno de menos es una pantalla vacía. */
 const CAMPOS_ESPERADOS = [
@@ -99,7 +131,7 @@ async function main() {
   const AUTOR_UID = process.env.AUTOR_UID;
   if (APLICAR && !AUTOR_UID) abortar('falta AUTOR_UID: toda adopción tiene autor.');
 
-  if (!admin.apps.length) admin.initializeApp();
+  if (!admin.apps.length) admin.initializeApp({ projectId: PROYECTO });
   const db = getFirestore();
 
   const snap = await db.doc(REF).get();
