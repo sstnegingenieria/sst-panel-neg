@@ -443,10 +443,10 @@ node functions/scripts/adoptar-semaforo-v1.1.js
 `DRY-RUN: no se escribió nada.` **Leer los seis textos**: es la última
 oportunidad de ver qué va a decir el panel.
 
-Si el plan es el esperado:
+Si el plan es el esperado — el `AUTOR_UID` va completo, de un tirón:
 
 ```bash
-AUTOR_UID=<el uid de Giovanny> node functions/scripts/adoptar-semaforo-v1.1.js --apply
+AUTOR_UID=SCVbIDFJHuWv9tjas6xj3k0iQcs1 node functions/scripts/adoptar-semaforo-v1.1.js --apply
 ```
 
 **Qué debe responder:** `✓ ADOPCIÓN COMPLETA Y VERIFICADA.` El script relee lo
@@ -457,11 +457,25 @@ guardados conservan su `semaforo` y su `semaforo_version` — cambiar el criteri
 y recalcular los documentos son **dos actos distintos** (invariante 5). El
 segundo tiene su propio script y su propia decisión.
 
-**Y al terminar, siempre:**
+> **De dónde sale ese `AUTOR_UID`.** Es el uid de Giovanny Montes en `users` —
+> el mismo que figura como autor del criterio v1.0 en el registro, verificado
+> contra producción. Se copia tal cual, sin recortar: un uid a medias no falla,
+> **escribe un autor que no existe**.
+
+**Y al terminar, SIEMPRE:**
 
 ```bash
 gcloud auth application-default revoke
 ```
+
+**Qué debe responder:** `Credentials revoked.`
+
+> **¿Y si se olvida?** No pasa nada grave en el momento — nadie más usa ese
+> equipo— pero el archivo de credenciales de la cuenta propietaria queda en el
+> disco y renueva su acceso solo, en silencio, hasta que alguien lo revoque.
+> Es exactamente la forma de la llave olvidada de julio, con otro nombre. Si se
+> descubre después, el mismo comando sirve en cualquier momento — y conviene
+> correrlo igual aunque hayan pasado días.
 
 > **Por qué así y no con una llave.** Es el mismo modelo del acto —entrar,
 > correr, revocar— **sin crear una llave descargable** que alguien tenga que
