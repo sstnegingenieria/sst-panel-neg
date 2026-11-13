@@ -2,7 +2,7 @@
 // cuando OCURRE (gestores, con autor siempre); el CORTE lo emite GERENCIA
 // (consecutivo CRT + PDF + hash, congelado — un corte entregado es un hecho).
 // El total del corte es lo que sustenta la factura parcial (B1).
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { doc, collection, getDoc, getDocs, setDoc, updateDoc, arrayUnion, query, orderBy, Timestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../../firebase/config'
@@ -21,6 +21,7 @@ import {
   avanceDe, pctItem, estadoItemAvance, ESTADO_ITEM_LABEL, patchRegistrarAvance,
   construirCorte, entradaHistorialCorte, plantillaObservacionesCorte,
   esCorteFacturable, aritmeticaFacturasCorte, type CorteObra, type TipoCorte,
+  baseCortadaDe, errorBajoBase, valorEjecutadoItem,
 } from '../../../types/sigp/corteObra'
 import { autorDe } from '../../../utils/sigp/autoria'
 import type { ConfigAIU, EsquemaTributario } from '../../../types/sigp/cotizacion'
@@ -102,16 +103,33 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
   const pctGlobal = cdContratado > 0 ? (cdEjecutado / cdContratado) * 100 : 0
   const facturasVivas = facturasVivasDe(proyecto)
 
+  // 13-nov (caso 01.01.01 del 058): la BASE del último corte FACTURABLE, por
+  // clave — la columna «Cortado» contra la que se mide lo nuevo, y el piso
+  // que el registro no puede contradecir. La pantalla pedía un número sin
+  // decir contra qué; ahora las tres columnas van juntas.
+  const base = useMemo(() => baseCortadaDe(cortes), [cortes])
+  // Delta EN VIVO tecla a tecla (onVivo de InputExpresion): borrador por
+  // clave del acumulado total y de «lo nuevo» (null = texto aún no evalúa).
+  const [vivoAcum, setVivoAcum] = useState<Record<string, number | null>>({})
+  const [vivoNuevo, setVivoNuevo] = useState<Record<string, number | null>>({})
+  const [corteDetalle, setCorteDetalle] = useState<Record<string, boolean>>({})
+
   const guardarAvance = async (clave: string, cantidad: number) => {
-    const r = patchRegistrarAvance(proyecto, clave, cantidad, user?.uid ?? '', Timestamp.now(), user?.nombre)
+    // BLOQUEO DURO bajo lo congelado (decisión 13-nov): al emitir ya se
+    // rechaza el delta negativo — el mismo criterio, en el momento del tecleo.
+    const piso = base.porClave.get(clave) ?? 0
+    if (cantidad < piso) { toast(errorBajoBase(cantidad, piso, base.consecutivo), 'error'); return }
+    const r = patchRegistrarAvance(proyecto, clave, cantidad, user?.uid ?? '', Timestamp.now(), user?.nombre, undefined, piso)
     if (!r) { toast('Ítem fuera del alcance vigente', 'error'); return }
     setAplicando(true)
     try {
       await updateDoc(doc(db, 'proyectos', proyecto.id), {
         avance_items: r.avance_items, fecha_actualizacion: Timestamp.now(),
       })
-      if (r.sobreEjecutado) toast(`⚠ ${fmtNum(cantidad)} supera la cantidad contratada (${fmtNum(r.item.cantidad)}) — registrado igual, a la vista`, 'error')
+      if (r.sobreEjecutado) toast(`⚠ ${fmtNum(cantidad)} supera la cantidad contratada (${fmtNum(r.item.cantidad)}) — registrado igual, a la vista (+${fmtNum(cantidad - r.item.cantidad)} ${r.item.unidad} sobre lo contratado)`, 'error')
       else toast('Avance registrado')
+      setVivoAcum(v => ({ ...v, [clave]: null }))
+      setVivoNuevo(v => ({ ...v, [clave]: null }))
       await reload()
     } catch { toast('Error al registrar el avance (verifica tu rol)', 'error') } finally { setAplicando(false) }
   }
@@ -217,65 +235,19 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
       <p className="text-[11px] text-gray-400 -mt-1">
         Por ítem del alcance — se captura cuando ocurre; capturan los gestores, el corte lo emite gerencia.
       </p>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-left text-[10px] uppercase text-gray-400 border-b border-gray-100">
-              <th className="py-1.5 pr-2">Cód.</th>
-              <th className="py-1.5 pr-2">Ítem</th>
-              <th className="py-1.5 pr-2 text-right">Contratado</th>
-              <th className="py-1.5 pr-2 text-right">Ejecutado (acum)</th>
-              <th className="py-1.5 pr-2 text-right">%</th>
-              <th className="py-1.5 pr-2">Estado</th>
-              <th className="py-1.5">Último registro</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map(it => {
-              const av = avanceDe(proyecto, it.clave)
-              const pct = pctItem(it, av)
-              const estado = estadoItemAvance(pct)
-              const ultimo = av?.registros[av.registros.length - 1]
-              return (
-                <tr key={it.clave} className="border-b border-gray-50">
-                  <td className="py-1.5 pr-2 font-mono text-[11px] text-gray-500 whitespace-nowrap align-top">{it.codigo ?? '—'}</td>
-                  <td className="py-1.5 pr-2 max-w-[16rem]">
-                    <span className="text-gray-800">{it.descripcion}</span>
-                    <span className="block text-[10px] text-gray-400">{it.grupo}</span>
-                  </td>
-                  <td className="py-1.5 pr-2 text-right font-mono text-gray-600">{fmtNum(it.cantidad)} {it.unidad}</td>
-                  <td className="py-1.5 pr-2 text-right">
-                    {puedeCapturar ? (
-                      <InputExpresion valor={av?.cantidad} onValor={n => guardarAvance(it.clave, n)}
-                        placeholder="0"
-                        className="w-24 px-2 py-1 border border-gray-300 rounded text-right font-mono text-xs focus:outline-none focus:ring-2 focus:ring-brand-300" />
-                    ) : <span className="font-mono">{fmtNum(av?.cantidad ?? 0)}</span>}
-                  </td>
-                  <td className="py-1.5 pr-2 text-right font-mono">{fmtNum(pct)}%</td>
-                  <td className="py-1.5 pr-2">
-                    <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold ${COLOR_ESTADO[estado]}`}>
-                      {ESTADO_ITEM_LABEL[estado]}
-                    </span>
-                    {pct > 100 && <span className="ml-1 text-[10px] text-red-600 font-semibold">sobre-ejecutado</span>}
-                  </td>
-                  <td className="py-1.5 text-[10px] text-gray-400">
-                    {ultimo ? `${autorDe(ultimo, nombres)} · ${ultimo.fecha.toDate().toLocaleDateString('es-CO')}` : '—'}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
 
+      {/* 13-nov: los cortes emitidos ARRIBA de la captura — se miran antes de
+          teclear, no después. Cada uno expandible con su congelado ítem por
+          ítem (antes ese detalle solo vivía en el PDF). */}
       {cortes.length > 0 && (
-        <div className="space-y-1.5 pt-1 border-t border-gray-100">
-          <p className="text-[11px] font-semibold text-gray-500">Cortes emitidos (congelados con hash — el avance posterior solo afecta los siguientes)</p>
+        <div className="space-y-1.5 pb-2 border-b border-gray-100">
+          <p className="text-[11px] font-semibold text-gray-500">
+            Cortes emitidos — la base contra la que se mide lo nuevo (congelados con hash; el avance posterior solo afecta los siguientes)
+          </p>
           {cortes.map(c => {
             const informativo = !esCorteFacturable(c)
-            // Aritmética POR CORTE (08-nov): facturado vs. falta contra el
-            // facturable — solo tiene sentido en cortes facturables.
             const arit = informativo ? null : aritmeticaFacturasCorte(c.id, c.resumen.total, facturasVivas)
+            const abiertoDet = !!corteDetalle[c.id]
             return (
               <div key={c.id} className="text-xs text-gray-700">
                 <p>
@@ -295,6 +267,10 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
                     </>
                   )}
                   {c.pdf_url && <a href={c.pdf_url} target="_blank" rel="noreferrer" className="ml-1.5 text-brand-700 underline underline-offset-2">PDF</a>}
+                  <button onClick={() => setCorteDetalle(d => ({ ...d, [c.id]: !abiertoDet }))}
+                    className="ml-1.5 text-gray-500 underline underline-offset-2 decoration-dotted">
+                    {abiertoDet ? 'ocultar ítems ▴' : 'ítems ▾'}
+                  </button>
                 </p>
                 {arit && arit.facturado > 0 && (
                   <p className={`ml-4 text-[11px] ${arit.sobrepasa ? 'text-red-700 font-semibold' : 'text-gray-500'}`}>
@@ -309,11 +285,146 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
                 {arit && arit.facturado === 0 && (
                   <p className="ml-4 text-[11px] text-amber-700">sin factura registrada contra este corte</p>
                 )}
+                {abiertoDet && (
+                  <div className="ml-4 mt-1 overflow-x-auto">
+                    <table className="text-[11px]">
+                      <thead>
+                        <tr className="text-left text-[10px] uppercase text-gray-400">
+                          <th className="pr-2">Cód.</th><th className="pr-2">Ítem</th>
+                          <th className="pr-2 text-right">Contratado</th>
+                          <th className="pr-2 text-right">Acum. congelado</th>
+                          <th className="pr-2 text-right">%</th>
+                          <th className="text-right">Valor acum.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {c.items.map(it => (
+                          <tr key={it.clave} className="border-b border-gray-50">
+                            <td className="pr-2 font-mono text-gray-500">{it.codigo ?? '—'}</td>
+                            <td className="pr-2 max-w-[18rem] truncate text-gray-700" title={it.descripcion}>{it.descripcion}</td>
+                            <td className="pr-2 text-right font-mono">{fmtNum(it.cantidad_contratada)} {it.unidad}</td>
+                            <td className="pr-2 text-right font-mono font-semibold">{fmtNum(it.cantidad_acum)}</td>
+                            <td className="pr-2 text-right font-mono">{fmtNum(it.pct)}%</td>
+                            <td className="text-right font-mono">{fmtMoney(it.valor_acum)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
       )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-[10px] uppercase text-gray-400 border-b border-gray-100">
+              <th className="py-1.5 pr-2">Cód.</th>
+              <th className="py-1.5 pr-2">Ítem</th>
+              <th className="py-1.5 pr-2 text-right">Contratado</th>
+              <th className="py-1.5 pr-2 text-right" title="Acumulado congelado en el último corte FACTURABLE — la base contra la que se mide este corte">
+                Cortado{base.consecutivo ? <span className="block normal-case text-gray-300">{base.consecutivo}</span> : null}
+              </th>
+              <th className="py-1.5 pr-2 text-right" title="La cantidad TOTAL ejecutada medida en campo — no lo nuevo">Acumulado total</th>
+              {puedeCapturar && <th className="py-1.5 pr-2 text-right" title="Lo NUEVO de este corte — el panel lo suma al acumulado">＋ Nuevo</th>}
+              <th className="py-1.5 pr-2 text-right" title="Lo que se facturaría en este corte: acumulado − cortado">Delta corte</th>
+              <th className="py-1.5 pr-2 text-right">Falta</th>
+              <th className="py-1.5 pr-2">Estado</th>
+              <th className="py-1.5">Último registro</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map(it => {
+              const av = avanceDe(proyecto, it.clave)
+              const pct = pctItem(it, av)
+              const estado = estadoItemAvance(pct)
+              const ultimo = av?.registros[av.registros.length - 1]
+              const baseCant = base.porClave.get(it.clave) ?? 0
+              // efectivo EN VIVO: lo tecleado (acumulado directo, o acumulado
+              // vigente + lo nuevo) antes de confirmar; en reposo, el vigente.
+              const efectivo = vivoAcum[it.clave] ?? ((av?.cantidad ?? 0) + (vivoNuevo[it.clave] ?? 0))
+              const deltaCant = efectivo - baseCant
+              const deltaValor = valorEjecutadoItem(it, efectivo) - valorEjecutadoItem(it, baseCant)
+              const falta = it.cantidad - efectivo
+              const bajoBase = efectivo < baseCant
+              return (
+                <tr key={it.clave} className={`border-b border-gray-50 ${bajoBase ? 'bg-red-50' : ''}`}>
+                  <td className="py-1.5 pr-2 font-mono text-[11px] text-gray-500 whitespace-nowrap align-top">{it.codigo ?? '—'}</td>
+                  <td className="py-1.5 pr-2 max-w-[13rem]">
+                    <span className="text-gray-800">{it.descripcion}</span>
+                    <span className="block text-[10px] text-gray-400">{it.grupo}</span>
+                  </td>
+                  <td className="py-1.5 pr-2 text-right font-mono text-gray-600 whitespace-nowrap">{fmtNum(it.cantidad)} {it.unidad}</td>
+                  <td className="py-1.5 pr-2 text-right font-mono text-gray-600">{baseCant > 0 ? fmtNum(baseCant) : '—'}</td>
+                  <td className="py-1.5 pr-2 text-right">
+                    {puedeCapturar ? (
+                      <InputExpresion valor={av?.cantidad} onValor={n => guardarAvance(it.clave, n)}
+                        onVivo={n => setVivoAcum(v => ({ ...v, [it.clave]: n }))}
+                        placeholder="0" titulo="Acumulado TOTAL medido (no lo nuevo)"
+                        className={`w-24 px-2 py-1 border rounded text-right font-mono text-xs focus:outline-none focus:ring-2 ${bajoBase ? 'border-red-400 focus:ring-red-300' : 'border-gray-300 focus:ring-brand-300'}`} />
+                    ) : <span className="font-mono">{fmtNum(av?.cantidad ?? 0)}</span>}
+                  </td>
+                  {puedeCapturar && (
+                    <td className="py-1.5 pr-2 text-right">
+                      {/* key con el acumulado: al confirmar, el campo «nuevo»
+                          se remonta vacío — lo suyo ya quedó sumado. */}
+                      <InputExpresion key={`${it.clave}-${av?.cantidad ?? 0}`} valor={undefined}
+                        onValor={n => guardarAvance(it.clave, (av?.cantidad ?? 0) + n)}
+                        onVivo={n => setVivoNuevo(v => ({ ...v, [it.clave]: n }))}
+                        placeholder="+" titulo="Lo NUEVO de este corte — se suma al acumulado y se ve el resultado"
+                        className="w-16 px-2 py-1 border border-gray-200 rounded text-right font-mono text-xs focus:outline-none focus:ring-2 focus:ring-brand-300" />
+                    </td>
+                  )}
+                  <td className="py-1.5 pr-2 text-right whitespace-nowrap">
+                    {bajoBase ? (
+                      <span className="font-mono text-red-700 font-semibold" title={errorBajoBase(efectivo, baseCant, base.consecutivo)}>
+                        ⚠ bajo lo congelado
+                      </span>
+                    ) : (
+                      <>
+                        <span className={`font-mono ${deltaCant > 0 ? 'text-brand-700 font-semibold' : 'text-gray-400'}`}>{fmtNum(deltaCant)}</span>
+                        <span className="block text-[10px] text-gray-400 font-mono">{fmtMoney(deltaValor)}</span>
+                      </>
+                    )}
+                  </td>
+                  <td className="py-1.5 pr-2 text-right whitespace-nowrap">
+                    {falta >= 0
+                      ? <span className="font-mono text-gray-600">{fmtNum(falta)}</span>
+                      : <span className="font-mono text-red-700 font-semibold" title="Ejecutado por encima de lo contratado — pasa, pero no pasa desapercibido">+{fmtNum(-falta)} sobre</span>}
+                  </td>
+                  <td className="py-1.5 pr-2">
+                    <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold ${COLOR_ESTADO[estado]}`}>
+                      {ESTADO_ITEM_LABEL[estado]}
+                    </span>
+                    {pct > 100 && <span className="ml-1 text-[10px] text-red-600 font-semibold">sobre-ejecutado</span>}
+                  </td>
+                  <td className="py-1.5 text-[10px] text-gray-400">
+                    {ultimo ? `${autorDe(ultimo, nombres)} · ${ultimo.fecha.toDate().toLocaleDateString('es-CO')}` : '—'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {/* El facturable estimado del corte en preparación, EN VIVO (solo CD —
+          AIU/IVA salen al emitir, del esquema del contrato). */}
+      {(() => {
+        const sumDelta = items.reduce((s, it) => {
+          const efectivo = vivoAcum[it.clave] ?? ((avanceDe(proyecto, it.clave)?.cantidad ?? 0) + (vivoNuevo[it.clave] ?? 0))
+          return s + (valorEjecutadoItem(it, efectivo) - valorEjecutadoItem(it, base.porClave.get(it.clave) ?? 0))
+        }, 0)
+        return (
+          <p className="text-[11px] text-gray-500">
+            Delta CD del corte en preparación{base.consecutivo ? ` (desde ${base.consecutivo})` : ''}:{' '}
+            <span className={`font-mono font-semibold ${sumDelta < 0 ? 'text-red-700' : 'text-brand-700'}`}>{fmtMoney(sumDelta)}</span>
+            <span className="text-gray-400"> — el total facturable sale al emitir (AIU/IVA del contrato)</span>
+          </p>
+        )
+      })()}
+
       </>}
 
       <Modal isOpen={emitirOpen} onClose={() => setEmitirOpen(false)} size="lg"
