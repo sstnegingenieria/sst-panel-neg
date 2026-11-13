@@ -1642,15 +1642,25 @@ export function patchCorregirPreliquidacion(
   /** Parte E: con el contexto, el margen se calcula sobre el CD VIVO de sus
    *  átomos; sin él, sobre el valor_alcance congelado (retrocompatible). */
   alcance?: ContextoAlcance,
+  /** 13-nov (caso 058): el que corrige por debajo de lo girado o sobre el
+   *  umbral de implausibilidad marcó el checkbox CON LAS CIFRAS — la
+   *  constancia guarda los números, no solo que se marcó (criterio del
+   *  sobre-giro y del margen negativo). */
+  confirmadoConCifras?: boolean,
 ): { sub: Partial<AsignacionContratista>; entradaHistorial: EntradaHistorialAsignacion; revierte: boolean; ajuste: boolean; resuelveSenal: boolean; margen: MargenEnVivo } | null {
   const pre = a.preliquidacion
   if (!pre || !motivo.trim()) return null
+  // 13-nov (caso 058): cero NUNCA — misma exigencia que definir
+  // (patchDefinirPreliquidacion). Un costo de cero con anticipo girado no
+  // tiene razón posible; la palanca rota lo escribió una vez y no vuelve.
+  if (!(datos.valor_contratista > 0)) return null
   if (a.estado === 'liquidada' || a.estado === 'cancelada') return null
   const sinCambio = pre.valor_contratista === datos.valor_contratista && pre.anticipo_pct === datos.anticipo_pct
   if (sinCambio) return null
   const margen = margenEnVivoDe(
     alcance ? valorAlcanceDe(a.atomos, alcance, a.atomos_nivel) : pre.valor_alcance,
     datos.valor_contratista + (a.modalidad === 'solo_mano_obra' ? (a.valor_materiales ?? 0) : 0))
+  const girado = hayAnticipoGirado(pre) ? anticipoTotalDe(pre) : 0
   const revierte = !proyectoEnEjecucion && (a.estado === 'preliquidacion_aprobada' || a.estado === 'anticipo_girado')
   const ajuste = proyectoEnEjecucion
   const { aprobada_por: _ap, fecha_aprobacion: _fa, ...base } = pre
@@ -1674,7 +1684,16 @@ export function patchCorregirPreliquidacion(
       (revierte ? ' · REVIERTE la aprobación: requiere re-aprobación' : '') +
       (ajuste ? ' · AJUSTE en ejecución — pendiente de reconocer en la liquidación' : '') +
       (a.alcance_desactualizado ? ' · resuelve la señal de alcance desactualizado' : '') +
-      constanciaMargen(margen)),
+      constanciaMargen(margen) +
+      // 13-nov: las CIFRAS del caso con girado encima — por debajo de lo
+      // girado se dice con los dos números, y la confirmación consciente
+      // queda con los números que el que corrigió tuvo a la vista.
+      (girado > 0 && datos.valor_contratista < girado
+        ? ` · ⚠ queda POR DEBAJO de lo girado — Σ girado ${girado} sobre valor ${datos.valor_contratista}` : '') +
+      (confirmadoConCifras
+        ? ` · CONFIRMADO con las cifras a la vista (valor ${datos.valor_contratista} · Σ girado ${girado}` +
+          (margen.margen_pct != null ? ` · margen ${Math.round(margen.margen_pct * 10) / 10} %` : '') + ')'
+        : '')),
   }
 }
 

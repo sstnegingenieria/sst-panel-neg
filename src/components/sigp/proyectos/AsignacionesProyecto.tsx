@@ -79,6 +79,11 @@ const fFecha = (t?: { toDate?: () => Date }) =>
  *  al peso (la venta es la de los átomos de ESTA asignación, #127).
  *  Advertencia, jamás bloqueo; la constancia la deja el builder. */
 function PanelMargenVivo({ venta, costo, anterior }: { venta: number; costo: number; anterior?: { venta: number; costo: number } }) {
+  // 13-nov (caso 058): el panel se pinta SIEMPRE — una pantalla que se
+  // esconde cuando algo no cuadra es la que dejó a oscuras al que corregía.
+  // Con costo aún vacío (0) muestra la venta y deja el margen en «—» sin
+  // advertir: no hay nada registrado todavía que advertir.
+  const sinCosto = !(costo > 0)
   const m = margenEnVivoDe(venta, costo)
   const ant = anterior ? margenEnVivoDe(anterior.venta, anterior.costo) : null
   const pct = m.margen_pct != null ? Math.round(m.margen_pct * 10) / 10 : null
@@ -90,21 +95,21 @@ function PanelMargenVivo({ venta, costo, anterior }: { venta: number; costo: num
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
         <div><span className="text-gray-500 block">Venta de sus actividades</span><span className="font-mono font-semibold">{fmtMoney(m.venta)}</span></div>
         <div><span className="text-gray-500 block">Costo asignado</span><span className="font-mono font-semibold">{fmtMoney(m.costo)}</span></div>
-        <div><span className="text-gray-500 block">Utilidad NEG</span><span className={`font-mono font-semibold ${m.utilidad < 0 ? 'text-red-700' : 'text-brand-700'}`}>{fmtMoney(m.utilidad)}</span></div>
+        <div><span className="text-gray-500 block">Utilidad NEG</span><span className={`font-mono font-semibold ${sinCosto ? 'text-gray-400' : m.utilidad < 0 ? 'text-red-700' : 'text-brand-700'}`}>{sinCosto ? '—' : fmtMoney(m.utilidad)}</span></div>
         <div>
           <span className="text-gray-500 block">{ant ? 'Margen (antes → ahora)' : 'Margen'}</span>
           {ant && <span className="font-mono text-gray-400">{pctA != null ? `${fmtNum(pctA)} %` : '—'} → </span>}
-          <span className={`font-mono font-semibold ${m.negativo ? 'text-red-700' : m.implausible ? 'text-amber-700' : 'text-brand-700'}`}>{pct != null ? `${fmtNum(pct)} %` : '—'}</span>
+          <span className={`font-mono font-semibold ${sinCosto ? 'text-gray-400' : m.negativo ? 'text-red-700' : m.implausible ? 'text-amber-700' : 'text-brand-700'}`}>{sinCosto ? '—' : pct != null ? `${fmtNum(pct)} %` : '—'}</span>
         </div>
       </div>
-      {m.negativo && (
+      {!sinCosto && m.negativo && (
         <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
           ⚠ <strong>Margen negativo</strong>: se asigna {fmtMoney(m.costo)} y al cliente se le cobran{' '}
           {fmtMoney(m.venta)} por esos mismos ítems.{venia} No se bloquea — puede haber razón — pero
           queda constancia en el historial de que se registró sabiéndolo.
         </p>
       )}
-      {!m.negativo && m.implausible && (
+      {!sinCosto && !m.negativo && m.implausible && (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
           ⚠ Margen del {fmtNum(pct!)} % — sobre el umbral de implausibilidad
           ({UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT} %).{venia} Probablemente este costo no cubre todo el
@@ -122,6 +127,15 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
   const nombres = useNombresUsuarios()
   const [histAbierto, setHistAbierto] = useState<Record<string, boolean>>({})
   const alcance = proyecto.snapshot.alcance ?? []
+  // 13-nov (caso PRY-2026-058): UNA SOLA forma de alimentar la venta de los
+  // átomos en TODOS los caminos — el snapshot COMPLETO, que trae
+  // `items_alcance`. Pasar solo el array de grupos hacía venta=0 para
+  // asignaciones de nivel ítem (los uuid no matchean claves de grupo) y la
+  // palanca de % derivaba $0 y lo escribía.
+  const ventaAtomosDe = (a: Pick<AsignacionContratista, 'atomos' | 'atomos_nivel'>) =>
+    valorAlcanceDe(a.atomos, proyecto.snapshot, a.atomos_nivel)
+  const materialesDe = (a: Pick<AsignacionContratista, 'modalidad' | 'valor_materiales'>) =>
+    a.modalidad === 'solo_mano_obra' ? (a.valor_materiales ?? 0) : 0
   const [subdocs, setSubdocs] = useState<AsignacionContratista[]>([])
   const [cargado, setCargado] = useState(false)
   const [aplicando, setAplicando] = useState(false)
@@ -750,15 +764,30 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
   const [corregirValor, setCorregirValor] = useState<number | undefined>(undefined)
   const [corregirPct, setCorregirPct] = useState<number | undefined>(undefined)
   const [corregirMotivo, setCorregirMotivo] = useState('')
+  // D4 (caso 058): checkbox CONSCIENTE con las cifras cuando hay plata girada
+  // encima — cambiar el valor lo resetea (una confirmación vieja no autoriza
+  // números nuevos, lección del wizard de LPU).
+  const [corregirConfirmo, setCorregirConfirmo] = useState(false)
+  const cambiarCorregirValor = (v?: number) => { setCorregirValor(v); setCorregirConfirmo(false) }
+  const corregirGirado = corregirTarget?.preliquidacion && hayAnticipoGirado(corregirTarget.preliquidacion)
+    ? anticipoTotalDe(corregirTarget.preliquidacion) : 0
+  const corregirMargenNuevo = corregirTarget && corregirValor !== undefined && corregirValor > 0
+    ? margenEnVivoDe(ventaAtomosDe(corregirTarget), corregirValor + materialesDe(corregirTarget)) : null
+  const corregirRequiereConfirmo = corregirGirado > 0 && corregirValor !== undefined && corregirValor > 0
+    && (corregirValor < corregirGirado || !!corregirMargenNuevo?.implausible)
   const proyectoEnEjecucion = ESTADOS_TRAMO_EJECUCION.has(proyecto.estado)
   const abrirCorregir = (a: AsignacionContratista) => {
     setCorregirValor(a.preliquidacion?.valor_contratista)
     setCorregirPct(a.preliquidacion?.anticipo_pct)
     setCorregirMotivo('')
+    setCorregirConfirmo(false)
     setCorregirTarget(a)
   }
   const corregir = async () => {
-    if (!corregirTarget || corregirValor === undefined || !corregirMotivo.trim()) return
+    // D3 (caso 058): cero NUNCA — misma exigencia que definir (y el builder
+    // también lo rechaza: tres capas).
+    if (!corregirTarget || !(corregirValor !== undefined && corregirValor > 0) || !corregirMotivo.trim()) return
+    if (corregirRequiereConfirmo && !corregirConfirmo) return
     setAplicando(true)
     try {
       const ahora = Timestamp.now()
@@ -766,7 +795,8 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
       const target = vigentes.find(x => x.id === corregirTarget.id) ?? corregirTarget
       const r = patchCorregirPreliquidacion(target, proyectoEnEjecucion,
         { valor_contratista: corregirValor, anticipo_pct: corregirPct ?? target.preliquidacion?.anticipo_pct ?? 50 },
-        corregirMotivo, user?.uid ?? '', ahora, proyecto.snapshot)
+        corregirMotivo, user?.uid ?? '', ahora, proyecto.snapshot,
+        corregirRequiereConfirmo && corregirConfirmo)
       if (!r) { toast('Sin cambios que corregir', 'error'); return }
       const patchSub: Record<string, unknown> = {
         ...r.sub, historial: arrayUnion(conAutor(r.entradaHistorial, user?.uid, user?.nombre)),
@@ -1415,7 +1445,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                       </span>
                     ))
                   })()}{' · '}
-                  <span className="font-mono">CD {fmtMoney(valorAlcanceDe(a.atomos, proyecto.snapshot, a.atomos_nivel))}</span>
+                  <span className="font-mono">CD {fmtMoney(ventaAtomosDe(a))}</span>
                 </p>
                 {a.preliquidacion && dir && (
                   <p className="text-xs text-gray-500">
@@ -1989,7 +2019,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                     venta={universo.unidades.filter(x => ajustarSel.has(x.clave)).reduce((s, x) => s + x.valor, 0)}
                     costo={ajustarValor + materiales}
                     anterior={{
-                      venta: valorAlcanceDe(ajustarTarget.atomos, proyecto.snapshot, ajustarTarget.atomos_nivel),
+                      venta: ventaAtomosDe(ajustarTarget),
                       costo: ajustarTarget.preliquidacion!.valor_contratista + materiales,
                     }} />
                 )
@@ -2034,7 +2064,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         <div className="space-y-3">
           {definirTarget && (
             <p className="text-sm text-gray-600">
-              CD de sus actividades: <span className="font-mono font-semibold">{fmtMoney(valorAlcanceDe(definirTarget.atomos, alcance, definirTarget.atomos_nivel))}</span>
+              CD de sus actividades: <span className="font-mono font-semibold">{fmtMoney(ventaAtomosDe(definirTarget))}</span>
               {' '}· {MODALIDAD_CONTRATISTA_LABEL[definirTarget.modalidad]}
               {definirTarget.modalidad === 'solo_mano_obra' && <> · materiales NEG {fmtMoney(definirTarget.valor_materiales ?? 0)}</>}
               . La aprueba Gerencia Administrativa (segregación de funciones).
@@ -2049,8 +2079,21 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
             </label>
             {definirTarget && (() => {
-              const venta = valorAlcanceDe(definirTarget.atomos, alcance, definirTarget.atomos_nivel)
-              const materiales = definirTarget.modalidad === 'solo_mano_obra' ? (definirTarget.valor_materiales ?? 0) : 0
+              const venta = ventaAtomosDe(definirTarget)
+              const materiales = materialesDe(definirTarget)
+              // D2 (caso 058): con venta irresoluble la palanca NO escribe
+              // nada — se desactiva y dice por qué. Derivar sobre base vacía
+              // entrega un cero con cara de respuesta.
+              if (!(venta > 0)) return (
+                <label className="block text-sm">
+                  <span className="font-medium text-gray-400">Margen %</span>
+                  <input disabled value="—"
+                    className="mt-1 w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-lg text-sm text-right font-mono text-gray-400" />
+                  <span className="mt-1 block text-[11px] text-amber-700">
+                    No se puede derivar por % — la venta de las actividades asignadas no se pudo resolver ($0). El valor en pesos sí se puede teclear.
+                  </span>
+                </label>
+              )
               const m = margenEnVivoDe(venta, (definirValor ?? 0) + materiales).margen_pct
               return (
                 <label className="block text-sm">
@@ -2067,9 +2110,9 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
             </label>
           </div>
-          {definirTarget && definirValor !== undefined && definirValor > 0 && (
-            <PanelMargenVivo venta={valorAlcanceDe(definirTarget.atomos, alcance, definirTarget.atomos_nivel)}
-              costo={definirValor + (definirTarget.modalidad === 'solo_mano_obra' ? (definirTarget.valor_materiales ?? 0) : 0)} />
+          {definirTarget && (
+            <PanelMargenVivo venta={ventaAtomosDe(definirTarget)}
+              costo={(definirValor ?? 0) + materialesDe(definirTarget)} />
           )}
           {definirValor !== undefined && definirValor > 0 && (
             <p className="text-xs text-gray-500">
@@ -2323,7 +2366,7 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
               {/* El margen donde se decide (Parte E): girar más plata a un
                   contratista se evalúa viendo contra qué venta y qué margen. */}
               <PanelMargenVivo
-                venta={valorAlcanceDe(evalTarget.atomos, proyecto.snapshot, evalTarget.atomos_nivel)}
+                venta={ventaAtomosDe(evalTarget)}
                 costo={(evalTarget.preliquidacion?.valor_contratista ?? 0) + materiales} />
               {adicValor != null && evalTarget.preliquidacion
                 && adicValor + anticipoTotalDe(evalTarget.preliquidacion) > evalTarget.preliquidacion.valor_contratista && (
@@ -2549,7 +2592,11 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
           { label: 'Volver', onClick: () => setCorregirTarget(null), variant: 'secondary' },
           {
             label: aplicando ? 'Corrigiendo…' : 'Aplicar corrección', onClick: corregir, variant: 'primary',
-            loading: aplicando, disabled: corregirValor === undefined || !corregirMotivo.trim(),
+            loading: aplicando,
+            // D3: >0 igual que definir · D4: con girado encima y cifras
+            // absurdas, sin el checkbox consciente no se guarda
+            disabled: !(corregirValor !== undefined && corregirValor > 0) || !corregirMotivo.trim()
+              || (corregirRequiereConfirmo && !corregirConfirmo),
           },
         ]}>
         <div className="space-y-3">
@@ -2562,18 +2609,30 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="block text-sm">
               <span className="font-medium text-gray-700">Nuevo valor del contratista <span className="text-red-500">*</span></span>
-              <InputExpresion valor={corregirValor} onValor={setCorregirValor}
+              <InputExpresion valor={corregirValor} onValor={cambiarCorregirValor}
                 className="mt-1 w-full px-3 py-2 border border-amber-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-amber-300" />
             </label>
             {corregirTarget && (() => {
-              const venta = valorAlcanceDe(corregirTarget.atomos, alcance, corregirTarget.atomos_nivel)
-              const materiales = corregirTarget.modalidad === 'solo_mano_obra' ? (corregirTarget.valor_materiales ?? 0) : 0
+              const venta = ventaAtomosDe(corregirTarget)
+              const materiales = materialesDe(corregirTarget)
+              // D2 (caso 058): con venta irresoluble la palanca NO escribe
+              // nada — así se escribió el 0 del PRY-2026-058.
+              if (!(venta > 0)) return (
+                <label className="block text-sm">
+                  <span className="font-medium text-gray-400">Margen %</span>
+                  <input disabled value="—"
+                    className="mt-1 w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-lg text-sm text-right font-mono text-gray-400" />
+                  <span className="mt-1 block text-[11px] text-amber-700">
+                    No se puede derivar por % — la venta de las actividades asignadas no se pudo resolver ($0). El valor en pesos sí se puede teclear.
+                  </span>
+                </label>
+              )
               const m = margenEnVivoDe(venta, (corregirValor ?? 0) + materiales).margen_pct
               return (
                 <label className="block text-sm">
                   <span className="font-medium text-gray-700">Margen % <span className="text-gray-400 font-normal">(deriva el valor)</span></span>
                   <InputExpresion valor={corregirValor !== undefined && m != null ? Math.round(m * 100) / 100 : undefined}
-                    onValor={v => { if (v !== undefined) setCorregirValor(Math.max(0, Math.round(contratistaDesdeMargen(venta, v)) - materiales)) }}
+                    onValor={v => { if (v !== undefined) cambiarCorregirValor(Math.max(0, Math.round(contratistaDesdeMargen(venta, v)) - materiales)) }}
                     className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
                 </label>
               )
@@ -2584,9 +2643,22 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-brand-300" />
             </label>
           </div>
-          {corregirTarget && corregirValor !== undefined && corregirValor > 0 && (
-            <PanelMargenVivo venta={valorAlcanceDe(corregirTarget.atomos, alcance, corregirTarget.atomos_nivel)}
-              costo={corregirValor + (corregirTarget.modalidad === 'solo_mano_obra' ? (corregirTarget.valor_materiales ?? 0) : 0)} />
+          {corregirTarget && (
+            <PanelMargenVivo venta={ventaAtomosDe(corregirTarget)}
+              costo={(corregirValor ?? 0) + materialesDe(corregirTarget)} />
+          )}
+          {corregirRequiereConfirmo && corregirTarget && corregirValor !== undefined && (
+            <label className="flex items-start gap-2 text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 cursor-pointer">
+              <input type="checkbox" checked={corregirConfirmo}
+                onChange={e => setCorregirConfirmo(e.target.checked)} className="mt-0.5" />
+              <span>
+                Registro sabiendo que el valor queda en <b className="font-mono">{fmtMoney(corregirValor)}</b> con{' '}
+                <b className="font-mono">{fmtMoney(corregirGirado)}</b> ya girados
+                {corregirMargenNuevo?.implausible && corregirMargenNuevo.margen_pct != null && (
+                  <> y margen del <b className="font-mono">{fmtNum(Math.round(corregirMargenNuevo.margen_pct * 10) / 10)} %</b> (umbral {UMBRAL_MARGEN_IMPLICITO_REVISAR_PCT} %)</>
+                )}. Las cifras quedan en el historial.
+              </span>
+            </label>
           )}
           <input value={corregirMotivo} onChange={e => setCorregirMotivo(e.target.value)}
             placeholder="Motivo de la corrección (obligatorio)…"
@@ -2609,14 +2681,14 @@ export default function AsignacionesProyecto({ proyecto, puedeGestionar, puedeAp
         <div className="space-y-3">
           {estimarTarget && (
             <p className="text-sm text-gray-600">
-              CD de sus actividades: <span className="font-mono font-semibold">{fmtMoney(valorAlcanceDe(estimarTarget.atomos, alcance, estimarTarget.atomos_nivel))}</span>.
+              CD de sus actividades: <span className="font-mono font-semibold">{fmtMoney(ventaAtomosDe(estimarTarget))}</span>.
               Sin aprobación de gerencia — no hay giro a terceros; el control es la señal de
               implausibilidad y la traza del historial.
             </p>
           )}
-          {estimarTarget && estimarCosto !== undefined && estimarCosto > 0 && (
-            <PanelMargenVivo venta={valorAlcanceDe(estimarTarget.atomos, alcance, estimarTarget.atomos_nivel)}
-              costo={estimarCosto} />
+          {estimarTarget && (
+            <PanelMargenVivo venta={ventaAtomosDe(estimarTarget)}
+              costo={estimarCosto ?? 0} />
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block text-sm">
