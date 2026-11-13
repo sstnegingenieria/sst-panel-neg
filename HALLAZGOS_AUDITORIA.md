@@ -659,6 +659,50 @@ El sexto agrega una variante, porque aquí no hubo ni fallo ni ejecución:
 
 > **«existe» tampoco significa «se ejecuta».**
 
+---
+
+## Nota de técnica · «se ejecuta» no significa «alguien lee el resultado» — séptima ocurrencia
+
+**Fecha:** 13-nov-2026 · **Hallazgo:** una guarda que corría, pasaba en verde y **decía que no** desde el primer día. Durante ocho meses nadie leyó su veredicto.
+
+`evaluarRetroactivo` contesta la pregunta más incomoda que se le puede hacer a un criterio: **si hubiera estado vigente, ¿cuántas adjudicaciones reales habría matado?** Si la respuesta no es cero, `criterio_aprobado` sale `false`. Existe desde el sub-bloque 1.3, tiene su test, y el test pasaba.
+
+El criterio v1.0 marcaba en rojo **toda** menor cuantía. Las tres adjudicaciones más grandes de la historia de NEG —DESAJ $315M, CNSC $67M, INM $102M— fueron menores cuantías. El contrafactual lo sabía.
+
+Y el test que lo cubría se llamaba *«CLAVE: activa el criterio de cancelación si el filtro mata una adjudicación»*. Comprobaba que **la guarda funcionara**, con un caso sintético, y lo comprobaba bien. Lo que nadie hizo fue correrla contra los datos reales y **mirar el número**. En verde quedó la mecánica; el veredicto no lo leía nadie.
+
+La prueba de que se sabía está escrita: el campo `limitaciones` de v1.0 nombra las tres adjudicaciones de 2023 y dice, con todas las letras, que *«v1.0 las habría marcado en rojo»*. El dato estuvo a la vista ocho meses, en el texto que la pantalla del rojo informado mostraba a quien descartaba.
+
+### Los seis antecedentes
+
+| # | qué era | por qué no se veía |
+|---|---|---|
+| 1 | el `limitaciones` omitido | el campo estaba, el filtro no lo leía |
+| 2 | el `docId` que colapsó 372 en 368 | la función corría y devolvía menos de lo que entraba |
+| 3 | el `$1` del replace | el patrón casaba; el reemplazo escribía el literal |
+| 4 | el `grep -c` contando líneas | el número salía, pero contaba otra cosa |
+| 5 | el `ConvertFrom-Json` que no desenrollaba | `$c.sa` funcionaba por *member enumeration* sobre el array |
+| 6 | `MAX_CREADOS_PRIMERA_CORRIDA = 50` | escrita, comentada y testeada; ninguna rama la alcanza |
+| **7** | **el contrafactual de calibración** | **corría, pasaba, y daba un veredicto que nadie leyó** |
+
+### La regla, y su tercera variante
+
+> **«no falló» y «funcionó» no son lo mismo.**
+> **«existe» tampoco significa «se ejecuta».**
+> **Y «se ejecuta» no significa «alguien lee el resultado».**
+
+### Por qué esta es la más incómoda de las tres
+
+Las seis primeras se arreglan con código: una línea, un predicado, un test que faltaba. **Esta no.** El código estaba bien, el test estaba bien, y el resultado era correcto. Lo que falló fue que nadie lo mirara — y contra eso no hay assert.
+
+Lo único que se le puede oponer es una costumbre, y queda escrita en `docs/radar-estado.md` §6-bis: **ante cualquier cambio de criterio del semáforo, el contrafactual se vuelve a correr contra los datos del momento y su veredicto se escribe en la `calibracion` de la versión nueva.** No alcanza con que el test pase.
+
+Lo mismo para el otro lado del trueque, que v1.1 dejó escrito en su `calibracion`: cuántas propuestas sin retorno deja pasar. v1.0 bloqueaba 12; v1.1 no bloquea ninguna. Ese número también hay que mirarlo, no solo calcularlo.
+
+### El corolario que esto le deja a v1.1
+
+v1.1 no es mejor que v1.0 por ser más permisiva. Es mejor porque **tiene fecha de revisión y con qué revisarla**: seis semanas, y si Karen trabajó menores cuantías y las perdió todas, el trueque salió mal y se vuelve a mirar. v1.0 se calibró una vez, en agosto, y no volvió a mirarse. No era peor: era **irrevisable**.
+
 Leer el código no basta para saber si una guarda protege: hay que preguntarse **qué entrada la alcanza**. Las cinco primeras se encontraron corriendo algo; ésta se encontró al responder *"¿cuál de los dos topes aplica?"* — una pregunta que nadie había hecho en voz alta porque los dos topes estaban ahí, escritos, y parecía obvio que alguno aplicaba.
 
 ### Qué se hace con ella
