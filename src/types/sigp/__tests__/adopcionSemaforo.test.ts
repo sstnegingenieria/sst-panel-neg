@@ -2,10 +2,14 @@
 // prueba acá sin red, igual que `construirDocSemilla`.
 import { describe, it, expect } from 'vitest'
 import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { RESUMEN_V1_1, ANTES_DE_DESCARTAR_V1_1, LIMITACIONES_V1_1 } from '../semaforoVersiones'
 
 const req = createRequire(import.meta.url)
 const { planAdopcion, CAMPOS_ESPERADOS } = req('../../../../functions/scripts/adoptar-semaforo-v1.1.js')
+const FUENTE_SCRIPT = readFileSync(
+  resolve(__dirname, '../../../../functions/scripts/adoptar-semaforo-v1.1.js'), 'utf8')
 const NUEVA = req('../../../../functions/scripts/semaforo-v1.1.json')
 
 const AHORA = { toMillis: () => 1_000 } as unknown as never
@@ -69,5 +73,25 @@ describe('planAdopcion', () => {
 
   it('es pura: mismos argumentos, mismo plan', () => {
     expect(planAdopcion(actual, 'u', AHORA)).toEqual(planAdopcion(actual, 'u', AHORA))
+  })
+})
+
+describe('el proyecto va EXPLÍCITO en initializeApp', () => {
+  it('no se deja resolver solo', () => {
+    // `getExplicitProjectId` del Admin SDK saca el proyecto de la credencial
+    // SOLO cuando es una llave de cuenta de servicio. Con las credenciales por
+    // defecto de un USUARIO —que es como corre este acto— la credencial es un
+    // `RefreshTokenCredential` y ese paso no dispara: sin esto, el script
+    // moriría con «Unable to detect a Project Id» a mitad del acto.
+    expect(FUENTE_SCRIPT).toContain("const PROYECTO = 'neg-sst-app'")
+    expect(FUENTE_SCRIPT).toContain('admin.initializeApp({ projectId: PROYECTO })')
+    expect(FUENTE_SCRIPT).not.toContain('admin.initializeApp()')
+  })
+
+  it('escribe en un solo proyecto, y está nombrado', () => {
+    // El accidente inverso: un GOOGLE_CLOUD_PROJECT olvidado apuntando a otro
+    // lado. Con el proyecto declarado, esa variable no tiene voz.
+    const nombrados = [...FUENTE_SCRIPT.matchAll(/'(neg-[a-z-]+)'/g)].map(m => m[1])
+    expect([...new Set(nombrados)]).toEqual(['neg-sst-app'])
   })
 })

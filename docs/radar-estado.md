@@ -417,8 +417,25 @@ escrito para quien calibró la regla, no para quien decide si la trabaja.
 > mantiene sincronizados carácter por carácter. Editar a mano habría
 > funcionado *y* habría dejado el repositorio mintiendo.
 
+**Primero, entrar con la cuenta PROPIETARIA** — no con la cuenta propia de
+quien corre el acto, que no tiene escritura en Firestore:
+
 ```bash
-GOOGLE_APPLICATION_CREDENTIALS=<llave de LECTURA> node functions/scripts/adoptar-semaforo-v1.1.js
+gcloud auth application-default login
+```
+
+**Qué debe responder:** abre el navegador, se elige la cuenta **propietaria**, y
+la terminal termina con `Credentials saved to file`.
+
+> ⚠ **No definir `GOOGLE_APPLICATION_CREDENTIALS`.** Si esa variable está
+> definida GANA sobre las credenciales por defecto, y el acto correría con otra
+> identidad sin avisar. Si quedó de otra cosa:
+> `$env:GOOGLE_APPLICATION_CREDENTIALS = $null`
+
+Después el ensayo:
+
+```bash
+node functions/scripts/adoptar-semaforo-v1.1.js
 ```
 
 **Qué debe responder:** el plan completo — `ANTES version_actual v1.0`,
@@ -429,7 +446,7 @@ oportunidad de ver qué va a decir el panel.
 Si el plan es el esperado:
 
 ```bash
-GOOGLE_APPLICATION_CREDENTIALS=<llave de ESCRITURA> AUTOR_UID=<tu uid> node functions/scripts/adoptar-semaforo-v1.1.js --apply
+AUTOR_UID=<el uid de Giovanny> node functions/scripts/adoptar-semaforo-v1.1.js --apply
 ```
 
 **Qué debe responder:** `✓ ADOPCIÓN COMPLETA Y VERIFICADA.` El script relee lo
@@ -440,10 +457,22 @@ guardados conservan su `semaforo` y su `semaforo_version` — cambiar el criteri
 y recalcular los documentos son **dos actos distintos** (invariante 5). El
 segundo tiene su propio script y su propia decisión.
 
-> **Esta parte SÍ necesita la llave de ESCRITURA de datos**, entregada para el
-> acto y retirada al terminar. No es como la marca: ahí eran dos campos en un
-> documento y la consola alcanzaba. Acá el texto tiene que salir de la fuente
-> única.
+**Y al terminar, siempre:**
+
+```bash
+gcloud auth application-default revoke
+```
+
+> **Por qué así y no con una llave.** Es el mismo modelo del acto —entrar,
+> correr, revocar— **sin crear una llave descargable** que alguien tenga que
+> acordarse de borrar, y sin concederle a nadie escritura permanente sobre toda
+> la base de datos. La cuenta propia de quien despliega **no sirve**: sus seis
+> roles no incluyen escritura en Firestore, y está bien que no la incluyan.
+>
+> Y no es como la marca: ahí eran dos campos en un documento y la consola
+> alcanzaba. Acá el texto tiene que salir de la fuente única del repositorio, y
+> la clave del mapa lleva un punto (`'v1.0'`) — la trampa de las rutas anidadas
+> que la consola no distingue.
 
 ---
 
