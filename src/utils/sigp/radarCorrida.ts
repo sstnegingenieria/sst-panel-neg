@@ -257,6 +257,53 @@ const _TODOS_LOS_CAMPOS: [SinClasificar] extends [never] ? true
   : ['campos del documento sin clasificar como refrescables o protegidos:', SinClasificar] = true
 void _TODOS_LOS_CAMPOS
 
+/**
+ * Sub-campos que el ORIGEN NUNCA SABE y que llena una PERSONA. El refresco no
+ * los puede pisar con el `null` que trae el mapeo.
+ *
+ * ── EL DEFECTO QUE ESTO EVITA ───────────────────────────────────
+ * `cronograma` es REFRESCABLE, y con razón: la fecha de cierre se corrige en
+ * el origen y el solape existe para eso. Pero de sus cinco fechas, el mapeo
+ * solo conoce `publicacion` y `cierre`; las otras tres salen siempre en
+ * `null`. Sin esta guarda, la primera corrida posterior a que Karen escribiera
+ * la fecha de manifestación se la BORRABA — en silencio, y sin que nadie
+ * pudiera notarlo hasta necesitarla.
+ *
+ * El límite de manifestación no existe en datos abiertos (medido: 85,8 % de
+ * 10.421 procesos). O sea: si una persona lo escribe, es el ÚNICO lugar donde
+ * existe. Pisarlo no es perder un refresco, es perder el dato.
+ *
+ * La regla es asimétrica a propósito, y es la misma de `completarSiFalta`:
+ * el origen puede LLENAR un hueco, nunca VACIAR lo que alguien lleno.
+ */
+export const SUBCAMPOS_DE_PERSONA: Record<string, readonly string[]> = {
+  cronograma: ['manifestacion', 'sorteo', 'adjudicacion'],
+}
+
+/**
+ * El valor a escribir, con los sub-campos de persona preservados cuando el
+ * origen los trae vacíos.
+ */
+export function preservandoLoDePersona(
+  campo: string, antes: unknown, ahora: unknown,
+): unknown {
+  const propios = SUBCAMPOS_DE_PERSONA[campo]
+  if (!propios) return ahora
+  if (antes === null || typeof antes !== 'object' || Array.isArray(antes)) return ahora
+  if (ahora === null || typeof ahora !== 'object' || Array.isArray(ahora)) return ahora
+  const a = antes as Record<string, unknown>
+  const b = { ...(ahora as Record<string, unknown>) }
+  for (const k of propios) {
+    const viejo = a[k]
+    // Solo se preserva lo que TIENE valor. Si los dos están vacíos no hay nada
+    // que preservar, y si el origen trajera algo (hoy no puede) ganaría él.
+    if (viejo !== undefined && viejo !== null && (b[k] === undefined || b[k] === null)) {
+      b[k] = viejo
+    }
+  }
+  return b
+}
+
 export interface PatchRadar {
   /** Lo que se va a escribir. Nunca incluye un campo protegido. */
   patch: Partial<LicitacionDetectada>
@@ -367,7 +414,10 @@ export function patchRadarSobreExistente(
   const cambios: string[] = []
   for (const campo of CAMPOS_REFRESCABLES) {
     const antes = (existente as Record<string, unknown>)[campo]
-    const ahora = (nuevo as Record<string, unknown>)[campo]
+    // Lo que el origen trae, con las fechas de persona a salvo.
+    const ahora = preservandoLoDePersona(
+      campo, antes, (nuevo as Record<string, unknown>)[campo],
+    )
     if (!igual(antes, ahora)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(patch as any)[campo] = ahora

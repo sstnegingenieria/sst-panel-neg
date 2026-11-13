@@ -187,6 +187,48 @@ export function porQueNoAlcanza(
   return null
 }
 
+/**
+ * AL FILO: cabe, pero exactamente. El sistema informa, no decide — mismo
+ * criterio que el rojo informado: la fila se queda arriba, trabajable, y dice
+ * en qué se está metiendo quien la tome.
+ *
+ * Medido sobre la cola real: cuatro mínimas cuantías que cerraban al día
+ * siguiente tenían 1 día hábil y necesitaban 1. El modelo dice que cabe, y es
+ * cierto; lo que no dice solo es que no hay ni un día de margen.
+ *
+ * ⚠ `horas_utiles_dia` es HOY UN SUPUESTO, no un dato medido — ver la nota en
+ * `docs/onboarding-licitaciones.md`. Este aviso hereda esa incertidumbre, y es
+ * justamente la razón de informar en vez de decidir.
+ */
+export function avisoAlFilo(
+  l: Pick<Licitacion, 'cronograma' | 'modalidad'>, hoy: string, horasUtilesDia: number,
+): string | null {
+  const v = evaluarVentana(cierreIsoDe(l), l.modalidad, hoy, horasUtilesDia)
+  if (v.vencida || v.insuficiente || v.dias_habiles === null) return null
+  if (v.dias_habiles > v.necesarios) return null
+  return v.dias_habiles === 1
+    ? 'Justo al filo: queda 1 día hábil y hace falta 1 — habría que armarla hoy'
+    : `Justo al filo: quedan ${v.dias_habiles} días hábiles y hacen falta ${v.necesarios}`
+}
+
+/**
+ * ¿Este proceso tuvo manifestación de interés y nadie anotó su fecha límite?
+ *
+ * No es un reproche: esa fecha NO viene en datos abiertos, así que la única
+ * forma de tenerla es que alguien la lea del pliego. Pero sin ella, el aviso
+ * de la «ventana fatal» no se puede dar, y el cierre —que sí se ve— muestra
+ * más tiempo del que realmente hay.
+ */
+export function faltaFechaManifestacion(
+  l: Pick<Licitacion, 'cronograma' | 'radar'>,
+): boolean {
+  const r = l.radar
+  if (!r) return false
+  const hubo = r.fase === FASE_MANIFESTACION
+    || (r.fases_previas ?? []).some(f => f === FASE_MANIFESTACION)
+  return hubo && l.cronograma.manifestacion == null
+}
+
 /** Una fila de la cola que ya no se puede trabajar, con su razón. */
 export interface FilaSinSalida {
   l: LicitacionConId

@@ -15,6 +15,7 @@ import {
   datosPresentacionCompletos, datosResultadoCompletos,
   MOTIVOS_DESCARTE_DEL_LEXICO, MOTIVO_DESCARTE_LABEL,
   SENAL_LABEL, ORIGEN_FECHA_LABEL, esDelRadar, lexicoParticipo,
+  patchCronogramaManual, ordenCronogramaValido,
   type ProcedenciaRadar, type SenalClasificacion, type OrigenFecha,
   type Licitacion, type EstadoLicitacion, type OverrideSemaforo,
   type MotivoDescarte,
@@ -1132,5 +1133,90 @@ describe('etiquetas de la procedencia', () => {
     for (const o of origenes) expect(ORIGEN_FECHA_LABEL[o], o).toBeTruthy()
     expect(Object.keys(ORIGEN_FECHA_LABEL).sort()).toEqual([...origenes].sort())
     expect(ORIGEN_FECHA_LABEL.ninguna).toMatch(/sin fecha/i)
+  })
+})
+
+// ── TERCERO: las fechas que el origen no trae ──────────────────────────
+
+const dia = (iso: string) => ts(Date.parse(`${iso}T12:00:00Z`))
+const CRONO_VACIO = {
+  publicacion: null, manifestacion: null, sorteo: null,
+  cierre: dia('2026-11-30'), adjudicacion: null,
+}
+const ACTOR_K = { uid: 'uid-karen' }
+
+describe('ordenCronogramaValido', () => {
+  it('manifestación ≤ sorteo ≤ cierre', () => {
+    expect(ordenCronogramaValido({
+      manifestacion: dia('2026-11-10'), sorteo: dia('2026-11-12'), cierre: dia('2026-11-20'),
+    })).toBe(true)
+  })
+
+  it('rechaza el sorteo antes de la manifestación', () => {
+    expect(ordenCronogramaValido({
+      manifestacion: dia('2026-11-12'), sorteo: dia('2026-11-10'),
+    })).toBe(false)
+  })
+
+  it('rechaza el cierre antes de la manifestación', () => {
+    expect(ordenCronogramaValido({
+      manifestacion: dia('2026-11-20'), cierre: dia('2026-11-10'),
+    })).toBe(false)
+  })
+
+  it('las AUSENTES no opinan: sorteo sin manifestación es válido', () => {
+    // Quiere decir "todavía no se sabe la primera", no que el orden esté mal.
+    expect(ordenCronogramaValido({ sorteo: dia('2026-11-12'), cierre: dia('2026-11-20') }))
+      .toBe(true)
+    expect(ordenCronogramaValido({})).toBe(true)
+  })
+})
+
+describe('patchCronogramaManual', () => {
+  it('escribe las fechas que el origen jamás va a traer', () => {
+    const p = patchCronogramaManual(
+      { cronograma: CRONO_VACIO },
+      { manifestacion: dia('2026-11-15'), sorteo: dia('2026-11-17') },
+      ACTOR_K, AHORA,
+    )
+    // Se comparan los MILISEGUNDOS: el fixture arma cada Timestamp con sus
+    // propias funciones, así que `toEqual` sobre el objeto compara closures.
+    expect(p?.cronograma.manifestacion?.toMillis()).toBe(dia('2026-11-15').toMillis())
+    expect(p?.cronograma.sorteo?.toMillis()).toBe(dia('2026-11-17').toMillis())
+    // Y no toca lo que no se mencionó.
+    expect(p?.cronograma.cierre?.toMillis()).toBe(CRONO_VACIO.cierre.toMillis())
+  })
+
+  it('lo que NO se menciona no se mueve', () => {
+    const con = { ...CRONO_VACIO, manifestacion: dia('2026-11-15') }
+    const p = patchCronogramaManual({ cronograma: con }, { sorteo: dia('2026-11-17') }, ACTOR_K, AHORA)
+    expect(p?.cronograma.manifestacion?.toMillis()).toBe(dia('2026-11-15').toMillis())
+  })
+
+  it('`null` EXPLÍCITO sí limpia: es alguien diciendo "me equivoqué"', () => {
+    const con = { ...CRONO_VACIO, manifestacion: dia('2026-11-15') }
+    const p = patchCronogramaManual({ cronograma: con }, { manifestacion: null }, ACTOR_K, AHORA)
+    expect(p?.cronograma.manifestacion).toBeNull()
+  })
+
+  it('sin cambios devuelve null y el caller no escribe', () => {
+    expect(patchCronogramaManual(
+      { cronograma: CRONO_VACIO }, { cierre: CRONO_VACIO.cierre }, ACTOR_K, AHORA,
+    )).toBeNull()
+    expect(patchCronogramaManual({ cronograma: CRONO_VACIO }, {}, ACTOR_K, AHORA)).toBeNull()
+  })
+
+  it('un orden imposible no se persiste', () => {
+    expect(patchCronogramaManual(
+      { cronograma: CRONO_VACIO },
+      { manifestacion: dia('2026-12-15') },   // después del cierre
+      ACTOR_K, AHORA,
+    )).toBeNull()
+  })
+
+  it('sin actor no hay patch: toda escritura tiene autor', () => {
+    expect(patchCronogramaManual(
+      { cronograma: CRONO_VACIO }, { sorteo: dia('2026-11-17') }, { uid: '  ' }, AHORA,
+    )).toBeNull()
   })
 })

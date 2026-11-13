@@ -228,13 +228,58 @@ Para que nadie lo espere y se lleve una sorpresa:
 
 ---
 
+## 6-bis. Lo que hay que PREGUNTARLE a Karen en la entrega
+
+Esta sección no explica el módulo: anota lo que el módulo todavía está
+suponiendo sobre cómo trabaja ella. Son preguntas, no decisiones tomadas.
+
+### ¿Cuántas horas al día se le pueden dedicar a UNA licitación?
+
+El panel usa **4 horas útiles al día** (`configuracion/licitaciones
+.horas_utiles_dia`) para decidir si una ventana alcanza. Con ese número:
+
+| modalidad | horas de armado | días hábiles que exige |
+|---|---|---|
+| mínima cuantía | ~4 h | 1 |
+| menor cuantía | ~6 h | 2 |
+
+**Ese 4 es un supuesto, no un dato.** Nadie lo midió contra cómo trabaja Karen
+de verdad — salió de una estimación razonable cuando se escribió el 1.4, y de
+ahí salen dos cosas que ella ve todos los días: qué procesos caen en **«ya no
+alcanza»** y cuáles salen **«justo al filo»**.
+
+Lo que hay que preguntarle, con casos concretos en la mano:
+
+- Un proceso que cierra **mañana**: ¿se alcanza a armar, o ya es imposible?
+  Hoy el panel dice que una mínima cuantía sí (1 día hábil, 1 necesario) y lo
+  marca «al filo» sin sacarlo de la cola.
+- ¿Cuántas horas de un día normal puede dedicarle a UNA propuesta, contando
+  que tiene otras cosas encima?
+- ¿Las 4 h de una mínima y las 6 h de una menor se parecen a la realidad, o
+  hay modalidades que le cuestan mucho más?
+
+El número es configurable y se cambia sin desplegar nada. **Lo que no hay que
+hacer es seguir adivinándolo.**
+
+### ¿Cuántas propuestas por semana?
+
+Mismo caso: el cupo semanal es **5** (`capacidad_semanal`) y también es un
+supuesto. La diferencia es que este ya tiene cómo medirse: la bandeja cuenta
+cuántos procesos **se vencieron esperando** en la cola, que es exactamente la
+señal de si el cupo alcanza o la bandeja se está acumulando. Vale la pena
+mirar esa cifra un par de semanas ANTES de tocar el 5.
+
+---
+
 ## 7. Si algo se ve raro
 
 Reportar cualquiera de estas cosas, sin dudarlo:
 
 - Un proceso descartado o marcado **por su monto** — eso no debería pasar
   nunca.
-- El aviso de **ventana insuficiente** saliendo casi siempre, o casi nunca.
+- El aviso de **ventana insuficiente** o el de **«justo al filo»** saliendo casi
+  siempre, o casi nunca — los dos salen del mismo supuesto de 4 horas útiles
+  al día, que está sin calibrar (ver 6-bis).
 - Un color que no cuadra con lo que dice el pliego.
 - Un texto de esta guía que ya no coincide con la pantalla.
 

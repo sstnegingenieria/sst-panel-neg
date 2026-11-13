@@ -13,6 +13,7 @@ import {
   GUARDA_VOLUMEN, evaluarVolumen, evaluarVentana, diasDeVentana,
   CAMPOS_REFRESCABLES, CAMPOS_PROTEGIDOS,
   patchRadarSobreExistente, hayQueEscribir, planearEscritura, completarSiFalta,
+  preservandoLoDePersona,
   construirRegistroCorrida, marcaSiguiente, resumenLegible, cuantosCrearia,
   sellarParaEscritura, fechasATimestamp, ACTOR_RADAR,
   avanzarEstadoRadar, MAX_CORRIDAS_EN_HISTORIAL, ESTADO_RADAR_INICIAL,
@@ -239,6 +240,39 @@ describe('re-escritura: el radar no pisa el trabajo humano', () => {
     expect(p.patch.radar).toBeUndefined()
     // Eso sí: la discrepancia se CUENTA. Para eso está cambios_materiales.
     expect(p.cambios_materiales).toEqual(['radar'])
+  })
+
+  it('CLAVE: el refresco NO BORRA las fechas que escribió una persona', () => {
+    // El límite de manifestación no existe en datos abiertos: si alguien lo
+    // escribe, el documento es el único lugar del mundo donde está. El mapeo
+    // lo trae siempre en `null`, así que sin la guarda la primera corrida
+    // posterior se lo llevaba — en silencio.
+    const base = docDe('minima_limpia')
+    const conFechas = {
+      ...base,
+      cronograma: {
+        ...base.cronograma,
+        manifestacion: '2026-11-15T05:00:00.000Z',
+        sorteo: '2026-11-17T05:00:00.000Z',
+      },
+    }
+    // El cast es el TIPO diciendo la verdad: `LicitacionDetectada` declara
+    // `manifestacion: null` porque el radar nunca la produce. El documento
+    // GUARDADO sí puede tenerla — la escribió una persona.
+    const p = patchRadarSobreExistente(conFechas as unknown as LicitacionDetectada, base)
+    expect(p.cambios).toEqual([])
+    expect(p.patch).toEqual({})
+  })
+
+  it('y el cierre SÍ se sigue refrescando: la guarda no congela el cronograma', () => {
+    const base = docDe('minima_limpia')
+    const conFechas = { ...base, cronograma: { ...base.cronograma, manifestacion: '2026-11-15T05:00:00.000Z' } }
+    const corregido = { ...base, cronograma: { ...base.cronograma, cierre: '2026-12-01T05:00:00.000Z' } }
+    const p = patchRadarSobreExistente(conFechas as unknown as LicitacionDetectada, corregido)
+    expect(p.cambios).toEqual(['cronograma'])
+    expect(p.patch.cronograma?.cierre).toBe('2026-12-01T05:00:00.000Z')
+    // La fecha de la persona viaja intacta dentro del patch.
+    expect(p.patch.cronograma?.manifestacion).toBe('2026-11-15T05:00:00.000Z')
   })
 
   it('la categoría que llega TARDE sí se refresca — para eso es el solape', () => {
@@ -519,5 +553,23 @@ describe('completarSiFalta', () => {
     expect(completarSiFalta(null, { a: 1 })).toBeNull()
     expect(completarSiFalta('texto', { a: 1 })).toBeNull()
     expect(completarSiFalta([1], [1, 2])).toBeNull()
+  })
+})
+
+describe('preservandoLoDePersona', () => {
+  it('solo actúa sobre los campos declarados', () => {
+    expect(preservandoLoDePersona('objeto', 'viejo', 'nuevo')).toBe('nuevo')
+  })
+
+  it('el origen puede LLENAR un hueco', () => {
+    const r = preservandoLoDePersona('cronograma',
+      { manifestacion: null, cierre: 'a' }, { manifestacion: 'x', cierre: 'b' })
+    expect(r).toEqual({ manifestacion: 'x', cierre: 'b' })
+  })
+
+  it('pero nunca VACIAR lo que alguien llenó', () => {
+    const r = preservandoLoDePersona('cronograma',
+      { manifestacion: 'puesta a mano', cierre: 'a' }, { manifestacion: null, cierre: 'b' })
+    expect(r).toEqual({ manifestacion: 'puesta a mano', cierre: 'b' })
   })
 })
