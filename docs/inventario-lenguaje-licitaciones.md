@@ -28,6 +28,21 @@ que están los archivos.
 **Esto es un acto de datos, no un deploy**, y es lo que más se lee: el panel
 pinta estos dos campos tal cual vienen de Firestore.
 
+> ⚠ **CORREGIDO el 13-nov.** Esta sección decía que el acto se hacía editando
+> los campos a mano en la consola. **No es así**, y el error era mío por no
+> haber mirado lo que ya existía: el registro del criterio tiene una fuente
+> única en `src/types/sigp/semaforoVersiones.ts`, un JSON derivado, un script
+> de siembra que **aborta a propósito** si el documento ya existe, y un test que
+> mantiene los tres sincronizados carácter por carácter.
+>
+> El script de siembra decía, literalmente, *«para agregar una versión nueva se
+> usa un script propio de adopción, no este»*. Ese script no existía; ahora sí:
+> **`functions/scripts/adoptar-semaforo-v1.1.js`** (PR #263).
+>
+> Editar los campos a mano habría funcionado *y* habría dejado el repositorio
+> mintiendo: el TS diría una cosa y Firestore otra, y el test de sincronía no
+> cubre ese documento en producción.
+
 ### Lo que hay hoy
 
 El documento de `v1.0` tiene siete claves: `definicion`, `limitaciones`,
@@ -60,6 +75,30 @@ cae a las viejas si no existen:
 El nombre de la segunda dice para qué es. No es «las limitaciones del
 criterio»: es lo que hay que leer **antes de descartar**, que es el momento en
 que sirve.
+
+### Cómo se aplica — el script, no la consola
+
+```bash
+GOOGLE_APPLICATION_CREDENTIALS=<llave de LECTURA> node functions/scripts/adoptar-semaforo-v1.1.js
+```
+
+Eso es el **dry-run**: lee el documento real, imprime el antes, el después y
+los seis textos completos, y no escribe nada. Ya se corrió contra producción.
+
+```bash
+GOOGLE_APPLICATION_CREDENTIALS=<llave de ESCRITURA> AUTOR_UID=<uid> node functions/scripts/adoptar-semaforo-v1.1.js --apply
+```
+
+Qué hace, y nada más: agrega la entrada `v1.1`, **cierra** la vigencia de v1.0
+sin tocar su texto, y mueve `version_actual`. No toca `licitaciones` — cambiar
+el criterio y recalcular los documentos son dos actos distintos (invariante 5).
+Al terminar relee y verifica; si la relectura no coincide, no declara el acto
+hecho.
+
+> **Este sí necesita la llave de ESCRITURA de datos**, entregada para el acto y
+> retirada al terminar. No es como la marca del radar: ahí eran dos campos en
+> un documento y la consola alcanzaba. Acá el texto tiene que salir de la
+> fuente única o el repositorio queda mintiendo.
 
 ### `resumen` — ANTES (lo que Karen lee hoy)
 
@@ -352,7 +391,7 @@ Lo que ya sé que hay que tocar:
 
 | | archivos | cómo se aplica |
 |---|---|---|
-| §0 | `configuracion/semaforo_versiones` | **acto de datos** con dry-run |
+| §0 | `configuracion/semaforo_versiones` | **acto de datos** con `adoptar-semaforo-v1.1.js` (dry-run + `--apply`) |
 | §1 | `Licitaciones.tsx`, `licitacion.ts` | PR de texto |
 | §2–§3 | `ModalAdmitir.tsx`, `ModalDescartar.tsx`, `licitacion.ts` | PR de texto |
 | §4–§5 | `LicitacionDetalle.tsx`, `ModalOverride.tsx` | PR de texto |
@@ -362,3 +401,8 @@ Lo que ya sé que hay que tocar:
 
 El acto de datos de §0 va **primero**: es lo que más se lee y lo único que no
 se arregla con un deploy.
+
+> El texto aprobado de `resumen` y `antes_de_descartar` **ya está en el
+> repositorio** desde el PR #263, en `semaforoVersiones.ts` y en
+> `semaforo-v1.1.json`. Lo de acá abajo queda como registro de la discusión;
+> lo que se escribe en Firestore sale de ahí, no de este documento.
