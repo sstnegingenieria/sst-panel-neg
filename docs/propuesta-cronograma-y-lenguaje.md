@@ -135,10 +135,22 @@ cuando se toque ese dato.
 
 El radar escribió **24 documentos**: 14 mínima cuantía, 10 menor cuantía.
 
-**Defecto 1 — doce de veinticuatro ya están vencidos.** Al momento de medir, 12
-de los 24 tienen `cierre` en el pasado. Esto no necesita ninguna teoría de
-fases: el radar trae procesos cuyo plazo ya terminó y la bandeja los muestra
-como si estuvieran vivos.
+**Defecto 1 — hay procesos vencidos mezclados con los vivos.** El radar trae
+procesos cuyo plazo ya terminó y la bandeja los muestra con la misma pinta que
+los demás. Esto no necesita ninguna teoría de fases.
+
+> ⚠ **CORRECCIÓN de un número que di mal en la primera versión de este
+> documento.** Escribí «12 de 24». El número real, medido por día civil de
+> **Bogotá**, es **2 vencidas de 23 en la cola** (5 cierran hoy y siguen vivas,
+> 16 vigentes). Dos errores compuestos en un script de medición de un solo uso:
+> resté **días UTC** a una hora en que UTC ya había pasado la medianoche de
+> Bogotá, y conté **«0 días restantes» como vencido** cuando son los que cierran
+> hoy. El defecto es real y crece cada día; la magnitud no lo era.
+>
+> La lección, que es la del proyecto: **una resta de días no es una fecha**. La
+> pregunta «¿ya venció?» vive en el día civil de quien la hace, y Karen no vive
+> en UTC. En el código esto quedó fijado por test — `plazoVencido` compara
+> `AAAA-MM-DD`, no instantes.
 
 **Defecto 2 — la fase viaja escondida dentro del número de proceso.** El
 `numero_proceso` de uno de ellos es, literalmente:
@@ -170,9 +182,9 @@ pequeño del conjunto.
 pasan a ser el campo `fase`. Karen tiene que leer `SAMC-010-2026`.
 
 **A.3 — La regla de lo vencido, que no depende de nada de lo anterior:** con
-`cierre` en el pasado, el proceso no va a la cola del radar. **No se oculta**:
-va a una sección propia o entra descartado con motivo `PLAZO_IMPOSIBLE`, que ya
-existe en el vocabulario. Hoy son 12 de 24.
+`cierre` en el pasado, el proceso sale de la cola de trabajo. **No se oculta**:
+va a un grupo propio al final, y desde ahí se descarta con `PLAZO_IMPOSIBLE`,
+que ya existe en el vocabulario. **HECHO** — PR #257.
 
 **A.4 — La regla de la manifestación perdida.** Menor cuantía + fase
 `Presentación de oferta` + NEG no manifestó → el proceso es inalcanzable aunque
