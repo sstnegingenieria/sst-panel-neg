@@ -617,7 +617,7 @@ describe('estamparSemaforo', () => {
   it('mínima cuantía sin sorteo → verde', () => {
     const [r] = estamparSemaforo([reg({ numero: 'X-1', tipo: 'MINIMA' })])
     expect(r.semaforo).toBe('verde')
-    expect(r.semaforo_version).toBe('v1.0')
+    expect(r.semaforo_version).toBe('v1.1')
   })
 
   it('mínima cuantía con sorteo → amarillo', () => {
@@ -626,10 +626,10 @@ describe('estamparSemaforo', () => {
     expect(r.semaforo_motivos).toEqual(['SORTEO'])
   })
 
-  it('menor cuantía → rojo', () => {
+  it('v1.1: menor cuantía → AMARILLO', () => {
     const [r] = estamparSemaforo([reg({ numero: 'X-1', tipo: 'MENOR' })])
-    expect(r.semaforo).toBe('rojo')
-    expect(r.semaforo_motivos).toEqual(['MODALIDAD_SIN_HISTORIAL'])
+    expect(r.semaforo).toBe('amarillo')
+    expect(r.semaforo_motivos).toEqual(['MENOR_CUANTIA'])
   })
 
   it('el portero deja pasar verde y amarillo, bloquea rojo', () => {
@@ -655,15 +655,34 @@ describe('evaluarRetroactivo', () => {
     expect(ev.criterio_aprobado).toBe(true)
   })
 
-  it('CLAVE: activa el criterio de cancelación si el filtro mata una adjudicación', () => {
-    // Una menor cuantía ganada: el filtro la habría bloqueado (rojo).
+  it('CLAVE: v1.1 YA NO MATA una menor cuantía ganada — el criterio de cancelación pasa', () => {
+    // ESTE ES EL TEST QUE v1.0 REPROBABA, y es la razón más dura del cambio.
+    //
+    // El criterio de cancelación dice que una regla NO PUEDE descartar
+    // adjudicaciones reales. v1.0 marcaba en rojo toda menor cuantía — y las
+    // tres adjudicaciones más grandes de la historia de NEG fueron menores
+    // cuantías (DESAJ $315M, CNSC $67M, INM $102M, las tres de 2023). O sea
+    // que la propia guarda del proyecto decía que no.
+    //
+    // Con v1.1 esa misma ganada sale AMARILLA, el portero la deja pasar, y no
+    // se pierde ninguna adjudicación.
     const ev = evaluarRetroactivo([reg({
       numero: 'SAMC-1-2025', tipo: 'MENOR', presupuesto: '100.000.000',
       estado: 'GANADA', presentacion: 45817,
     })])
+    expect(ev.adjudicaciones_perdidas_total).toBe(0)
+    expect(ev.criterio_aprobado).toBe(true)
+  })
+
+  it('y el criterio de cancelación SIGUE VIVO para las modalidades que sí cortan', () => {
+    // Quitarle el diente a la guarda sería peor que no tenerla. Una ganada en
+    // una modalidad que sigue roja la sigue activando.
+    const ev = evaluarRetroactivo([reg({
+      numero: 'LP-1-2025', tipo: 'LICITACION', presupuesto: '100.000.000',
+      estado: 'GANADA', presentacion: 45817,
+    })])
     expect(ev.adjudicaciones_perdidas_total).toBe(1)
     expect(ev.criterio_aprobado).toBe(false)
-    expect(ev.adjudicaciones_perdidas_detalle[0].numero_proceso).toBe('SAMC-1-2025')
     expect(ev.adjudicaciones_perdidas_detalle[0].motivos).toEqual(['MODALIDAD_SIN_HISTORIAL'])
   })
 
@@ -736,7 +755,15 @@ describe('evaluarRetroactivo', () => {
     expect(ev.adjudicaciones_no_evaluables).toBe(2)   // pero se reportan
   })
 
-  it('cuenta las propuestas sin retorno que el filtro habría bloqueado', () => {
+  it('EL COSTO DE v1.1: ya no bloquea las menores perdidas — y eso es a propósito', () => {
+    // La otra cara del cambio, dicha sin maquillaje. v1.0 bloqueaba las menores
+    // cuantías sin retorno (12 de las 32 presentadas en 2025, según la
+    // calibración). v1.1 no bloquea ninguna: las deja pasar a la bandeja.
+    //
+    // El trueque es explícito: v1.0 ahorraba 12 propuestas perdidas pero habría
+    // matado las 3 adjudicaciones más grandes de la historia de NEG. v1.1 no
+    // ahorra ninguna de las 12 y no mata ninguna de las 3 — y lo que ahora
+    // limita el esfuerzo es el CUPO SEMANAL, que para eso existe.
     const ev = evaluarRetroactivo([
       reg({ numero: 'A-2025', tipo: 'MENOR', estado: 'PERDIDA', presentacion: 45817 }),
       reg({ numero: 'B-2025', tipo: 'MENOR', estado: 'PERDIDA', presentacion: 45818 }),
@@ -744,11 +771,20 @@ describe('evaluarRetroactivo', () => {
     ])
     const a = ev.por_anio[0]
     expect(a.presentadas).toBe(3)
-    expect(a.sin_retorno_bloqueadas).toBe(2)
-    expect(a.pasan_filtro).toBe(1)
+    expect(a.sin_retorno_bloqueadas).toBe(0)
+    expect(a.pasan_filtro).toBe(3)
+    // La tasa filtrada deja de maquillar: es la real, porque no filtra nada.
     expect(a.tasa_real_pct).toBeCloseTo(33.33, 1)
-    expect(a.tasa_filtrada_pct).toBe(100)
+    expect(a.tasa_filtrada_pct).toBeCloseTo(33.33, 1)
     expect(ev.criterio_aprobado).toBe(true)
+  })
+
+  it('una modalidad que sigue roja sí se sigue contando como bloqueada', () => {
+    const ev = evaluarRetroactivo([
+      reg({ numero: 'LP-2025', tipo: 'LICITACION', estado: 'PERDIDA', presentacion: 45817 }),
+      reg({ numero: 'C-2025', tipo: 'MINIMA', estado: 'GANADA', presentacion: 45819 }),
+    ])
+    expect(ev.por_anio[0].sin_retorno_bloqueadas).toBe(1)
   })
 
   it('las descartadas NO cuentan como presentadas', () => {

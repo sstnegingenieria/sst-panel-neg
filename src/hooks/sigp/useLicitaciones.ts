@@ -112,8 +112,12 @@ export function useCriterioSemaforo(habilitado: boolean, version: string | null)
         // JAMÁS por ruta de campo de Firestore (ver el gotcha documentado en
         // types/sigp/semaforoVersiones.ts).
         const v = reg?.versiones?.[version] ?? null
-        setLimitaciones(v?.limitaciones ?? null)
-        setDefinicion(v?.definicion ?? null)
+        // Los dos campos de v1.1 son para quien DECIDE; `definicion` y
+        // `limitaciones` son para quien audita. Si el registro todavía no los
+        // trae —una versión anterior a v1.1— se cae a los viejos: es mejor un
+        // texto técnico que un hueco.
+        setLimitaciones(v?.antes_de_descartar ?? v?.limitaciones ?? null)
+        setDefinicion(v?.resumen ?? v?.definicion ?? null)
       })
       .catch(() => { if (vivo) { setLimitaciones(null); setDefinicion(null) } })
       .finally(() => { if (vivo) setCargando(false) })

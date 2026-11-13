@@ -109,7 +109,7 @@ export type MotivoDescarte = typeof MOTIVOS_DESCARTE[number]
 export const MOTIVOS_DESCARTE_DEL_LEXICO: MotivoDescarte[] = ['RUIDO_LEXICO', 'FUERA_DE_ALCANCE']
 
 export const MOTIVOS_SEMAFORO = [
-  'MODALIDAD_SIN_HISTORIAL', 'SORTEO', 'LIMITACION_MIPYME', 'REQUIERE_LECTURA',
+  'MODALIDAD_SIN_HISTORIAL', 'MENOR_CUANTIA', 'SORTEO', 'LIMITACION_MIPYME', 'REQUIERE_LECTURA',
 ] as const
 export type MotivoSemaforo = typeof MOTIVOS_SEMAFORO[number]
 
@@ -491,10 +491,11 @@ export const ORIGEN_FECHA_LABEL: Record<OrigenFecha, string> = {
 }
 
 export const MOTIVO_SEMAFORO_LABEL: Record<MotivoSemaforo, string> = {
-  MODALIDAD_SIN_HISTORIAL: 'Modalidad sin historial de NEG',
-  SORTEO: 'El proceso tiene sorteo de consolidación',
-  LIMITACION_MIPYME: 'Limitación a MiPyme de otro territorio',
-  REQUIERE_LECTURA: 'Requiere lectura del pliego',
+  MODALIDAD_SIN_HISTORIAL: 'NEG casi no ha ganado en esta modalidad',
+  MENOR_CUANTIA: 'Menor cuantía: hay dos cosas que verificar',
+  SORTEO: 'Hay sorteo: presentarse no garantiza que te evalúen',
+  LIMITACION_MIPYME: 'Reservado a MiPymes de otra región',
+  REQUIERE_LECTURA: 'Hay que leer el pliego para saber',
 }
 
 // ── Máquina de estados ───────────────────────────────────────────────────────

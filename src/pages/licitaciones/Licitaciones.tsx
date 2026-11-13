@@ -435,11 +435,13 @@ export default function Licitaciones() {
             {/* Se DERIVA de `creado_en` y la fecha de cierre, no de un contador: se
                 puede mirar hacia atrás y no hay nada que acordarse de incrementar. */}
             En los últimos {perdidas.dias} días se vencieron{' '}
-            <strong>{perdidas.vencidas_esperando}</strong>{' '}
-            esperando en la cola
+            <strong>{perdidas.vencidas_esperando}</strong> esperando en la cola.
             {perdidas.nacieron_vencidas > 0 && (
-              <>, y <strong>{perdidas.nacieron_vencidas}</strong> llegaron ya vencidas</>
-            )}.
+              <>
+                {' '}Otros <strong>{perdidas.nacieron_vencidas}</strong> ya venían cerrados
+                cuando el radar los encontró — ese no es tiempo que hayas perdido tú.
+              </>
+            )}
             {perdidas.vencidas_esperando === 0 && perdidas.nacieron_vencidas === 0
               && ' Nada se perdió por falta de tiempo.'}
           </p>
