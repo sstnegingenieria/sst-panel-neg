@@ -25,28 +25,50 @@ describe('calcularSemaforo — verde', () => {
   })
 
   it('sella la versión del criterio en cada cálculo', () => {
-    expect(calcularSemaforo(base()).version).toBe('v1.0')
-    expect(calcularSemaforo(base({ modalidad: 'otra' })).version).toBe('v1.0')
+    expect(calcularSemaforo(base()).version).toBe('v1.1')
+    expect(calcularSemaforo(base({ modalidad: 'otra' })).version).toBe('v1.1')
   })
 })
 
 describe('calcularSemaforo — rojo por modalidad', () => {
-  it('menor cuantía es ROJO con MODALIDAD_SIN_HISTORIAL', () => {
+  it('v1.1: la menor cuantía es AMARILLA, no roja', () => {
+    // El cambio del bloque. Tres razones medidas, ninguna la competencia:
+    // el cupo ya protege (dentro no se mueve: 5 y 5), la regla frenaba 30 de
+    // las 39 de la bandeja cuando el cupo ya limita, y los tres contratos más
+    // grandes de la historia de NEG fueron menores cuantías.
     const r = calcularSemaforo(base({ modalidad: 'menor_cuantia' }))
-    expect(r.semaforo).toBe('rojo')
-    expect(r.motivos).toEqual(['MODALIDAD_SIN_HISTORIAL'])
+    expect(r.semaforo).toBe('amarillo')
+    expect(r.motivos).toEqual(['MENOR_CUANTIA'])
   })
 
-  it('TODA modalidad distinta de mínima cuantía es roja', () => {
+  it('las banderas del proceso se ACUMULAN sobre la menor cuantía', () => {
+    // Antes ni se evaluaban: el rojo cortaba seco. Ahora la lista de
+    // verificación se arma con lo que el proceso realmente tiene.
+    const r = calcularSemaforo(base({ modalidad: 'menor_cuantia', tiene_sorteo: true }))
+    expect(r.semaforo).toBe('amarillo')
+    expect(r.motivos).toEqual(['MENOR_CUANTIA', 'SORTEO'])
+  })
+
+  it('las DEMÁS modalidades siguen rojas: el cambio es solo la menor', () => {
     for (const m of MODALIDADES_LICITACION) {
       const r = calcularSemaforo(base({ modalidad: m }))
       if (m === 'minima_cuantia') {
-        expect(r.semaforo).toBe('verde')
+        expect(r.semaforo, m).toBe('verde')
+      } else if (m === 'menor_cuantia') {
+        expect(r.semaforo, m).toBe('amarillo')
+        expect(r.motivos, m).toEqual(['MENOR_CUANTIA'])
       } else {
-        expect(r.semaforo).toBe('rojo')
-        expect(r.motivos).toEqual(['MODALIDAD_SIN_HISTORIAL'])
+        expect(r.semaforo, m).toBe('rojo')
+        expect(r.motivos, m).toEqual(['MODALIDAD_SIN_HISTORIAL'])
       }
     }
+  })
+
+  it('EL AMARILLO NUNCA BLOQUEA: ni la menor cuantía ni ninguna otra', () => {
+    // La consecuencia que hace seguro el cambio. Pasar de rojo a amarillo no
+    // descarta nada: solo deja pasar más, y el cupo decide cuánto.
+    const r = calcularSemaforo(base({ modalidad: 'menor_cuantia' }))
+    expect(r.semaforo).not.toBe('rojo')
   })
 
   it('el rojo CORTA SECO: no acumula motivos amarillos encima', () => {

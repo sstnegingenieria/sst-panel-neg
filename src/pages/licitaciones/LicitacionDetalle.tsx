@@ -30,6 +30,7 @@ import {
 } from '../../types/sigp/licitacion'
 import type { DatosCumplimiento, EstadoLicitacion, Licitacion } from '../../types/sigp/licitacion'
 import { probabilidadSorteo } from '../../utils/sigp/semaforo'
+import { manifestacionCerrada, faltaFechaManifestacion } from '../../utils/sigp/bandejaLicitaciones'
 import { SEMAFORO_CHIP } from '../../utils/sigp/bandejaLicitaciones'
 import {
   evaluarVentana, isoLocal, frasesSorteo, REFERENCIA_OFERTA, fueraDeBanda,
@@ -128,6 +129,9 @@ export default function LicitacionDetalle() {
 
   const ventana = evaluarVentana(isoDe(lic.cronograma.cierre), lic.modalidad, hoy, horasUtilesDia)
   const haySorteo = lic.cronograma.sorteo !== null
+  // v1.1: la menor cuantía ya no es roja. El panel deja de explicar por qué
+  // NO y pasa a decir QUÉ VERIFICAR antes de comprometerse.
+  const hayQueVerificar = lic.semaforo_motivos.includes('MENOR_CUANTIA')
   const rojoPorModalidad = lic.semaforo === 'rojo'
     && lic.semaforo_motivos.includes('MODALIDAD_SIN_HISTORIAL')
   const salidas = TRANSICIONES_LICITACION[lic.estado] ?? []
@@ -224,33 +228,72 @@ export default function LicitacionDetalle() {
         <EconomiaLicitacion licitacionId={lic.id} puedeEditar={puedeGestionar} />
       ) : (
         <div className="space-y-5">
+          {/* ══ ANTES DE COMPROMETERSE ══ */}
+          {/* No explica por qué no: dice qué mirar. Dos ítems, los dos con
+              respuesta en el documento — el tercero que se consideró
+              («cuántos manifestaron interés») se midió y NO EXISTE antes de
+              decidir, y una lista con un ítem que nunca se llena enseña a
+              ignorar la lista entera. */}
+          {hayQueVerificar && (
+            <section className="bg-amber-50 border border-amber-300 rounded-lg p-4 space-y-3">
+              <h2 className="text-sm font-semibold text-amber-900">
+                Antes de comprometerse, hay dos cosas que verificar
+              </h2>
+              <ul className="space-y-2 text-sm text-amber-900">
+                <li className="flex gap-2">
+                  <span aria-hidden>{lic.cronograma.sorteo ? '⚠' : '✓'}</span>
+                  <span>
+                    <strong>¿Tiene sorteo?</strong>{' '}
+                    {lic.cronograma.sorteo
+                      ? 'Sí. Presentarse no garantiza que te evalúen.'
+                      : 'No hay fecha de sorteo anotada.'}
+                  </span>
+                </li>
+                <li className="flex gap-2">
+                  <span aria-hidden>{manifestacionCerrada(lic) ? '⚠' : '✓'}</span>
+                  <span>
+                    <strong>¿Sigue abierta la manifestación de interés?</strong>{' '}
+                    {manifestacionCerrada(lic)
+                      ? 'No: el proceso ya pasó a la fase de oferta. Si NEG no manifestó, no se puede presentar.'
+                      : faltaFechaManifestacion(lic)
+                        ? 'Falta anotar la fecha límite — está en el pliego, no en los datos del SECOP.'
+                        : 'Sí, por lo que se sabe hasta ahora.'}
+                  </span>
+                </li>
+              </ul>
+              <p className="text-xs text-amber-900/80">
+                Esto no bloquea nada. Es amarillo porque hay algo que mirar, no
+                porque haya algo que impida.
+              </p>
+            </section>
+          )}
+
           {/* ══ EL ROJO INFORMADO ══ */}
           {rojoPorModalidad && (
             <section className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-3">
               <h2 className="text-sm font-semibold text-red-800">
-                El criterio {lic.semaforo_version} frena este proceso
+                Este proceso está fuera del perfil donde NEG suele ganar
               </h2>
               <p className="text-sm text-red-900">
-                Motivo: <strong>{MOTIVO_SEMAFORO_LABEL.MODALIDAD_SIN_HISTORIAL}</strong>
-                {' — '}es {MODALIDAD_LICITACION_LABEL[lic.modalidad].toLowerCase()}.
+                Es {MODALIDAD_LICITACION_LABEL[lic.modalidad].toLowerCase()}, y NEG
+                casi no ha ganado en esta modalidad.
               </p>
               {definicion && (
                 <p className="text-xs text-red-800/90">
-                  <span className="font-medium">Qué dice el criterio:</span> {definicion}
+                  <span className="font-medium">La regla, en corto:</span> {definicion}
                 </p>
               )}
-              {/* Leído de `configuracion/semaforo_versiones`, no del bundle. */}
               {limitaciones ? (
                 <div className="bg-white/70 border border-red-200 rounded p-3">
                   <p className="text-xs font-semibold text-red-800 mb-1">
-                    Antes de decidir, lo que el criterio NO cubre:
+                    Pero antes de descartarlo, algo que conviene saber:
                   </p>
                   <p className="text-xs text-red-900 leading-relaxed">{limitaciones}</p>
                 </div>
               ) : (
                 <p className="text-xs text-red-700/80">
-                  No se pudo leer el registro del criterio ({lic.semaforo_version}).
-                  El rojo se sostiene, pero sin sus límites a la vista.
+                  No se pudo cargar la explicación de esta marca. Sigue en rojo,
+                  pero sin el contexto que suele acompañarla.
                 </p>
               )}
               {puedeGestionar && !lic.override_manual && (
@@ -262,9 +305,7 @@ export default function LicitacionDetalle() {
                 </button>
               )}
             </section>
-          )}
-
-          {lic.override_manual && (
+          )}        {lic.override_manual && (
             <section className="bg-orange-50 border border-orange-200 rounded-lg p-4">
               <h2 className="text-sm font-semibold text-orange-900">Decisión manual registrada</h2>
               <p className="text-sm text-orange-900 mt-1">{lic.override_manual.motivo}</p>
