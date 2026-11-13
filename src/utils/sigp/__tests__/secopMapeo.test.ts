@@ -17,6 +17,7 @@ import {
   docIdSecop, colapsarPorProceso, mapearProceso, guardaIdentidad, ingerirSecop,
   entradaSemaforoSecop, TOPE_PRESUPUESTO_COP, FAMILIAS_RUP_NEG,
   type FilaSecop,
+  limpiarReferencia, FASES_SECOP,
 } from '../secopMapeo'
 import { SEMAFORO_VERSION } from '../semaforo'
 
@@ -598,5 +599,62 @@ describe('reporte de ingesta', () => {
     expect(rep.procesos).toBe(0)
     expect(rep.senales).toEqual([])
     expect(rep.puede_escribir).toBe(true)
+  })
+})
+
+// ── SEGUNDO: la fase sale del número del proceso ────────────────────────────
+
+describe('limpiarReferencia', () => {
+  it('quita el sufijo de la fase propia', () => {
+    // Caso REAL, de un documento que está hoy en producción.
+    expect(limpiarReferencia(
+      'PN RASES 5 SA MC 010 2026 (Manifestación de interés (Menor Cuantía))',
+      'Manifestación de interés (Menor Cuantía)',
+    )).toBe('PN RASES 5 SA MC 010 2026')
+  })
+
+  it('quita los sufijos ACUMULADOS, no solo el último', () => {
+    // El otro caso real: la referencia junta una fase por cada una que pasó.
+    expect(limpiarReferencia(
+      'SAMC-010-2026 (Manifestación de interés (Menor Cuantía)) (Presentación de oferta)',
+      'Presentación de oferta',
+    )).toBe('SAMC-010-2026')
+  })
+
+  it('NO toca un paréntesis que no es una fase', () => {
+    // La razón de comparar contra una lista y no contra "lo que esté entre
+    // paréntesis al final": esto es un dato real del número de proceso.
+    const n = 'MC-001-2026 (SEGUNDA CONVOCATORIA)'
+    expect(limpiarReferencia(n, 'Presentación de oferta')).toBe(n)
+  })
+
+  it('una fase NUEVA del origen se limpia igual, por venir en la fila', () => {
+    expect(limpiarReferencia(
+      'XYZ-9 (Fase Que No Existe Todavía)', 'Fase Que No Existe Todavía',
+    )).toBe('XYZ-9')
+  })
+
+  it('una fase nueva que NO viene en la fila degrada a no recortar', () => {
+    // Nunca al revés: jamás recorta algo que no sabe que es una fase.
+    expect(limpiarReferencia('XYZ-9 (Fase Que No Existe Todavía)', null))
+      .toBe('XYZ-9 (Fase Que No Existe Todavía)')
+  })
+
+  it('sin fase, limpia igual las conocidas', () => {
+    expect(limpiarReferencia('ABC-1 (Presentación de oferta)', null)).toBe('ABC-1')
+  })
+
+  it('jamás deja el número vacío', () => {
+    // Un número de proceso que sea SOLO el nombre de una fase es raro, pero
+    // vaciarlo sería peor que dejarlo como está.
+    expect(limpiarReferencia('Presentación de oferta', 'Presentación de oferta'))
+      .toBe('Presentación de oferta')
+    expect(limpiarReferencia('  ', null)).toBe('')
+  })
+
+  it('las fases conocidas son las MEDIDAS, incluida la variante de mayúsculas', () => {
+    expect(FASES_SECOP).toContain('Presentación de observaciones')
+    expect(FASES_SECOP).toContain('Presentación de Observaciones')
+    expect(FASES_SECOP).toContain('Manifestación de interés (Menor Cuantía)')
   })
 })

@@ -1027,7 +1027,7 @@ describe('INVARIANTE 8 — no se presenta con el checklist abierto', () => {
 describe('triage del radar (D3): revisado_por / revisado_en', () => {
   const delRadar = () => base({
     estado: 'detectada',
-    radar: { senal: 'texto_coincide' as const, terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'publicacion' as const },
+    radar: { senal: 'texto_coincide' as const, terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', fase: null, portafolio: null, origen_fecha: 'publicacion' as const },
   })
 
   it('ADMITIR una fila del radar sella quien hizo el triage', () => {
@@ -1058,7 +1058,7 @@ describe('triage del radar (D3): revisado_por / revisado_en', () => {
 
   it('DESCARTAR desde otro estado NO es triage: ya habia sido revisada', () => {
     const patch = patchDescartarLicitacion(
-      base({ estado: 'en_evaluacion', radar: { senal: 'texto_coincide' as const, terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'publicacion' as const } }), ACTOR, AHORA, 'CAPACIDAD')
+      base({ estado: 'en_evaluacion', radar: { senal: 'texto_coincide' as const, terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', fase: null, portafolio: null, origen_fecha: 'publicacion' as const } }), ACTOR, AHORA, 'CAPACIDAD')
     expect(patch).not.toBeNull()
     expect(patch).not.toHaveProperty('revisado_por')
   })
@@ -1082,7 +1082,7 @@ describe('triage del radar (D3): revisado_por / revisado_en', () => {
 
 const procedencia = (extra?: Partial<ProcedenciaRadar>): ProcedenciaRadar => ({
   senal: 'texto_coincide', terminos: ['redes'],
-  vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'publicacion',
+  vocabulario_version: 'v1.0', corrida: 'c1', fase: null, portafolio: null, origen_fecha: 'publicacion',
   ...extra,
 })
 

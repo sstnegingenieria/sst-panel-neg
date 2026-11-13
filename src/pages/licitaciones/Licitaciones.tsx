@@ -505,6 +505,15 @@ function Procedencia({ radar }: { radar: ProcedenciaRadar }) {
       <span className={`px-2 py-0.5 rounded font-medium ${SENAL_CHIP[radar.senal]}`}>
         {SENAL_LABEL[radar.senal]}
       </span>
+      {radar.fase && (
+        // La fase, TAL CUAL la dice el origen. Lo que significa para poder
+        // presentarse —que en menor cuantía una fase de oferta quiere decir
+        // que la manifestación ya pasó— es el bloque siguiente; acá solo se
+        // muestra el hecho.
+        <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700">
+          {radar.fase}
+        </span>
+      )}
       {radar.terminos.length > 0 && (
         <span className="text-gray-600">
           <span className="text-gray-400">términos:</span> {radar.terminos.join(' · ')}

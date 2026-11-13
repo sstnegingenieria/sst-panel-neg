@@ -62,7 +62,7 @@ describe('seccionDe', () => {
       estado: 'detectada' as EstadoLicitacion,
       radar: {
         senal: 'texto_coincide' as const, terminos: ['redes'],
-        vocabulario_version: 'v1.0', corrida: 'corr-1', origen_fecha: 'publicacion' as const,
+        vocabulario_version: 'v1.0', corrida: 'corr-1', fase: null, portafolio: null, origen_fecha: 'publicacion' as const,
       },
     }
     expect(seccionDe(delRadar)).toBe('radar')
@@ -142,7 +142,7 @@ describe('repartirPorCapacidad', () => {
     const traida = conCierre(1, {
       id: 'del_radar',
       estado: 'detectada',
-      radar: { senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'publicacion' },
+      radar: { senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', fase: null, portafolio: null, origen_fecha: 'publicacion' },
     })
 
     // Lo que hace la página: filtrar por sección y repartir SOLO las activas.
@@ -320,7 +320,7 @@ describe('coincideBusqueda / contarSecciones', () => {
       lic({ estado: 'en_evaluacion' }),
       lic({
         estado: 'detectada',
-        radar: { senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha: 'publicacion' },
+        radar: { senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', fase: null, portafolio: null, origen_fecha: 'publicacion' },
       }),
       lic({ estado: 'descartada', motivo_descarte: 'SORTEO', activa: false }),
       lic({ estado: 'perdida', activa: false }),
@@ -345,7 +345,7 @@ const delRadar = (
 ) => {
   const radar = {
     senal: 'texto_coincide' as const, terminos: ['redes'],
-    vocabulario_version: 'v1.0', corrida: 'c1', origen_fecha,
+    vocabulario_version: 'v1.0', corrida: 'c1', fase: null, portafolio: null, origen_fecha,
   }
   return dias === null
     ? lic({ ...extra, estado: 'detectada', radar })

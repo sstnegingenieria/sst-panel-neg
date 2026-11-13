@@ -223,6 +223,8 @@ export type FilaSecop = { readonly [K in CampoSecop]?: unknown }
 export type DestinoMapeado =
   | 'id_secop'
   | 'numero_proceso'
+  | 'fase'
+  | 'portafolio'
   | 'entidad.nombre'
   | 'entidad.nit'
   | 'entidad.departamento'
@@ -252,6 +254,8 @@ export type DestinoMapeado =
 export const CAMPO_SECOP = {
   id_secop: 'id_del_proceso',
   numero_proceso: 'referencia_del_proceso',
+  fase: 'fase',
+  portafolio: 'id_del_portafolio',
   'entidad.nombre': 'entidad',
   'entidad.nit': 'nit_entidad',
   'entidad.departamento': 'departamento_entidad',
@@ -289,9 +293,7 @@ export const CAMPOS_NO_MAPEADOS: Partial<Record<CampoSecop, string>> = {
     + 'probabilidadSorteo(). `manifestaciones` se captura a mano al presentar.',
   codigo_pci: 'Clasificador interno de la entidad; sin uso en el radar.',
   ppi: 'Marca de proyecto de inversión; sin uso en el radar.',
-  id_del_portafolio: 'Agrupador interno de SECOP.',
   nombre_del_procedimiento: 'Título corto; el objeto contratado va en descripci_n_del_procedimiento.',
-  fase: 'Fase del flujo de SECOP; el estado del radar es el nuestro (nace detectada).',
   fecha_de_ultima_publicaci: 'Reservado para el bloque de re-lectura (detectar cambios del pliego).',
   fecha_de_publicacion_fase: 'Fecha de fase intermedia; el cronograma del radar se arma en su bloque.',
   fecha_de_publicacion_fase_1: 'Ídem.',
@@ -1101,6 +1103,69 @@ export function entradaSemaforoSecop(d: {
  * el proceso no tiene identidad usable — todo lo demás se degrada a `null` en
  * su campo y queda contado en `meta`.
  */
+/**
+ * FASES observadas en el filtro del radar, MEDIDAS sobre todo lo publicado
+ * desde 2025 (las tres modalidades que la ingesta consulta):
+ *
+ *   131.117  Presentación de oferta
+ *    20.988  Presentación de observaciones
+ *    20.211  Manifestación de interés (Menor Cuantía)
+ *    11.302  Fase de ofertas
+ *     2.361  Clarification submission
+ *     2.081  Pré-Calificación de competidores
+ *        27  Presentación de Observaciones   ← variante de mayúsculas del origen
+ *
+ * La variante con «O» mayúscula está a propósito: son 27 filas reales y
+ * normalizar para compararlas invitaría a normalizar también lo que NO es una
+ * fase. Acá se comparan literales exactos y punto.
+ */
+export const FASES_SECOP = [
+  'Presentación de oferta',
+  'Presentación de observaciones',
+  'Presentación de Observaciones',
+  'Manifestación de interés (Menor Cuantía)',
+  'Fase de ofertas',
+  'Clarification submission',
+  'Pré-Calificación de competidores',
+] as const
+
+/**
+ * Quita del número de proceso los sufijos de FASE que el origen le acumula.
+ *
+ * `referencia_del_proceso` va juntando el nombre de cada fase por la que el
+ * proceso pasó, y se mapeaba verbatim. Lo que Karen leía como «el número»
+ * era, literalmente:
+ *
+ *   SAMC-010-2026 (Manifestación de interés (Menor Cuantía)) (Presentación de oferta)
+ *
+ * ── POR QUÉ SE COMPARA CONTRA UNA LISTA Y NO CONTRA «LO QUE ESTÉ ENTRE
+ *    PARÉNTESIS AL FINAL» ────────────────────────────────────────────────
+ * Porque un número de proceso puede terminar legítimamente en un paréntesis
+ * —«MC-001-2026 (SEGUNDA CONVOCATORIA)»— y recortarlo sería borrar un dato
+ * real. Acá solo se quita lo que coincide EXACTO con una fase conocida. Una
+ * fase nueva del origen degrada a NO recortar, que es lo que pasa hoy; jamás
+ * a recortar algo que no es una fase.
+ *
+ * La fase de la propia fila entra primero en la lista de candidatas: siempre
+ * es el último sufijo, y así una fase nueva se limpia aunque no esté en
+ * `FASES_SECOP`.
+ */
+export function limpiarReferencia(referencia: string, fase: string | null): string {
+  const candidatas = fase ? [fase, ...FASES_SECOP] : [...FASES_SECOP]
+  let out = referencia.trim()
+  for (let vuelta = 0; vuelta < candidatas.length + 2; vuelta++) {
+    const sufijo = candidatas.find(f => {
+      const s = ` (${f})`
+      // `>` y no `>=`: un número de proceso que sea SOLO el nombre de una fase
+      // es un dato raro, pero vaciarlo sería peor que dejarlo como está.
+      return out.length > s.length && out.endsWith(s)
+    })
+    if (sufijo === undefined) break
+    out = out.slice(0, -(sufijo.length + 3)).trimEnd()
+  }
+  return out === '' ? referencia.trim() : out
+}
+
 export function mapearProceso(
   p: ProcesoColapsado, hash: (s: string) => string,
   terminos: readonly string[] = TERMINOS_NEG,
@@ -1133,9 +1198,11 @@ export function mapearProceso(
 
   const sem = calcularSemaforo(entradaSemaforoSecop({ modalidad: mod.modalidad, entidad }))
 
+  const fase = textoONull(f, CAMPO_SECOP.fase)
+
   const doc: LicitacionDetectada = {
     consecutivo: '',
-    numero_proceso: texto(f, CAMPO_SECOP.numero_proceso),
+    numero_proceso: limpiarReferencia(texto(f, CAMPO_SECOP.numero_proceso), fase),
     id_secop,
     origen: 'secop_ii',
     url_proceso,
@@ -1174,6 +1241,8 @@ export function mapearProceso(
       terminos: clasificacion.terminos,
       vocabulario_version,
       corrida: null,
+      fase,
+      portafolio: textoONull(f, CAMPO_SECOP.portafolio),
       origen_fecha: fecha.origen,
     },
   }

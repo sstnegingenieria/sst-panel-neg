@@ -205,6 +205,41 @@ export interface ProcedenciaRadar {
   /** Id de la corrida que lo creó. Lo sella el escritor, no el mapeo. */
   corrida: string | null
   /**
+   * LA FASE DEL PROCESO EN SECOP, literal: «Presentación de oferta»,
+   * «Manifestación de interés (Menor Cuantía)», «Presentación de
+   * observaciones»… `null` cuando el origen no la trae.
+   *
+   * ── POR QUÉ IMPORTA, MEDIDO ────────────────────────────────────────────
+   * En una MENOR CUANTÍA, quien no manifestó interés antes del límite NO
+   * puede presentar oferta, aunque la fecha de cierre siga vigente. El límite
+   * de manifestación NO se publica en datos abiertos (`fecha_de_recepcion_de`
+   * vale lo mismo en las dos filas en el 85,8 % de 10.421 procesos de 2026:
+   * es el límite de la OFERTA, estampado también sobre la fila de
+   * manifestación). La fase es lo que SÍ lo dice: un proceso en
+   * «Presentación de oferta» ya pasó la manifestación.
+   *
+   * Medido además: la manifestación se abre, 5 días después (mediana) se abre
+   * la fase de oferta, y 4 días después vence. En un proceso de ~9 días la
+   * puerta se cierra sobre el día 5 — y al día 6 el `cierre` todavía muestra
+   * 3 o 4 días por delante.
+   */
+  fase: string | null
+  /**
+   * `id_del_portafolio` — LO ÚNICO QUE UNE LAS FASES DE UN MISMO PROCESO.
+   *
+   * Las filas de un mismo proceso NO comparten `id_del_proceso` (cruzan 0 de
+   * 11.463 medidas); comparten el portafolio (cruzan 10.421, el 90,9 %). Y
+   * como el id del documento sale de `id_del_proceso`, **cada fase entra como
+   * documento propio**: el radar ya trae todas las filas, solo que sin saber
+   * que son la misma licitación.
+   *
+   * Cuánto se nota depende de la ventana —1,16 filas por portafolio a 12 días;
+   * 1,50 en el año—, porque las fases están a ~9 días una de otra. Con el
+   * solape en 4 el problema está escondido; al ampliarlo aparece. Por eso este
+   * campo entra ANTES de la restitución del solape.
+   */
+  portafolio: string | null
+  /**
    * DE DÓNDE SALIÓ LA FECHA DEL PROCESO, en el DOCUMENTO y no solo en la meta.
    *
    * Hasta la corrida de noviembre `origen_fecha` vivía únicamente en
