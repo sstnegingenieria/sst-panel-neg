@@ -756,6 +756,63 @@ function selloTriage(
  * instante con el documento en `en_preparacion` sin número. El caller lo
  * obtiene de la CF `generarConsecutivo('LIC')` justo antes.
  */
+export interface FechasCronograma {
+  manifestacion?: Timestamp | null
+  sorteo?: Timestamp | null
+  cierre?: Timestamp | null
+}
+
+/**
+ * ¿Las fechas van en orden? manifestación ≤ sorteo ≤ cierre.
+ *
+ * Las ausentes no opinan: un cronograma con sorteo y sin manifestación es
+ * perfectamente válido — quiere decir que todavía no se sabe la primera, no
+ * que el orden esté mal.
+ */
+export function ordenCronogramaValido(f: FechasCronograma): boolean {
+  const ms = (t: Timestamp | null | undefined) => t?.toMillis?.() ?? null
+  const m = ms(f.manifestacion), so = ms(f.sorteo), c = ms(f.cierre)
+  if (m !== null && so !== null && m > so) return false
+  if (so !== null && c !== null && so > c) return false
+  if (m !== null && c !== null && m > c) return false
+  return true
+}
+
+/**
+ * Patch de las fechas del cronograma que una PERSONA escribe.
+ *
+ * ── POR QUÉ ESTO EXISTE ────────────────────────────────────────
+ * El límite de manifestación de interés y la fecha de sorteo NO EXISTEN en
+ * datos abiertos — medido sobre 10.421 procesos de 2026. Si alguien las
+ * escribe, este documento es el único lugar del mundo donde están.
+ *
+ * En MENOR CUANTÍA la de manifestación es la que manda: quien no manifestó
+ * interes antes del límite no puede presentar oferta, aunque la fecha de cierre
+ * siga vigente. El cierre llega a los 9 días (mediana) de publicado el proceso
+ * y la puerta se cierra sobre el día 5.
+ *
+ * Solo toca las claves que vienen en `fechas`: lo que no se menciona no se
+ * mueve. `null` explícito SÍ limpia — es una persona diciendo "me equivoqué".
+ */
+export function patchCronogramaManual(
+  l: Pick<Licitacion, 'cronograma'>, fechas: FechasCronograma,
+  actor: ActorLicitacion, ahora: Timestamp,
+) {
+  if (!actor.uid.trim()) return null
+  const cronograma = { ...l.cronograma }
+  let toco = false
+  for (const k of ['manifestacion', 'sorteo', 'cierre'] as const) {
+    if (!(k in fechas)) continue
+    const v = fechas[k] ?? null
+    if ((cronograma[k]?.toMillis?.() ?? null) === (v?.toMillis?.() ?? null)) continue
+    cronograma[k] = v
+    toco = true
+  }
+  if (!toco) return null
+  if (!ordenCronogramaValido(cronograma)) return null
+  return { cronograma, actualizado_por: actor.uid, actualizado_en: ahora }
+}
+
 export function patchAvanzarLicitacion(
   l: Licitacion, destino: EstadoLicitacion, actor: ActorLicitacion, ahora: Timestamp,
   opciones?: { consecutivo?: string },

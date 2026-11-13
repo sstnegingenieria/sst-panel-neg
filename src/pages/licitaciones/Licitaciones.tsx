@@ -24,13 +24,17 @@ import {
   MOTIVO_DESCARTE_LABEL, MOTIVOS_DESCARTE,
   ORIGEN_FECHA_LABEL, SENAL_LABEL,
   lexicoParticipo, patchAvanzarLicitacion, patchDescartarLicitacion,
+  patchCronogramaManual,
 } from '../../types/sigp/licitacion'
 import { probabilidadSorteo } from '../../utils/sigp/semaforo'
 import type { MotivoDescarte, ProcedenciaRadar } from '../../types/sigp/licitacion'
 import ModalDescartar from '../../components/sigp/licitaciones/ModalDescartar'
+import ModalAdmitir from '../../components/sigp/licitaciones/ModalAdmitir'
+import type { FechasFormulario } from '../../components/sigp/licitaciones/ModalAdmitir'
 import {
   SECCIONES_BANDEJA, SECCION_LABEL, SEMAFORO_CHIP, SENAL_CHIP,
   seccionDe, ordenarPorCierre, repartirRadar, capacidadSemanal,
+  avisoAlFilo, faltaFechaManifestacion, FASE_MANIFESTACION,
   repartirPorCapacidad, coincideBusqueda,
   contarSecciones, planIntercambioCupo, patchLiberarCupo,
 } from '../../utils/sigp/bandejaLicitaciones'
@@ -179,13 +183,34 @@ export default function Licitaciones() {
     } finally { setGuardando(false) }
   }
 
-  const admitir = async (l: LicitacionConId) => {
-    if (!user?.uid) return
+  // Admitir abre el modal: es el momento en que alguien lee el pliego, y las
+  // dos fechas que faltan están ahí y en ningún otro lado.
+  const [admitiendo, setAdmitiendo] = useState<LicitacionConId | null>(null)
+
+  const confirmarAdmision = async (f: FechasFormulario) => {
+    const l = admitiendo
+    if (!l || !user?.uid) return
+    const ahora = Timestamp.now()
+    const actor = { uid: user.uid }
     // `en_evaluacion` no quema consecutivo: el LIC se gasta al comprometerse
     // con horas de trabajo (`en_preparacion`), no al mirar.
+    const avance = patchAvanzarLicitacion(l, 'en_evaluacion', actor, ahora)
+    if (!avance) { toast('El movimiento no es válido', 'error'); return }
+
+    const aTs = (iso: string) => iso ? Timestamp.fromDate(new Date(`${iso}T12:00:00`)) : null
+    // Las tres claves van SIEMPRE: un campo que la persona vació es una
+    // persona diciendo "me equivoqué", y el builder lo distingue de "no lo
+    // mencioné" por la presencia de la clave.
+    const fechas = patchCronogramaManual(l, {
+      manifestacion: aTs(f.manifestacion),
+      sorteo: aTs(f.sorteo),
+      cierre: aTs(f.cierre),
+    }, actor, ahora)
+
+    setAdmitiendo(null)
     await persistirTriage(
       l,
-      patchAvanzarLicitacion(l, 'en_evaluacion', { uid: user.uid }, Timestamp.now()),
+      { ...avance, ...(fechas ?? {}) },
       `${l.numero_proceso} pasa a evaluación`,
     )
   }
@@ -375,7 +400,7 @@ export default function Licitaciones() {
             <Fila
               key={l.id} l={l} hoy={hoy} horasUtilesDia={horasUtilesDia}
               puedeGestionar={puedeGestionar} enRadar
-              onAdmitir={puedeGestionar ? () => admitir(l) : undefined}
+              onAdmitir={puedeGestionar ? () => setAdmitiendo(l) : undefined}
               onDescartar={puedeGestionar ? () => setDescartando(l) : undefined}
               ocupado={guardando}
             />
@@ -429,6 +454,19 @@ export default function Licitaciones() {
             : cerradas.map(l => <Fila key={l.id} l={l} hoy={hoy} horasUtilesDia={horasUtilesDia} puedeGestionar={puedeGestionar} />)}
         </div>
       )}
+
+      {/* ── Admitir, con las fechas que el origen no trae ── */}
+      <ModalAdmitir
+        abierto={!!admitiendo}
+        licitacion={admitiendo}
+        hubeManifestacion={
+          admitiendo?.radar?.fase === FASE_MANIFESTACION
+          || (admitiendo?.radar?.fases_previas ?? []).includes(FASE_MANIFESTACION)
+        }
+        guardando={guardando}
+        onCerrar={() => setAdmitiendo(null)}
+        onConfirmar={confirmarAdmision}
+      />
 
       {/* ── Descartar desde la bandeja ── */}
       <ModalDescartar
@@ -580,6 +618,10 @@ function Fila({
   onSubir, onLiberar, onAdmitir, onDescartar, ocupado,
 }: FilaProps) {
   const ventana = evaluarVentana(isoDe(l.cronograma.cierre), l.modalidad, hoy, horasUtilesDia)
+  // Informar, no decidir: la fila se queda donde está y dice en qué se mete
+  // quien la tome. Mismo criterio que el rojo informado.
+  const alFilo = noAlcanza ? null : avisoAlFilo(l, hoy, horasUtilesDia)
+  const faltaManifestacion = !noAlcanza && faltaFechaManifestacion(l)
   const haySorteo = l.cronograma.sorteo !== null
   const sorteo = haySorteo ? frasesSorteo(l.manifestaciones, probabilidadSorteo(l.manifestaciones)) : null
 
@@ -658,6 +700,17 @@ function Fila({
       {enRadar && l.radar && <Procedencia radar={l.radar} />}
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+        {alFilo && (
+          <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">
+            ⏱ {alFilo}
+          </span>
+        )}
+        {faltaManifestacion && (
+          <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"
+            title="El límite de manifestación no viene en los datos del SECOP: está en el pliego.">
+            Falta la fecha de manifestación
+          </span>
+        )}
         {noAlcanza ? (
           <span
             className="px-2 py-0.5 rounded bg-gray-200 text-gray-700 font-medium"

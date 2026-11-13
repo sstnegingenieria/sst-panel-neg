@@ -7,6 +7,7 @@ import {
   ESTADOS_ACTIVOS_BANDEJA, SEMAFORO_CHIP, SENAL_CHIP,
   repartirRadar, porQueNoAlcanza, manifestacionCerrada, sinFechaEnElOrigen,
   nacioVencida, vencioEsperando, capacidadSemanal,
+  avisoAlFilo, faltaFechaManifestacion,
 } from '../bandejaLicitaciones'
 import type { LicitacionConId } from '../bandejaLicitaciones'
 import { ESTADOS_LICITACION, SENAL_LABEL } from '../../../types/sigp/licitacion'
@@ -521,6 +522,60 @@ describe('repartirRadar', () => {
 
   it('con la lista vacía devuelve los tres grupos vacíos, no undefined', () => {
     expect(repartirRadar([], HOY, HU)).toEqual({ sinFecha: [], vigentes: [], noAlcanza: [] })
+  })
+})
+
+describe('avisoAlFilo', () => {
+  it('EL CASO MEDIDO: cierra mañana, 1 hábil y hace falta 1', () => {
+    // Las cuatro mínimas de la cola real. Caben — exactamente. Se quedan
+    // arriba, trabajables, y la fila dice en qué se mete quien la tome.
+    const a = avisoAlFilo(conFase('2026-11-13', 'minima_cuantia', null, []), HOY, HU)
+    expect(a).toMatch(/al filo/i)
+    expect(a).toMatch(/habría que armarla hoy/)
+  })
+
+  it('con margen de sobra no avisa nada', () => {
+    expect(avisoAlFilo(conFase('2026-11-30', 'minima_cuantia', null, []), HOY, HU)).toBeNull()
+  })
+
+  it('lo que YA no alcanza no es "al filo": tiene su propio grupo', () => {
+    expect(avisoAlFilo(conFase('2026-11-10', 'minima_cuantia', null, []), HOY, HU)).toBeNull()
+    expect(avisoAlFilo(conFase(HOY, 'minima_cuantia', null, []), HOY, HU)).toBeNull()
+  })
+
+  it('una menor cuantía al filo necesita DOS hábiles, no uno', () => {
+    // 6 h de armado contra 4 h útiles al día. El umbral sale de la modalidad.
+    expect(avisoAlFilo(conFase('2026-11-16', 'menor_cuantia', null, []), HOY, HU))
+      .toMatch(/2 días hábiles y hacen falta 2/)
+  })
+})
+
+describe('faltaFechaManifestacion', () => {
+  it('pasó por manifestación y nadie anotó la fecha', () => {
+    expect(faltaFechaManifestacion(conFase('2026-11-30', 'menor_cuantia',
+      'Presentación de oferta', ['Manifestación de interés (Menor Cuantía)']))).toBe(true)
+  })
+
+  it('está EN manifestación y tampoco la tiene: también falta', () => {
+    expect(faltaFechaManifestacion(conFase('2026-11-30', 'menor_cuantia',
+      'Manifestación de interés (Menor Cuantía)', []))).toBe(true)
+  })
+
+  it('con la fecha anotada ya no falta', () => {
+    const l = conFase('2026-11-30', 'menor_cuantia',
+      'Manifestación de interés (Menor Cuantía)', [])
+    const d = new Date('2026-11-20T12:00:00')
+    l.cronograma = {
+      ...l.cronograma,
+      manifestacion: { toMillis: () => d.getTime(), toDate: () => d } as unknown as Timestamp,
+    }
+    expect(faltaFechaManifestacion(l)).toBe(false)
+  })
+
+  it('un proceso que nunca tuvo manifestación no la echa de menos', () => {
+    expect(faltaFechaManifestacion(conFase('2026-11-30', 'minima_cuantia',
+      'Presentación de oferta', []))).toBe(false)
+    expect(faltaFechaManifestacion(lic({ radar: null }))).toBe(false)
   })
 })
 
