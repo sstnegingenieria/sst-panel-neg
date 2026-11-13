@@ -103,23 +103,73 @@ export function sinFechaEnElOrigen(l: Pick<Licitacion, 'radar'>): boolean {
 }
 
 /**
- * Orden de la cola del radar: LAS SIN FECHA PRIMERO.
+ * ¿El plazo de este proceso YA VENCIÓ?
  *
- * `ordenarPorCierre` manda al FINAL lo que no tiene reloj, y para las activas
- * eso es correcto —no se puede priorizar por urgencia lo que no tiene fecha—.
- * En el radar el mismo criterio hace daño: hunde al fondo de la cola justo las
- * filas que nadie puede priorizar solo, que además entraron por un acto
- * deliberado. Lo que no tiene reloj no se ordena solo: hay que mirarlo.
+ * Compara contra `hoy` en formato ISO `AAAA-MM-DD` —no contra `Date.now()`—
+ * para que la función sea pura y testeable, y para que la comparación sea por
+ * DÍA CIVIL y no por instante: un proceso que cierra hoy sigue vivo hasta el
+ * final del día, aunque sean las 23:00.
  *
- * Dentro de cada grupo DELEGA en `ordenarPorCierre`, que ya resuelve el empate
- * por número de proceso y mantiene el orden estable entre renders. Reescribir
- * ese desempate acá sería un segundo criterio del mismo orden.
+ * Sin fecha de cierre NO está vencido: no se puede declarar muerto lo que no
+ * tiene reloj. Esas filas tienen su propio lugar, arriba de todo.
  */
-export function ordenarRadar(a: LicitacionConId, b: LicitacionConId): number {
-  const sa = sinFechaEnElOrigen(a)
-  const sb = sinFechaEnElOrigen(b)
-  if (sa !== sb) return sa ? -1 : 1
-  return ordenarPorCierre(a, b)
+export function plazoVencido(
+  l: Pick<Licitacion, 'cronograma'>, hoy: string,
+): boolean {
+  const d = l.cronograma.cierre?.toDate?.()
+  if (!d) return false
+  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return iso < hoy
+}
+
+export interface RepartoRadar {
+  /** El origen no les dio fecha. Van ARRIBA: nadie puede priorizarlas solo. */
+  sinFecha: LicitacionConId[]
+  /** Lo que todavía se puede trabajar, por fecha de cierre. */
+  vigentes: LicitacionConId[]
+  /** El plazo ya pasó. NO se esconden: se muestran al final y se dicen muertas. */
+  vencidas: LicitacionConId[]
+}
+
+/**
+ * Reparte la cola del radar en tres, y es el ÚNICO criterio de orden de esa
+ * sección.
+ *
+ * ── POR QUÉ LOS VENCIDOS VAN APARTE ────────────────────────────────────────
+ * Medido el 12-nov-2026 sobre lo que el radar escribió en producción: **12 de
+ * 24 documentos tenían el cierre YA PASADO**. La bandeja los mostraba mezclados
+ * con los vivos y con la misma pinta. Un proceso muerto en la cola de trabajo
+ * no es un detalle de orden: es trabajo que alguien puede empezar a hacer para
+ * nada.
+ *
+ * No se ocultan —esconderlos daría la impresión de que el radar no los trajo, y
+ * el conteo de lo que llega es justamente lo que se quiere poder mirar—. Se
+ * muestran al final, atenuados, y la sección lo dice con todas las letras.
+ *
+ * ── POR QUÉ LAS SIN FECHA SIGUEN ARRIBA ────────────────────────────────────
+ * `ordenarPorCierre` manda al FINAL lo que no tiene reloj, y para las activas
+ * eso es correcto. En el radar hunde justo las filas que nadie puede priorizar
+ * solo, y que entraron por un acto deliberado.
+ *
+ * Los tres grupos ordenan por dentro con `ordenarPorCierre`, que ya resuelve el
+ * empate por número de proceso y mantiene el orden estable entre renders.
+ */
+export function repartirRadar(ls: LicitacionConId[], hoy: string): RepartoRadar {
+  const sinFecha: LicitacionConId[] = []
+  const vigentes: LicitacionConId[] = []
+  const vencidas: LicitacionConId[] = []
+  for (const l of ls) {
+    if (sinFechaEnElOrigen(l)) sinFecha.push(l)
+    else if (plazoVencido(l, hoy)) vencidas.push(l)
+    else vigentes.push(l)
+  }
+  return {
+    sinFecha: sinFecha.sort(ordenarPorCierre),
+    vigentes: vigentes.sort(ordenarPorCierre),
+    // Las vencidas, la más reciente primero: la que acaba de morir es la que
+    // todavía puede importarle a alguien.
+    vencidas: vencidas.sort((a, b) => ordenarPorCierre(b, a)),
+  }
 }
 
 export interface RepartoCapacidad {

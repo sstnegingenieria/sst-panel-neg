@@ -30,7 +30,7 @@ import type { MotivoDescarte, ProcedenciaRadar } from '../../types/sigp/licitaci
 import ModalDescartar from '../../components/sigp/licitaciones/ModalDescartar'
 import {
   SECCIONES_BANDEJA, SECCION_LABEL, SEMAFORO_CHIP, SENAL_CHIP,
-  seccionDe, ordenarPorCierre, ordenarRadar, sinFechaEnElOrigen,
+  seccionDe, ordenarPorCierre, repartirRadar,
   repartirPorCapacidad, coincideBusqueda,
   contarSecciones, planIntercambioCupo, patchLiberarCupo,
 } from '../../utils/sigp/bandejaLicitaciones'
@@ -94,17 +94,13 @@ export default function Licitaciones() {
   // el radar trajo solo no compite por el cupo de la semana hasta que alguien
   // lo admita, y admitirlo es justamente lo que lo pone a competir.
   //
-  // Orden propio (`ordenarRadar`): LAS SIN FECHA PRIMERO. Con el orden de las
-  // activas —por cierre, y sin reloj al final— quedarían hundidas al fondo
-  // justo las que nadie puede priorizar por su cuenta.
-  const delRadar = useMemo(
-    () => (seccion === 'radar' ? [...filtradas].sort(ordenarRadar) : []),
-    [filtradas, seccion],
+  // La cola va en TRES grupos (`repartirRadar`, el único criterio de orden de
+  // esta sección): sin fecha arriba, vigentes en el medio, VENCIDAS al final.
+  const radar = useMemo(
+    () => repartirRadar(seccion === 'radar' ? filtradas : [], hoy),
+    [filtradas, seccion, hoy],
   )
-  const sinFechaEnRadar = useMemo(
-    () => delRadar.filter(sinFechaEnElOrigen).length,
-    [delRadar],
-  )
+  const hayEnRadar = radar.sinFecha.length + radar.vigentes.length + radar.vencidas.length
 
   const cerradas = useMemo(
     () => (seccion === 'cerradas' ? [...filtradas].sort(ordenarPorCierre) : []),
@@ -356,28 +352,53 @@ export default function Licitaciones() {
             Lo que el radar trajo y todavía no es de nadie. No compite por el cupo
             de la semana: admitir uno es justamente lo que lo pone a competir.
           </p>
-          {sinFechaEnRadar > 0 && (
+          {radar.sinFecha.length > 0 && (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
               {/* La frase queda impersonal después del conteo: con la redacción
                   en plural, el caso de UNO sonaba a error de la propia bandeja. */}
-              <strong>{sinFechaEnRadar}</strong>{' '}
-              {sinFechaEnRadar === 1 ? 'proceso va arriba' : 'procesos van arriba'}: el origen
+              <strong>{radar.sinFecha.length}</strong>{' '}
+              {radar.sinFecha.length === 1 ? 'proceso va arriba' : 'procesos van arriba'}: el origen
               no trae ninguna fecha. Sin reloj que marque urgencia, el orden por cierre manda
               al fondo de la cola justo lo que entró por un barrido autorizado y no por la
               corrida de todos los días.
             </p>
           )}
-          {delRadar.length === 0
-            ? <Vacio texto="El radar no ha traído procesos sin revisar." />
-            : delRadar.map(l => (
+
+          {hayEnRadar === 0 && <Vacio texto="El radar no ha traído procesos sin revisar." />}
+
+          {[...radar.sinFecha, ...radar.vigentes].map(l => (
+            <Fila
+              key={l.id} l={l} hoy={hoy} horasUtilesDia={horasUtilesDia}
+              puedeGestionar={puedeGestionar} enRadar
+              onAdmitir={puedeGestionar ? () => admitir(l) : undefined}
+              onDescartar={puedeGestionar ? () => setDescartando(l) : undefined}
+              ocupado={guardando}
+            />
+          ))}
+
+          {/* ── Lo que ya no se puede presentar ── */}
+          {radar.vencidas.length > 0 && (
+            <section className="space-y-2 pt-4">
+              <h2 className="text-sm font-semibold text-gray-500">
+                Ya no se puede presentar
+                <span className="ml-2 font-normal text-gray-400">{radar.vencidas.length}</span>
+              </h2>
+              <p className="text-xs text-gray-500">
+                El plazo de estos procesos venció. Siguen a la vista porque el radar los
+                trajo y eso cuenta, pero no hay nada que trabajar en ellos. Descartarlos
+                con <strong>«Cierra antes de poder armarlo»</strong> los saca de la cola
+                dejando el motivo escrito.
+              </p>
+              {radar.vencidas.map(l => (
                 <Fila
                   key={l.id} l={l} hoy={hoy} horasUtilesDia={horasUtilesDia}
-                  puedeGestionar={puedeGestionar} enRadar
-                  onAdmitir={puedeGestionar ? () => admitir(l) : undefined}
+                  puedeGestionar={puedeGestionar} enRadar atenuada vencida
                   onDescartar={puedeGestionar ? () => setDescartando(l) : undefined}
                   ocupado={guardando}
                 />
               ))}
+            </section>
+          )}
         </div>
       )}
 
@@ -516,6 +537,8 @@ interface FilaProps {
   puedeGestionar: boolean
   /** En la sección del radar la fila muestra la procedencia y el triage. */
   enRadar?: boolean
+  /** El plazo ya pasó: se dice en la fila, no solo en el encabezado del grupo. */
+  vencida?: boolean
   onSubir?: () => void
   onLiberar?: () => void
   onAdmitir?: () => void
@@ -525,7 +548,7 @@ interface FilaProps {
 }
 
 function Fila({
-  l, hoy, horasUtilesDia, enCapacidad, atenuada, enRadar,
+  l, hoy, horasUtilesDia, enCapacidad, atenuada, enRadar, vencida,
   onSubir, onLiberar, onAdmitir, onDescartar, ocupado,
 }: FilaProps) {
   const ventana = evaluarVentana(isoDe(l.cronograma.cierre), l.modalidad, hoy, horasUtilesDia)
@@ -607,7 +630,13 @@ function Fila({
       {enRadar && l.radar && <Procedencia radar={l.radar} />}
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-        <span className="text-gray-500">Cierra {fFecha(l.cronograma.cierre)}</span>
+        {vencida ? (
+          <span className="px-2 py-0.5 rounded bg-gray-200 text-gray-700 font-medium">
+            Cerró el {fFecha(l.cronograma.cierre)} — el plazo ya pasó
+          </span>
+        ) : (
+          <span className="text-gray-500">Cierra {fFecha(l.cronograma.cierre)}</span>
+        )}
         {enCapacidad && (
           <span className={`px-2 py-0.5 rounded font-medium ${
             ventana.insuficiente ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'
