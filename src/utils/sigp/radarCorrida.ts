@@ -269,8 +269,87 @@ export interface PatchRadar {
   cambios_materiales: string[]
 }
 
+/**
+ * Igualdad por VALOR, con las claves ordenadas en profundidad.
+ *
+ * `JSON.stringify` a secas depende del orden en que se construyó el objeto, y
+ * eso ya mordió en este repositorio: comparar dos lecturas REST del mismo
+ * documento daba FALSOS «distintos» (gotcha del PR #81). Acá volvió a morder
+ * en cuanto `completarSiFalta` empezó a añadir claves al final: el mismo
+ * contenido, otro orden, «cambio material».
+ *
+ * Dos objetos con el mismo contenido son el mismo dato. El orden de las claves
+ * es un detalle de cómo se armó, no un hecho del proceso.
+ */
+function canonico(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonico)
+  if (v !== null && typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    return Object.keys(o).sort().reduce<Record<string, unknown>>((acc, k) => {
+      acc[k] = canonico(o[k])
+      return acc
+    }, {})
+  }
+  return v
+}
+
 const igual = (a: unknown, b: unknown): boolean =>
-  JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+  JSON.stringify(canonico(a ?? null)) === JSON.stringify(canonico(b ?? null))
+
+/**
+ * `radar.corrida` es un SELLO DEL ESCRITOR, no un hecho del proceso.
+ *
+ * El mapeo produce siempre `corrida: null` —lo dice el propio tipo: «lo sella
+ * el escritor, no el mapeo»— y `sellarParaEscritura` le pone el id al crear.
+ * Comparar el documento guardado (con sello) contra el recién mapeado (sin
+ * sello) hacía que `radar` saliera como CAMBIO MATERIAL en **todos** los
+ * documentos, en **todas** las corridas. Medido en producción el 12-nov-2026:
+ * la corrida de las 19:00 reportó 24 cambios materiales, los 24 en `radar`, y
+ * ninguno era un cambio.
+ *
+ * Eso no es un conteo inflado y ya: `cambios_materiales` existe para que una
+ * persona mire lo que el origen cambió por debajo —el caso típico es
+ * `modalidad`—, y un campo que grita en cada corrida es exactamente la forma
+ * de que nadie vuelva a mirar la lista.
+ */
+const SELLOS_DEL_ESCRITOR: Record<string, readonly string[]> = { radar: ['corrida'] }
+
+const sinSellos = (campo: string, v: unknown): unknown => {
+  const quitar = SELLOS_DEL_ESCRITOR[campo]
+  if (!quitar || v === null || typeof v !== 'object') return v
+  const copia = { ...(v as Record<string, unknown>) }
+  for (const k of quitar) delete copia[k]
+  return copia
+}
+
+/**
+ * Sub-campos que el documento guardado NO TIENE y el origen SÍ trae: se
+ * COMPLETAN, nunca se sobrescriben.
+ *
+ * Es el patrón «completa-si-falta» que ya usa `sincronizarObraEspejo` con las
+ * coordenadas. El caso que lo motiva: los documentos que el radar escribió
+ * antes de que se capturaran `fase` y `portafolio` no los tienen, y `radar` es
+ * un campo PROTEGIDO —no se refresca— así que sin esto nunca los tendrían y
+ * además reportarían «cambio material» para siempre.
+ *
+ * La asimetría es deliberada y es la misma de la obra-espejo: **rellenar un
+ * hueco no es reescribir historia.** Un sub-campo con valor se queda como
+ * está, aunque el origen diga otra cosa; eso sí sería reescribir, y para eso
+ * está `cambios_materiales`.
+ */
+export function completarSiFalta(
+  antes: unknown, ahora: unknown,
+): { valor: Record<string, unknown>; llenados: string[] } | null {
+  if (antes === null || typeof antes !== 'object' || Array.isArray(antes)) return null
+  if (ahora === null || typeof ahora !== 'object' || Array.isArray(ahora)) return null
+  const a = antes as Record<string, unknown>
+  const b = ahora as Record<string, unknown>
+  const llenados = Object.keys(b).filter(k => a[k] === undefined && b[k] !== undefined)
+  if (llenados.length === 0) return null
+  const valor = { ...a }
+  for (const k of llenados) valor[k] = b[k]
+  return { valor, llenados }
+}
 
 /**
  * Patch de una RE-LECTURA sobre un documento que ya existe.
@@ -301,7 +380,22 @@ export function patchRadarSobreExistente(
     const ahora = (nuevo as Record<string, unknown>)[campo]
     // Solo cuenta si el documento YA tenía valor: un campo que nunca se
     // escribió no es un cambio material, es un documento viejo.
-    if (antes !== undefined && !igual(antes, ahora)) cambios_materiales.push(campo)
+    if (antes === undefined) continue
+
+    // Primero: los huecos se rellenan. Un sub-campo que el documento no tiene
+    // no es una discrepancia con el origen, es una ausencia.
+    const relleno = completarSiFalta(antes, ahora)
+    if (relleno) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(patch as any)[campo] = relleno.valor
+      cambios.push(`${campo} (completado: ${relleno.llenados.join(', ')})`)
+    }
+
+    // Y recién ahí se compara lo que QUEDA, sin los sellos del escritor.
+    const base = relleno ? relleno.valor : antes
+    if (!igual(sinSellos(campo, base), sinSellos(campo, ahora))) {
+      cambios_materiales.push(campo)
+    }
   }
   return { patch, cambios, cambios_materiales }
 }

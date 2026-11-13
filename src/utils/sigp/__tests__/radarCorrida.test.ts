@@ -12,7 +12,7 @@ import FIXTURES from './fixtures/secop.p6dx-8zbt.json'
 import {
   GUARDA_VOLUMEN, evaluarVolumen, evaluarVentana, diasDeVentana,
   CAMPOS_REFRESCABLES, CAMPOS_PROTEGIDOS,
-  patchRadarSobreExistente, hayQueEscribir, planearEscritura,
+  patchRadarSobreExistente, hayQueEscribir, planearEscritura, completarSiFalta,
   construirRegistroCorrida, marcaSiguiente, resumenLegible, cuantosCrearia,
   sellarParaEscritura, fechasATimestamp, ACTOR_RADAR,
   avanzarEstadoRadar, MAX_CORRIDAS_EN_HISTORIAL, ESTADO_RADAR_INICIAL,
@@ -174,6 +174,71 @@ describe('re-escritura: el radar no pisa el trabajo humano', () => {
     expect(p.cambios).toEqual([])
     expect(p.patch).toEqual({})
     expect(hayQueEscribir(p)).toBe(false)
+  })
+
+  it('CLAVE: el SELLO de la corrida no es un cambio material', () => {
+    // El mapeo produce siempre `corrida: null` y el escritor le pone el id al
+    // crear. Comparar el guardado (con sello) contra el mapeado (sin sello)
+    // hacía que `radar` saliera como cambio material en TODOS los documentos
+    // y en TODAS las corridas. Medido en producción el 12-nov-2026: la corrida
+    // de las 19:00 reportó 24 cambios materiales, los 24 en `radar`, ninguno
+    // real. Un campo que grita siempre es la forma de que nadie mire la lista.
+    const guardado = docDe('minima_limpia')
+    const sellado = { ...guardado, radar: { ...guardado.radar, corrida: 'corr-2026-11-12' } }
+    const mapeado = { ...guardado, radar: { ...guardado.radar, corrida: null } }
+    const p = patchRadarSobreExistente(sellado, mapeado)
+    expect(p.cambios_materiales).toEqual([])
+    expect(p.patch).toEqual({})
+  })
+
+  it('un cambio REAL dentro de `radar` sí se cuenta', () => {
+    // La otra mitad: ignorar el sello no puede volver ciega la comparación.
+    const guardado = docDe('minima_limpia')
+    const sellado = { ...guardado, radar: { ...guardado.radar, corrida: 'corr-1' } }
+    const otro = {
+      ...guardado,
+      radar: { ...guardado.radar, corrida: null, vocabulario_version: 'v2.0' },
+    }
+    expect(patchRadarSobreExistente(sellado, otro).cambios_materiales).toEqual(['radar'])
+  })
+
+  it('COMPLETA-SI-FALTA: el documento viejo gana `fase` y `portafolio`', () => {
+    // Los que el radar escribió antes de capturarlas no las tienen, y `radar`
+    // es protegido. Sin esto nunca las tendrían.
+    const guardado = docDe('minima_limpia')
+    const viejo = { ...guardado, radar: { ...guardado.radar, corrida: 'corr-1' } }
+    delete (viejo.radar as Record<string, unknown>).fase
+    delete (viejo.radar as Record<string, unknown>).portafolio
+    const nuevo = {
+      ...guardado,
+      radar: {
+        ...guardado.radar, corrida: null,
+        fase: 'Presentación de oferta', portafolio: 'CO1.BDOS.123',
+      },
+    }
+    const p = patchRadarSobreExistente(viejo, nuevo)
+    expect(p.patch.radar?.fase).toBe('Presentación de oferta')
+    expect(p.patch.radar?.portafolio).toBe('CO1.BDOS.123')
+    // Rellenar un hueco no es un cambio material.
+    expect(p.cambios_materiales).toEqual([])
+    // Y el sello que ya tenía NO se pierde al completar.
+    expect(p.patch.radar?.corrida).toBe('corr-1')
+  })
+
+  it('COMPLETAR NO ES SOBRESCRIBIR: un sub-campo con valor se queda', () => {
+    const guardado = docDe('minima_limpia')
+    const viejo = {
+      ...guardado,
+      radar: { ...guardado.radar, corrida: 'corr-1', fase: 'Presentación de oferta' },
+    }
+    const nuevo = {
+      ...guardado,
+      radar: { ...guardado.radar, corrida: null, fase: 'OTRA COSA' },
+    }
+    const p = patchRadarSobreExistente(viejo, nuevo)
+    expect(p.patch.radar).toBeUndefined()
+    // Eso sí: la discrepancia se CUENTA. Para eso está cambios_materiales.
+    expect(p.cambios_materiales).toEqual(['radar'])
   })
 
   it('la categoría que llega TARDE sí se refresca — para eso es el solape', () => {
@@ -430,5 +495,29 @@ describe('registro de la corrida', () => {
     expect(s).toMatch(/ventana 2026-09-17 → 2026-11-09/)
     expect(s).toMatch(/procesos/)
     expect(s).toMatch(/si \d+ · probable \d+ · no \d+/)
+  })
+})
+
+describe('completarSiFalta', () => {
+  it('llena solo las claves ausentes y dice cuáles', () => {
+    const r = completarSiFalta({ a: 1, b: null }, { a: 9, b: 9, c: 3, d: 4 })
+    expect(r?.valor).toEqual({ a: 1, b: null, c: 3, d: 4 })
+    expect(r?.llenados.sort()).toEqual(['c', 'd'])
+  })
+
+  it('`null` NO es una ausencia: es un valor y se respeta', () => {
+    // La distinción que sostiene todo el patrón. `null` dice "se miró y no
+    // había"; `undefined` dice "nunca se miró".
+    expect(completarSiFalta({ a: null }, { a: 'algo' })).toBeNull()
+  })
+
+  it('sin nada que llenar devuelve null, y el caller no escribe', () => {
+    expect(completarSiFalta({ a: 1 }, { a: 2 })).toBeNull()
+  })
+
+  it('no inventa estructura sobre lo que no es un objeto', () => {
+    expect(completarSiFalta(null, { a: 1 })).toBeNull()
+    expect(completarSiFalta('texto', { a: 1 })).toBeNull()
+    expect(completarSiFalta([1], [1, 2])).toBeNull()
   })
 })
