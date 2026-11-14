@@ -226,6 +226,39 @@ cambia por completo qué tan urgente es el recall, y es la única forma de saber
 
 ---
 
+## 6-bis. Hallazgo colateral — la cola tiene 16 licitaciones repetidas
+
+Al verificar el costo de quitar `DOTACION` apareció que los dos documentos que
+cambiaban de veredicto eran **la misma licitación** (SAMC-025-2026 de la
+Alcaldía de Chía), una por fase. Medido sobre la cola completa:
+
+| | |
+|---|---|
+| documentos activos | **129** |
+| licitaciones distintas de verdad | **113** |
+| documentos sobrantes | **16** |
+
+Son **el 12 % de la cola**: Karen ve la misma licitación dos veces. El
+`numero_proceso` lo delata — un documento dice `SAMC-025-2026` y el otro
+`SAMC-025-2026 (Manifestación de interés (Menor Cuantía))`.
+
+La causa es conocida y ya está medida: una fila por FASE, y las filas de una
+misma licitación **no comparten `id_del_proceso`** (0 de 11.463 cruzan) pero
+**sí `id_del_portafolio`** (90,9 %). El colapso de la corrida agrupa por
+`id_del_proceso`, así que la fila de manifestación y la de oferta se vuelven
+dos documentos.
+
+Lo que confirma que es el trabajo sin desplegar y no un defecto nuevo: los 32
+documentos involucrados tienen `radar.fase` en `(sin fase)` y **ninguno** trae
+`id_del_portafolio` — los escribió una corrida anterior a la captura de fase y
+portafolio. El número con la fase pegada al final tampoco está limpio, que es
+lo que hace `separarFasesDeReferencia`.
+
+**No se arregla con un cambio de criterio: se arregla desplegando.** Y una vez
+desplegado hay que decidir qué hacer con los 16 ya escritos.
+
+---
+
 ## 7. Límites de esta medición
 
 - **El territorio no se pudo verificar en los 372**: el registro de Karen no
