@@ -88,10 +88,12 @@ import {
 import type { RegistroVocabularioNeg } from '../../src/types/sigp/vocabularioNeg'
 import {
   RUTA_ESTADO_RADAR, RUTA_VOCABULARIO_NEG, rutaLicitacion, validarRutaEscritura,
+  COL_LICITACIONES,
 } from '../../src/utils/sigp/radarRutas'
 import {
   evaluarVentana, evaluarVolumen, cuantosCrearia, planearEscritura, construirRegistroCorrida,
   marcaSiguiente, sellarParaEscritura, fechasATimestamp, avanzarEstadoRadar,
+  resolverPorPortafolio, lotesDePortafolios,
   resumenLegible, ACTOR_RADAR, ESTADO_RADAR_INICIAL,
 } from '../../src/utils/sigp/radarCorrida'
 import type { EstadoRadar } from '../../src/utils/sigp/radarCorrida'
@@ -126,6 +128,23 @@ const appToken = (): string => (process.env.SECOP_APP_TOKEN ?? '').trim()
  */
 const refLectura = (db: Firestore, ruta: string) => db.doc(ruta)
 const refEscritura = (db: Firestore, ruta: string) => db.doc(validarRutaEscritura(ruta))
+/**
+ * La TERCERA puerta, y la única consulta de esta función.
+ *
+ * Las otras dos resuelven documentos por ruta. Esta hace falta porque buscar
+ * un documento por `radar.portafolio` es una CONSULTA, y una consulta necesita
+ * la colección, no un documento.
+ *
+ * Existe como puerta —y no como un `db.collection(...)` suelto donde se
+ * necesita— por lo mismo que las otras dos: que haya UN solo lugar donde esta
+ * función nombra Firestore, y que el nombre de la colección venga de
+ * `radarRutas.ts` en vez de estar escrito a mano acá. Hay un test que cuenta
+ * las apariciones de `db.collection(` y exige que sea esta línea.
+ *
+ * Es de LECTURA: no se usa para escribir. La escritura sigue pasando por
+ * `refEscritura`, que valida la ruta.
+ */
+const consultaLectura = (db: Firestore) => db.collection(COL_LICITACIONES)
 
 /** Tamaño de los lotes de escritura. El límite de Firestore es 500. */
 const LOTE_ESCRITURA = 400
@@ -345,9 +364,52 @@ async function corridaDelRadar(): Promise<void> {
     }
   }
 
+  // ── 4-bis. La IDENTIDAD: que la misma licitacion no nazca dos veces ──
+  //
+  // SECOP publica una fila por FASE con un `id_del_proceso` distinto en cada
+  // una, y el doc id sale de ahi. Medido el 14-nov: 129 documentos eran 113
+  // licitaciones. Lo unico que une las fases es `id_del_portafolio`.
+  //
+  // La consulta es de IGUALDAD sobre un campo simple anidado, asi que Firestore
+  // la sirve con su indice automatico — verificado contra produccion, sin
+  // indice declarado. Lo que si tiene tope es el operador `in`: 30 valores
+  // (tambien medido, con 31 responde `'IN' supports up to 30`).
+  const docIdPorPortafolio = new Map<string, string>()
+  for (const lote of lotesDePortafolios(reporte.registros)) {
+    const snap = await consultaLectura(db)
+      .where('radar.portafolio', 'in', lote).get()
+    for (const d of snap.docs) {
+      const pf = (d.get('radar.portafolio') ?? null) as string | null
+      if (pf === null || pf === '') continue
+      // El MENOR id gana, para que el destino no dependa del orden en que
+      // Firestore devolvio los documentos.
+      const previo = docIdPorPortafolio.get(pf)
+      if (previo === undefined || d.id.localeCompare(previo) < 0) {
+        docIdPorPortafolio.set(pf, d.id)
+      }
+      // Se aprovecha la lectura: si no estaba, entra al mapa de existentes y
+      // el plan lo puede comparar sin una segunda ida a la base.
+      if (!existentes.has(d.id)) {
+        existentes.set(d.id, d.data() as Partial<LicitacionDetectada>)
+      }
+    }
+  }
+
+  const resuelto = resolverPorPortafolio(
+    reporte.registros, new Set(existentes.keys()), docIdPorPortafolio)
+  if (resuelto.fusiones.length > 0) {
+    logger.info('radar: fases fusionadas por portafolio', {
+      cuantas: resuelto.fusiones.length,
+      muestra: resuelto.fusiones.slice(0, 10),
+    })
+  }
+
   // ── 5. Guarda de volumen ──
+  // Sobre lo RESUELTO, no sobre lo ingerido: contar las dos fases de una misma
+  // licitacion como dos nacimientos inflaria la guarda justo cuando el arreglo
+  // esta haciendo su trabajo.
   const volumen = evaluarVolumen(
-    cuantosCrearia(reporte, new Set(existentes.keys())),
+    cuantosCrearia({ registros: resuelto.registros }, new Set(existentes.keys())),
     ventana,
     { autorizado_manual: estado.autorizado_manual === true },
   )
@@ -362,7 +424,7 @@ async function corridaDelRadar(): Promise<void> {
   }
 
   // ── 6. Escritura idempotente ──
-  const plan = planearEscritura(reporte.registros, existentes)
+  const plan = planearEscritura(resuelto.registros, existentes)
   const aTs = (iso: string) => Timestamp.fromDate(new Date(iso))
   const ahora = Timestamp.fromDate(inicio)
 

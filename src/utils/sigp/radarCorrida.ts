@@ -583,6 +583,177 @@ export interface PlanEscritura {
   cambios_materiales: { doc_id: string; campos: string[] }[]
 }
 
+// ── La identidad del documento y el portafolio (3a) ─────────────────────────
+
+/** Un registro con el doc id que el mapeo le calculó. */
+export type RegistroConDestino = {
+  doc: LicitacionDetectada
+  meta: { doc_id: string }
+}
+
+export interface FusionPorPortafolio {
+  portafolio: string
+  /** El doc id que el mapeo había calculado y que NO se va a usar. */
+  doc_id_descartado: string
+  /** El documento donde esa fase se escribe. */
+  doc_id_destino: string
+  /** `corrida` si los dos venían en la misma cosecha; `existente` si el destino ya estaba. */
+  por: 'corrida' | 'existente'
+}
+
+export interface ResolucionIdentidad<R> {
+  registros: R[]
+  fusiones: FusionPorPortafolio[]
+}
+
+/** Qué tan avanzada está la fase: más fases previas = más adelante en la cadena. */
+const avance = (r: RegistroConDestino): number => (r.doc.radar?.fases_previas ?? []).length
+
+
+/**
+ * Resuelve a QUÉ documento va cada fila, usando el portafolio.
+ *
+ * ── EL DEFECTO QUE ESTO ARREGLA ─────────────────────────────────────────────
+ *
+ * La identidad del documento es `docIdSecop(id_del_proceso)`, y SECOP publica
+ * **una fila por FASE** con un `id_del_proceso` distinto en cada una. Así que
+ * la misma licitación nacía dos veces: medido el 14-nov, 129 documentos eran
+ * 113 licitaciones — el 12 % de la cola de Karen era la misma cosa dos veces.
+ *
+ * Lo único que une las fases es `id_del_portafolio` (cruzan 10.421 de 11.463,
+ * el 90,9 %).
+ *
+ * ── POR QUÉ NO BASTABA CAMBIAR EL COLAPSO ───────────────────────────────────
+ *
+ * Agrupar las FILAS por portafolio no alcanza: el doc id sale del
+ * `id_del_proceso` del representante, y cuál es el representante cambia cuando
+ * llega una fase nueva. La misma licitación podía acabar con un TERCER
+ * documento. El arreglo tiene que estar en la identidad, no en el colapso.
+ *
+ * ── EL ORDEN DE LAS DOS VÍAS, Y POR QUÉ ES ESTE ─────────────────────────────
+ *
+ * 1. Si el doc id propio YA EXISTE, se usa ese. Es el camino de siempre, y es
+ *    el que cubre el caso del documento que nació sin portafolio y después lo
+ *    gana: la consulta por portafolio no lo encuentra, su propio id sí, y
+ *    queda actualizado con su portafolio — de ahí en adelante las fases
+ *    siguientes lo encuentran por la primera vía.
+ * 2. Si no existe y hay portafolio, se busca un documento con ese portafolio.
+ * 3. Si tampoco, pero OTRA FILA DE ESTA MISMA COSECHA comparte el portafolio,
+ *    las dos van al mismo documento. Sin esto el arreglo no serviría para el
+ *    caso normal: cuando una licitación es nueva, sus dos fases llegan juntas
+ *    y ninguna existe todavía.
+ * 4. Si no hay portafolio, su propio doc id. El 9,1 % sin portafolio no es una
+ *    excepción: es el caso base, y no se puede agrupar de ninguna manera.
+ *
+ * El doc id propio va PRIMERO a propósito, y no al revés: si se preguntara por
+ * portafolio antes, una fila cuyo documento ya existe podría terminar escrita
+ * en OTRO documento —y la consulta no garantiza cuál devuelve primero cuando
+ * hay dos—. Abandonar un documento que ya existe, de forma no determinista, es
+ * peor que el duplicado que se está arreglando.
+ *
+ * ── QUÉ FILA MANDA CUANDO DOS VAN AL MISMO DOCUMENTO ────────────────────────
+ *
+ * La de la fase MÁS AVANZADA, medida por cuántas fases previas arrastra. Su
+ * plazo es el que importa —en menor cuantía la fecha operativa es el cierre de
+ * ofertas— y `fases_previas` conserva igual las anteriores, así que la
+ * detección de manifestación cerrada sigue funcionando. El doc id, en cambio,
+ * sale del MENOR de los ids: es estable entre corridas, y una identidad que
+ * cambia de un día para otro es otro duplicado con otro nombre.
+ *
+ * PURA: no lee ni escribe. Las consultas las hace el caller.
+ */
+export function resolverPorPortafolio<R extends RegistroConDestino>(
+  registros: readonly R[],
+  existentesPorId: ReadonlySet<string>,
+  docIdPorPortafolio: ReadonlyMap<string, string>,
+): ResolucionIdentidad<R> {
+  const fusiones: FusionPorPortafolio[] = []
+
+  // Paso 1: lo que ya existe por su propio id se queda donde está.
+  const yaExiste = new Set<string>()
+  for (const r of registros) {
+    if (existentesPorId.has(r.meta.doc_id)) yaExiste.add(r.meta.doc_id)
+  }
+
+  // Paso 2: agrupar por portafolio los que NO existen por su propio id.
+  const grupos = new Map<string, R[]>()
+  const sueltos: R[] = []
+  for (const r of registros) {
+    const pf = r.doc.radar?.portafolio ?? null
+    if (yaExiste.has(r.meta.doc_id) || pf === null || pf === '') {
+      sueltos.push(r)
+      continue
+    }
+    const g = grupos.get(pf)
+    if (g) g.push(r)
+    else grupos.set(pf, [r])
+  }
+
+  const salida: R[] = [...sueltos]
+
+  for (const [pf, g] of grupos) {
+    // El destino: un documento existente con ese portafolio, o el menor id del
+    // grupo — estable entre corridas.
+    const existente = docIdPorPortafolio.get(pf) ?? null
+    const ordenados = [...g].sort((a, b) => a.meta.doc_id.localeCompare(b.meta.doc_id))
+    const destino = existente ?? ordenados[0].meta.doc_id
+    const por: 'corrida' | 'existente' = existente !== null ? 'existente' : 'corrida'
+
+    // La fila que manda: la fase más avanzada; empate por doc id para no
+    // depender del orden en que la API devolvió las filas.
+    const manda = [...g].sort((a, b) => {
+      const d = avance(b) - avance(a)
+      return d !== 0 ? d : a.meta.doc_id.localeCompare(b.meta.doc_id)
+    })[0]
+
+    // Se reporta descartado TODO id del grupo que no sea el destino. Ojo con
+    // el error facil: descartar `manda` en vez del destino. Son cosas
+    // distintas — `manda` aporta el CONTENIDO, el destino aporta la
+    // IDENTIDAD, y cuando no coinciden el id que se pierde es el de `manda`.
+    for (const r of g) {
+      if (r.meta.doc_id === destino) continue
+      fusiones.push({
+        portafolio: pf,
+        doc_id_descartado: r.meta.doc_id,
+        doc_id_destino: destino,
+        por,
+      })
+    }
+
+    // Se arrastra el registro COMPLETO y solo cambia el doc_id. El resto de
+    // `meta` —la clasificacion, el origen de la fecha, la familia— es lo que
+    // el reporte de la corrida cuenta: perderlo dejaria el agregado mintiendo
+    // sobre con que criterio entro cada cosa.
+    salida.push({ ...manda, meta: { ...manda.meta, doc_id: destino } })
+  }
+
+  return { registros: salida, fusiones }
+}
+
+/**
+ * Los portafolios de una cosecha, listos para consultar.
+ *
+ * En lotes de 30 porque es el tope del operador `in` de Firestore — medido
+ * contra producción, no supuesto: con 31 valores responde
+ * `'IN' supports up to 30 comparison values`.
+ */
+export const TOPE_IN_FIRESTORE = 30
+
+export function lotesDePortafolios(
+  registros: readonly RegistroConDestino[],
+  tope: number = TOPE_IN_FIRESTORE,
+): string[][] {
+  const pfs = new Set<string>()
+  for (const r of registros) {
+    const pf = r.doc.radar?.portafolio
+    if (typeof pf === 'string' && pf !== '') pfs.add(pf)
+  }
+  const todos = [...pfs]
+  const lotes: string[][] = []
+  for (let i = 0; i < todos.length; i += tope) lotes.push(todos.slice(i, i + tope))
+  return lotes
+}
+
 /**
  * Arma el plan a partir de lo ingerido y de lo que ya hay en la colección.
  *
