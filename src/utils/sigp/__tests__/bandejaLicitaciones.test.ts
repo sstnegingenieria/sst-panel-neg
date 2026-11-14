@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { Timestamp } from 'firebase/firestore'
 import {
-  SECCIONES_BANDEJA, CAPACIDAD_SEMANAL_DEFAULT,
+  SECCIONES_BANDEJA, SECCION_LABEL, CAPACIDAD_SEMANAL_DEFAULT,
   seccionDe, compitePorCupo, ordenarPorCierre, repartirPorCapacidad,
   planIntercambioCupo, patchLiberarCupo, coincideBusqueda, contarSecciones,
   ESTADOS_ACTIVOS_BANDEJA, SEMAFORO_CHIP, SENAL_CHIP,
@@ -317,18 +317,73 @@ describe('coincideBusqueda / contarSecciones', () => {
     expect(coincideBusqueda(lic(), '   ')).toBe(true)
   })
 
-  it('los conteos cubren las CUATRO secciones', () => {
+  it('los conteos cubren las CINCO secciones', () => {
     const c = contarSecciones([
       lic({ estado: 'en_evaluacion' }),
       lic({
         estado: 'detectada',
         radar: { senal: 'texto_coincide', terminos: ['redes'], vocabulario_version: 'v1.0', corrida: 'c1', fase: null, fases_previas: [], portafolio: null, origen_fecha: 'publicacion' },
       }),
+      lic({ estado: 'manifestada', migrado: true }),
       lic({ estado: 'descartada', motivo_descarte: 'SORTEO', activa: false }),
       lic({ estado: 'perdida', activa: false }),
       lic({ estado: 'adjudicada', activa: false }),
     ])
-    expect(c).toEqual({ radar: 1, activas: 1, descartadas: 1, cerradas: 2 })
+    expect(c).toEqual({
+      radar: 1, activas: 1, registro_anterior: 1, descartadas: 1, cerradas: 2,
+    })
+  })
+})
+
+describe('las migradas salen de Activas (Acto 2-A)', () => {
+  it('una historica sin desenlace va a su propia seccion', () => {
+    // Medido: Activas tenia 39 documentos y 38 eran del registro historico.
+    // Karen abria su cola de trabajo y 38 de 39 cosas no eran trabajo.
+    for (const e of ['manifestada', 'presentada', 'en_preparacion', 'detectada'] as const) {
+      expect(seccionDe({ estado: e, migrado: true }), e).toBe('registro_anterior')
+    }
+  })
+
+  it('pero una TERMINAL migrada sigue en cerradas, y una descartada en descartadas', () => {
+    // El orden de las guardas importa: el desenlace conocido gana sobre el
+    // origen. Una historica `perdida` SI tiene desenlace.
+    expect(seccionDe({ estado: 'perdida', migrado: true })).toBe('cerradas')
+    expect(seccionDe({ estado: 'adjudicada', migrado: true })).toBe('cerradas')
+    expect(seccionDe({ estado: 'descartada', migrado: true })).toBe('descartadas')
+  })
+
+  it('CLAVE: el trabajo real de Karen NO se mueve', () => {
+    // La alternativa descartada era filtrar por «cierre ya paso». Eso habria
+    // sacado de Activas una licitacion que Karen presento y cuyo plazo vencio
+    // — que es exactamente donde espera el resultado para registrarlo.
+    // Esconderla seria peor que el problema que se arregla.
+    for (const e of ['manifestada', 'presentada', 'en_preparacion'] as const) {
+      expect(seccionDe({ estado: e }), e).toBe('activas')
+      expect(seccionDe({ estado: e, migrado: false }), e).toBe('activas')
+    }
+  })
+
+  it('una del RADAR migrada no existe, pero si existiera el radar gana', () => {
+    // Guarda de orden: `migrado` se evalua DESPUES del radar, asi que un
+    // documento del radar nunca se va a esta seccion por error.
+    const l = {
+      estado: 'detectada' as const,
+      migrado: true,
+      radar: {
+        senal: 'texto_coincide' as const, terminos: ['x'], vocabulario_version: 'v1.1',
+        corrida: 'c1', fase: null, fases_previas: [], portafolio: null,
+        origen_fecha: 'publicacion' as const,
+      },
+    }
+    expect(seccionDe(l)).toBe('radar')
+  })
+
+  it('la seccion tiene texto, y no dice «sin desenlace» como jerga', () => {
+    expect(SECCION_LABEL.registro_anterior).toBe('Del registro anterior')
+    expect(SECCIONES_BANDEJA).toContain('registro_anterior')
+    // Va DESPUES de activas: es historia, no cola de entrada.
+    expect(SECCIONES_BANDEJA.indexOf('registro_anterior'))
+      .toBeGreaterThan(SECCIONES_BANDEJA.indexOf('activas'))
   })
 })
 

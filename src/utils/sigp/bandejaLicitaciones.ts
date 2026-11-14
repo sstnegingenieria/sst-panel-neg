@@ -19,14 +19,18 @@ import { evaluarVentana, isoLocal } from './ventanaLicitacion'
 /** Licitación con su id de documento (lo que consume la UI). */
 export type LicitacionConId = Licitacion & { id: string }
 
-export type SeccionBandeja = 'radar' | 'activas' | 'descartadas' | 'cerradas'
+export type SeccionBandeja =
+  | 'radar' | 'activas' | 'registro_anterior' | 'descartadas' | 'cerradas'
 
 /** El radar va PRIMERO: es la cola de entrada, lo que todavia no es de nadie. */
-export const SECCIONES_BANDEJA: SeccionBandeja[] = ['radar', 'activas', 'descartadas', 'cerradas']
+export const SECCIONES_BANDEJA: SeccionBandeja[] = [
+  'radar', 'activas', 'registro_anterior', 'descartadas', 'cerradas',
+]
 
 export const SECCION_LABEL: Record<SeccionBandeja, string> = {
   radar: 'Radar',
   activas: 'Activas',
+  registro_anterior: 'Del registro anterior',
   descartadas: 'Descartadas',
   cerradas: 'Cerradas',
 }
@@ -58,13 +62,52 @@ export const CAPACIDAD_SEMANAL_DEFAULT = 5
  * sigue funcionando y cae del lado seguro.
  */
 export function seccionDe(
-  l: Pick<Licitacion, 'estado'> & Partial<Pick<Licitacion, 'radar'>>,
+  l: Pick<Licitacion, 'estado'>
+    & Partial<Pick<Licitacion, 'radar' | 'migrado'>>,
 ): SeccionBandeja {
   if (l.estado === 'descartada') return 'descartadas'
   if (esLicitacionTerminal(l.estado)) return 'cerradas'
   if (l.estado === 'detectada' && esDelRadar(l)) return 'radar'
+  if (l.migrado === true) return 'registro_anterior'
   return 'activas'
 }
+
+/**
+ * ── POR QUÉ LAS MIGRADAS SALEN DE ACTIVAS ───────────────────────────────────
+ *
+ * Medido el 14-nov-2026: Activas tenía 39 documentos y **38 eran del registro
+ * histórico**. Karen abría su cola de trabajo y 38 de 39 cosas no eran trabajo.
+ *
+ * No caían ahí por un dato malo: caían POR DESCARTE. Una histórica
+ * `manifestada` no está descartada, no es terminal y no es del radar, así que
+ * la última línea de `seccionDe` se la quedaba.
+ *
+ * Y están todas muertas: **37 de las 38 ya pasaron su fecha de cierre**,
+ * ninguna tiene cierre futuro, y la más reciente cerró el 1-sep-2026 — diez
+ * semanas antes de medirlo.
+ *
+ * ── POR QUÉ UN FILTRO Y NO UN ACTO DE DATOS ─────────────────────────────────
+ *
+ * La alternativa era cerrarlas en producción con un estado y un motivo. No se
+ * puede hacer con honestidad: 16 están `manifestada` y 4 `presentada` — **NEG
+ * participó y no sabemos qué pasó**, porque el registro anterior no guardaba
+ * el desenlace. `descartada` diría que decidimos no ir, y fuimos. `perdida`
+ * afirmaría una derrota que nadie registró.
+ *
+ * Un hueco se ve; un dato inventado se cita. Así que la sección dice la verdad
+ * —vienen del registro anterior y no tienen desenlace— y no escribe ninguno.
+ *
+ * ── POR QUÉ `migrado` Y NO LA FECHA DE CIERRE ───────────────────────────────
+ *
+ * Filtrar por "cierre ya pasó" habría sacado de Activas el trabajo REAL de
+ * Karen: una licitación que presentó y cuyo plazo venció es exactamente donde
+ * está esperando el resultado para registrarlo. Esconderla sería peor que el
+ * problema que se arregla.
+ *
+ * `migrado` no es un atajo: es el campo que marca "vino de un registro que no
+ * guardaba desenlaces", que es la propiedad que importa. La fecha de cierre
+ * es la EVIDENCIA de que ninguna está en vuelo, no el criterio.
+ */
 
 /**
  * ¿Esta licitación compite por un cupo de la semana?
@@ -480,7 +523,9 @@ export function coincideBusqueda(l: LicitacionConId, q: string): boolean {
 
 /** Conteo por sección, para los pills con contador. */
 export function contarSecciones(ls: LicitacionConId[]): Record<SeccionBandeja, number> {
-  const out: Record<SeccionBandeja, number> = { radar: 0, activas: 0, descartadas: 0, cerradas: 0 }
+  const out: Record<SeccionBandeja, number> = {
+    radar: 0, activas: 0, registro_anterior: 0, descartadas: 0, cerradas: 0,
+  }
   for (const l of ls) out[seccionDe(l)]++
   return out
 }

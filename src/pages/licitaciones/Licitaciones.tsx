@@ -116,6 +116,11 @@ export default function Licitaciones() {
     [filtradas, seccion],
   )
 
+  const registroAnterior = useMemo(
+    () => (seccion === 'registro_anterior' ? [...filtradas].sort(ordenarPorCierre) : []),
+    [filtradas, seccion],
+  )
+
   // ── Intercambio de cupo ──
   const [intercambio, setIntercambio] = useState<LicitacionConId | null>(null)
   const [saleId, setSaleId] = useState('')
@@ -341,6 +346,29 @@ export default function Licitaciones() {
               ))}
             </section>
           )}
+        </div>
+      )}
+
+      {/* ══════════════════ DEL REGISTRO ANTERIOR ══════════════════ */}
+      {seccion === 'registro_anterior' && !cargando && (
+        <div className="space-y-3">
+          <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
+            Estas vienen del registro que se llevaba antes del panel. No tienen
+            resultado anotado: en varias NEG sí se presentó, pero el registro no
+            guardaba en qué quedaron. Se dejan acá con lo que se sabe, en vez de
+            ponerles un desenlace que nadie anotó.
+            <div className="mt-1 text-gray-500">
+              Si recuerdas cómo terminó alguna, ábrela y márcala — sale de esta
+              lista y pasa a Cerradas.
+            </div>
+          </div>
+          <div className="space-y-2">
+            {registroAnterior.length === 0
+              ? <Vacio texto="No queda nada del registro anterior sin resultado." />
+              : registroAnterior.map(l => (
+                <Fila key={l.id} l={l} hoy={hoy} horasUtilesDia={horasUtilesDia} puedeGestionar={puedeGestionar} />
+              ))}
+          </div>
         </div>
       )}
 
