@@ -306,7 +306,13 @@ export function lexicoParticipo(radar: ProcedenciaRadar | null | undefined): boo
  * Los caminos de creación sí escriben `null` explícito desde este bloque; esta
  * guarda es para lo que se escribió antes y no se va a reescribir.
  */
-export function esDelRadar(l: { radar?: ProcedenciaRadar | null }): boolean {
+export function esDelRadar(
+  l: { radar?: Partial<ProcedenciaRadar> | null },
+): boolean {
+  // Es una comprobacion de NULIDAD, no de forma: por eso admite un bloque
+  // parcial. Un acto que lee un documento crudo de Firestore tiene
+  // `portafolio` y `fases_previas` y nada mas, y eso ya alcanza para responder
+  // la pregunta que esta funcion hace.
   return l.radar != null
 }
 
@@ -690,12 +696,28 @@ export interface ActorLicitacion {
 }
 
 /** Campos de trazabilidad que TODO patch arrastra. */
-interface SelloPatch {
+interface SelloPatch<TS> {
   actualizado_por: string
-  actualizado_en: Timestamp
+  actualizado_en: TS
 }
 
-const sello = (actor: ActorLicitacion, ahora: Timestamp): SelloPatch => ({
+/**
+ * ── POR QUE `TS` Y NO `Timestamp` ───────────────────────────────────────────
+ *
+ * El `Timestamp` del SDK cliente y el del Admin SDK son dos tipos DISTINTOS
+ * —el del Admin no tiene `toJSON`— y los actos sobre produccion corren con el
+ * Admin. Un `Timestamp` nunca se construye aca: lo pone el caller, y a estas
+ * funciones les da igual cual de los dos sea porque solo lo copian al patch.
+ *
+ * La alternativa era un cast en cada acto, y un cast en el borde de una
+ * escritura a produccion es exactamente donde no se quiere tener uno: el dia
+ * que el tipo cambie de verdad, el cast lo tapa. Es el mismo patron que
+ * `sellarParaEscritura<T>` y `fechasATimestamp<T>` en `radarCorrida.ts`.
+ *
+ * Los callers que declaran `ahora: Timestamp` infieren `TS = Timestamp` y no
+ * cambian en nada.
+ */
+const sello = <TS>(actor: ActorLicitacion, ahora: TS): SelloPatch<TS> => ({
   actualizado_por: actor.uid,
   actualizado_en: ahora,
 })
@@ -736,13 +758,13 @@ const sello = (actor: ActorLicitacion, ahora: Timestamp): SelloPatch => ({
 
  */
 
-function selloTriage(
+function selloTriage<TS>(
 
-  l: Pick<Licitacion, 'estado'> & Partial<Pick<Licitacion, 'radar'>>,
+  l: DocParaDescartar,
 
-  actor: ActorLicitacion, ahora: Timestamp,
+  actor: ActorLicitacion, ahora: TS,
 
-): Partial<{ revisado_por: string; revisado_en: Timestamp }> {
+): Partial<{ revisado_por: string; revisado_en: TS }> {
 
   if (l.estado !== 'detectada' || !esDelRadar(l)) return {}
 
@@ -867,12 +889,28 @@ export function patchAvanzarLicitacion(
 }
 
 /**
+ * Lo UNICO que hay que saber del documento para descartarlo: en que estado
+ * esta y si vino del radar. Estrecho a proposito — asi un acto de limpieza
+ * sobre produccion, que lee un documento crudo de Firestore y no un
+ * `Licitacion` tipado, puede usar al DUENO de la invariante en vez de armar el
+ * patch a mano. Un patch de descarte escrito a mano es una segunda
+ * implementacion de la invariante 1, y se equivoca en silencio: la primera
+ * version de los actos escribia `fecha_actualizacion` —el nombre que usan
+ * `accionMejora` y `asignacion`, no esta coleccion— y se le olvidaba el sello
+ * del triage.
+ */
+export type DocParaDescartar = Pick<Licitacion, 'estado'> & {
+  /** Solo se mira si es nulo o no (`esDelRadar`), nunca su contenido. */
+  radar?: Partial<ProcedenciaRadar> | null
+}
+
+/**
  * Descarte con motivo OBLIGATORIO (invariante 1). Legal desde cualquier
  * estado que liste `descartada` como salida; el portero no aplica —
  * descartar nunca está bloqueado.
  */
-export function patchDescartarLicitacion(
-  l: Licitacion, actor: ActorLicitacion, ahora: Timestamp, motivo: MotivoDescarte,
+export function patchDescartarLicitacion<TS>(
+  l: DocParaDescartar, actor: ActorLicitacion, ahora: TS, motivo: MotivoDescarte,
 ) {
   if (!puedeTransicionarLicitacion(l.estado, 'descartada')) return null
   if (!MOTIVOS_DESCARTE.includes(motivo)) return null
@@ -1071,8 +1109,9 @@ export interface CambioDeVersionSemaforo {
  * override queda como registro del acto que fue, con el `semaforo_anterior`
  * que era cierto en su momento.
  */
-export function patchRecalcularSemaforo(
-  l: Licitacion, r: ResultadoSemaforoLicitacion, ahora: Timestamp,
+export function patchRecalcularSemaforo<TS>(
+  l: Pick<Licitacion, 'semaforo_version'>,
+  r: ResultadoSemaforoLicitacion, ahora: TS,
   cambio?: CambioDeVersionSemaforo,
 ) {
   const mismaVersion = r.version === l.semaforo_version
