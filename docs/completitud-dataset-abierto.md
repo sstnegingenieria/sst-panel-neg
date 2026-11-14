@@ -2,7 +2,8 @@
 
 *Medido el 14-nov-2026, entre las 14:00 y las 15:00 de Bogotá.*
 *Fuente: PORTAL DE DATOS ABIERTOS - SECOPII (dataset `p6dx-8zbt`, datos.gov.co).*
-*15 peticiones en total: 14 respondidas, 1 caída por handshake TLS.*
+*25 peticiones en total: 24 respondidas, 1 caída por handshake TLS. Las diez
+últimas son la medición de las infechables de §4.*
 
 ---
 
@@ -14,8 +15,14 @@ del retraso; el único hueco interior que apareció **sí estaba en el dataset**
 desde el principio.
 
 Y ahora la salvedad, que importa tanto como la respuesta: **la pregunta de
-Giovanny no se puede cerrar con esta medición.** No porque falte trabajo, sino
-porque el dataset no puede atestiguar lo que no tiene. Eso está en §5.
+Giovanny no se cierra con esta medición**, se cierra con la del **18 de
+noviembre**. No porque falte trabajo, sino porque el dataset no puede atestiguar
+lo que no tiene.
+
+Lo que sí cambió es que ya tiene quien atestigüe. **Giovanny confirmó que los
+siete los vio en el portal de SECOP II** (§5-bis), y eso elimina la única
+explicación benigna que el dataset no podía descartar por sí mismo. La corrida
+del 18 pasa de ser indicativa a ser **concluyente**.
 
 ---
 
@@ -142,10 +149,53 @@ en el tiempo**: no se puede envejecer, no entra en una ventana, y el alcance de
 «48 horas» no significa nada para ella. Entra —por `IS NULL`, con
 `origen_fecha: 'ninguna'`— y entra sin edad.
 
-Son **926 filas** del territorio sin ninguna de las dos fechas, según la
-medición que ya estaba en el código. No es el objeto de esta pregunta y no lo
-convierto en tarea acá, pero queda nombrado: *presente pero infechable* es una
-tercera categoría, distinta de «llegó tarde» y de «no llegó».
+*Presente pero infechable* es una tercera categoría, distinta de «llegó tarde» y
+de «no llegó». Queda nombrada y **no la convierto en tarea** acá.
+
+### Medido, porque Giovanny preguntó si eran cuatro o cien
+
+Su criterio textual: *«Si son cuatro, es una curiosidad. Si son cien, es un
+agujero.»* Medido con el código real del radar —`whereIngesta` construye el
+filtro, `ingerirSecop` clasifica con el léxico **v1.1**; nada reimplementado—:
+
+| | |
+|---|---|
+| filas del territorio sin ninguna de las dos fechas | **37.633** |
+| de esas, las que pasan el filtro completo del radar | **2.074** |
+| procesos distintos que eso representa | 1.758 |
+| **que el clasificador admite** (`si` 122 + `probable` 15) | **137** |
+
+**Son 137. Es un agujero, por tu propio criterio.**
+
+Y no son chatarra histórica. Los primeros sesenta son trabajo de NEG, con
+nombre: *mantenimiento preventivo y correctivo de instalaciones* (Fuerza
+Aeroespacial, ICBF, DIJIN, Escuela de Postgrados de Policía), *adecuación y
+mantenimiento de sedes* (INVIAS, Ministerio de las Culturas), *mejoramiento de
+la subestación eléctrica* (Aerocivil), *cerramientos y obras locativas*,
+*mejoramiento de vías* en media docena de municipios de Cundinamarca. De esos
+sesenta, la mayoría son referencias **de 2026**.
+
+**Lo que el número confirma y lo que corrige.** El 926 del código está vigente:
+medido hoy con las **dos** modalidades originales del brief da **930** — cuatro
+más en cinco días. El salto a 2.074 **no es del dataset, es del filtro**: las
+dos modalidades que se agregaron después —la variante sin manifestación de
+interés y el régimen especial con ofertas del #278— aportan unas 1.144 filas
+infechables más. Vale anotarlo porque al medir el #278 se midió lo que *agrega
+a la cola* (67 al año) y no lo que *agrega al montón sin fecha*. De los sesenta
+que revisé, ninguno es de régimen especial: las modalidades nuevas aportaron
+volumen, no persistibles.
+
+**Y probablemente ya tenía nombre.** `HALLAZGOS_AUDITORIA.md` menciona, al
+hablar de `MAX_CREADOS_PRIMERA_CORRIDA`, *«el backlog de las 125 filas sin
+fecha»* como decisión pendiente de Giovanny. 125 y 137 son con casi seguridad el
+mismo animal contado en dos momentos — no verifiqué cómo se definió aquel 125,
+así que lo digo como lo que es: **muy probablemente esto no es un hallazgo nuevo
+sino el mismo pendiente, ahora con número medido y con los nombres de lo que
+hay dentro.**
+
+Dicho eso, sigue sin ser tarea de este documento. Lo que cambia es que cuando se
+decida qué hacer con ese barrido, se decide sobre 137 procesos de trabajo real y
+no sobre una cifra abstracta.
 
 ## 5 · El techo de todo esto, dicho sin rodeos
 
@@ -169,6 +219,38 @@ procesos de los que consta que estuvieron publicados— y por eso la prueba
 necesita de él un dato que no está en ninguna base: **¿los vio en el portal de
 SECOP II, o en otra parte?**
 
+## 5-bis · El testimonio, y de dónde sale esta certeza
+
+> ### 🗣 Testimonio
+>
+> **Quién:** Giovanny Montes, NEG Ingeniería.
+> **Cuándo:** 14 de noviembre de 2026.
+> **Cómo consta:** afirmado por él y relevado a esta sesión de trabajo el mismo
+> día, en respuesta a la pregunta planteada arriba en este mismo documento.
+>
+> **Qué afirma:** que **los siete** del grupo A —`TMSA-MIN-14-2026`,
+> `MC-CIC-9226-446-2026`, `IECR-008-2026`, `IEGM-015-2026`, `53025223`,
+> `4143.091.26.30.2026` y `CW404232`— **los vio en el portal de SECOP II.**
+> Todos. No en otra plataforma, no en un boletín, no de oído.
+
+**Esto no es un detalle de procedimiento: es la pieza que vuelve concluyente la
+corrida del 18.** De las cuatro explicaciones de arriba, el testimonio mata la
+**3** —*nunca se publicó*—, que era la única que el dataset no podía separar de
+la pérdida. Quedan la 1 (llegó tarde), que el 18 pone a prueba; la 4 (está con
+otra forma o sin fecha), que los pasos 3 y 4 del protocolo descartan caso por
+caso; y la 2, la pérdida.
+
+Queda escrito con autor y fecha a propósito. Quien lea este documento en seis
+meses tiene que poder ver **de dónde salió la certeza** y, si hace falta,
+volver a preguntarle a la persona que la dio. Un documento que dijera «los
+procesos estaban publicados» sin decir quién lo vio sería una afirmación sin
+dueño, y una afirmación sin dueño no se puede revisar.
+
+> ⚠ Lo que el testimonio **no** cubre, para no estirarlo: afirma que los vio en
+> el portal, no la fecha exacta en que cada uno se publicó. Los días hábiles de
+> retraso del paso 1 del protocolo salen de la `fecha_de_publicacion_del` del
+> dataset cuando la fila aparezca, no del testimonio.
+
 ## 6 · El protocolo, para que la corrida del 18 sirva
 
 1. **Fecha: martes 18-nov o después.** Tres días hábiles tras la última
@@ -178,20 +260,69 @@ SECOP II, o en otra parte?**
    todo el dataset (§4).
 4. **Serie y dueño.** Para cada ausente: la serie de **su** entidad, no del
    prefijo (§3a), y solo si la serie es densa y de un dueño (§3b).
-5. **Una pregunta a Giovanny por cada ausente**, y es la que decide: *¿esta la
-   vio en el portal de SECOP II?* Sin eso, un ausente no distingue «se perdió»
-   de «nunca se publicó» (§5).
-6. **Si queda uno** que él vio en SECOP II, con serie densa de un dueño, con
-   vecinos posteriores presentes y sin fila de fecha nula: **ése es el hallazgo
-   mayor**, y entonces sí hay que medirlo en grande antes de concluir.
+5. **El testimonio ya está** (§5-bis): los siete fueron vistos en el portal de
+   SECOP II. Este paso está cumplido y no hay que volver a preguntarlo.
 
-Para el paso 6 en grande, el diseño que tendría sentido: tomar un mes cerrado
-—donde el retraso ya no puede explicar nada— y medir la **densidad de series**
-de las entidades que publican seguido. Si el dataset es espejo completo, las
-series de un solo dueño deberían ser densas salvo por cancelaciones. Un déficit
-sistemático de densidad sería evidencia de pérdida **sin necesidad de testigo**.
-No lo construyo acá: es una medición grande y depende de que el paso 5 dé al
-menos un caso que la justifique.
+Y entonces el veredicto se parte en dos, sin terceras opciones:
+
+| resultado el 18 | qué significa | qué se reporta |
+|---|---|---|
+| **apareció** | **retraso** | **cuántos días hábiles** tardó cada uno: de su `fecha_de_publicacion_del` a la fecha en que se lo ve en el dataset |
+| **sigue ausente** | **pérdida real del dataset** | el caso, y nada de conclusión todavía — ver abajo |
+
+Para los días hábiles: contar con el calendario de festivos de Colombia que ya
+está en el repositorio (`src/utils/sigp/calendarioColombia.ts`), no a mano. El
+forense anotó entre sus salvedades que el 11,4 % se calculó **sin contar
+festivos**; esta cuenta no debe repetir eso.
+
+Dos salvedades sobre ese número, porque de otro modo se reporta con una
+precisión que no tiene:
+
+- **Contar con el calendario de festivos** que ya está en el repositorio
+  (`src/utils/sigp/calendarioColombia.ts`), no a mano. El forense anotó entre
+  sus salvedades que el 11,4 % se calculó **sin contar festivos**; esta cuenta
+  no debe repetir eso.
+- **Una sola observación da un intervalo, no un dato.** Si una fila está ausente
+  el 14 y presente el 18, lo que consta es que tardó **más de lo que va del 14 y
+  a lo sumo hasta el 18** — no se sabe si llegó el 17 o el 18. Reportar «tardó N
+  días» con una sola mirada es inventar el día de llegada. Dos formas de
+  resolverlo, y la primera es casi gratis: **mirar el 17, el 18 y el 19** y
+  quedarse con el primer día en que aparece; o reportar el intervalo tal cual,
+  con sus dos extremos. Lo que no vale es el punto medio.
+
+### Si queda aunque sea uno
+
+**Es un hallazgo mayor que el retraso**, y precisamente por eso no se concluye
+del caso único. Un proceso perdido puede ser un error puntual de una carga; un
+patrón es otra cosa, y solo lo segundo cambia qué fuente puede usar el radar.
+
+Antes de concluir hay que medirlo en grande, y hay dos caminos. **El segundo es
+el que recomiendo**, por una razón concreta:
+
+**(a) Muestra del portal con testimonio independiente.** Tomar N procesos vistos
+en el portal por una persona —no por una máquina— y verificar cuántos llegaron
+al dataset. Es el método directo y el más fuerte como evidencia. Su costo es
+real y hay que decirlo: **el portal está detrás del reCAPTCHA**, así que la
+muestra la tiene que recolectar una persona a mano, proceso por proceso. Con 30
+casos ya se distingue un error puntual de un patrón; con 5 no.
+
+**(b) Densidad de series, sin necesidad de testigo.** Tomar un **mes cerrado**
+—donde el retraso ya no pueda explicar nada— y medir la densidad de las series
+de las entidades que publican seguido: un solo dueño, prefijo propio, serie
+numérica. Si el dataset es espejo completo, esas series deben ser densas salvo
+cancelaciones. Un **déficit sistemático de densidad** es evidencia de pérdida a
+escala, y se mide **solo con datos abiertos**, sin portal, sin reCAPTCHA y sin
+que nadie transcriba nada a mano.
+
+Las dos condiciones que (b) exige, aprendidas a golpes en §3: la serie tiene que
+ser **densa y de un solo dueño** —el prefijo `IECR` lo comparten tres entidades
+y el contador `9226` del SENA seis prefijos—, y **toda ausencia se busca sin
+filtro de fecha**, o se inventan pérdidas como la de §4. Un universo de
+entidades que cumplan ambas se puede armar con el dataset mismo.
+
+Tampoco lo construyo acá: (b) es una medición grande y depende de que el 18 deje
+al menos un caso que la justifique. Si el 18 cierra con todos presentes, no hay
+nada que medir en grande.
 
 ---
 
