@@ -81,12 +81,36 @@ exacta ni con la entidad.
 | `4143.091.26.30.2026` | — | cero filas |
 | `CW404232` | EPM | cero filas |
 
-Dos de estas no son retraso, son **otra plataforma**: el Banco de la República
-y EPM contratan por régimen propio y no publican en SECOP II como los demás.
-`CW404232` tiene la forma de un identificador del portal de EPM, no de una
-referencia de SECOP.
+> ### ⚠ CORRECCIÓN (14-nov-2026, misma tarde) — este párrafo estaba equivocado
+>
+> Decía: *«Dos de estas no son retraso, son otra plataforma: el Banco de la
+> República y EPM contratan por régimen propio y no publican en SECOP II como
+> los demás.»* **Lo afirmé sin medirlo, y es falso.** Medido sobre el dataset
+> completo, sin filtro de fecha:
+>
+> | entidad | filas en el dataset | última publicación |
+> |---|---|---|
+> | BANCO DE LA REPUBLICA | **31.780** | **2026-11-12** |
+> | EMPRESAS PUBLICAS DE MEDELLIN E.S.P. | **27.593** | 2026-11-10 |
+>
+> Las dos publican en SECOP II, y las dos publicaban **esta semana**. Así que
+> **los dos casos cuentan**: la muestra útil del grupo A son **7, no 5**.
+>
+> Lo que sí se sostiene: una entidad de régimen propio puede llevar *parte* de
+> su contratación a SECOP II y parte a su propio portal, así que esto no prueba
+> que ESTOS procesos debieran estar en el dataset. Pero «esa entidad no usa
+> SECOP II» dejó de ser una explicación disponible, y era la que descartaba dos
+> casos sin mirarlos.
+>
+> La medición completa y el protocolo para rehacer la prueba están en
+> `docs/completitud-dataset-abierto.md`.
 
-Para las otras cinco no se puede distinguir, con lo medido, entre «todavía no
+Lo único de ese párrafo que queda en pie: **`CW404232` tiene la forma de un
+identificador del portal de EPM, no de una referencia de SECOP.** Es una
+observación sobre la forma del código y se sostiene; la conclusión que le colgué
+no.
+
+Para las siete no se puede distinguir, con lo medido, entre «todavía no
 llegó» y «no se publica acá». Lo que sí se puede decir: **si Giovanny las vio en
 el portal de SECOP y no están en el dataset, es retraso** — y es el mismo
 retraso de dos días de arriba.
@@ -170,6 +194,12 @@ cuestan:
    mismo día; el dataset `p6dx-8zbt` es un espejo que se actualiza con retraso.
    Habría que medir si hay una API o un canal con menos latencia — y si existe,
    el radar cambia de fuente, no de criterio.
+
+   > ⚠ **Medido después (14-nov):** el área pública del portal transaccional
+   > está detrás de un **reCAPTCHA** en la entrada, así que leerla de forma
+   > programada no es un camino. No hay canal con menos latencia documentado.
+   > Ver `docs/terminos-secop-acceso-automatizado.md` y la consulta a la mesa
+   > de servicio de Colombia Compra en `docs/consulta-colombia-compra-acceso.md`.
 3. **Revisar la frontera de modalidad** para el caso de la Universidad Militar:
    el régimen especial con ofertas trae listas de precalificados en Bogotá que
    son trabajo de NEG. Hay que medir su volumen antes de proponer nada.
