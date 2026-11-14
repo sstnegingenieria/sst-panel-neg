@@ -125,11 +125,47 @@ Son 78 peticiones repartidas en un día sobre la fuente **expresamente
 autorizada**. El tope duro de 12 por corrida es del portal transaccional, no de
 acá.
 
-> ⚠ **El muestreo vive mientras viva la sesión.** Si se corta, se relanza con un
-> comando y la serie continúa en el mismo archivo; lo que ya está medido no se
-> pierde, porque cada muestra se escribe al momento. Si hace falta que sobreviva
-> a un reinicio, se monta como tarea programada del sistema — eso no lo hago sin
-> decirlo antes, porque deja algo instalado en la máquina.
+## 4-bis · Sin tarea programada: la decisión, y los dos comandos que la reemplazan
+
+**El muestreo vive mientras viva la sesión.** Si el equipo se reinicia, se
+corta. Se evaluó dejarlo como **tarea programada de Windows** para que
+sobreviviera al reinicio, y **se descartó por decisión expresa** (14-nov-2026):
+
+> Dejar algo instalado permanentemente en el equipo es exactamente la categoría
+> de cosa que nadie recuerda. Este mes se cerraron dos: la llave olvidada desde
+> julio y el clon huérfano de 50 MB en un scratchpad. Las dos empezaron siendo
+> algo que alguien dejó puesto «mientras tanto». Un muestreo de 26 horas no
+> justifica abrir esa puerta.
+
+Lo que reemplaza a la tarea programada: **si se pierde una noche, se repite una
+noche.** Y la serie no se corrompe al relanzarla — cada muestra se escribe al
+momento, el archivo se continúa, y el análisis conserva **una sola muestra por
+hora** (un relanzamiento accidental no duplica nada; el índice `n` del script
+se reinicia en 0 y el análisis lo ignora a propósito).
+
+**1 · Ver si sigue vivo.** Imprime la última muestra y hace cuántos minutos se
+escribió. **Más de 70 minutos = se cayó.**
+
+```powershell
+cd "C:\apps\APLICACION SST\wt-cronograma\_datos\cadencia-p6dx"; Get-Content muestras.txt -Tail 1; "--- hace $([int]((Get-Date) - (Get-Item muestras.txt).LastWriteTime).TotalMinutes) min que escribio (mas de 70 = se cayo)"
+```
+
+**2 · Relanzarlo si se cortó.** Continúa en el mismo archivo. **La ventana tiene
+que quedar abierta** — es la contrapartida de no instalar nada.
+
+```powershell
+cd "C:\apps\APLICACION SST\wt-cronograma"; $env:PYTHONIOENCODING="utf-8"; python -I _datos\cadencia-p6dx\muestrea.py
+```
+
+Correr el primero antes del segundo: si el muestreo está vivo, relanzar solo
+agrega una segunda muestra por hora que el análisis descarta. No rompe nada,
+pero tampoco aporta.
+
+**3 · Leer la serie en cualquier momento**, completa o a medias:
+
+```powershell
+cd "C:\apps\APLICACION SST\wt-cronograma\_datos\cadencia-p6dx"; python -I analiza.py
+```
 
 ## 5 · Qué se decide con cada resultado, escrito antes de verlo
 
@@ -165,10 +201,47 @@ Lo que sí deja esto claro: **la frecuencia con que sondeamos es la única palan
 que tenemos de este lado**, y por eso vale medir dónde está el techo antes de
 mover el horario.
 
+## 7 · La serie va a tener huecos, y el análisis los declara en vez de taparlos
+
+Sin tarea programada, la serie se corta cuando se corta la sesión. Eso no es un
+problema **si el análisis dice dónde faltan horas**. El riesgo no es el hueco:
+es leerlo como si no estuviera.
+
+La forma incorrecta es tentadora: dividir el cambio total del tramo entre las
+horas del tramo y hablar de «filas nuevas por hora». Eso **inventa una cadencia
+que nadie midió** — reparte sobre horas sin dato un cambio que pudo ocurrir
+entero en un minuto. Es el mismo error que la ventana 00:34–02:29 de §3, pero
+peor: ahí confundí una etiqueta con un hecho; acá sería fabricar el hecho.
+
+`_datos/cadencia-p6dx/analiza.py` se escribió con cinco reglas duras:
+
+| regla | por qué |
+|---|---|
+| El índice `n` del muestreo **se ignora** | un relanzamiento lo reinicia en 0; el orden y las distancias salen del timestamp UTC |
+| Los huecos **se listan** con hora y cantidad, antes que cualquier conclusión | la cobertura es el primer dato, no una nota al pie |
+| Cada cambio se atribuye a una **ventana con su ancho en horas**, nunca a una franja que el dato no resuelve | un cambio visto entre las 02:00 y las 06:00 no es «un cambio a las 04:00» |
+| Una muestra con peticiones fallidas (campos en `None`) cuenta como **hueco, no como cero** | un conteo nulo leído como 0 sería una caída de nueve millones de filas que no ocurrió |
+| **No se calcula ninguna tasa por hora.** Ni una | es la única forma de no promediar sobre el agujero sin darse cuenta |
+
+Y una consecuencia que el script dice en voz alta: si la ventana de cambio queda
+**a caballo** entre la madrugada y la jornada, imprime *«la franja NO queda
+resuelta»* en lugar de elegir. Un hueco que se tragó la carga del día no
+responde la pregunta de ese día — ahí la salida honesta es **repetir una
+noche**, no concluir con lo que alcanzó.
+
+Verificado contra una serie sintética con tres horas faltantes, una muestra
+fallida y el salto de carga cayendo dentro del hueco: declaró los 4 huecos (los
+3 ausentes + la fallida), reportó el cambio como *ventana de 5 h · a caballo ·
+franja no resuelta*, y no imprimió una sola tasa por hora. Con la serie real de
+hoy, sin huecos, reconoció además la muestra repetida del arranque.
+
 ---
 
 ## Resultado de la serie horaria
 
 *Pendiente — se completa cuando terminen las 26 muestras. La serie cruda queda
 en `_datos/cadencia-p6dx/muestras.jsonl` (una línea JSON por muestra) y legible
-en `muestras.txt`.*
+en `muestras.txt`; se interpreta con `analiza.py` (comando 3 de §4-bis), que
+declara la cobertura y los huecos **antes** de cualquier conclusión. Si la serie
+quedó con un hueco que se tragó la carga del día, lo que va acá es «se repite una
+noche», no una conclusión a medias.*
