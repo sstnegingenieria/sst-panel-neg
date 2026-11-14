@@ -16,10 +16,10 @@ confundirlas ya pasó una vez (el guardia del script de deploy lo atrapó).
 
 | | PASO 1 · desplegar | PASO 2 · escribir datos |
 |---|---|---|
-| comando | `firebase login` | `gcloud auth application-default login` |
+| comando | `npx firebase login` | `gcloud auth application-default login` |
 | identidad | **la suya**, Giovanny | la **cuenta propietaria** del proyecto |
 | por qué | un deploy lo firma una persona; el script **aborta** con llave de servicio o cuenta compartida | los actos escriben en `licitaciones`, y eso lo autoriza el dueño del proyecto |
-| cierre | `firebase logout` | `gcloud auth application-default revoke` |
+| cierre | `npx firebase logout` | `gcloud auth application-default revoke` |
 
 **Nunca las dos abiertas a la vez.** El paso 1 se cierra antes de abrir el 2.
 
@@ -35,6 +35,18 @@ unset GOOGLE_APPLICATION_CREDENTIALS
 ---
 
 ## ANTES DE EMPEZAR
+
+**En qué consola.** Todos los comandos de este guion están escritos para **Git
+Bash**, no para PowerShell, por dos cosas: `unset VARIABLE` y el prefijo
+`AUTOR_UID=… node …` son sintaxis de bash. En PowerShell el prefijo no existe y
+el acto arrancaría **sin autor**, que es justo lo que su guarda rechaza. Si
+prefiere PowerShell, los equivalentes son:
+
+```
+$env:AUTOR_UID = "<SU-UID>"        # una vez, y después los `node …` sin prefijo
+Remove-Item Env:GOOGLE_APPLICATION_CREDENTIALS -ErrorAction SilentlyContinue
+.\scripts\deploy-funciones.ps1 -Codebase radar
+```
 
 Necesita su **UID** (no el correo): es lo que queda firmado en cada documento
 que los actos tocan. Está en Firebase Console → Authentication → su fila,
@@ -93,7 +105,7 @@ antes de los actos y ya no aplica. Lo que sigue mandando el orden es la
 credencial: el paso 1 se cierra antes de abrir la del paso 2.
 
 ```bash
-firebase login
+npx firebase login
 ```
 
 ```bash
@@ -105,7 +117,7 @@ El script pide el PR y una palabra de confirmación, verifica antes y después, 
 desplegar** — no hay estado a medias que limpiar.
 
 ```bash
-firebase logout
+npx firebase logout
 ```
 
 ### Cómo saber que funcionó
