@@ -120,11 +120,39 @@ import { DEPARTAMENTOS_OBSERVADOS } from './secopMapeo'
  * sin manifestación de interés — o sea sin sorteo de consolidación, la
  * variante con mejores probabilidades para NEG — y cae igual en rojo por
  * modalidad, así que no inunda la bandeja. Quitarla es borrar una línea.
+ *
+ * ── EL RÉGIMEN ESPECIAL «CON OFERTAS» (14-nov-2026) ─────────────────────────
+ *
+ * Entró por un caso que Giovanny encontró a mano: una lista de precalificados
+ * de la Universidad Militar Nueva Granada, en Bogotá, para mantenimientos
+ * locativos. Entrar en una de esas vale más que una licitación suelta, y
+ * quedaba afuera porque su modalidad no estaba acá.
+ *
+ * MEDIDO antes de agregarla, y la medición parte la decisión en dos:
+ *
+ *   `Contratación régimen especial`              1.599 calificarían en 2026
+ *   `Contratación régimen especial (con ofertas)`    67 calificarían en 2026
+ *
+ * El régimen especial COMPLETO queda afuera: 1.599 sobre los ~2.662 que trae
+ * la cola al año es un 63 % más de un golpe. «Con ofertas» son 67 — 0,3 por
+ * día hábil — y lo que traen son colegios y universidades contratando
+ * mantenimiento y adecuaciones.
+ *
+ * La diferencia entre las dos sub-modalidades es que «con ofertas» tiene
+ * COMPETENCIA ABIERTA: por eso produce listas de precalificados y por eso es
+ * ofertable. La otra es, en su mayoría, contratación directa de régimen
+ * especial, donde no hay a qué presentarse.
+ *
+ * Cae en ROJO por modalidad (`MODALIDAD_SIN_HISTORIAL`): NEG no tiene historia
+ * ahí y el semáforo lo dice. Entra a la cola del radar, visible, sin competir
+ * por el cupo semanal — que es exactamente lo que se quiere de algo que hay
+ * que mirar y sobre lo que no hay evidencia.
  */
 export const MODALIDADES_INGESTA = [
   'Mínima cuantía',
   'Selección Abreviada de Menor Cuantía',
   'Seleccion Abreviada Menor Cuantia Sin Manifestacion Interes',
+  'Contratación régimen especial (con ofertas)',
 ] as const
 
 /** Tope de filas por página que admite Socrata. */
