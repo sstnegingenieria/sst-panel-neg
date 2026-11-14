@@ -110,6 +110,70 @@ export function seccionDe(
  */
 
 /**
+ * Hasta dónde llega la cola, en días.
+ *
+ * ── POR QUÉ DERIVADO Y NO ESCRITO ───────────────────────────────────────────
+ *
+ * El conjunto de datos abiertos de SECOP va con retraso: medido el 14-nov-2026,
+ * tenía CERO filas publicadas el 13 y 30 del 12 contra las 108-144 de un día
+ * hábil normal. El radar no puede ver lo que la fuente no publicó, y no hay
+ * fuente más oportuna (ver `docs/latencia-fuente.md`).
+ *
+ * Eso no se arregla; se DECLARA. Pero se declara con el dato, no con una
+ * constante: si mañana el retraso baja a un día, el texto lo dice solo, y si
+ * sube, también. Una frase escrita a mano envejece sin que nadie se entere —
+ * y un panel que afirma algo falso sobre su propia cobertura es peor que uno
+ * que no dice nada.
+ */
+export function hastaDondeLlegaLaCola(
+  ls: readonly Pick<LicitacionConId, 'cronograma' | 'radar'>[],
+  hoy: string,
+): { fecha: string | null; dias: number | null } {
+  let max: string | null = null
+  for (const l of ls) {
+    // Solo las del radar: una histórica cargada a mano no dice nada sobre la
+    // frescura de la fuente.
+    if (!esDelRadar(l)) continue
+    const p = l.cronograma?.publicacion
+    const iso = p == null ? null : isoLocal(p.toDate())
+    if (iso !== null && (max === null || iso > max)) max = iso
+  }
+  if (max === null) return { fecha: null, dias: null }
+  const ms = Date.parse(hoy + 'T00:00:00Z') - Date.parse(max + 'T00:00:00Z')
+  return { fecha: max, dias: Math.max(0, Math.round(ms / 86400000)) }
+}
+
+const MESES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+]
+
+/** `'2026-11-12'` → `'12 de noviembre'`. */
+export function fechaEnPalabras(iso: string): string {
+  const [, m, d] = iso.split('-')
+  const mes = MESES[Number(m) - 1]
+  return mes === undefined ? iso : `${Number(d)} de ${mes}`
+}
+
+/**
+ * El aviso de cobertura para la cabecera del radar, o `null` si no hay nada
+ * que advertir.
+ *
+ * Calla cuando la cola está al día (un día de diferencia es la corrida de
+ * esta mañana, no un retraso) y cuando no hay con qué medir. Decir «va al
+ * día» cada mañana es ruido; decirlo cuando NO lo está es el trabajo.
+ */
+export function avisoDeCobertura(
+  ls: readonly Pick<LicitacionConId, 'cronograma' | 'radar'>[],
+  hoy: string,
+): string | null {
+  const { fecha, dias } = hastaDondeLlegaLaCola(ls, hoy)
+  if (fecha === null || dias === null || dias <= 1) return null
+  return `La cola llega hasta el ${fechaEnPalabras(fecha)}; lo publicado `
+    + 'después todavía no está en los datos públicos de SECOP.'
+}
+
+/**
  * ¿Esta licitación compite por un cupo de la semana?
  *
  * Solo verdes y amarillas. Una roja no ocupa capacidad porque el portero no

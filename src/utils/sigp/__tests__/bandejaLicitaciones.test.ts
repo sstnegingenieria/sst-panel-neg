@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { Timestamp } from 'firebase/firestore'
 import {
   SECCIONES_BANDEJA, SECCION_LABEL, CAPACIDAD_SEMANAL_DEFAULT,
+  avisoDeCobertura, hastaDondeLlegaLaCola, fechaEnPalabras,
   seccionDe, compitePorCupo, ordenarPorCierre, repartirPorCapacidad,
   planIntercambioCupo, patchLiberarCupo, coincideBusqueda, contarSecciones,
   ESTADOS_ACTIVOS_BANDEJA, SEMAFORO_CHIP, SENAL_CHIP,
@@ -700,5 +701,83 @@ describe('SENAL_CHIP — manual de marca', () => {
     // No es un detalle estético: es la fila donde `RUIDO_LEXICO` no aplica.
     expect(SENAL_CHIP.codigo_en_clase_sin_texto)
       .not.toBe(SENAL_CHIP.codigo_en_clase_con_texto)
+  })
+})
+
+// ── El aviso de cobertura: el panel declara su propio retraso ────────────────
+
+describe('avisoDeCobertura — DERIVADO, no escrito', () => {
+  const ts = (iso: string) => ({ toDate: () => new Date(iso + 'T12:00:00Z') }) as never
+  const delRadar = (pub: string | null) => ({
+    id: 'd' + pub,
+    cronograma: { publicacion: pub === null ? null : ts(pub) },
+    radar: {
+      senal: 'texto_coincide' as const, terminos: ['x'], vocabulario_version: 'v1.1',
+      corrida: 'c1', fase: null, fases_previas: [], portafolio: null,
+      origen_fecha: 'publicacion' as const,
+    },
+  }) as never
+
+  it('dice hasta donde llega la cola, con la fecha real', () => {
+    const texto = avisoDeCobertura(
+      [delRadar('2026-11-09'), delRadar('2026-11-12'), delRadar('2026-11-10')],
+      '2026-11-14')
+    expect(texto).toBe('La cola llega hasta el 12 de noviembre; lo publicado '
+      + 'después todavía no está en los datos públicos de SECOP.')
+  })
+
+  it('CLAVE: si el retraso baja, el texto lo dice SOLO', () => {
+    // La razon de que sea derivado y no una constante. Una frase escrita a
+    // mano envejece sin que nadie se entere, y un panel que afirma algo falso
+    // sobre su propia cobertura es peor que uno que no dice nada.
+    const texto = avisoDeCobertura([delRadar('2026-11-12')], '2026-11-15')
+    expect(texto).toContain('12 de noviembre')
+    const otro = avisoDeCobertura([delRadar('2026-12-01')], '2026-12-04')
+    expect(otro).toContain('1 de diciembre')
+  })
+
+  it('CALLA cuando la cola esta al dia', () => {
+    // Un dia de diferencia es la corrida de esta manana, no un retraso.
+    // Decir «va al dia» cada manana es ruido; decirlo cuando NO lo esta es el
+    // trabajo.
+    expect(avisoDeCobertura([delRadar('2026-11-14')], '2026-11-14')).toBeNull()
+    expect(avisoDeCobertura([delRadar('2026-11-13')], '2026-11-14')).toBeNull()
+  })
+
+  it('calla cuando no hay con que medir', () => {
+    expect(avisoDeCobertura([], '2026-11-14')).toBeNull()
+    expect(avisoDeCobertura([delRadar(null)], '2026-11-14')).toBeNull()
+  })
+
+  it('IGNORA lo que no es del radar: no dice nada de la frescura de la fuente', () => {
+    // Una historica cargada a mano con fecha de hoy no significa que el
+    // dataset este al dia.
+    const historica = {
+      id: 'h1', migrado: true,
+      cronograma: { publicacion: ts('2026-11-14') },
+      radar: null,
+    } as never
+    const texto = avisoDeCobertura([historica, delRadar('2026-11-12')], '2026-11-14')
+    expect(texto).toContain('12 de noviembre')
+  })
+
+  it('hastaDondeLlegaLaCola cuenta los dias', () => {
+    const r = hastaDondeLlegaLaCola([delRadar('2026-11-12')], '2026-11-14')
+    expect(r).toEqual({ fecha: '2026-11-12', dias: 2 })
+  })
+
+  it('una publicacion en el FUTURO no produce dias negativos', () => {
+    const r = hastaDondeLlegaLaCola([delRadar('2026-11-20')], '2026-11-14')
+    expect(r.dias).toBe(0)
+  })
+
+  it('fechaEnPalabras cubre los doce meses y no deja ceros a la izquierda', () => {
+    expect(fechaEnPalabras('2026-01-01')).toBe('1 de enero')
+    expect(fechaEnPalabras('2026-09-05')).toBe('5 de septiembre')
+    expect(fechaEnPalabras('2026-12-31')).toBe('31 de diciembre')
+    for (let m = 1; m <= 12; m++) {
+      const iso = `2026-${String(m).padStart(2, '0')}-15`
+      expect(fechaEnPalabras(iso), iso).toMatch(/^15 de [a-z]+$/)
+    }
   })
 })

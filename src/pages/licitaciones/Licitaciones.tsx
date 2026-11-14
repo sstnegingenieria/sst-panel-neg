@@ -34,7 +34,7 @@ import type { FechasFormulario } from '../../components/sigp/licitaciones/ModalA
 import {
   SECCIONES_BANDEJA, SECCION_LABEL, SEMAFORO_CHIP, SENAL_CHIP,
   seccionDe, ordenarPorCierre, repartirRadar, capacidadSemanal,
-  avisoAlFilo, faltaFechaManifestacion, FASE_MANIFESTACION,
+  avisoAlFilo, faltaFechaManifestacion, FASE_MANIFESTACION, avisoDeCobertura,
   repartirPorCapacidad, coincideBusqueda,
   contarSecciones, planIntercambioCupo, patchLiberarCupo,
 } from '../../utils/sigp/bandejaLicitaciones'
@@ -76,6 +76,9 @@ export default function Licitaciones() {
   const [filtroMotivo, setFiltroMotivo] = useState('')
 
   const hoy = useMemo(() => isoLocal(new Date()), [])
+  // Se calcula sobre TODAS las licitaciones, no sobre las filtradas: lo que la
+  // cola alcanza a ver no cambia porque alguien escriba en el buscador.
+  const cobertura = useMemo(() => avisoDeCobertura(licitaciones, hoy), [licitaciones, hoy])
   const conteos = useMemo(() => contarSecciones(licitaciones), [licitaciones])
 
   const filtradas = useMemo(
@@ -410,6 +413,15 @@ export default function Licitaciones() {
             Lo que el radar trajo y todavía no es de nadie. No compite por el cupo
             de la semana: admitir uno es justamente lo que lo pone a competir.
           </p>
+          {/* Hasta dónde llega la cola, DERIVADO de la publicación más reciente
+              que hay en ella. Si el retraso de SECOP baja, el texto lo dice
+              solo; si sube, también. Una frase escrita a mano envejece sin que
+              nadie se entere. */}
+          {cobertura !== null && (
+            <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded px-2.5 py-1.5">
+              {cobertura}
+            </p>
+          )}
           {radar.sinFecha.length > 0 && (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
               {/* La frase queda impersonal después del conteo: con la redacción

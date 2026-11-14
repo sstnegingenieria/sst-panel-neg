@@ -716,6 +716,85 @@ Leer el código no basta para saber si una guarda protege: hay que preguntarse *
 Nada todavía, a propósito. La constante no causa daño: el camino que debería gobernar —el barrido autorizado del backlog— hoy no tiene tope, y **ése** es el problema real. Cuando llegue el turno del backlog de las 125 filas sin fecha se decide si `autorizado_manual` debe respetar un tope; si la respuesta es sí, el 50 deja de ser letra muerta y el barrido entra en pasadas acotadas en vez de un volcado. Decisión de Giovanny, planteada en su momento y no antes.
 
 ---
+## Límite medido · el radar llega dos días tarde, y eso cuesta el 11,4 %
+
+*14-nov-2026. La cifra que hay que volver a medir si alguien propone cambiar
+de fuente.*
+
+**El conjunto de datos abiertos de SECOP va dos días atrasado.** No es una
+impresión: el 14-nov tenía CERO filas publicadas el 13 —un viernes hábil— y 30
+del 12, contra las 108-144 de un día hábil normal en el territorio y las dos
+modalidades. Los sábados y domingos traen entre 1 y 5, así que no es el fin de
+semana.
+
+Contra nuestra propia cola, por día de publicación: del 11 tenía **2 de 16**;
+del 12, **ninguno**. La corrida del 13 a las 06:30 vio 2 de los 16 procesos
+publicados el 11.
+
+### EL NÚMERO
+
+Procesos publicados en el mes anterior, en el territorio, que **calificarían**
+con el léxico v1.1. Umbral de armado de `evaluarVentana` con
+`horas_utiles_dia = 4`: mínima necesita 1 día hábil, menor necesita 2.
+
+| | mínima | menor |
+|---|---|---|
+| califican | 99 | 156 |
+| **los mata el retraso de 2 días** | **10 (10,1 %)** | **19 (12,2 %)** |
+
+**Combinado: 29 de 255 — el 11,4 %.** Unos 29 al mes, del orden de 350 al año.
+Y no son ruido: adecuación de instituciones educativas, reparaciones locativas
+en cubierta, adecuaciones locativas de infraestructura.
+
+### LAS TRES SALVEDADES, que son parte de la cifra
+
+1. **No conté festivos.** Los días hábiles se cuentan de lunes a viernes.
+   Colombia tiene 18 festivos al año, así que el daño real es **algo mayor**
+   que el 11,4 %.
+2. **Supuse un retraso parejo de dos días.** Medí 2 días para el 11-nov y al
+   menos 2 para el 12. **No medí su variación**, y un retraso que algunos días
+   es de 1 y otros de 4 da un daño distinto del que da uno constante de 2.
+3. **Excluí una modalidad por error de transcripción.** Mis scripts usaron
+   `'Seleccion Abreviada de Menor Cuantia'`, que **no existe** en el dataset
+   (inocuo), en vez de `'Seleccion Abreviada Menor Cuantia Sin Manifestacion
+   Interes'`, que sí existe y tiene 58 filas en todo 2026 en el territorio.
+   Es negligible —0,2 por día hábil— pero la cifra se midió sin ella.
+
+### POR QUÉ NO SE ARREGLA
+
+Medido, no supuesto (`docs/latencia-fuente.md`):
+
+- **No hay otro conjunto.** `a8sx-pfr3` es el MISMO que `p6dx-8zbt` (9.487.636
+  filas idénticas, misma hora al segundo). `rpmr-utcd` «SECOP Integrado» son
+  23 millones de contratos FIRMADOS, sin fecha de publicación del proceso ni
+  plazo de ofertas. Los tres conjuntos grandes topan en el 12-nov.
+- **No hay canal documentado.** El manual M-MUDA-02 promete carga diaria y
+  ofrece un enlace OData y un API — las dos, funciones de Socrata sobre el
+  mismo conjunto. Cero menciones de retraso, notificaciones, webhooks ni
+  endpoint OCDS propio.
+- **Mover el horario no gana nada.** Seis conjuntos distintos se cargan entre
+  las 00:34 y las 02:29 de Bogotá; el radar corre a las 06:30, ya cuatro horas
+  después. El dato del 13 no estaba a medianoche y no iba a estar a las 06:30.
+
+La distinción que importa: **la actualización sí es diaria. Lo que llega tarde
+es lo que entra en ella.**
+
+### LA DECISIÓN, Y SU RAZÓN
+
+Se descartó **raspar el portal web de SECOP II**, que era la única vía restante.
+La razón, de Giovanny y correcta: *se rompe en silencio, y llevamos un mes
+corrigiendo esa familia de defecto. Cambiar un límite medido por uno invisible
+es el intercambio al revés.*
+
+Lo que se hizo en cambio: **el panel declara su propio retraso**, con el texto
+DERIVADO de la publicación más reciente que hay en la cola
+(`avisoDeCobertura`). Si el retraso baja a un día, el texto lo dice solo; si
+sube, también. Una frase escrita a mano envejece sin que nadie se entere, y un
+panel que afirma algo falso sobre su propia cobertura es peor que uno que no
+dice nada.
+
+---
+
 ## Criterio del léxico · un término NEGATIVO exige más evidencia que uno positivo
 
 *13-nov-2026. Ganado el mismo día que se introdujo el error, al medir recall.*

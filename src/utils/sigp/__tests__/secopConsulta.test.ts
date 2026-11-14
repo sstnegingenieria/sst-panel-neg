@@ -38,12 +38,41 @@ describe('endpoint y vocabularios', () => {
     expect(DEPARTAMENTOS_INGESTA).toEqual(['Distrito Capital de Bogotá', 'Cundinamarca'])
   })
 
-  it('las modalidades son las dos del brief más la variante sin tildes', () => {
+  it('las modalidades: las dos del brief, la variante sin tildes y el régimen especial CON OFERTAS', () => {
     expect(MODALIDADES_INGESTA).toContain('Mínima cuantía')
     expect(MODALIDADES_INGESTA).toContain('Selección Abreviada de Menor Cuantía')
     expect(MODALIDADES_INGESTA)
       .toContain('Seleccion Abreviada Menor Cuantia Sin Manifestacion Interes')
-    expect(MODALIDADES_INGESTA).toHaveLength(3)
+    expect(MODALIDADES_INGESTA).toContain('Contratación régimen especial (con ofertas)')
+    expect(MODALIDADES_INGESTA).toHaveLength(4)
+  })
+
+  it('CLAVE: el régimen especial COMPLETO queda afuera', () => {
+    // Medido antes de agregar nada, y es lo que parte la decisión en dos:
+    //   `Contratación régimen especial`              1.599 calificarían en 2026
+    //   `Contratación régimen especial (con ofertas)`    67 calificarían
+    // El completo es un 63 % más de cola de un golpe. «Con ofertas» son 0,3
+    // por día hábil, y es el único de los dos con COMPETENCIA ABIERTA — por
+    // eso produce listas de precalificados y por eso es ofertable. El otro es
+    // contratación directa de régimen especial: no hay a qué presentarse.
+    expect(MODALIDADES_INGESTA).not.toContain('Contratación régimen especial')
+    // Y la cláusula que se manda a la API tampoco lo trae.
+    const cl = clausulaIn('modalidad_de_contratacion', MODALIDADES_INGESTA)
+    expect(cl).toContain("'Contratación régimen especial (con ofertas)'")
+    expect(cl).not.toMatch(/'Contrataci\u00f3n r\u00e9gimen especial'/)
+  })
+
+  it('las otras modalidades que NO entran siguen afuera', () => {
+    // Un recordatorio de lo que la frontera deja pasar, para que agrandarla
+    // sea una decisión y no un descuido.
+    for (const m of [
+      'Contratación directa', 'Contratación Directa (con ofertas)',
+      'Licitación pública', 'Concurso de méritos abierto',
+      'Selección abreviada subasta inversa',
+      'Solicitud de información a los Proveedores',
+    ]) {
+      expect(MODALIDADES_INGESTA, m).not.toContain(m)
+    }
   })
 })
 
