@@ -83,7 +83,7 @@ import {
 import { ingerirSecop, construirResumenCorrida } from '../../src/utils/sigp/secopMapeo'
 import type { FilaSecop, LicitacionDetectada } from '../../src/utils/sigp/secopMapeo'
 import {
-  terminosVigentes, versionVocabularioVigente,
+  terminosVigentes, negativosVigentes, versionVocabularioVigente,
 } from '../../src/types/sigp/vocabularioNeg'
 import type { RegistroVocabularioNeg } from '../../src/types/sigp/vocabularioNeg'
 import {
@@ -246,6 +246,10 @@ async function corridaDelRadar(): Promise<void> {
     ? (snapVocab.data() as RegistroVocabularioNeg)
     : null
   const terminos = terminosVigentes(registroVocab)
+  // De la MISMA lectura que los términos. Dejarlos caer al empaquetado por su
+  // cuenta mezclaría las palabras de un documento con los bloqueos del bundle
+  // — dos versiones del léxico decidiendo juntas, y el reporte nombrando una.
+  const negativos = negativosVigentes(registroVocab)
   const vocabulario_version = versionVocabularioVigente(registroVocab)
 
   const ventana = ventanaIngesta(estado.marca, inicio, estado.solape_dias)
@@ -298,7 +302,7 @@ async function corridaDelRadar(): Promise<void> {
     // El resumen vacío se DERIVA de un reporte sin filas, no se escribe a mano:
     // así su forma no puede divergir de la del resumen real.
     const resumen = construirResumenCorrida(
-      ingerirSecop([], hash, { terminos, vocabulario_version }),
+      ingerirSecop([], hash, { terminos, negativos, vocabulario_version }),
       {
         ejecutada_en: corridaId,
         modo: MODO_INGESTA_DEFECTO,
@@ -324,7 +328,7 @@ async function corridaDelRadar(): Promise<void> {
   }
 
   // ── 3. Clasificación (pura) ──
-  const reporte = ingerirSecop(filas, hash, { terminos, vocabulario_version })
+  const reporte = ingerirSecop(filas, hash, { terminos, negativos, vocabulario_version })
   const resumen = construirResumenCorrida(reporte, {
     ejecutada_en: corridaId,
     modo: MODO_INGESTA_DEFECTO,

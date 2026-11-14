@@ -136,7 +136,7 @@ import type {
 import { calcularSemaforo, esTerritorioNeg } from './semaforo'
 import type { EntradaSemaforo } from './semaforo'
 import {
-  coincideVocabulario, TERMINOS_NEG, VOCABULARIO_NEG_VERSION,
+  coincideVocabulario, TERMINOS_NEG, NEGATIVOS_NEG, VOCABULARIO_NEG_VERSION,
 } from '../../types/sigp/vocabularioNeg'
 
 // ── Las 59 columnas del dataset ──────────────────────────────────────────────
@@ -661,6 +661,19 @@ export interface Clasificacion {
    */
   descartado_con_texto_coincidente: boolean
   /**
+   * El término de BLOQUEO que vetó el objeto, o `null`. No es decorativo: es
+   * la única forma de distinguir «el texto no dijo nada» de «el texto dijo
+   * algo y lo vetamos», y de auditar después si el veto estuvo bien puesto.
+   */
+  bloqueado_por: string | null
+  /**
+   * El negativo que estaba presente y NO bloqueó, porque un término fuerte se
+   * le impuso. Es el único rastro de que un bloqueo estuvo a punto de tapar
+   * algo que el léxico reconocía bien — y el error de un negativo no aparece
+   * en ninguna otra métrica.
+   */
+  negativo_ignorado: string | null
+  /**
    * `true` si el proceso está en un departamento OBSERVADO y habría calificado
    * de estar en el territorio. Mismo instrumento que el contador de arriba,
    * aplicado a la frontera geográfica.
@@ -683,20 +696,28 @@ export interface Clasificacion {
  * sobreponerse al código, un "mantenimiento de software" entraría por la
  * palabra MANTENIMIENTO.
  *
- * `terminos` se inyecta para que el léxico pueda venir del documento de
- * configuración o del paquete, sin que este módulo sepa de dónde.
+ * `terminos` y `negativos` se inyectan para que el léxico pueda venir del
+ * documento de configuración o del paquete, sin que este módulo sepa de dónde.
+ * Los DOS, juntos: si solo se inyectaran los términos, un documento más nuevo
+ * clasificaría con sus propias palabras y con los bloqueos del bundle — dos
+ * versiones del léxico mezcladas en la misma decisión, sin que nada avise.
  */
 export function clasificarProceso(
   categoria: string | null,
   objeto: string | null | undefined,
   terminos: readonly string[],
   contexto?: { departamento?: string },
+  negativos: readonly string[] = NEGATIVOS_NEG,
 ): Clasificacion {
   const familia = familiaRup(categoria)
   const origen_codigo = origenCodigoNeg(categoria)
-  const { coincide, terminos: hallados } = coincideVocabulario(objeto, terminos)
+  const { coincide, terminos: hallados, bloqueado_por, negativo_ignorado } =
+    coincideVocabulario(objeto, terminos, negativos)
 
-  const base = { familia, origen_codigo, habria_calificado: false }
+  const base = {
+    familia, origen_codigo, habria_calificado: false,
+    bloqueado_por, negativo_ignorado,
+  }
   let v: Clasificacion
 
   if (familia === 'familia_neg') {
@@ -727,6 +748,22 @@ export function clasificarProceso(
       ...base,
       veredicto: 'probable',
       senal: 'texto_coincide',
+      terminos: hallados,
+      descartado_con_texto_coincidente: false,
+    }
+  } else if (bloqueado_por !== null && hallados.length > 0) {
+    // Sin código, el texto coincidía, y un término de bloqueo lo vetó. Los
+    // términos hallados SE CONSERVAN: vaciarlos ahorraría una línea y borraría
+    // la evidencia de qué palabra del léxico trajo esto hasta acá.
+    //
+    // `hallados.length > 0` no es defensivo: un bloqueo sobre un objeto que
+    // NINGÚN término reconoció no cambió el resultado —no iba a entrar igual—
+    // y marcarlo como vetado le atribuiría un efecto que no tuvo. Eso cae en
+    // `sin_codigo_ni_texto`, que es la verdad.
+    v = {
+      ...base,
+      veredicto: 'no',
+      senal: 'texto_vetado',
       terminos: hallados,
       descartado_con_texto_coincidente: false,
     }
@@ -1203,6 +1240,7 @@ export function mapearProceso(
   p: ProcesoColapsado, hash: (s: string) => string,
   terminos: readonly string[] = TERMINOS_NEG,
   vocabulario_version: string = VOCABULARIO_NEG_VERSION,
+  negativos: readonly string[] = NEGATIVOS_NEG,
 ): RegistroIngesta | null {
   const f = p.representante
   const id_secop = p.id_secop.trim()
@@ -1216,7 +1254,8 @@ export function mapearProceso(
   const url_proceso = urlSecop(f, CAMPO_SECOP.url_proceso)
   const objeto = texto(f, CAMPO_SECOP.objeto)
   const departamento = textoONull(f, CAMPO_SECOP['entidad.departamento']) ?? ''
-  const clasificacion = clasificarProceso(categoria_unspsc, objeto, terminos, { departamento })
+  const clasificacion = clasificarProceso(
+    categoria_unspsc, objeto, terminos, { departamento }, negativos)
   const fecha = fechaReferencia(f)
   const publicacion = fechaSecopAIso(f, CAMPO_SECOP['cronograma.publicacion'])
   const cierre = fechaSecopAIso(f, CAMPO_SECOP['cronograma.cierre'])
@@ -1366,9 +1405,25 @@ export interface DescartesIngesta {
   sin_codigo_ni_texto: number
   /**
    * Descartados por el TERRITORIO (B.1c). Cierra la identidad del struct:
-   * `total` = código fuera + sin código ni texto + fuera de territorio.
+   * `total` = código fuera + sin código ni texto + texto vetado + fuera de
+   * territorio.
+   *
+   * ⚠ La identidad se ROMPIÓ un día: al agregar la señal `texto_vetado` sumé
+   * a `total` sin darle cubo, y el test que vigila la identidad pasó igual
+   * porque ningún fixture produjo un vetado. Un invariante con test puede
+   * estar roto esperando datos reales. Si se agrega otra señal de descarte,
+   * va con su cubo Y con un fixture que la ejercite.
    */
   fuera_de_territorio: number
+  /** Descartados porque un término de BLOQUEO vetó el objeto. */
+  texto_vetado: number
+  /**
+   * Cuántas veces un negativo estaba presente y NO bloqueó, porque un término
+   * fuerte se le impuso. NO es un descarte — estos SÍ entraron. Vive acá
+   * porque es la única medición posible de si la regla de bloqueo sirve: lo
+   * que un negativo tapa no llega a ninguna pantalla.
+   */
+  negativos_ignorados: number
   /**
    * De los descartados por código, cuántos SÍ coinciden con el léxico. El
    * contador que importa: 3 de los 23 procesos que NEG ganó caen acá.
@@ -1461,9 +1516,14 @@ export const MAX_EJEMPLOS_DESCARTE = 10
  */
 export function ingerirSecop(
   filas: readonly FilaSecop[], hash: (s: string) => string,
-  opciones?: { terminos?: readonly string[]; vocabulario_version?: string },
+  opciones?: {
+    terminos?: readonly string[]
+    negativos?: readonly string[]
+    vocabulario_version?: string
+  },
 ): ReporteIngestaSecop {
   const terminos = opciones?.terminos ?? TERMINOS_NEG
+  const negativos = opciones?.negativos ?? NEGATIVOS_NEG
   const { procesos: colapsados, sin_identidad } = colapsarPorProceso(filas)
 
   const por_veredicto: Record<VeredictoRadar, number> = { si: 0, probable: 0, no: 0 }
@@ -1473,6 +1533,7 @@ export function ingerirSecop(
     codigo_en_clase_sin_texto: 0,
     codigo_fuera_de_familia: 0,
     texto_coincide: 0,
+    texto_vetado: 0,
     sin_codigo_ni_texto: 0,
     fuera_de_territorio: 0,
   }
@@ -1484,6 +1545,8 @@ export function ingerirSecop(
     codigo_fuera_de_familia: 0,
     sin_codigo_ni_texto: 0,
     fuera_de_territorio: 0,
+    texto_vetado: 0,
+    negativos_ignorados: 0,
     con_texto_coincidente: 0,
     ejemplos_con_texto_coincidente: [],
   }
@@ -1497,7 +1560,8 @@ export function ingerirSecop(
   const registros: RegistroIngesta[] = []
   let procesos_vistos = 0
   for (const p of colapsados) {
-    const r = mapearProceso(p, hash, terminos, opciones?.vocabulario_version)
+    const r = mapearProceso(
+      p, hash, terminos, opciones?.vocabulario_version, negativos)
     if (!r) continue
     procesos_vistos++
     const c = r.meta.clasificacion
@@ -1514,10 +1578,15 @@ export function ingerirSecop(
         })
       }
     }
+    // Se cuenta ANTES de la bifurcación: un negativo ignorado describe a un
+    // proceso que SÍ entró, así que contarlo después del `continue` lo
+    // perdería justo en los casos que importan.
+    if (c.negativo_ignorado !== null) descartes.negativos_ignorados++
     if (sePersiste(c.veredicto)) { registros.push(r); continue }
     descartes.total++
     if (c.senal === 'codigo_fuera_de_familia') descartes.codigo_fuera_de_familia++
     if (c.senal === 'sin_codigo_ni_texto') descartes.sin_codigo_ni_texto++
+    if (c.senal === 'texto_vetado') descartes.texto_vetado++
     if (c.senal === 'fuera_de_territorio') {
       descartes.fuera_de_territorio++
       observados.total++

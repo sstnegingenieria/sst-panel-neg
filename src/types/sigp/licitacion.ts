@@ -173,6 +173,15 @@ export type SenalClasificacion =
    * si alguno se trabajó o si entraron para nada.
    */
   | 'codigo_en_clase_sin_texto'
+  /**
+   * El objeto coincidía con el léxico, pero nombra algo que NEG no hace
+   * —software, dotación— y un término de BLOQUEO lo vetó. Lleva señal aparte
+   * de `sin_codigo_ni_texto` porque no es lo mismo: ahí el texto no dijo
+   * nada, acá dijo algo y se le respondió. Los términos hallados se
+   * conservan, que es la única forma de ver después dónde se equivocó el
+   * léxico.
+   */
+  | 'texto_vetado'
   | 'codigo_fuera_de_familia'
   | 'texto_coincide'
   | 'sin_codigo_ni_texto'
@@ -472,6 +481,7 @@ export const SENAL_LABEL: Record<SenalClasificacion, string> = {
   codigo_en_clase_sin_texto: 'Código con adjudicación probada — el texto no dice nada',
   texto_coincide: 'El objeto coincide con el léxico',
   codigo_fuera_de_familia: 'Código fuera de la familia',
+  texto_vetado: 'El objeto habla de algo que NEG no hace',
   sin_codigo_ni_texto: 'Ni código ni texto',
   fuera_de_territorio: 'Fuera del territorio',
 }

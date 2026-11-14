@@ -16,7 +16,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createHash } from 'node:crypto'
 import FIXTURES from './fixtures/secop.p6dx-8zbt.json'
-import VOCABULARIO_JSON from '../../../../functions/scripts/vocabulario-neg-v1.0.json'
+import VOCABULARIO_JSON from '../../../../functions/scripts/vocabulario-neg-v1.1.json'
 import {
   TERMINOS_NEG, VOCABULARIO_NEG_VERSION, FRECUENCIAS_NEG, CAMPOS_JSON_VOCABULARIO,
   PALABRAS_FUNCIONALES, LARGO_MINIMO_PALABRA,
@@ -55,17 +55,19 @@ afterAll(() => { globalThis.fetch = fetchOriginal })
 // ── El léxico ────────────────────────────────────────────────────────────────
 
 describe('léxico de NEG — el documento versionado', () => {
-  it('trae los 48 términos derivados, únicos y normalizados', () => {
-    expect(TERMINOS_NEG).toHaveLength(48)
-    expect(new Set(TERMINOS_NEG).size).toBe(48)
+  it('trae los 43 términos derivados, únicos y normalizados', () => {
+    expect(TERMINOS_NEG).toHaveLength(43)
+    expect(new Set(TERMINOS_NEG).size).toBe(43)
     for (const t of TERMINOS_NEG) {
       expect(t, t).toBe(normalizarObjeto(t))
       expect(t.length, t).toBeGreaterThanOrEqual(LARGO_MINIMO_PALABRA)
     }
-    expect(VOCABULARIO_NEG_VERSION).toBe('v1.0')
+    expect(VOCABULARIO_NEG_VERSION).toBe('v1.1')
   })
 
   it('cada término trae su frecuencia medida, y ninguna es inventada', () => {
+    // Siguen siendo 48: el respaldo de la derivación no se poda cuando un
+    // término sale del léxico (ver `semillaVocabulario.test.ts`).
     expect(Object.keys(FRECUENCIAS_NEG)).toHaveLength(48)
     for (const t of TERMINOS_NEG) {
       const f = FRECUENCIAS_NEG[t]
@@ -116,7 +118,7 @@ describe('semilla de configuracion/vocabulario_neg', () => {
   it('copia el JSON campo por campo, sin reescribir nada', () => {
     const s = construirSemillaVocabularioNeg('uid-giovanny', ahora)
     const v = s.versiones[VOCABULARIO_NEG_VERSION]
-    expect(s.version_actual).toBe('v1.0')
+    expect(s.version_actual).toBe('v1.1')
     expect(v.definicion).toBe(VOCABULARIO_JSON.definicion)
     expect(v.derivacion).toBe(VOCABULARIO_JSON.derivacion)
     expect(v.limitaciones).toBe(VOCABULARIO_JSON.limitaciones)
@@ -146,20 +148,20 @@ describe('semilla de configuracion/vocabulario_neg', () => {
     // Un radar que se apaga porque falta un doc de configuración es un radar
     // apagado; pero el reporte no puede mentir sobre con qué criterio midió.
     expect(terminosVigentes(null)).toEqual(TERMINOS_NEG)
-    expect(versionVocabularioVigente(null)).toBe('v1.0 (empaquetada)')
+    expect(versionVocabularioVigente(null)).toBe('v1.1 (empaquetada)')
     expect(versionVocabularioVigente({ versiones: {}, version_actual: 'v9' }))
-      .toBe('v1.0 (empaquetada)')
+      .toBe('v1.1 (empaquetada)')
   })
 
   it('un documento con la versión vacía también degrada', () => {
     const reg = {
       versiones: {
-        'v1.0': {
+        'v1.1': {
           vigente_desde: ahora, vigente_hasta: null, definicion: '', derivacion: '',
           metricas: {}, excluidos: {}, limitaciones: '', autor_uid: '', terminos: [],
         },
       },
-      version_actual: 'v1.0',
+      version_actual: 'v1.1',
     } as RegistroVocabularioNeg
     expect(terminosVigentes(reg)).toEqual(TERMINOS_NEG)
   })
@@ -255,13 +257,64 @@ describe('clasificarProceso — los cuatro casos de la tabla', () => {
   })
 
   it('EL CÓDIGO MANDA: el texto no puede sobreponerse a un código fuera', () => {
-    // Si el texto pudiera ganarle al código, un "mantenimiento de software"
+    // Si el texto pudiera ganarle al código, un proceso de otra familia
     // entraría por la palabra MANTENIMIENTO.
-    const c = clasificarProceso('V1.81112200', 'MANTENIMIENTO DE LA INFRAESTRUCTURA FISICA DEL SOFTWARE', TERMINOS_NEG)
+    //
+    // El objeto de este caso decía «DEL SOFTWARE» hasta v1.1. Ahora SOFTWARE
+    // es un término de BLOQUEO y el texto ya no coincide, así que el ejemplo
+    // dejó de servir para lo que el test prueba: se cambió el OBJETO, no la
+    // expectativa. El caso vetado se prueba aparte, abajo.
+    const c = clasificarProceso('V1.81112200', 'MANTENIMIENTO DE LA INFRAESTRUCTURA FISICA DEL EDIFICIO', TERMINOS_NEG)
     expect(c.veredicto).toBe('no')
     expect(c.senal).toBe('codigo_fuera_de_familia')
     // Pero NO se pierde la discrepancia: queda contada.
     expect(c.descartado_con_texto_coincidente).toBe(true)
+    expect(c.bloqueado_por).toBeNull()
+  })
+
+  it('un término de BLOQUEO no es lo mismo que «ni código ni texto»', () => {
+    // Objeto real de la cola: coincide por ADECUACION y no es trabajo de NEG.
+    // Si esto cayera en `sin_codigo_ni_texto` el documento afirmaría que el
+    // texto no dijo nada — y dijo algo, se le respondió.
+    const c = clasificarProceso(
+      null,
+      'MANTENIMIENTO PREVENTIVO Y CORRECTIVO DE HARDWARE Y SOFTWARE CON LA ADECUACION DE EQUIPOS',
+      TERMINOS_NEG)
+    expect(c.veredicto).toBe('no')
+    expect(c.senal).toBe('texto_vetado')
+    expect(c.bloqueado_por).toBe('SOFTWARE')
+    // La evidencia de qué palabra lo trajo hasta acá NO se borra.
+    expect(c.terminos).toContain('ADECUACION')
+    // Y no contamina el contador de discrepancias del código: no hubo código.
+    expect(c.descartado_con_texto_coincidente).toBe(false)
+  })
+
+  it('un bloqueo que no cambió nada NO se reporta como veto', () => {
+    // El caso de Giovanny entraba por REALIZAR ACTIVIDADES, que v1.1 ya quitó
+    // del léxico. Hoy NINGÚN término lo reconoce: el bloqueo por SOFTWARE
+    // llega cuando ya no hay nada que bloquear. Marcarlo como vetado le
+    // atribuiría al negativo un acierto que no tuvo — y la medición de si los
+    // negativos sirven se haría sobre un número inflado.
+    const c = clasificarProceso(
+      null,
+      'BRINDAR SOPORTE, MANTENIMIENTO INTEGRAL Y REALIZAR ACTIVIDADES DE DESARROLLO EN EL SOFTWARE SIAF',
+      TERMINOS_NEG)
+    expect(c.veredicto).toBe('no')
+    expect(c.senal).toBe('sin_codigo_ni_texto')
+    expect(c.terminos).toEqual([])
+    // El bloqueo SÍ queda registrado: no se reporta como veto, no se oculta.
+    expect(c.bloqueado_por).toBe('SOFTWARE')
+  })
+
+  it('los negativos se INYECTAN, igual que los términos', () => {
+    // Si solo se inyectaran los términos, un documento más nuevo clasificaría
+    // con sus palabras y con los bloqueos del bundle: dos versiones del léxico
+    // decidiendo en la misma corrida.
+    const objeto = 'MANTENIMIENTO DE CUBIERTAS DEL POLIDEPORTIVO MUNICIPAL'
+    expect(clasificarProceso(null, objeto, TERMINOS_NEG).senal).toBe('texto_coincide')
+    const c = clasificarProceso(null, objeto, TERMINOS_NEG, undefined, ['POLIDEPORTIVO'])
+    expect(c.senal).toBe('texto_vetado')
+    expect(c.bloqueado_por).toBe('POLIDEPORTIVO')
   })
 
   it('solo `si` y `probable` se persisten', () => {
@@ -392,7 +445,7 @@ describe('los que entran por evidencia sin que el texto lo diga', () => {
     const doc = rep.registros[0].doc
     expect(doc.radar.senal).toBe('codigo_en_clase_sin_texto')
     expect(doc.radar.terminos).toEqual([])
-    expect(doc.radar.vocabulario_version).toBe('v1.0')
+    expect(doc.radar.vocabulario_version).toBe('v1.1')
     expect(doc.radar.corrida, 'lo sella el escritor, no el mapeo').toBeNull()
   })
 
@@ -525,8 +578,9 @@ describe('agregado de la corrida', () => {
     expect(rep.procesos_vistos).toBe(rep.procesos + rep.descartes.total)
     expect(rep.por_veredicto.si + rep.por_veredicto.probable + rep.por_veredicto.no)
       .toBe(rep.procesos_vistos)
-    // La identidad del struct de descartes cierra con los tres motivos.
+    // La identidad del struct de descartes cierra con los CUATRO motivos.
     expect(rep.descartes.codigo_fuera_de_familia + rep.descartes.sin_codigo_ni_texto
+      + rep.descartes.texto_vetado
       + rep.descartes.fuera_de_territorio).toBe(rep.descartes.total)
     // Y las señales cuadran con los vistos.
     const sumaSenales = Object.values(rep.por_senal).reduce((a, b) => a + b, 0)
@@ -534,9 +588,58 @@ describe('agregado de la corrida', () => {
     expect(rep.registros.every(r => sePersiste(r.meta.clasificacion.veredicto))).toBe(true)
   })
 
+  it('LA IDENTIDAD con un VETADO de verdad adentro', () => {
+    // El test de arriba vigila la identidad y pasó con ella ROTA: cuando
+    // agregué la señal `texto_vetado` sumé a `total` sin darle cubo, y ningún
+    // fixture producía un vetado. Un invariante con test puede estar roto
+    // esperando datos reales — este es el fixture que faltaba.
+    const vetado: FilaSecop = {
+      ...una('minima_limpia'),
+      id_del_proceso: 'VETADO-001',
+      referencia_del_proceso: 'VETADO-001',
+      codigo_principal_de_categoria: 'UNSPECIFIED',
+      // Ojo con el objeto: 'MANTENIMIENTO Y ADECUACION' produce el bigrama
+      // MANTENIMIENTO ADECUACION, que ES un termino del lexico — o sea FUERTE,
+      // y la regla nueva lo deja entrar. Para que haya veto hacen falta solo
+      // palabras SUELTAS. Este es un objeto real de la cola del 13-nov.
+      descripci_n_del_procedimiento:
+        'ADECUACION DE EQUIPOS DE COMPUTO Y SOFTWARE DE LA ENTIDAD',
+    } as FilaSecop
+
+    const rep = ingerirSecop([...Object.values(casos).flatMap(c => c.filas), vetado], hash)
+    expect(rep.descartes.texto_vetado, 'el fixture tiene que producir un vetado')
+      .toBeGreaterThan(0)
+    expect(rep.descartes.codigo_fuera_de_familia + rep.descartes.sin_codigo_ni_texto
+      + rep.descartes.texto_vetado
+      + rep.descartes.fuera_de_territorio).toBe(rep.descartes.total)
+    expect(rep.procesos_vistos).toBe(rep.procesos + rep.descartes.total)
+    const sumaSenales = Object.values(rep.por_senal).reduce((a, b) => a + b, 0)
+    expect(sumaSenales).toBe(rep.procesos_vistos)
+  })
+
+  it('cuenta los negativos IGNORADOS, que no son descartes', () => {
+    // Un negativo que pierde contra un término fuerte describe un proceso que
+    // SÍ entró. Es la única medición posible de si la regla de bloqueo sirve:
+    // lo que un negativo tapa no llega a ninguna pantalla.
+    const ignorado: FilaSecop = {
+      ...una('minima_limpia'),
+      id_del_proceso: 'IGNORADO-001',
+      referencia_del_proceso: 'IGNORADO-001',
+      codigo_principal_de_categoria: 'UNSPECIFIED',
+      descripci_n_del_procedimiento:
+        'MANTENIMIENTO DE LA INFRAESTRUCTURA FISICA Y DEL SOFTWARE DE LA SEDE',
+    } as FilaSecop
+
+    const rep = ingerirSecop([ignorado], hash)
+    expect(rep.descartes.negativos_ignorados).toBe(1)
+    // Y NO se contó como descarte: entró.
+    expect(rep.descartes.total).toBe(0)
+    expect(rep.procesos).toBe(1)
+  })
+
   it('reporta con qué versión del léxico clasificó', () => {
     const rep = ingerirSecop(caso('minima_limpia'), hash)
-    expect(rep.vocabulario_version).toBe('v1.0')
+    expect(rep.vocabulario_version).toBe('v1.1')
     const rep2 = ingerirSecop(caso('minima_limpia'), hash, {
       terminos: ['OTRA COSA'], vocabulario_version: 'v2.0 (documento)',
     })
@@ -563,7 +666,7 @@ describe('agregado de la corrida', () => {
     expect(resumen.descartes).toEqual(rep.descartes)
     expect(resumen.ventana.solape_dias).toBe(45)
     expect(resumen.modo).toBe('radar')
-    expect(resumen.vocabulario_version).toBe('v1.0')
+    expect(resumen.vocabulario_version).toBe('v1.1')
     // Es serializable tal cual: va a un documento.
     expect(() => JSON.stringify(resumen)).not.toThrow()
   })
