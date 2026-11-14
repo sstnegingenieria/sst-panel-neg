@@ -716,6 +716,96 @@ Leer el código no basta para saber si una guarda protege: hay que preguntarse *
 Nada todavía, a propósito. La constante no causa daño: el camino que debería gobernar —el barrido autorizado del backlog— hoy no tiene tope, y **ése** es el problema real. Cuando llegue el turno del backlog de las 125 filas sin fecha se decide si `autorizado_manual` debe respetar un tope; si la respuesta es sí, el 50 deja de ser letra muerta y el barrido entra en pasadas acotadas en vez de un volcado. Decisión de Giovanny, planteada en su momento y no antes.
 
 ---
+## Criterio del léxico · un término NEGATIVO exige más evidencia que uno positivo
+
+*13-nov-2026. Ganado el mismo día que se introdujo el error, al medir recall.*
+
+**El criterio.** Un término que BLOQUEA necesita mucha más evidencia que uno
+que admite, porque **su error es invisible**.
+
+- Un **positivo** equivocado aparece como ruido en la cola, alguien lo reporta
+  y se mide. Fue exactamente así como salieron los cinco términos sin poder
+  discriminante de v1.1: Giovanny vio software en la cola y lo dijo.
+- Un **negativo** equivocado **no aparece nunca**. Lo que bloquea no llega a
+  ninguna pantalla, no entra en ningún conteo, y nadie puede reportar lo que no
+  ve. El único modo de encontrarlo es medir recall contra una verdad externa —
+  que es trabajo deliberado, no un subproducto de operar.
+
+**La forma lógica, que es la razón de fondo.** Un término positivo es una
+pista probabilística: «si esta palabra está, probablemente sea trabajo de NEG».
+Un término negativo es una afirmación **universal**: «si esta palabra está,
+NUNCA es trabajo de NEG». Un solo contraejemplo refuta una universal. Por eso
+tres observaciones favorables no sostienen un bloqueo, y una observación en
+contra lo tumba.
+
+**El caso.** `DOTACION` entró como bloqueo y salió el mismo día.
+
+| | |
+|---|---|
+| evidencia a favor | 3 de 3 ruido sobre la cola de 128 de un día |
+| respaldo estadístico | 496 documentos del corpus negativo contra 1 del positivo — **lift 0,17** |
+| lo que la refutó | UN documento del registro de Karen: «OBRAS DE ADECUACIÓN, MANTENIMIENTO Y DOTACION DE MOBILIARIO DE LA INFRAESTRUCTURA FÍSICA» — trabajo de NEG con cuatro términos buenos adentro, vetado por una palabra |
+| confirmación independiente | la gerencia aportó otro caso real: a NEG le pidieron dotar mobiliario dentro de un contrato de INVIAS |
+
+Lo importante del cuadro: **el respaldo estadístico era fuerte y aun así el
+bloqueo estaba mal**. «Aparece mucho en el corpus negativo» no es lo mismo que
+«su presencia hace imposible el trabajo de NEG», que es lo que un bloqueo
+afirma. La medición de PRECISIÓN no podía ver el daño — por construcción, mide
+lo que entra.
+
+**Lo que queda del caso.** `DOTACION MOBILIARIO` como POSITIVO se midió con el
+método de la derivación original: DF_pos 1, DF_neg 2, **lift 28,56**. El
+bigrama sí discrimina —la palabra suelta da 0,17, un salto de 168 veces, el
+patrón de siempre— pero el corte exige DF_pos ≥ 8 y hay **un** documento.
+Agregarlo sobre una sola observación sería el mismo error al revés. Y es
+innecesario: sin el bloqueo, el objeto ya entra por los términos de obra.
+
+> **Trampa de la métrica, para quien repita el cálculo.** `DOTACION ALIMENTOS`
+> da lift 42,85 con DF_pos 0 y DF_neg 0: es puro suavizado. El lift sin DF_pos
+> no dice nada. Y el lift se calcula sobre **frecuencia** documental, no sobre
+> conteos — con conteos crudos `INFRAESTRUCTURA FISICA` daría 2,29 y está en el
+> léxico con corte ≥ 10. Esa incoherencia de escala fue lo que delató mi error.
+
+**Lo que se cambió además, y que vale con o sin `DOTACION`:** un negativo
+bloquea solo si **ningún término FUERTE** —de varias palabras— coincidió. Si el
+objeto coincide en una *frase* del oficio, está hablando del oficio, y el
+bloqueo pierde. Costo medido sobre el universo 2026: **un** proceso al año que
+hoy se bloquea entraría. En la cola de hoy la regla **no se dispara ni una
+vez** — es un seguro, no un cambio de comportamiento.
+
+Y el que un negativo haya perdido queda **contado** (`negativos_ignorados` en
+el reporte de la corrida). Sin ese contador, «¿la regla sirve?» no se podría
+responder con datos — y el punto entero de esta nota es que los negativos no se
+miden solos.
+
+---
+
+## Nota de técnica · un invariante CON test puede estar roto esperando datos
+
+*13-nov-2026. Mismo día, mismo bloque.*
+
+`DescartesIngesta` documenta su identidad: `total` = código fuera + sin código
+ni texto + fuera de territorio. Hay un test que la verifica. Al agregar la
+señal `texto_vetado` sumé a `total` sin darle cubo — **y el test siguió
+pasando**, porque ningún fixture del archivo producía un vetado.
+
+El invariante estaba roto y verde. Lo encontré leyendo el comentario del
+struct, no corriendo la suite.
+
+Es una variante del patrón de las siete ocurrencias: «hay test» tampoco
+significa «el test cubre este caso». Un test de identidad sobre datos de prueba
+solo vigila las ramas que los datos de prueba recorren.
+
+Remedio aplicado: cubo `texto_vetado`, identidad corregida en el comentario, y
+**un fixture que la ejercita** — con una advertencia que me costó dos intentos:
+el primer objeto que escribí (`MANTENIMIENTO Y ADECUACION DE EQUIPOS…`)
+producía el bigrama `MANTENIMIENTO ADECUACION`, que es un término del léxico, o
+sea FUERTE, y la regla nueva lo dejaba entrar. Para que haya veto hacen falta
+solo palabras sueltas. Regla para el futuro: **una señal de descarte nueva va
+con su cubo Y con un fixture que la produzca.**
+
+---
+
 ## Nota de configuración · APIs habilitadas en `neg-sst-app`
 
 El 05-jul-2026, durante el pre-flight del deploy de `generarConsecutivo`, el CLI de Firebase habilitó automáticamente dos APIs de Google Cloud necesarias para Cloud Functions 2ª gen:

@@ -72,12 +72,19 @@ especial no está en la consulta). **Una sola es culpa del filtro de familias.**
 **Cero** pérdidas por el filtro de familias. Todas las pérdidas corregibles son
 del léxico.
 
-> ⚠ **Un falso negativo que introduje yo hoy mismo.** El bloqueado por
-> `DOTACION` es *«OBRAS DE ADECUACIÓN, MANTENIMIENTO Y DOTACION DE MOBILIARIO
-> DE LA INFRAESTRUCTURA FÍSICA…»* — trabajo de NEG, con tres términos buenos
-> adentro, vetado por una palabra. `DOTACION` midió 3 de 3 ruido sobre la cola
-> de 128, y esa medición de **precisión** no podía ver este caso. Es
-> exactamente el tipo de daño que solo aparece midiendo recall.
+> ⚠ **Un falso negativo que introduje yo hoy mismo — YA CORREGIDO.** El
+> bloqueado por `DOTACION` era *«OBRAS DE ADECUACIÓN, MANTENIMIENTO Y DOTACION
+> DE MOBILIARIO DE LA INFRAESTRUCTURA FÍSICA…»* — trabajo de NEG, con cuatro
+> términos buenos adentro, vetado por una palabra. `DOTACION` midió 3 de 3
+> ruido sobre la cola de 128, y esa medición de **precisión** no podía ver
+> este caso.
+>
+> **`DOTACION` salió de los bloqueos por completo** el mismo día. Los 372
+> quedan con CERO bloqueados. Costo de sacarlo: 3 procesos de ruido vuelven a
+> la cola de hoy (111 en vez de 108) — ruido visible a cambio de un veto
+> invisible. El criterio que salió de esto está en la bitácora: **un término
+> negativo exige más evidencia que uno positivo, porque su error no aparece en
+> ninguna métrica.**
 
 ### (b) SOLTEC — la verdad que no viene de nuestro pasado
 

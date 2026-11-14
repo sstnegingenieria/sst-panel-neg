@@ -134,10 +134,26 @@ export interface CoincidenciaVocabulario {
    * entre «no hubo bloqueo» y «nadie preguntó».
    */
   bloqueado_por: string | null
+  /**
+   * El negativo que estaba presente y NO bloqueó, porque un término fuerte
+   * se le impuso. O `null`.
+   *
+   * Existe por una razón precisa: el error de un negativo es INVISIBLE — lo
+   * que bloquea no llega a ninguna pantalla. Este campo es el único lugar
+   * donde queda registrado que un bloqueo estuvo a punto de tapar algo que el
+   * léxico reconocía bien. Sin él, la pregunta «¿la regla nueva sirve?» no
+   * se puede responder con datos.
+   *
+   * Nunca va junto con `bloqueado_por`: o bloqueó, o no bloqueó.
+   */
+  negativo_ignorado: string | null
   coincide: boolean
   /** Términos del léxico encontrados, en orden de aparición en la lista. */
   terminos: string[]
 }
+
+/** Un término de varias palabras. Ver `esTerminoFuerte`. */
+export const esTerminoFuerte = (t: string): boolean => t.trim().includes(' ')
 
 /**
  * ¿El objeto contratado habla del trabajo de NEG?
@@ -145,6 +161,24 @@ export interface CoincidenciaVocabulario {
  * Devuelve TAMBIÉN cuáles términos coincidieron: sin eso, un `probable` es
  * una afirmación sin respaldo y nadie puede revisar por qué el radar le puso
  * algo al frente. Es el mismo principio de `semaforo_motivos`.
+ *
+ * ── LA REGLA DE BLOQUEO ─────────────────────────────────────────────────────
+ *
+ * Un negativo bloquea SOLO si ningún término FUERTE —de varias palabras—
+ * coincidió. Antes bloqueaba siempre, y esa versión vivió un día: al medir
+ * recall apareció «OBRAS DE ADECUACIÓN, MANTENIMIENTO Y DOTACION DE
+ * MOBILIARIO DE LA INFRAESTRUCTURA FÍSICA» — cuatro términos buenos adentro,
+ * vetado por una palabra.
+ *
+ * Por qué el umbral son los bigramas y no un conteo: lo que distingue este
+ * léxico es que las frases discriminan donde las palabras sueltas no
+ * (INFRAESTRUCTURA FISICA tiene lift 95; INFRAESTRUCTURA sola arrastra
+ * «infraestructura digital»). Un objeto que coincide en una FRASE del oficio
+ * está hablando del oficio, y entonces el bloqueo pierde.
+ *
+ * Costo medido sobre el universo 2026: UN proceso al año que hoy se bloquea
+ * entraría. Eso es lo que cuesta que un bloqueo equivocado no pueda tapar lo
+ * que el léxico reconoce bien.
  */
 export function coincideVocabulario(
   objeto: string | null | undefined,
@@ -158,11 +192,14 @@ export function coincideVocabulario(
   // conservan: el documento tiene que poder decir «coincidió en esto, y aun
   // así no entró por aquello». Devolver la lista vacía ahorraría una línea y
   // borraría la única evidencia de por qué el léxico se equivocó.
-  const bloqueado_por = negativos.find(n => presentes.has(n)) ?? null
+  const negativo = negativos.find(n => presentes.has(n)) ?? null
+  const hayFuerte = hallados.some(esTerminoFuerte)
+  const bloqueado_por = negativo !== null && !hayFuerte ? negativo : null
   return {
     coincide: hallados.length > 0 && bloqueado_por === null,
     terminos: hallados,
     bloqueado_por,
+    negativo_ignorado: negativo !== null && hayFuerte ? negativo : null,
   }
 }
 

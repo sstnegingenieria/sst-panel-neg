@@ -17,6 +17,7 @@ import {
   NEGATIVOS_NEG,
   coincideVocabulario,
   negativosVigentes,
+  esTerminoFuerte,
 } from '../vocabularioNeg'
 
 // ── v1.1: los cinco sin poder discriminante, y los negativos ────────────────
@@ -58,14 +59,22 @@ describe('v1.1 — los términos que acertaban cero', () => {
   })
 })
 
-describe('v1.1 — los términos que BLOQUEAN', () => {
-  it('un objeto con SOFTWARE no entra aunque coincida otro término', () => {
-    // El ejemplo de Giovanny. Tiene MANTENIMIENTO INTEGRAL, pero NEG no hace
-    // software.
-    const o = 'BRINDAR SOPORTE, MANTENIMIENTO INTEGRAL Y REALIZAR ACTIVIDADES DE DESARROLLO EN EL SOFTWARE SIAF'
-    const r = coincideVocabulario(o)
+describe('v1.1 — el término que BLOQUEA', () => {
+  it('SOFTWARE es el único: NEG no construye software', () => {
+    // No se derivó de los datos — lo confirmó la gerencia dos veces. Es la
+    // única forma honesta de sostener un bloqueo: el dato dice qué aparece,
+    // no qué es imposible.
+    expect([...NEGATIVOS_NEG]).toEqual(['SOFTWARE'])
+  })
+
+  it('un objeto con SOFTWARE y sin término fuerte no entra', () => {
+    const r = coincideVocabulario(
+      'MANTENIMIENTO PREVENTIVO Y CORRECTIVO DE HARDWARE Y SOFTWARE CON LA ADECUACION DE EQUIPOS')
     expect(r.coincide).toBe(false)
     expect(r.bloqueado_por).toBe('SOFTWARE')
+    // ADECUACION es una palabra suelta: no le gana al bloqueo.
+    expect(r.terminos).toContain('ADECUACION')
+    expect(r.negativo_ignorado).toBeNull()
   })
 
   it('CLAVE: los términos hallados NO se borran al bloquear', () => {
@@ -74,20 +83,83 @@ describe('v1.1 — los términos que BLOQUEAN', () => {
     // única evidencia de dónde se equivocó el léxico.
     const r = coincideVocabulario(
       'MANTENIMIENTO PREVENTIVO Y CORRECTIVO DE HARDWARE Y SOFTWARE CON LA ADECUACION DE EQUIPOS')
-    expect(r.coincide).toBe(false)
-    expect(r.bloqueado_por).toBe('SOFTWARE')
     expect(r.terminos.length).toBeGreaterThan(0)
   })
 
-  it('sin negativo presente, bloqueado_por es null y no estorba', () => {
+  it('sin negativo presente, los dos campos son null y no estorban', () => {
     const r = coincideVocabulario('MANTENIMIENTO CUBIERTAS PARA LA ESCUELA')
     expect(r.coincide).toBe(true)
     expect(r.bloqueado_por).toBeNull()
+    expect(r.negativo_ignorado).toBeNull()
+  })
+})
+
+describe('la regla: un negativo pierde contra un término FUERTE', () => {
+  it('un término fuerte es de varias palabras', () => {
+    expect(esTerminoFuerte('INFRAESTRUCTURA FISICA')).toBe(true)
+    expect(esTerminoFuerte('ADECUACION')).toBe(false)
   })
 
-  it('los negativos descartados NO están: se midieron y hacían daño', () => {
-    // DESARROLLO vive en «actividades a desarrollar»; MOBILIARIO aparece en
-    // «reparaciones locativas de los predios y del mobiliario distrital».
+  it('con una FRASE del oficio, el bloqueo no se aplica', () => {
+    const r = coincideVocabulario(
+      'MANTENIMIENTO DE LA INFRAESTRUCTURA FISICA Y DEL SOFTWARE DE LA SEDE')
+    expect(r.coincide).toBe(true)
+    expect(r.bloqueado_por).toBeNull()
+    // Y queda REGISTRADO que el bloqueo estuvo ahí y perdió. Es el único
+    // rastro: lo que un negativo tapa no llega a ninguna pantalla.
+    expect(r.negativo_ignorado).toBe('SOFTWARE')
+  })
+
+  it('los dos campos JAMÁS van juntos: o bloqueó, o no bloqueó', () => {
+    const casos = [
+      'MANTENIMIENTO DE LA INFRAESTRUCTURA FISICA Y DEL SOFTWARE',
+      'ADECUACION DE EQUIPOS DE SOFTWARE',
+      'MANTENIMIENTO CUBIERTAS DEL COLISEO',
+      'COMPRA DE SOFTWARE CONTABLE',
+    ]
+    for (const o of casos) {
+      const r = coincideVocabulario(o)
+      expect(r.bloqueado_por !== null && r.negativo_ignorado !== null, o).toBe(false)
+    }
+  })
+
+  it('un negativo sobre un objeto sin NINGÚN término no inventa nada', () => {
+    const r = coincideVocabulario('COMPRA DE LICENCIAS DE SOFTWARE CONTABLE')
+    expect(r.coincide).toBe(false)
+    expect(r.terminos).toEqual([])
+    // No bloqueó nada: no había nada que bloquear. Y no se ignoró.
+    expect(r.bloqueado_por).toBe('SOFTWARE')
+    expect(r.negativo_ignorado).toBeNull()
+  })
+})
+
+describe('DOTACION: estuvo un día y salió', () => {
+  it('NO es un negativo', () => {
+    // Midió 3 de 3 ruido sobre la cola de 128 — y esa medición de PRECISIÓN
+    // no podía ver el daño. Al medir RECALL contra los 372 del registro
+    // apareció un contrato real de NEG vetado por esta palabra, y la gerencia
+    // confirmó otro: dotar mobiliario dentro de un contrato de INVIAS.
+    expect(NEGATIVOS_NEG).not.toContain('DOTACION')
+  })
+
+  it('el caso REAL del registro vuelve a entrar', () => {
+    const r = coincideVocabulario(
+      'OBRAS DE ADECUACIÓN, MANTENIMIENTO Y DOTACION DE MOBILIARIO DE LA '
+      + 'INFRAESTRUCTURA FÍSICA DE LOS PISOS 2, 3 Y 4')
+    expect(r.coincide).toBe(true)
+    expect(r.terminos).toContain('INFRAESTRUCTURA FISICA')
+  })
+
+  it('y DOTACION MOBILIARIO tampoco entra como POSITIVO', () => {
+    // Medido con el método de la derivación: lift 28,56 — el bigrama SÍ
+    // discrimina (la palabra suelta da 0,17, un salto de 168 veces). Pero
+    // DF_pos = 1: UN documento. El corte exige 8. Agregarlo sobre una sola
+    // observación sería el mismo error que bloquear sobre tres, al revés.
+    // Y es innecesario: el caso ya entra por los términos de obra.
+    expect(TERMINOS_NEG).not.toContain('DOTACION MOBILIARIO')
+  })
+
+  it('los otros negativos evaluados tampoco están', () => {
     for (const n of ['DESARROLLO', 'MOBILIARIO', 'ALIMENTOS', 'LICENCIA']) {
       expect(NEGATIVOS_NEG, n).not.toContain(n)
     }

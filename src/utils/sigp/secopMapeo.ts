@@ -667,6 +667,13 @@ export interface Clasificacion {
    */
   bloqueado_por: string | null
   /**
+   * El negativo que estaba presente y NO bloqueó, porque un término fuerte se
+   * le impuso. Es el único rastro de que un bloqueo estuvo a punto de tapar
+   * algo que el léxico reconocía bien — y el error de un negativo no aparece
+   * en ninguna otra métrica.
+   */
+  negativo_ignorado: string | null
+  /**
    * `true` si el proceso está en un departamento OBSERVADO y habría calificado
    * de estar en el territorio. Mismo instrumento que el contador de arriba,
    * aplicado a la frontera geográfica.
@@ -704,10 +711,13 @@ export function clasificarProceso(
 ): Clasificacion {
   const familia = familiaRup(categoria)
   const origen_codigo = origenCodigoNeg(categoria)
-  const { coincide, terminos: hallados, bloqueado_por } =
+  const { coincide, terminos: hallados, bloqueado_por, negativo_ignorado } =
     coincideVocabulario(objeto, terminos, negativos)
 
-  const base = { familia, origen_codigo, habria_calificado: false, bloqueado_por }
+  const base = {
+    familia, origen_codigo, habria_calificado: false,
+    bloqueado_por, negativo_ignorado,
+  }
   let v: Clasificacion
 
   if (familia === 'familia_neg') {
@@ -1395,9 +1405,25 @@ export interface DescartesIngesta {
   sin_codigo_ni_texto: number
   /**
    * Descartados por el TERRITORIO (B.1c). Cierra la identidad del struct:
-   * `total` = código fuera + sin código ni texto + fuera de territorio.
+   * `total` = código fuera + sin código ni texto + texto vetado + fuera de
+   * territorio.
+   *
+   * ⚠ La identidad se ROMPIÓ un día: al agregar la señal `texto_vetado` sumé
+   * a `total` sin darle cubo, y el test que vigila la identidad pasó igual
+   * porque ningún fixture produjo un vetado. Un invariante con test puede
+   * estar roto esperando datos reales. Si se agrega otra señal de descarte,
+   * va con su cubo Y con un fixture que la ejercite.
    */
   fuera_de_territorio: number
+  /** Descartados porque un término de BLOQUEO vetó el objeto. */
+  texto_vetado: number
+  /**
+   * Cuántas veces un negativo estaba presente y NO bloqueó, porque un término
+   * fuerte se le impuso. NO es un descarte — estos SÍ entraron. Vive acá
+   * porque es la única medición posible de si la regla de bloqueo sirve: lo
+   * que un negativo tapa no llega a ninguna pantalla.
+   */
+  negativos_ignorados: number
   /**
    * De los descartados por código, cuántos SÍ coinciden con el léxico. El
    * contador que importa: 3 de los 23 procesos que NEG ganó caen acá.
@@ -1519,6 +1545,8 @@ export function ingerirSecop(
     codigo_fuera_de_familia: 0,
     sin_codigo_ni_texto: 0,
     fuera_de_territorio: 0,
+    texto_vetado: 0,
+    negativos_ignorados: 0,
     con_texto_coincidente: 0,
     ejemplos_con_texto_coincidente: [],
   }
@@ -1550,10 +1578,15 @@ export function ingerirSecop(
         })
       }
     }
+    // Se cuenta ANTES de la bifurcación: un negativo ignorado describe a un
+    // proceso que SÍ entró, así que contarlo después del `continue` lo
+    // perdería justo en los casos que importan.
+    if (c.negativo_ignorado !== null) descartes.negativos_ignorados++
     if (sePersiste(c.veredicto)) { registros.push(r); continue }
     descartes.total++
     if (c.senal === 'codigo_fuera_de_familia') descartes.codigo_fuera_de_familia++
     if (c.senal === 'sin_codigo_ni_texto') descartes.sin_codigo_ni_texto++
+    if (c.senal === 'texto_vetado') descartes.texto_vetado++
     if (c.senal === 'fuera_de_territorio') {
       descartes.fuera_de_territorio++
       observados.total++

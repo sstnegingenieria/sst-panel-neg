@@ -578,13 +578,63 @@ describe('agregado de la corrida', () => {
     expect(rep.procesos_vistos).toBe(rep.procesos + rep.descartes.total)
     expect(rep.por_veredicto.si + rep.por_veredicto.probable + rep.por_veredicto.no)
       .toBe(rep.procesos_vistos)
-    // La identidad del struct de descartes cierra con los tres motivos.
+    // La identidad del struct de descartes cierra con los CUATRO motivos.
     expect(rep.descartes.codigo_fuera_de_familia + rep.descartes.sin_codigo_ni_texto
+      + rep.descartes.texto_vetado
       + rep.descartes.fuera_de_territorio).toBe(rep.descartes.total)
     // Y las señales cuadran con los vistos.
     const sumaSenales = Object.values(rep.por_senal).reduce((a, b) => a + b, 0)
     expect(sumaSenales).toBe(rep.procesos_vistos)
     expect(rep.registros.every(r => sePersiste(r.meta.clasificacion.veredicto))).toBe(true)
+  })
+
+  it('LA IDENTIDAD con un VETADO de verdad adentro', () => {
+    // El test de arriba vigila la identidad y pasó con ella ROTA: cuando
+    // agregué la señal `texto_vetado` sumé a `total` sin darle cubo, y ningún
+    // fixture producía un vetado. Un invariante con test puede estar roto
+    // esperando datos reales — este es el fixture que faltaba.
+    const vetado: FilaSecop = {
+      ...una('minima_limpia'),
+      id_del_proceso: 'VETADO-001',
+      referencia_del_proceso: 'VETADO-001',
+      codigo_principal_de_categoria: 'UNSPECIFIED',
+      // Ojo con el objeto: 'MANTENIMIENTO Y ADECUACION' produce el bigrama
+      // MANTENIMIENTO ADECUACION, que ES un termino del lexico — o sea FUERTE,
+      // y la regla nueva lo deja entrar. Para que haya veto hacen falta solo
+      // palabras SUELTAS. Este es un objeto real de la cola del 13-nov.
+      descripci_n_del_procedimiento:
+        'ADECUACION DE EQUIPOS DE COMPUTO Y SOFTWARE DE LA ENTIDAD',
+    } as FilaSecop
+
+    const rep = ingerirSecop([...Object.values(casos).flatMap(c => c.filas), vetado], hash)
+    expect(rep.descartes.texto_vetado, 'el fixture tiene que producir un vetado')
+      .toBeGreaterThan(0)
+    expect(rep.descartes.codigo_fuera_de_familia + rep.descartes.sin_codigo_ni_texto
+      + rep.descartes.texto_vetado
+      + rep.descartes.fuera_de_territorio).toBe(rep.descartes.total)
+    expect(rep.procesos_vistos).toBe(rep.procesos + rep.descartes.total)
+    const sumaSenales = Object.values(rep.por_senal).reduce((a, b) => a + b, 0)
+    expect(sumaSenales).toBe(rep.procesos_vistos)
+  })
+
+  it('cuenta los negativos IGNORADOS, que no son descartes', () => {
+    // Un negativo que pierde contra un término fuerte describe un proceso que
+    // SÍ entró. Es la única medición posible de si la regla de bloqueo sirve:
+    // lo que un negativo tapa no llega a ninguna pantalla.
+    const ignorado: FilaSecop = {
+      ...una('minima_limpia'),
+      id_del_proceso: 'IGNORADO-001',
+      referencia_del_proceso: 'IGNORADO-001',
+      codigo_principal_de_categoria: 'UNSPECIFIED',
+      descripci_n_del_procedimiento:
+        'MANTENIMIENTO DE LA INFRAESTRUCTURA FISICA Y DEL SOFTWARE DE LA SEDE',
+    } as FilaSecop
+
+    const rep = ingerirSecop([ignorado], hash)
+    expect(rep.descartes.negativos_ignorados).toBe(1)
+    // Y NO se contó como descarte: entró.
+    expect(rep.descartes.total).toBe(0)
+    expect(rep.procesos).toBe(1)
   })
 
   it('reporta con qué versión del léxico clasificó', () => {
