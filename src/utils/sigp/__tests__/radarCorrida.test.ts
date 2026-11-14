@@ -17,6 +17,7 @@ import {
   construirRegistroCorrida, marcaSiguiente, resumenLegible, cuantosCrearia,
   sellarParaEscritura, fechasATimestamp, ACTOR_RADAR,
   avanzarEstadoRadar, MAX_CORRIDAS_EN_HISTORIAL, ESTADO_RADAR_INICIAL,
+  resolverPorPortafolio, lotesDePortafolios, TOPE_IN_FIRESTORE,
 } from '../radarCorrida'
 import {
   ingerirSecop, construirResumenCorrida, colapsarPorProceso, mapearProceso,
@@ -571,5 +572,166 @@ describe('preservandoLoDePersona', () => {
     const r = preservandoLoDePersona('cronograma',
       { manifestacion: 'puesta a mano', cierre: 'a' }, { manifestacion: null, cierre: 'b' })
     expect(r).toEqual({ manifestacion: 'puesta a mano', cierre: 'b' })
+  })
+})
+
+// ── La identidad del documento y el portafolio (3a) ──────────────────────────
+
+describe('resolverPorPortafolio — que la misma licitacion no nazca dos veces', () => {
+  // Un registro mínimo: lo único que mira el resolutor es el doc_id, el
+  // portafolio y cuántas fases previas arrastra.
+  const reg = (doc_id: string, portafolio: string | null, previas: string[] = []) => ({
+    doc: {
+      radar: {
+        senal: 'texto_coincide' as const, terminos: ['x'], vocabulario_version: 'v1.1',
+        corrida: 'c1', fase: null, fases_previas: previas, portafolio,
+        origen_fecha: 'publicacion' as const,
+      },
+    } as unknown as LicitacionDetectada,
+    meta: { doc_id },
+  })
+  const vacio = new Set<string>()
+  const sinIndice = new Map<string, string>()
+
+  it('EL CASO NORMAL: las dos fases llegan juntas y ninguna existe', () => {
+    // Sin esto el arreglo no serviría para lo que importa: cuando una
+    // licitación es nueva, sus dos filas llegan en la misma cosecha.
+    const manif = reg('secop_A', 'PF-1', [])
+    const oferta = reg('secop_B', 'PF-1', ['Manifestación de interés (Menor Cuantía)'])
+    const r = resolverPorPortafolio([manif, oferta], vacio, sinIndice)
+
+    expect(r.registros).toHaveLength(1)
+    // La IDENTIDAD sale del menor id — estable entre corridas.
+    expect(r.registros[0].meta.doc_id).toBe('secop_A')
+    // El CONTENIDO sale de la fase mas avanzada.
+    expect(r.registros[0].doc.radar?.fases_previas).toHaveLength(1)
+    expect(r.fusiones).toEqual([{
+      portafolio: 'PF-1', doc_id_descartado: 'secop_B',
+      doc_id_destino: 'secop_A', por: 'corrida',
+    }])
+  })
+
+  it('la identidad NO depende del orden en que la API devolvio las filas', () => {
+    const a = reg('secop_A', 'PF-1', [])
+    const b = reg('secop_B', 'PF-1', ['Manifestación de interés (Menor Cuantía)'])
+    const r1 = resolverPorPortafolio([a, b], vacio, sinIndice)
+    const r2 = resolverPorPortafolio([b, a], vacio, sinIndice)
+    expect(r1.registros[0].meta.doc_id).toBe(r2.registros[0].meta.doc_id)
+    expect(r1.registros[0].doc.radar?.fases_previas)
+      .toEqual(r2.registros[0].doc.radar?.fases_previas)
+  })
+
+  it('una fase nueva de una licitacion YA GUARDADA va a su documento', () => {
+    const oferta = reg('secop_B', 'PF-1', ['Manifestación de interés (Menor Cuantía)'])
+    const r = resolverPorPortafolio([oferta], vacio, new Map([['PF-1', 'secop_A']]))
+    expect(r.registros[0].meta.doc_id).toBe('secop_A')
+    expect(r.fusiones[0]).toMatchObject({ doc_id_descartado: 'secop_B', por: 'existente' })
+  })
+
+  it('EL CASO QUE MATABA A LA OTRA OPCION: nacio sin portafolio y despues lo gana', () => {
+    // La consulta por portafolio no lo encuentra —no tenía portafolio cuando
+    // nació— pero su propio id SÍ existe, así que se actualiza ahí y gana el
+    // portafolio. De ahí en adelante las fases siguientes lo encuentran por la
+    // primera vía.
+    const mismo = reg('secop_A', 'PF-1', [])
+    const r = resolverPorPortafolio([mismo], new Set(['secop_A']), sinIndice)
+    expect(r.registros).toHaveLength(1)
+    expect(r.registros[0].meta.doc_id).toBe('secop_A')
+    expect(r.fusiones).toEqual([])
+  })
+
+  it('el doc id propio MANDA sobre la consulta por portafolio', () => {
+    // Si se preguntara por portafolio primero, esta fila se escribiría en OTRO
+    // documento — y la consulta no garantiza cuál devuelve cuando hay dos.
+    // Abandonar un documento existente, de forma no determinista, es peor que
+    // el duplicado que se arregla.
+    const propio = reg('secop_B', 'PF-1', [])
+    const r = resolverPorPortafolio(
+      [propio], new Set(['secop_B']), new Map([['PF-1', 'secop_A']]))
+    expect(r.registros[0].meta.doc_id).toBe('secop_B')
+    expect(r.fusiones).toEqual([])
+  })
+
+  it('sin portafolio: el caso BASE, no una excepcion', () => {
+    // El 9,1 % que no comparte portafolio no se puede agrupar de ninguna
+    // manera. Se queda con la identidad de siempre.
+    const a = reg('secop_A', null, [])
+    const b = reg('secop_B', '', [])
+    const r = resolverPorPortafolio([a, b], vacio, sinIndice)
+    expect(r.registros.map(x => x.meta.doc_id).sort()).toEqual(['secop_A', 'secop_B'])
+    expect(r.fusiones).toEqual([])
+  })
+
+  it('portafolios distintos no se mezclan', () => {
+    const r = resolverPorPortafolio(
+      [reg('secop_A', 'PF-1'), reg('secop_B', 'PF-2')], vacio, sinIndice)
+    expect(r.registros).toHaveLength(2)
+    expect(r.fusiones).toEqual([])
+  })
+
+  it('tres fases del mismo portafolio caen en UN documento', () => {
+    const r = resolverPorPortafolio([
+      reg('secop_C', 'PF-1', ['a', 'b']),
+      reg('secop_A', 'PF-1', []),
+      reg('secop_B', 'PF-1', ['a']),
+    ], vacio, sinIndice)
+    expect(r.registros).toHaveLength(1)
+    expect(r.registros[0].meta.doc_id).toBe('secop_A')
+    expect(r.registros[0].doc.radar?.fases_previas).toEqual(['a', 'b'])
+    expect(r.fusiones).toHaveLength(2)
+  })
+
+  it('el destino NUNCA aparece como descartado', () => {
+    // El error fácil al escribir esto: reportar descartado el que aporta el
+    // contenido en vez del que pierde la identidad. Son cosas distintas.
+    const r = resolverPorPortafolio([
+      reg('secop_A', 'PF-1', []),
+      reg('secop_B', 'PF-1', ['a']),
+    ], vacio, sinIndice)
+    const destinos = new Set(r.registros.map(x => x.meta.doc_id))
+    for (const f of r.fusiones) {
+      expect(destinos.has(f.doc_id_descartado), f.doc_id_descartado).toBe(false)
+    }
+  })
+
+  it('no pierde ni inventa licitaciones', () => {
+    const entrada = [
+      reg('secop_A', 'PF-1'), reg('secop_B', 'PF-1'),
+      reg('secop_C', 'PF-2'), reg('secop_D', null),
+    ]
+    const r = resolverPorPortafolio(entrada, vacio, sinIndice)
+    // 4 filas → 3 licitaciones (PF-1 se fusiona), y las fusiones lo explican.
+    expect(r.registros.length + r.fusiones.length).toBe(entrada.length)
+  })
+})
+
+describe('lotesDePortafolios', () => {
+  const reg = (id: string, pf: string | null) => ({
+    doc: { radar: { portafolio: pf } } as unknown as LicitacionDetectada,
+    meta: { doc_id: id },
+  })
+
+  it('el tope es 30, medido contra produccion', () => {
+    // Con 31 valores Firestore responde
+    // «'IN' supports up to 30 comparison values». No es un numero elegido.
+    expect(TOPE_IN_FIRESTORE).toBe(30)
+  })
+
+  it('parte en lotes de 30 y no repite', () => {
+    const regs = Array.from({ length: 65 }, (_, i) => reg('d' + i, 'PF-' + i))
+    const lotes = lotesDePortafolios(regs)
+    expect(lotes).toHaveLength(3)
+    expect(lotes[0]).toHaveLength(30)
+    expect(lotes[2]).toHaveLength(5)
+    expect(new Set(lotes.flat()).size).toBe(65)
+  })
+
+  it('deduplica: dos fases del mismo portafolio se preguntan una vez', () => {
+    const lotes = lotesDePortafolios([reg('a', 'PF-1'), reg('b', 'PF-1'), reg('c', 'PF-2')])
+    expect(lotes).toEqual([['PF-1', 'PF-2']])
+  })
+
+  it('ignora nulos y vacios — no se consulta por nada', () => {
+    expect(lotesDePortafolios([reg('a', null), reg('b', '')])).toEqual([])
   })
 })

@@ -152,8 +152,32 @@ describe('la Cloud Function no construye referencias por fuera de los helpers', 
     expect(lineas[1]).toContain('validarRutaEscritura(ruta)')
   })
 
-  it('no usa `db.collection(` ni rutas armadas a mano', () => {
-    expect(/db\.collection\(/.test(fuenteCF)).toBe(false)
+  it('`db.collection(` aparece SOLO en la tercera puerta', () => {
+    // Antes este test exigia CERO apariciones. Dejo de valer cuando la
+    // funcion necesito BUSCAR por `radar.portafolio`: una consulta necesita la
+    // coleccion, no un documento. La regla que importaba no era «no hay
+    // consultas» sino «esta funcion nombra Firestore en un solo lugar», asi
+    // que la guarda se extendio en vez de aflojarse: una aparicion, y en su
+    // puerta.
+    const lineas = fuenteCF.split('\n')
+      .filter(l => /db\.collection\(/.test(l) && !l.trim().startsWith('*') && !l.trim().startsWith('//'))
+    expect(lineas).toHaveLength(1)
+    expect(lineas[0]).toContain('const consultaLectura')
+    // Y el nombre de la coleccion sale de radarRutas, no escrito a mano.
+    expect(lineas[0]).toContain('COL_LICITACIONES')
+    expect(lineas[0]).not.toMatch(/'licitaciones'|"licitaciones"/)
+  })
+
+  it('la puerta de consulta es de LECTURA: no se escribe por ahi', () => {
+    const sospechosas = fuenteCF.split('\n').filter(l => {
+      const t = l.trim()
+      if (t.startsWith('*') || t.startsWith('//')) return false
+      return /consultaLectura\(/.test(l) && /\.(set|create|update|delete)\(/.test(l)
+    })
+    expect(sospechosas).toEqual([])
+  })
+
+  it('nada de rutas armadas a mano', () => {
     // Nada de `${algo}/${algo}` construyendo rutas fuera de radarRutas.ts.
     const plantillasDeRuta = fuenteCF.match(/`\$\{[^`]*\}\/\$\{[^`]*\}`/g) ?? []
     expect(plantillasDeRuta).toEqual([])
