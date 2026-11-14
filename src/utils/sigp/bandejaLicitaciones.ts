@@ -506,6 +506,7 @@ export const SENAL_CHIP: Record<SenalClasificacion, string> = {
   codigo_en_clase_sin_texto: 'bg-amber-100 text-amber-800',
   texto_coincide: 'bg-gray-100 text-gray-700',
   codigo_fuera_de_familia: 'bg-gray-100 text-gray-600',
+  texto_vetado: 'bg-gray-100 text-gray-600',
   sin_codigo_ni_texto: 'bg-gray-100 text-gray-600',
   fuera_de_territorio: 'bg-gray-100 text-gray-600',
 }

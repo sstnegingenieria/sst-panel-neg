@@ -9,7 +9,7 @@
  * `ReporteIngestaSecop.vocabulario_version`.
  *
  * ── NO ES EL CAMINO PRINCIPAL ───────────────────────────────────────────────
- * El léxico va EMPAQUETADO en el bundle (`vocabulario-neg-v1.0.json`), y el
+ * El léxico va EMPAQUETADO en el bundle (`vocabulario-neg-v1.1.json`), y el
  * clasificador degrada a él cuando el documento no existe. Este script existe
  * para que el léxico quede además EN FIRESTORE, legible por el panel y
  * editable por quien tiene el rol, sin volver a desplegar. Si el documento no
@@ -62,7 +62,7 @@
 const admin = require('firebase-admin');
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 
-const SEMILLA = require('./vocabulario-neg-v1.0.json');
+const SEMILLA = require('./vocabulario-neg-v1.1.json');
 
 const APLICAR = process.argv.includes('--apply');
 const MODO = APLICAR ? 'APLICAR (escribe)' : 'DRY-RUN (solo lee)';
@@ -78,7 +78,7 @@ const VERSION_INICIAL = SEMILLA.version;
  */
 const CAMPOS_ESPERADOS = [
   'version', 'definicion', 'derivacion', 'metricas', 'excluidos',
-  'limitaciones', 'terminos', 'frecuencias',
+  'limitaciones', 'terminos', 'frecuencias', 'negativos',
 ];
 
 function camposNoEscritos() {
@@ -107,6 +107,7 @@ function construirDocSemilla(autorUid, ahora) {
         limitaciones: SEMILLA.limitaciones,
         autor_uid: autorUid,
         terminos: [...SEMILLA.terminos],
+        negativos: [...SEMILLA.negativos],
       },
     },
     version_actual: VERSION_INICIAL,
@@ -122,7 +123,7 @@ async function main() {
 
   const faltantes = camposNoEscritos();
   if (faltantes.length > 0) {
-    console.error(`ABORTA: vocabulario-neg-v1.0.json trae campos que este script no conoce: ${faltantes.join(', ')}`);
+    console.error(`ABORTA: vocabulario-neg-v1.1.json trae campos que este script no conoce: ${faltantes.join(', ')}`);
     console.error('Agrégalos a CAMPOS_ESPERADOS (y al documento si deben persistirse) antes de sembrar.');
     process.exit(1);
   }

@@ -24,7 +24,7 @@ const RAIZ = resolve(__dirname, '../../../..')
 // El script se importa SIN efectos: `main()` solo corre si se ejecuta
 // directamente, y `initializeApp` vive dentro de `main`.
 const script = require_(resolve(RAIZ, 'functions/scripts/sembrar-vocabulario-neg.js'))
-const JSON_SEMILLA = require_(resolve(RAIZ, 'functions/scripts/vocabulario-neg-v1.0.json'))
+const JSON_SEMILLA = require_(resolve(RAIZ, 'functions/scripts/vocabulario-neg-v1.1.json'))
 
 const AHORA = { seconds: 1762704000, nanoseconds: 0 } as never
 
@@ -45,9 +45,9 @@ describe('semilla del léxico — el script y el TS no pueden divergir', () => {
     expect(delScript).toEqual(delTs)
   })
 
-  it('el documento lleva los 48 términos, no un subconjunto', () => {
+  it('el documento lleva los 43 términos, no un subconjunto', () => {
     const v = script.construirDocSemilla('uid-x', AHORA).versiones[VOCABULARIO_NEG_VERSION]
-    expect(v.terminos).toHaveLength(48)
+    expect(v.terminos).toHaveLength(43)
     expect(v.terminos).toEqual([...TERMINOS_NEG])
     expect(v.terminos).toEqual(JSON_SEMILLA.terminos)
   })
@@ -56,6 +56,10 @@ describe('semilla del léxico — el script y el TS no pueden divergir', () => {
     const v = script.construirDocSemilla('uid-x', AHORA).versiones[VOCABULARIO_NEG_VERSION]
     expect(v).not.toHaveProperty('frecuencias')
     // Pero el JSON sí las tiene, para poder rehacer la derivación.
+    // 48, no 43: las frecuencias son el RESPALDO de la derivación original y
+    // se conservan completas. Los cinco términos que v1.1 sacó por no
+    // discriminar siguen teniendo su frecuencia acá — borrarla sería borrar la
+    // evidencia de por qué alguna vez fueron candidatos.
     expect(Object.keys(JSON_SEMILLA.frecuencias)).toHaveLength(48)
   })
 

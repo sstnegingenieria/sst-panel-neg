@@ -40,13 +40,32 @@
  * módulo que clasifica: un tokenizador distinto es un léxico distinto.
  */
 import type { Timestamp } from 'firebase/firestore'
-import VOCABULARIO_JSON from '../../../functions/scripts/vocabulario-neg-v1.0.json'
+import VOCABULARIO_JSON from '../../../functions/scripts/vocabulario-neg-v1.1.json'
 
 /** Versión del léxico empaquetado. Subirla es cambiar de criterio. */
 export const VOCABULARIO_NEG_VERSION: string = VOCABULARIO_JSON.version
 
 /** Los términos del léxico v1.0, tal como salieron de la derivación. */
 export const TERMINOS_NEG: readonly string[] = VOCABULARIO_JSON.terminos
+
+/**
+ * TÉRMINOS QUE BLOQUEAN. Si el objeto contiene uno, el proceso NO entra
+ * aunque coincida cualquier otro término.
+ *
+ * No es lo mismo que excluir un término del léxico: un término excluido deja
+ * de aportar, un negativo CANCELA lo que aportaron los demás. Hace falta
+ * porque el ruido que queda no viene de una palabra mala sino de un objeto que
+ * habla de otra cosa — «mantenimiento preventivo y correctivo de hardware y
+ * software, con la adecuación de equipos» tiene ADECUACION, que es un buen
+ * término, y aun así no es trabajo de NEG.
+ *
+ * SE MIDEN ANTES DE ENTRAR. Los dos que están aparecen en 3 procesos cada uno
+ * de los 128 medidos, y los 6 son ruido. Se descartaron DESARROLLO y
+ * MOBILIARIO porque bloqueaban adecuaciones locativas legítimas, y ALIMENTOS y
+ * LICENCIA porque no aparecían en ninguno: un negativo sin casos medidos es
+ * una suposición con cara de regla.
+ */
+export const NEGATIVOS_NEG: readonly string[] = VOCABULARIO_JSON.negativos ?? []
 
 /** Frecuencias medidas por término: documentos positivos, fondo y lift. */
 export const FRECUENCIAS_NEG: Readonly<Record<string, { pos: number; fondo: number; lift: number }>> =
@@ -106,6 +125,15 @@ export function terminosDelObjeto(texto: string | null | undefined): Set<string>
 }
 
 export interface CoincidenciaVocabulario {
+  /**
+   * El término negativo que canceló la coincidencia, o `null`.
+   *
+   * NO es opcional. La función siempre lo devuelve, y declararlo opcional
+   * obligaba a cada consumidor a tratar `undefined` como un tercer caso que
+   * no existe — o, peor, a confundirlo con `null` y perder la distinción
+   * entre «no hubo bloqueo» y «nadie preguntó».
+   */
+  bloqueado_por: string | null
   coincide: boolean
   /** Términos del léxico encontrados, en orden de aparición en la lista. */
   terminos: string[]
@@ -121,10 +149,21 @@ export interface CoincidenciaVocabulario {
 export function coincideVocabulario(
   objeto: string | null | undefined,
   terminos: readonly string[] = TERMINOS_NEG,
+  negativos: readonly string[] = NEGATIVOS_NEG,
 ): CoincidenciaVocabulario {
   const presentes = terminosDelObjeto(objeto)
   const hallados = terminos.filter(t => presentes.has(t))
-  return { coincide: hallados.length > 0, terminos: hallados }
+
+  // El bloqueo se evalúa DESPUÉS de hallar, y los términos hallados se
+  // conservan: el documento tiene que poder decir «coincidió en esto, y aun
+  // así no entró por aquello». Devolver la lista vacía ahorraría una línea y
+  // borraría la única evidencia de por qué el léxico se equivocó.
+  const bloqueado_por = negativos.find(n => presentes.has(n)) ?? null
+  return {
+    coincide: hallados.length > 0 && bloqueado_por === null,
+    terminos: hallados,
+    bloqueado_por,
+  }
 }
 
 // ── El documento de configuración ───────────────────────────────────────────
@@ -147,6 +186,8 @@ export interface VersionVocabularioNeg {
   /** Quién lo adoptó. */
   autor_uid: string
   terminos: string[]
+  /** Términos que BLOQUEAN. Opcional: v1.0 no los tenía. */
+  negativos?: string[]
 }
 
 export interface RegistroVocabularioNeg {
@@ -170,6 +211,22 @@ export function terminosVigentes(
   const v = registro?.versiones?.[registro.version_actual]
   if (!v || !Array.isArray(v.terminos) || v.terminos.length === 0) return TERMINOS_NEG
   return v.terminos
+}
+
+/**
+ * Los negativos de la versión vigente, o los empaquetados.
+ *
+ * Una lista VACÍA es una respuesta legítima — una versión puede no tener
+ * negativos— así que el fallback mira si el campo EXISTE, no si tiene algo.
+ * Con el criterio de `terminosVigentes`, un registro que quiso quedarse sin
+ * negativos recuperaría los empaquetados sin que nadie lo pidiera.
+ */
+export function negativosVigentes(
+  registro: RegistroVocabularioNeg | null | undefined,
+): readonly string[] {
+  const v = registro?.versiones?.[registro.version_actual]
+  if (!v || !Array.isArray(v.negativos)) return NEGATIVOS_NEG
+  return v.negativos
 }
 
 /** Qué versión se está usando de verdad: la del documento o la empaquetada. */
@@ -206,6 +263,7 @@ export function construirSemillaVocabularioNeg(
         limitaciones: VOCABULARIO_JSON.limitaciones,
         autor_uid: autorUid,
         terminos: [...TERMINOS_NEG],
+        negativos: [...NEGATIVOS_NEG],
       },
     },
     version_actual: VOCABULARIO_NEG_VERSION,
@@ -220,5 +278,5 @@ export function construirSemillaVocabularioNeg(
  */
 export const CAMPOS_JSON_VOCABULARIO: readonly string[] = [
   'version', 'definicion', 'derivacion', 'metricas', 'excluidos',
-  'limitaciones', 'terminos', 'frecuencias',
+  'limitaciones', 'terminos', 'frecuencias', 'negativos',
 ]

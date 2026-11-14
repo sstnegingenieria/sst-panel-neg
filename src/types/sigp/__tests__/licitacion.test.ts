@@ -1121,8 +1121,8 @@ describe('etiquetas de la procedencia', () => {
   it('toda señal tiene texto: la bandeja no muestra la constante cruda', () => {
     const senales: SenalClasificacion[] = [
       'codigo_en_familia', 'codigo_en_clase_con_texto', 'codigo_en_clase_sin_texto',
-      'codigo_fuera_de_familia', 'texto_coincide', 'sin_codigo_ni_texto',
-      'fuera_de_territorio',
+      'codigo_fuera_de_familia', 'texto_coincide', 'texto_vetado',
+      'sin_codigo_ni_texto', 'fuera_de_territorio',
     ]
     for (const s of senales) expect(SENAL_LABEL[s], s).toBeTruthy()
     expect(Object.keys(SENAL_LABEL).sort()).toEqual([...senales].sort())
