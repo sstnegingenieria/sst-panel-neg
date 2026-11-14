@@ -716,6 +716,69 @@ Leer el código no basta para saber si una guarda protege: hay que preguntarse *
 Nada todavía, a propósito. La constante no causa daño: el camino que debería gobernar —el barrido autorizado del backlog— hoy no tiene tope, y **ése** es el problema real. Cuando llegue el turno del backlog de las 125 filas sin fecha se decide si `autorizado_manual` debe respetar un tope; si la respuesta es sí, el 50 deja de ser letra muerta y el barrido entra en pasadas acotadas en vez de un volcado. Decisión de Giovanny, planteada en su momento y no antes.
 
 ---
+## Nota de técnica · «no está en mi consulta» no significa «no está en el dataset»
+
+*14-nov-2026, midiendo la completitud del dataset abierto
+(`docs/completitud-dataset-abierto.md`).*
+
+La pregunta era si SECOP II pierde procesos o solo los publica tarde. Apareció
+un candidato limpio: `TMSA-MIN-04-2026`. Transmilenio tenía el 01, 02, 03,
+**05**, 06…13 — un hueco interior, serie densa, un solo dueño, vecinos
+posteriores presentes. Eso descarta el retraso por construcción: si llegó el 05,
+el 04 no está en camino.
+
+**Estaba en el dataset.** Con `fecha_de_publicacion_del` en nulo y
+`fecha_de_recepcion_de` en nulo. Mis consultas llevaban
+`fecha_de_publicacion_del >= '2026-01-01'`, y un `>=` **excluye los nulos
+siempre**.
+
+### Por qué esta ocurrencia es distinta de las otras
+
+Lo sabíamos. `secopConsulta.ts` lo tiene medido y escrito desde el 09-nov:
+
+> *FILAS SIN `fecha_de_publicacion_del`: 3.785 en el territorio completo. Un
+> `where fecha > marca` las excluye SIEMPRE, en toda corrida.*
+
+Está documentado, tiene su mitigación en producción (la ingesta las recoge por
+`IS NULL`, con `origen_fecha: 'ninguna'`) y aun así lo pisé. **El conocimiento
+estaba en el repositorio y no en la consulta que escribí a mano.**
+
+Y el daño que habría hecho era del peor tipo disponible. En una ingesta, la
+trampa produce un **faltante**: algo que no llega y que una ventana de solape
+termina recogiendo. En una medición de completitud produce **lo contrario de un
+faltante**: una pérdida inventada. Habría reportado «el dataset perdió un
+proceso de Transmilenio» con un hueco, un dueño y vecinos como evidencia, y la
+fila estaba ahí.
+
+### La regla, y su cuarta variante
+
+> **«no falló» y «funcionó» no son lo mismo.**
+> **«existe» tampoco significa «se ejecuta».**
+> **«se ejecuta» no significa «alguien lee el resultado».**
+> **Y «no está en mi consulta» no significa «no está».**
+
+Las tres primeras son sobre código que se cree activo. Esta es sobre **una
+ausencia que se cree un hecho**: toda consulta con filtro define un universo, y
+lo que queda fuera del universo se parece exactamente a lo que no existe. Un
+`SELECT` no devuelve «no hay»: devuelve «no hay de lo que pediste».
+
+### Qué se le opone
+
+Una costumbre, y es barata: **cuando lo que se va a afirmar es una AUSENCIA, la
+consulta que la establece va sin filtros** — sin fecha, sin territorio, sin
+modalidad. Los filtros sirven para contar lo que hay; para probar que algo no
+está, estorban. En `docs/completitud-dataset-abierto.md` §6 quedó como paso 3
+del protocolo de la próxima corrida.
+
+El corolario, que vale para cualquier medición futura sobre este dataset: **un
+hueco no es evidencia de nada hasta que se lo busca sin filtro de fecha.** Y en
+la misma medición cayó la otra trampa gemela —`referencia_del_proceso` no es
+identidad, la 10 de `secopMapeo.ts`—, que fabricó un segundo hueco falso
+(`IECR-008`) juntando tres entidades que comparten prefijo. Dos trampas
+documentadas, las dos pisadas el mismo día, las dos produciendo pérdidas
+inventadas.
+
+---
 ## Límite medido · el radar llega dos días tarde, y eso cuesta el 11,4 %
 
 *14-nov-2026. La cifra que hay que volver a medir si alguien propone cambiar
