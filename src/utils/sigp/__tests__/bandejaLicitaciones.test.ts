@@ -503,14 +503,28 @@ describe('porQueNoAlcanza', () => {
     expect(porQueNoAlcanza(l, HOY, HU)?.motivo).toBe('plazo_vencido')
   })
 
-  it('la manifestación cerrada se dice aunque el plazo siga abierto', () => {
+  it('el paso a fase de oferta se dice aunque el plazo siga abierto', () => {
     // Es el caso que motiva todo el bloque: la fecha de cierre muestra días
-    // por delante y el proceso ya es inalcanzable.
+    // por delante y la puerta pudo haberse cerrado antes.
     const l = conFase('2026-11-30', 'menor_cuantia',
       'Presentación de oferta', ['Manifestación de interés (Menor Cuantía)'])
     const r = porQueNoAlcanza(l, HOY, HU)
     expect(r?.motivo).toBe('manifestacion_cerrada')
-    expect(r?.frase).toMatch(/aunque el plazo siga abierto/)
+    expect(r?.frase).toMatch(/pasó a fase de presentación de oferta/)
+  })
+
+  it('la frase NO afirma que el plazo de manifestación venció, y manda a mirar', () => {
+    // La asimetría, que es la razón del texto: el dato sostiene «pasó a fase
+    // de oferta» (hecho del origen) y NO sostiene «cerró» (inferencia del
+    // flujo normativo). Si decimos «cerró» y no cerró, Karen descarta y el
+    // error es invisible; si decimos «pasó a fase de oferta», abre y mira, y
+    // cuesta un clic. Este test existe para que nadie lo vuelva a endurecer
+    // sin leer esto.
+    const l = conFase('2026-11-30', 'menor_cuantia',
+      'Presentación de oferta', ['Manifestación de interés (Menor Cuantía)'])
+    const frase = porQueNoAlcanza(l, HOY, HU)?.frase ?? ''
+    expect(frase).not.toMatch(/ya cerró|no se puede presentar/)
+    expect(frase).toMatch(/confirmar en el portal/)
   })
 
   it('cierra HOY: no está vencida y no da tiempo', () => {

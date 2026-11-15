@@ -241,10 +241,22 @@ export function cierreIsoDe(l: Pick<Licitacion, 'cronograma'>): string | null {
  * manifestación y en la de oferta en el 85,8 % — es el límite de la OFERTA,
  * estampado también sobre la otra. No hay fecha que comparar.
  *
- * ── LO QUE SÍ ──────────────────────────────────────────────────
- * La FASE. Un proceso en «Presentación de oferta» que ANTES pasó por una fase
- * de manifestación es un proceso cuya puerta ya se cerró. No es una
- * estimación: es el origen diciendo por dónde pasó.
+ * ── LO QUE SÍ, Y HASTA DÓNDE ───────────────────────────────────
+ * La FASE. Que un proceso esté en «Presentación de oferta» y que su referencia
+ * registre haber pasado por manifestación es un HECHO del origen: es el origen
+ * diciendo por dónde pasó.
+ *
+ * Lo que NO es un hecho del origen es el paso siguiente — «entonces la puerta
+ * se cerró» —, que es una inferencia del flujo normativo de la menor cuantía
+ * (manifestación → sorteo → oferta). La inferencia es razonable y no está en
+ * la tabla, así que **lo que la fila le dice a Karen afirma solo el hecho** y
+ * la invita a confirmar en el portal (ver `porQueNoAlcanza`).
+ *
+ * La asimetría es la misma del léxico negativo: si decimos «cerró» y no cerró,
+ * Karen descarta y el error es invisible; si decimos «pasó a fase de oferta»,
+ * abre, mira y el costo es un clic. Medido el 14-nov-2026: el portal publica
+ * el `Plazo para manifestación de Interés` con hora exacta —21 fechas en su
+ * cronograma— así que ese clic tiene dónde terminar.
  *
  * Las dos condiciones son necesarias. `menor_cuantia` sola no alcanza —la
  * modalidad «Sin Manifestacion Interes» también mapea ahí, 4.817 procesos— y
@@ -263,8 +275,12 @@ export function manifestacionCerrada(l: Pick<Licitacion, 'radar'>): boolean {
  *
  * Tres razones, y el orden importa porque la fila muestra UNA:
  *  1. el plazo pasó — el hecho más duro, no hay nada que agregar;
- *  2. la manifestación cerró — explica más que «no alcanza», porque no es un
- *     problema de tiempo sino de puerta;
+ *  2. pasó a fase de oferta — explica más que «no alcanza», porque no es un
+ *     problema de tiempo sino de puerta. La frase afirma el hecho de la fase y
+ *     pide confirmar en el portal: el dato NO sostiene que el plazo venció
+ *     (ver `manifestacionCerrada`). El nombre del motivo sigue siendo
+ *     `manifestacion_cerrada` porque es un identificador interno, no texto de
+ *     pantalla;
  *  3. no da el tiempo — lo mide `evaluarVentana`, que existe desde el 1.4 y ya
  *     cuenta días hábiles contra horas de armado por modalidad. No se inventa
  *     ningún umbral nuevo acá.
@@ -279,7 +295,8 @@ export function porQueNoAlcanza(
   if (manifestacionCerrada(l)) {
     return {
       motivo: 'manifestacion_cerrada',
-      frase: 'La manifestación de interés ya cerró — no se puede presentar aunque el plazo siga abierto',
+      frase: 'Ya pasó a fase de presentación de oferta — si la manifestación era requisito, '
+        + 'conviene abrirlo y confirmar en el portal',
     }
   }
   if (v.insuficiente) {
