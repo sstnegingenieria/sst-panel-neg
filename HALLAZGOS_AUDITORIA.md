@@ -716,6 +716,109 @@ Leer el código no basta para saber si una guarda protege: hay que preguntarse *
 Nada todavía, a propósito. La constante no causa daño: el camino que debería gobernar —el barrido autorizado del backlog— hoy no tiene tope, y **ése** es el problema real. Cuando llegue el turno del backlog de las 125 filas sin fecha se decide si `autorizado_manual` debe respetar un tope; si la respuesta es sí, el 50 deja de ser letra muerta y el barrido entra en pasadas acotadas en vez de un volcado. Decisión de Giovanny, planteada en su momento y no antes.
 
 ---
+## Criterio · un patch escrito a mano es una SEGUNDA implementación de la invariante
+
+*14-nov-2026. Atrapado antes de tocar producción, por leer el código que ya
+existía en vez del que estaba escribiendo.*
+
+Los cuatro actos de limpieza sobre `licitaciones` armaban su patch de descarte
+a mano:
+
+```ts
+patch: {
+  estado: 'descartada',
+  motivo_descarte: motivo,
+  activa: false,
+  fecha_actualizacion: ahora,     // ← el campo de OTRA colección
+  actualizado_por: actor,
+}
+```
+
+Las tres primeras líneas son correctas. Las dos últimas, no, y de dos maneras:
+
+1. **`fecha_actualizacion` no es un campo de esta colección.** Es la
+   convención de `accionMejora`, `actividad` y `asignacion`. `licitaciones` usa
+   **`actualizado_en`**, que es lo que escribe `sello()`. El acto habría dejado
+   34 documentos de producción con un campo que nadie lee **y el campo real sin
+   mover**.
+2. **Faltaba el sello del triage.** `patchDescartarLicitacion` llama a
+   `selloTriage`, que escribe `revisado_por`/`revisado_en` cuando el documento
+   **vino del radar y está en `detectada`** — exactamente el caso de los dos
+   actos que descartan. Descartar una fila del radar **es** el triage de esa
+   fila. Sin el sello, esos 34 documentos quedaban sin registro de quién los
+   sacó de la sección del radar, que es la pregunta que el sello existe para
+   responder.
+
+### LO QUE LO HACE UN CRITERIO Y NO UNA ANÉCDOTA
+
+**`patchDescartarLicitacion` es el DUEÑO de la invariante 1** (descartada ⟺
+motivo presente). El repo ya tenía la regla escrita, en el comentario de
+`patchAvanzarLicitacion`:
+
+> cada invariante tiene un solo dueño, así no hay dos caminos que puedan
+> divergir.
+
+Y el acto abrió un segundo camino. No por discrepar: por no haber mirado si el
+primero existía. **Es el mismo defecto que el bundle del radar vino a eliminar**
+—dos implementaciones de un criterio— aplicado a una escritura de producción en
+vez de a una consulta.
+
+La corrección: el planificador **le pide el patch al dueño** y reporta los
+rechazos uno por uno (`patchDescartarLicitacion` devuelve `null` ante una
+transición ilegal o un motivo que no existe). Que el dueño de la invariante le
+diga no a un acto de limpieza no es un estorbo: es la invariante funcionando.
+
+### Y LA PARTE INCÓMODA: HABÍA 29 TESTS VERDES
+
+Ninguno lo vio. El único que miraba el patch usaba `toMatchObject` con los tres
+campos de la invariante:
+
+```ts
+expect(plan.patches[0].patch).toMatchObject({
+  estado: 'descartada', motivo_descarte: 'RUIDO_LEXICO', activa: false,
+  actualizado_por: ACTOR,
+})
+```
+
+**`toMatchObject` es una comprobación de SUBCONJUNTO: no puede ver el campo
+equivocado que sí está, ni el campo correcto que falta.** El test pasaba antes
+de la corrección y pasa después, con patches distintos.
+
+Es la variante más cara de un patrón que esta bitácora ya lleva registrado
+cuatro veces —«no falló» ≠ «funcionó» → «existe» ≠ «se ejecuta» → «se ejecuta»
+≠ «alguien lee el resultado» → «está desplegado» ≠ «funciona»— en su quinta
+forma: **«hay test» ≠ «el test cubre este caso»**. Acá con un agravante: el
+test no solo no cubría el caso, *parecía* cubrirlo.
+
+Lo que queda, y es la parte accionable:
+
+- Para un patch que se escribe a producción, **fijar el conjunto EXACTO de
+  claves** (`Object.keys(patch).sort()`), no un subconjunto. Un campo de más es
+  tan grave como uno de menos.
+- Y afirmar explícitamente lo que **no** debe estar: `expect(patch).not
+  .toHaveProperty('fecha_actualizacion')`. Un `not` sobre el nombre equivocado
+  concreto es lo que convierte el test en memoria del defecto.
+
+Los tests nuevos se verificaron por **mutación**: romper la regla hace fallar 4
+de ellos. Un test que no falla cuando rompés lo que vigila es decoración.
+
+### DE PASO, DOS CORRECCIONES MÁS DEL MISMO ORIGEN
+
+- **Admitir cuenta como trabajo humano.** Salir de `detectada` no lo hace el
+  radar: lo hace una persona. En el acto 3b esa regla no solo protege, **elige**:
+  si de dos duplicados alguien admitió uno, ese es el que se queda, aunque el
+  otro arrastre la fase más avanzada. Sin la regla, el acto habría descartado
+  justamente el que Karen abrió.
+- **Los actos ya no llevan `as never`.** Firestore devuelve `unknown`, y un
+  cast en el borde de una escritura a producción es exactamente donde no se
+  quiere tener uno: el día que el dato no tenga la forma supuesta, el cast no
+  dice nada. En su lugar, comprobación contra la lista de verdad
+  (`MODALIDADES_LICITACION`, `SEMAFOROS`) y lo que no pasa **se separa y se
+  nombra**. Un documento que no se recalcula se ve; uno que se recalcula mal,
+  no.
+
+---
+
 ## Nota de técnica · «no está en mi consulta» no significa «no está en el dataset»
 
 *14-nov-2026, midiendo la completitud del dataset abierto
