@@ -518,6 +518,103 @@ de la sentada.
 
 ---
 
+## 10 · Lo que el panel le muestra hoy a Karen sobre una fecha que no tenemos
+
+*Dimensionado el 14-nov-2026 a pedido del revisor. **No construido**: acá está
+lo que cuesta y lo que rompe, para decidirlo aparte. **No entra en la
+sentada.***
+
+### La asimetría, que es el argumento y no la precisión
+
+Es la misma de siempre, la del léxico negativo:
+
+> **Si el panel afirma que la puerta se cerró y no se cerró, Karen descarta y
+> el error es INVISIBLE. Si el panel dice solo lo que el dato sostiene, Karen
+> abre, mira, y el costo es un clic.**
+
+Por eso la frase de la fila pasó de *«la manifestación de interés ya cerró — no
+se puede presentar aunque el plazo siga abierto»* a **«ya pasó a fase de
+presentación de oferta — si la manifestación era requisito, conviene abrirlo y
+confirmar en el portal»**. Y por eso ese clic ahora tiene dónde terminar: el
+portal publica el `Plazo para manifestación de Interés` con hora exacta (§8).
+
+El mismo razonamiento, aplicado al número: para una menor cuantía el panel
+muestra los días hasta la **recepción de ofertas**. El número es **correcto y a
+la vez engañoso**, porque la fecha accionable es anterior y no está en la
+fuente. En `DSAJBO-SAMC-008-2026` eso son **19 días mostrados contra una puerta
+que cierra 9 días antes** (§9).
+
+### Dónde vive el cálculo, y qué lo fija
+
+| | |
+|---|---|
+| el cálculo | **un solo sitio**: `evaluarVentana()` en `src/utils/sigp/ventanaLicitacion.ts` (213 líneas). Recibe `cierreIso` (de `cronograma.cierre` ← `fecha_de_recepcion_de`), `modalidad`, `hoy` y `horas_utiles_dia` |
+| tests que lo fijan | `ventanaLicitacion.test.ts` (37 casos) + `bandejaLicitaciones.test.ts` (83) |
+| lugares que muestran un plazo **calculado** | **3**: la fila de la bandeja (`Licitaciones.tsx:662`), la ficha (`LicitacionDetalle.tsx:130`) y el alta manual (`LicitacionNueva.tsx:70` — ahí la fecha la teclea una persona) |
+| lugares que muestran la fecha **cruda** | **4**: tooltip y «Cierra …» de la fila, el label de un selector, y el `Dato "Cierre"` de la ficha |
+
+### ¿La distinción por modalidad ya existe? Sí, pero no donde hace falta
+
+- **En el cálculo, sí**: `HORAS_ARMADO` es `Record<ModalidadLicitacion, number>`
+  (mínima 4 h, menor 6 h) y `evaluarVentana` deriva de ahí los `necesarios`.
+- **En el aviso, no**: el aviso existente —`faltaFechaManifestacion()`, que ya
+  pinta un chip ámbar *«Falta la fecha de manifestación»* en la fila y en la
+  ficha— **se decide por el rastro de fase en la REFERENCIA**, no por la
+  modalidad: `fase === 'Manifestación de interés…'` o ese literal dentro de
+  `fases_previas`.
+
+### El hueco, medido
+
+El origen **no siempre escribe el sufijo de fase en la referencia.** De las
+**323** menores cuantías reales frescas del pozo (`Publicado`, publicadas en
+2026):
+
+| | |
+|---|---|
+| con el sufijo en la referencia → el panel **puede** declarar | 86 (**27 %**) |
+| **sin** sufijo → el panel **no declara nada** | **237 (73 %)** |
+
+Y esos 237 caen **entre los dos mecanismos**: no disparan
+`faltaFechaManifestacion` (no hay rastro en la referencia) ni
+`manifestacionCerrada` (su fase es `Presentación de observaciones`, no
+`Presentación de oferta`). `DSAJBO-SAMC-008-2026` es uno de ellos — por eso el
+panel le muestra «19 días» sin decir nada.
+
+### Por qué no es «una frase en un sitio»
+
+La versión fácil sería declarar **por modalidad**: toda menor cuantía tiene
+puerta por norma. Choca con un dato:
+
+> **`'Seleccion Abreviada Menor Cuantia Sin Manifestacion Interes'` mapea al
+> mismo `menor_cuantia`** (35 filas vivas; 4.817 en el histórico) y **por
+> definición no tiene puerta**. El string crudo de la modalidad se calcula al
+> ingerir (`crudo`) pero **no se persiste** en el documento.
+
+Así que hay dos caminos y la diferencia de tamaño es grande:
+
+| camino | qué toca | tamaño |
+|---|---|---|
+| **A · declarar por modalidad y aceptar la sobre-declaración** en las «Sin Manifestación» | 1 predicado en `bandejaLicitaciones.ts` + su render en 2 lugares (fila y ficha) + tests en 1 archivo | **chico** |
+| **B · distinguirlas de verdad** | persistir la modalidad cruda al ingerir → toca el mapeo y los documentos ya escritos | **otro bloque** |
+
+**A no es deshonesto**, y es la razón de que la frase nueva ya esté redactada
+en condicional: *«si la manifestación era requisito…»*. Sobre-declarar una
+puerta en 35 procesos cuesta un clic; callarla en 237 cuesta el proceso. Es la
+misma asimetría de arriba.
+
+**Lo que NO se va a hacer, y queda escrito para que nadie lo proponga de
+nuevo:** inventar la fecha de manifestación por regla normativa («día 5 de 9»).
+Una fecha estimada mostrada como fecha es exactamente el patrón que este
+documento viene desarmando — el mismo del `>=` que fabricaba pérdidas y el del
+proxy de fase que afirmaba un cierre.
+
+**No toca el reparto ni el orden** de la bandeja (`repartirRadar`,
+`ordenarPorCierre`): es un chip más, al lado del que ya existe. Si en algún
+momento se quisiera que esto cambie el ORDEN —que una menor cuantía sin fecha
+de manifestación baje o suba—, eso sí es otro bloque y va después.
+
+---
+
 ## Cómo se midió
 
 - `p6dx-8zbt` vía SoQL 2.1 (`date_diff_d` + pipe `|>` para agrupar por proceso
