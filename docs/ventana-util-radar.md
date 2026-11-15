@@ -88,10 +88,14 @@ nombre)»*— y la ausencia del límite ya estaba medida sobre **10.421 procesos
 > la fila de la manifestación. No hay fecha que comparar.
 
 **Lo que sí dice por dónde va el proceso es la FASE** («Manifestación de
-interés (Menor Cuantía)», «Presentación de oferta»…). Un proceso en fase de
-oferta que antes pasó por manifestación es uno cuya puerta ya se cerró; eso no
-es estimación, es el origen diciendo por dónde pasó. De los 729 persistibles de
-hoy, **574 traen fase** (79 %).
+interés (Menor Cuantía)», «Presentación de oferta»…). De los 729 persistibles
+de hoy, **574 traen fase** (79 %).
+
+Que la fase sea lo único disponible tiene una consecuencia que hay que decir
+antes de usarla: **«está en fase de oferta» no es «el plazo de manifestación
+venció»**. Lo primero es un hecho del origen; lo segundo es una inferencia del
+flujo normativo. El §4 desarma ese paso y dice exactamente qué sostiene y qué
+no.
 
 ---
 
@@ -179,20 +183,63 @@ Dos cosas que este número NO es:
 
 ---
 
-## 4 · La puerta de la manifestación, en números de hoy
+## 4 · Los 3 de la manifestación — y sobre qué base se afirman
 
-De los **34 procesos de menor cuantía vivos y trabajables o casi** del pozo de
-hoy, la fase dice que la puerta ya cerró en **3**:
+> **Corregido el 14-nov, por una pregunta del revisor:** si el límite de
+> manifestación no existe como campo (§1), ¿sobre qué base se afirma que esos 3
+> «la tienen cerrada»? La primera versión de esta sección decía *«la fase dice
+> que la puerta ya cerró»* sin declarar que **es un proxy de fase, no una
+> fecha**. Se declara ahora, y el número cambia de significado.
+
+**Lo que mide el 3, literalmente.** La condición es
+`manifestacionCerrada()`, y no compara ninguna fecha:
 
 ```
-2026-11-18  TMSA-SAM-11-2026              fase = Presentación de oferta
-2026-11-17  SAMC-019-2026                 fase = Presentación de oferta
-2026-11-17  FDLT-SAMC-035-2026 (160714)   fase = Presentación de oferta
+fase === 'Presentación de oferta'
+  && fases_previas incluye 'Manifestación de interés (Menor Cuantía)'
 ```
 
-Los tres tienen plazo de cierre **futuro** y son intrabajables: es exactamente
-el caso que Giovanny describió, y el panel lo nombra con esas palabras. Pero son
-**3 de 34**, no todos.
+Y de dónde sale cada parte, verificado en el código y en el dato:
+
+- **`fases_previas` se deriva SOLO del texto de `referencia_del_proceso`.** El
+  origen acumula los sufijos de fase en la referencia:
+  `"TMSA-SAM-11-2026 (Manifestación de interés (Menor Cuantía)) (Presentación de oferta)"`.
+  No se mira ninguna otra fila.
+- **`fase` sale de la fila representante, que es la primera del grupo** por
+  `id_del_proceso` — sin criterio de fase más avanzada ni de fecha. Que eso
+  equivalga a «la fase ACTUAL» es cierto **en este pozo** porque **0 de 5.957
+  procesos tienen más de una fila**; no es una garantía general del dataset.
+
+**Las filas crudas de los 3.** Una sola fila cada uno, ya en fase de oferta,
+con la publicación de la fase de manifestación (`fecha_de_publicacion`) en
+**None** y `fecha_de_recepcion_de` = `fecha_de_apertura_de_respuesta` = el
+plazo de la OFERTA:
+
+```
+TMSA-SAM-11-2026             pub 2026-11-05  ·  recepción 2026-11-18
+SAMC-019-2026                pub 2026-11-10  ·  recepción 2026-11-17
+FDLT-SAMC-035-2026 (160714)  pub 2026-11-11  ·  recepción 2026-11-17
+```
+
+**No hay ninguna fecha de manifestación que comparar.** Por lo tanto:
+
+| | |
+|---|---|
+| **qué es el 3** | un **conteo de procesos cuya fase actual dice que ya pasaron la manifestación** |
+| **qué NO es** | una medición de que un plazo venció |
+| **de dónde sale el salto** | de que el flujo normativo de la menor cuantía va manifestación → sorteo → oferta. Eso es **inferencia del flujo**, no un dato de la tabla |
+
+**Y no toca los 58.** El proxy solo EXCLUYE: si fuera demasiado estricto, el
+número de trabajables sería **61 en vez de 58** — nunca menos. La conclusión
+general del documento no depende de él.
+
+**Un pendiente que esto destapa, de texto y no de dato:** la frase que la
+bandeja muestra en esas filas afirma más de lo que el proxy sostiene —
+*«La manifestación de interés ya cerró — no se puede presentar aunque el plazo
+siga abierto»* (`bandejaLicitaciones.ts`, un solo lugar, con tests que la
+fijan). Lo que el dato sostiene es *«ya pasó a fase de presentación de
+oferta»*. Queda anotado como candidato de redacción, sin cambiar: es texto que
+lee Karen.
 
 ---
 
@@ -241,6 +288,10 @@ De los 58 trabajables, 49 traen fecha de publicación (9 no):
 
 **Dos tercios se publicaron dentro de la última semana.** El radar lleva 7 días
 corriendo dos veces al día, así que la ventana de ingesta los cubría.
+
+> **Esta cifra se recalcula con un comando**, y no hay que creerle a la fecha de
+> este documento: `npx vitest run --config vitest.pozo.config.ts`. Ver «La cifra
+> del día se recalcula» al final.
 
 ---
 
@@ -329,10 +380,30 @@ de 6 días en mínima cuantía, es **un tercio de la ventana**; y recupera los
 los 29 al mes ya estimados. En menor cuantía el retraso cuesta menos en
 porcentaje (6,3 %) pero sobre una ventana real de ~3 días **cada día pesa más**.
 
-Lo que el raspador **no** arregla: la puerta de la manifestación sigue sin
-publicarse en datos abiertos. Esa fecha solo entra si alguien la lee del pliego,
-y hoy el único lugar del mundo donde puede quedar escrita es nuestro propio
-documento (`patchCronogramaManual`).
+### PREGUNTA ABIERTA que puede cambiar esta valuación — y quién la responde
+
+Esta cuenta —«el raspador vale un tercio de la ventana»— asume que el raspador
+solo recupera **tiempo**. Puede estar subestimándolo, y la pista salió de la
+observación que originó todo este documento:
+
+> **Giovanny supo, navegando SECOP II, que las manifestaciones de interés ya
+> habían pasado.** Para saberlo tuvo que ver una fecha.
+
+Si el portal transaccional **publica el límite de manifestación de interés que
+el conjunto abierto no tiene** (§1), entonces el raspador no vale la ventana:
+vale **la ventana más el único dato que decide si una menor cuantía es
+alcanzable** — hoy inaccesible salvo que una persona lo lea del pliego, y cuyo
+único lugar de registro en el mundo es nuestro propio documento
+(`patchCronogramaManual`).
+
+**No está verificado y no se verifica raspando** — no hace falta y no
+corresponde. **Lo confirma una mirada humana sobre el portal: Giovanny**,
+abriendo uno de los 3 procesos del §4 y diciendo si ve ahí una fecha límite de
+manifestación.
+
+Mientras no esté confirmado, **esto no es un hallazgo y la valuación de arriba
+se queda como está.** Si se confirma, hay que rehacerla — y el bloque del
+raspador cambia de «gana días» a «gana el dato que falta».
 
 **Y lo que ningún raspador arregla: si los 58 vivos de hoy no están en la
 bandeja, el problema no es la fuente.** Esa es la medición que sigue, y es la
@@ -347,9 +418,30 @@ que decide si este bloque continúa o se replantea.
   de fecha**, en ninguna consulta de este documento.
 - Percentiles exactos sobre el histograma completo de días (no muestreo).
 - El pozo vivo del §5 se trajo filtrando por estado, se pasó por
-  `ingerirSecop()` con el léxico v1.1 real y se juzgó con `porQueNoAlcanza()` —
-  en un harness temporal que **no queda en la suite** (lee un archivo de
-  `_datos/`, gitignoreado).
+  `ingerirSecop()` con el léxico v1.1 real y se juzgó con `porQueNoAlcanza()`.
+
+### La cifra del día se recalcula — el 58 no es folclore
+
+El pozo cambia todos los días, así que el número de arriba sin forma de
+recalcularlo se vuelve una cita vieja en tres semanas. **Queda versionado**, y
+lo corre cualquiera:
+
+```bash
+npx vitest run --config vitest.pozo.config.ts
+```
+
+`scripts/sigp/pozo-vivo.pozo.ts`. Trae las filas él mismo (territorio + las 4
+modalidades + estados vivos, **sin ningún filtro de fecha**), usa
+`ingerirSecop()` y `porQueNoAlcanza()` reales —cero reimplementación del
+criterio— e **imprime la fecha y hora de la medición al lado de cada número**,
+con su denominador. Deliberadamente **fuera de la suite** (extensión `.pozo.ts`
+y config propia): el pozo cambia a diario y la consulta sale a la red, así que
+en la suite sería una prueba que falla por el mundo, no por el código.
+Verificado: `npx vitest run` sigue en **122 archivos / 2.309 tests**.
+
+Corrida de control del 14-nov-2026 (reproduce exacto lo de este documento):
+6.913 filas · 5.957 procesos · 729 persistibles · 61 futuros · **58
+trabajables** · 3 manifestación cerrada · 664 plazo vencido.
 - Alcance: territorio **Distrito Capital de Bogotá + Cundinamarca** y las
   **4 modalidades** de `MODALIDADES_INGESTA`. No es el país: es el universo del
   radar. Los literales se verificaron contra el dataset antes de usarlos
