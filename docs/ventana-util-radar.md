@@ -380,34 +380,141 @@ de 6 días en mínima cuantía, es **un tercio de la ventana**; y recupera los
 los 29 al mes ya estimados. En menor cuantía el retraso cuesta menos en
 porcentaje (6,3 %) pero sobre una ventana real de ~3 días **cada día pesa más**.
 
-### PREGUNTA ABIERTA que puede cambiar esta valuación — y quién la responde
+### HALLAZGO · el portal publica el calendario competitivo completo; el conjunto abierto no
 
-Esta cuenta —«el raspador vale un tercio de la ventana»— asume que el raspador
-solo recupera **tiempo**. Puede estar subestimándolo, y la pista salió de la
-observación que originó todo este documento:
+**La cuenta de arriba —«un tercio de la ventana»— subestima el raspador, y hay
+que corregirla.**
 
-> **Giovanny supo, navegando SECOP II, que las manifestaciones de interés ya
-> habían pasado.** Para saberlo tuvo que ver una fecha.
+> **Evidencia: observación DIRECTA del portal, no medición nuestra.**
+> Giovanny Montes entró a SECOP II el **14-nov-2026** y trajo tres capturas de
+> la pantalla de detalle de un proceso. Esto no se midió, no se raspó y no se
+> dedujo del dataset: se vio.
 
-Si el portal transaccional **publica el límite de manifestación de interés que
-el conjunto abierto no tiene** (§1), entonces el raspador no vale la ventana:
-vale **la ventana más el único dato que decide si una menor cuantía es
-alcanzable** — hoy inaccesible salvo que una persona lo lea del pliego, y cuyo
-único lugar de registro en el mundo es nuestro propio documento
-(`patchCronogramaManual`).
+En la sección **«Cronograma»** del detalle hay **21 fechas con hora exacta**,
+entre ellas:
 
-**No está verificado y no se verifica raspando** — no hace falta y no
-corresponde. **Lo confirma una mirada humana sobre el portal: Giovanny**,
-abriendo uno de los 3 procesos del §4 y diciendo si ve ahí una fecha límite de
-manifestación.
+- **`Plazo para manifestación de Interés`** — por ejemplo `24/11/2026 5:00:00 PM`
+- sorteo
+- lista de precalificados
+- plazo de adendas
+- presentación de ofertas
+- informe de evaluación
+- adjudicación
 
-Mientras no esté confirmado, **esto no es un hallazgo y la valuación de arriba
-se queda como está.** Si se confirma, hay que rehacerla — y el bloque del
-raspador cambia de «gana días» a «gana el dato que falta».
+**Ninguna de las 21 está en el conjunto abierto**, que trae publicación y
+recepción de respuestas y nada más (§1).
+
+Y dos cosas que **sí medí** sobre el conjunto abierto, que agravan la cuenta:
+
+| lo que el conjunto abierto hace | medido sobre el pozo vivo |
+|---|---|
+| **trunca todas las fechas a medianoche** | **una sola hora distinta** en 5.806 publicaciones y en 6.873 recepciones: `00:00:00`. El portal da `9:00 PM`, `5:00:00 PM` |
+| **deja la categoría sin código** | `codigo_principal_de_categoria` = `UNSPECIFIED` en **1.812 de 6.913 filas (26,2 %)** |
+
+Lo segundo pega donde más duele: la clasificación del radar es híbrida —el
+código manda cuando existe, el texto habla cuando no—, así que en **un cuarto
+del pozo** el radar está decidiendo solo por texto, con `probable` como mejor
+veredicto posible. El portal publica los UNSPSC de ese cuarto.
+
+**Valuación corregida.** El raspador no vale 2 días sobre 6:
+
+1. **el calendario competitivo completo** — incluido el único dato que decide
+   si una menor cuantía es alcanzable, hoy inaccesible salvo que alguien lea el
+   pliego a mano (y cuyo único lugar de registro en el mundo es nuestro propio
+   documento, `patchCronogramaManual`);
+2. **la hora**, que en una ventana de 4 días útiles vale hasta un día;
+3. **la categoría UNSPSC** del 26,2 % que hoy llega sin código;
+4. y además los **2 días** de latencia, que era lo único que la cuenta vieja
+   contaba.
+
+### Las dos restricciones de diseño que salen de las mismas capturas
+
+**1 · El cronograma NO está en la lista de resultados, solo en el detalle.** La
+lista trae entidad, referencia, descripción, fase actual y fecha de
+publicación. Entonces el diseño correcto es:
+
+> **la lista para DETECTAR; el detalle solo para lo que ya pasó el léxico.**
+
+Eso es un orden de **~10 aperturas al día**, no 58 ni 729. **Cualquier diseño
+que abra el detalle de todo queda descartado de entrada** — por volumen, por
+cortesía con el portal y porque no hace falta: lo que decide si vale abrir un
+proceso ya está en la lista.
+
+**2 · CONDICIÓN ABIERTA Y BLOQUEANTE: en la captura el usuario tenía sesión
+iniciada.** Está **sin confirmar** si el detalle es visible sin cuenta. No se
+supone en ninguna dirección: ni que sí (el diseño entero dependería de algo no
+verificado) ni que no (se descartaría un bloque viable por una suposición).
+**Hasta que se confirme, el diseño del raspador no se cierra.**
 
 **Y lo que ningún raspador arregla: si los 58 vivos de hoy no están en la
 bandeja, el problema no es la fuente.** Esa es la medición que sigue, y es la
 que decide si este bloque continúa o se replantea.
+
+---
+
+## 9 · LA PRUEBA PUNTUAL — `DSAJBO-SAMC-008-2026`, y va ANTES del censo
+
+Un proceso concreto vale más que el censo completo y es inmediato. El elegido:
+
+| | |
+|---|---|
+| referencia | **`DSAJBO-SAMC-008-2026`** |
+| entidad | Rama Judicial — Dirección Seccional de Administración Judicial de Bogotá |
+| objeto | impermeabilización sede Calle 72 (obra) |
+| modalidad | Selección Abreviada de Menor Cuantía |
+| precio base | **$564.337.823** |
+| id interno del origen | `CO1.REQ.11355790` |
+
+### Lo que YA está verificado, de este lado
+
+**La fila existe en `p6dx-8zbt` y el criterio REAL del radar la admite como
+trabajable.** Medido con el script versionado (`npx vitest run --config
+vitest.pozo.config.ts`, corrida del 14-nov 00:33 UTC), aparece en la lista de
+los 58:
+
+```
+2026-12-03 · 19 d · menor_cuantia · Rama Judicial- Dirección Seccional de
+Administración Judicial de Bogotá · DSAJBO-SAMC-008-2026
+```
+
+**Consecuencia: la rama «ni siquiera está en el conjunto» queda descartada.**
+Si no está en Firestore, la falla está **entre la fuente y la colección** — es
+nuestra, no del dataset.
+
+### Y el mismo proceso muestra el hallazgo del §8 en un solo caso
+
+| | conjunto abierto | portal (capturas de Giovanny) |
+|---|---|---|
+| publicación | `2026-11-11 00:00:00` | **11/11/2026 9:00 PM** |
+| **límite de manifestación** | **el campo no existe** | **24/11/2026 5:00:00 PM** |
+| recepción de respuestas | `2026-12-03 00:00:00` | presentación de ofertas, en el cronograma |
+| categoría UNSPSC | **`UNSPECIFIED`** | 72101500 · 72153204 · 81101500 |
+| fase | `Presentación de observaciones` | — |
+
+**El radar cree que quedan 19 días. La puerta real se cierra el 24-nov —
+nueve días antes del plazo que el radar ve.** Ese es el daño del campo que no
+existe, medido sobre un proceso con nombre y presupuesto.
+
+### El comando — lo corre quien tenga la llave de LECTURA
+
+```bash
+node scripts/sigp/censo-ventana-radar.mjs --llave <ruta de la llave de LECTURA>
+```
+
+```bash
+grep -i "DSAJBO-SAMC-008" _datos/censo-ventana-radar.json
+```
+
+### Qué dice cada resultado
+
+| resultado | qué significa | dónde mirar |
+|---|---|---|
+| **está y es trabajable** | la bandeja está sana; lo que vio Giovanny era otra cosa | cerrar esta línea y volver al censo |
+| **está, pero clasificada de forma que no se ve** | defecto de **criterio o de reparto** | el `estado` del documento, su `radar.senal` y `seccionDe`/`repartirRadar` |
+| **no está** | defecto **entre la fuente y la colección** | la ventana de ingesta, la marca de la corrida y las guardas de `radarCorrida` — porque la fila SÍ está en el origen y SÍ pasa el léxico (verificado arriba) |
+
+**Esto va antes que todo lo demás, incluido el censo**, y así quedó en el guion
+de la sentada.
 
 ---
 
