@@ -1,32 +1,43 @@
-# La sentada: despliegue del radar + los cuatro actos de datos
+# La sentada: censo del radar + despliegue + los cuatro actos de datos
 
-*Un solo acto para Giovanny, no seis. Preparado el 14-nov-2026.*
+*Un solo acto para Giovanny, no seis. Preparado el 14-nov-2026; el censo se
+puso de primero el mismo día, cuando se midió que el conjunto abierto tenía 58
+procesos trabajables y no se sabía cuántos habían llegado a la bandeja.*
 
-Esto se corre **de una sentada, en este orden**, y toma entre 25 y 40 minutos.
+Esto se corre **de una sentada, en este orden**, y toma entre 30 y 45 minutos.
 El orden no es cómodo: es el único que funciona, y cada dependencia está
 explicada donde aparece.
 
+> **El PASO 1 es un CENSO que puede detener todo lo demás.** Se corre primero a
+> propósito: si la bandeja del radar está vacía de procesos trabajables cuando
+> el conjunto abierto tiene decenas, hay un **defecto activo** y ni el
+> despliegue ni los cuatro actos son lo que toca hacer ese día. Medir antes de
+> actuar, aunque el acto ya esté escrito.
+
 ---
 
-## LAS DOS APERTURAS DE CREDENCIAL, Y POR QUÉ SON DISTINTAS
+## LAS CREDENCIALES, Y POR QUÉ SON TRES COSAS DISTINTAS
 
-Es lo único de este guion que hay que leer dos veces. Son **dos sesiones
-distintas, de dos identidades distintas, por dos razones distintas**, y
-confundirlas ya pasó una vez (el guardia del script de deploy lo atrapó).
+Es lo único de este guion que hay que leer dos veces. Confundirlas ya pasó una
+vez (el guardia del script de deploy lo atrapó).
 
-| | PASO 1 · desplegar | PASO 2 · escribir datos |
-|---|---|---|
-| comando | `npx firebase login` | `gcloud auth application-default login` |
-| identidad | **la suya**, Giovanny | la **cuenta propietaria** del proyecto |
-| por qué | un deploy lo firma una persona; el script **aborta** con llave de servicio o cuenta compartida | los actos escriben en `licitaciones`, y eso lo autoriza el dueño del proyecto |
-| cierre | `npx firebase logout` | `gcloud auth application-default revoke` |
+| | PASO 1 · censar | PASO 2 · desplegar | PASO 3 · escribir datos |
+|---|---|---|---|
+| qué es | un **archivo** de llave, no una sesión | una **sesión** suya | una **sesión** del dueño |
+| comando | `--llave <ruta>` | `npx firebase login` | `gcloud auth application-default login` |
+| identidad | la llave de **solo LECTURA** que ya existe | **la suya**, Giovanny | la **cuenta propietaria** del proyecto |
+| por qué | leer `licitaciones` no necesita sesión y no escribe nada | un deploy lo firma una persona; el script **aborta** con llave de servicio o cuenta compartida | los actos escriben en `licitaciones`, y eso lo autoriza el dueño |
+| cierre | no hay: no se abrió nada | `npx firebase logout` | `gcloud auth application-default revoke` |
 
-**Nunca las dos abiertas a la vez.** El paso 1 se cierra antes de abrir el 2.
+**Las dos SESIONES nunca van abiertas a la vez.** El paso 2 se cierra antes de
+abrir el 3. El paso 1 no abre ninguna.
 
-Y una tercera cosa que **no** se usa: si tiene `GOOGLE_APPLICATION_CREDENTIALS`
-apuntando a un archivo de llave, los actos **abortan**. Esa variable *gana*
-sobre las credenciales por defecto, así que el acto correría con otra
-identidad sin avisar. Límpiela antes:
+Y una trampa que las conecta: **la llave de lectura se pasa con `--llave`, NO
+por `GOOGLE_APPLICATION_CREDENTIALS`.** Si esa variable queda apuntando a un
+archivo de llave, los actos del paso 3 **abortan** — esa variable *gana* sobre
+las credenciales por defecto, así que el acto correría con otra identidad sin
+avisar. Que aborten es lo correcto; lo que no queremos es llegar hasta ahí.
+Límpiela antes del paso 3, siempre:
 
 ```bash
 unset GOOGLE_APPLICATION_CREDENTIALS
@@ -60,27 +71,69 @@ git pull --ff-only
 
 ---
 
-# PASO 0 · MERGEAR EL `#279` (sin esto el paso 2 no existe)
+# PASO 0 · MERGEAR EL `#283` Y EL `#279` (sin esto no existe ni el paso 1 ni el 3)
 
-Los cuatro actos **viven en el `#279`**, no en `main`. El runner
-(`functions-radar/acto.mjs`) y los cuatro actos se incorporan cuando ese PR se
-mergea; antes de eso, `node functions-radar/acto.mjs …` responde que no
-encuentra el archivo.
+Dos PRs, cada uno trae una pieza de esta sentada:
 
-Se mergea desde GitHub (una persona mira y aprueba; ninguna sesión lo hace
+- **`#283`** → `scripts/sigp/censo-ventana-radar.mjs`, que es **el paso 1**.
+- **`#279`** → el runner `functions-radar/acto.mjs` y los cuatro actos, que son
+  **el paso 3**. Antes de ese merge, `node functions-radar/acto.mjs …`
+  responde que no encuentra el archivo.
+
+Se mergean desde GitHub (una persona mira y aprueba; ninguna sesión lo hace
 sola) y después se actualiza el repositorio local, que es el mismo comando de
-«ANTES DE EMPEZAR». Verificación de que quedó:
+«ANTES DE EMPEZAR». Verificación de que quedaron los dos:
 
 ```bash
-git log --oneline -1 && ls functions-radar/acto.mjs functions-radar/actos
+git log --oneline -1 && ls scripts/sigp/censo-ventana-radar.mjs functions-radar/acto.mjs functions-radar/actos
 ```
 
-Tiene que listar `acto.mjs` y los cuatro archivos `1a- 1b- 1c- 3b-`. Si no
-están, el merge no entró y el paso 2 no se puede correr.
+Tiene que listar el censo, `acto.mjs` y los cuatro archivos `1a- 1b- 1c- 3b-`.
+Si falta alguno, ese merge no entró y su paso no se puede correr.
 
 ---
 
-# PASO 1 · DESPLEGAR EL RADAR
+# PASO 1 · EL CENSO — 🔑 LLAVE DE LECTURA · **puede detener la sentada**
+
+Este paso **no cambia nada**: lee y cuenta. Está primero porque lo que cuente
+decide si el resto del día tiene sentido.
+
+**Qué se sabe hoy, medido** (`docs/ventana-util-radar.md`): el conjunto abierto
+de SECOP II tenía el 14-nov **58 procesos trabajables** en el territorio del
+radar — 31 menores cuantías, 23 mínimas, 4 de régimen especial —, publicados
+hace una mediana de 4 días. **Lo que no se sabe es cuántos de esos llegaron a
+la bandeja**, porque eso vive en producción.
+
+```bash
+node scripts/sigp/censo-ventana-radar.mjs --llave <ruta de la llave de LECTURA>
+```
+
+Escribe `_datos/censo-ventana-radar.json` con los campos crudos de cada
+documento de `licitaciones`. **No juzga nada**: el veredicto lo calcula después
+el código real de la bandeja sobre ese JSON — un script que reimplementara el
+criterio sería una segunda copia que puede divergir de lo que Karen ve.
+
+### La regla de parada
+
+| lo que diga el censo | qué se hace |
+|---|---|
+| la bandeja tiene **trabajables en el mismo orden de magnitud** que el pozo | la sentada sigue: paso 2 y paso 3 |
+| la bandeja tiene **cero** (o un puñado) y el pozo tiene decenas | **PARAR.** Hay un defecto activo entre la fuente y la colección. Ni el despliegue ni los cuatro actos son lo que toca hacer ese día |
+
+No es una formalidad: si el radar no está metiendo en la cola los procesos
+vivos que la fuente sí publica, desplegar una modalidad nueva y limpiar 18
+filas de ruido deja el defecto intacto y lo tapa con trabajo.
+
+Para que la comparación sea del **mismo día** y no contra el número del 14-nov,
+el pozo se recalcula con su propio script versionado antes de comparar (el
+comando y su salida están en `docs/ventana-util-radar.md`).
+
+**Sin cierre**: acá no se abrió ninguna sesión. La llave es un archivo y se
+pasa con `--llave`; no se exporta a `GOOGLE_APPLICATION_CREDENTIALS`.
+
+---
+
+# PASO 2 · DESPLEGAR EL RADAR — 🔑 CREDENCIAL 1 (la suya)
 
 > **Corregido el 14-nov respecto de la primera versión de este guion.** Decía
 > que había once PRs sin desplegar, incluido el léxico v1.1. **No es cierto:**
@@ -94,7 +147,7 @@ están, el merge no entró y el paso 2 no se puede correr.
 - **#278** — la modalidad `Contratación régimen especial (con ofertas)`. Es la
   única razón de este paso. El aviso de cobertura del mismo PR **no** necesita
   esto: sale solo por Vercel.
-- Y, si el paso 0 ya se hizo, también sube el `#279`. Sus cambios a `src/` son
+- Y, si el paso 0 ya se hizo, también suben el `#279` y el `#283`. Sus cambios a `src/` son
   **de tipos solamente** (genéricos para que el `Timestamp` del Admin SDK y el
   del SDK cliente convivan): no cambian el comportamiento desplegado. El único
   cambio de conducta que este deploy lleva es el de `#278`.
@@ -102,7 +155,7 @@ están, el merge no entró y el paso 2 no se puede correr.
 Consecuencia de la corrección, y es buena: **el acto 1b ya no limpia una cola
 que el radar vuelva a ensuciar mañana.** Ese era el argumento para desplegar
 antes de los actos y ya no aplica. Lo que sigue mandando el orden es la
-credencial: el paso 1 se cierra antes de abrir la del paso 2.
+credencial: la sesión del paso 2 se cierra antes de abrir la del paso 3.
 
 ```bash
 npx firebase login
@@ -124,11 +177,11 @@ npx firebase logout
 
 El script lo dice, pero la prueba real es la corrida de mañana a las 06:30: en
 el log de la función tiene que aparecer la modalidad nueva entre las
-consultadas. No hace falta esperarla para seguir con el paso 2.
+consultadas. No hace falta esperarla para seguir con el paso 3.
 
 ---
 
-# PASO 2 · LOS CUATRO ACTOS DE DATOS
+# PASO 3 · LOS CUATRO ACTOS DE DATOS — 🔑 CREDENCIAL 2 (cuenta propietaria)
 
 ```bash
 gcloud auth application-default login
