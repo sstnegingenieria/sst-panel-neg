@@ -613,6 +613,81 @@ proxy de fase que afirmaba un cierre.
 momento se quisiera que esto cambie el ORDEN —que una menor cuantía sin fecha
 de manifestación baje o suba—, eso sí es otro bloque y va después.
 
+### Dónde va el aviso — la decisión, y por qué
+
+**Camino A aprobado.** Antes de construirlo hay que decidir dónde se muestra,
+porque un aviso que aparece en todas las filas de una modalidad deja de ser
+información: **es papel tapiz, y Karen deja de verlo en una semana.**
+
+**El criterio que separa las dos cosas: si la marca se puede APAGAR.**
+
+| | se apaga | entonces es | y va |
+|---|---|---|---|
+| «en menor cuantía hay una puerta anterior cuya fecha no publica el conjunto abierto» | **nunca** — es verdad de toda menor cuantía, siempre | una **propiedad de la modalidad** | **una vez**, en el encabezado y en la etiqueta |
+| «de ESTA licitación nadie anotó la fecha de manifestación» | **sí** — el día que alguien la escribe (`patchCronogramaManual`), desaparece de esa fila | **trabajo pendiente** | **en la fila** |
+
+Una marca que no se puede apagar es una propiedad y va arriba. Una que se apaga
+con una acción es una lista de pendientes que se vacía — y eso no es papel
+tapiz, es la cola.
+
+Así que **las dos cosas, con pesos distintos**:
+
+1. **La invariante, una sola vez**, en los dos lugares donde ya se mira para
+   saber de qué tipo es el proceso: el `title` del **chip de modalidad** que la
+   fila ya pinta (`MODALIDAD_LICITACION_LABEL`), y **una línea en el encabezado
+   del grupo** del radar. Hay precedente exacto para eso: el grupo «sin fecha»
+   ya lleva su propia línea explicativa. **Cero elementos visuales nuevos
+   repetidos.**
+2. **El faltante accionable se queda como chip por fila** — el que ya existe,
+   *«Falta la fecha de manifestación»* — con el disparador cambiado de
+   rastro-de-fase a modalidad.
+3. **Y un recorte que baja la repetición sin perder nada: el chip solo donde se
+   puede actuar.** En el grupo «no alcanza» (hoy **664 de 725**) un aviso de
+   puerta no aporta: ese proceso ya está fuera. Con ese recorte el chip pasa de
+   «todas las menores cuantías» a **las del grupo trabajable: 31 de 58 filas de
+   hoy**, y cada una se apaga cuando alguien anota su fecha.
+
+### La sobre-declaración de las 35 NO es gratis — y el punto 2 es lo que la retira
+
+Confirmado en pantalla: **`MODALIDAD_LICITACION_LABEL` se deriva del enum**, y
+`'Seleccion Abreviada Menor Cuantia Sin Manifestacion Interes'` mapea a
+`menor_cuantia`. O sea que la fila dice **«Menor cuantía» en las dos** y
+**Karen no puede distinguirlas leyendo**. El clic que cuesta la
+sobre-declaración se paga: abre, no encuentra puerta, y nada en la fila le
+había dicho que ahí no había.
+
+Eso cambia el orden de los dos trabajos: **persistir la modalidad cruda no es
+solo para que el camino B deje de ser un bloque en tres meses — es lo que hace
+que A no tenga ruido.** Con el crudo guardado, la etiqueta puede decir «Menor
+cuantía (sin manifestación)» y el predicado puede saltárselas.
+
+### Lo que cuesta persistir la modalidad cruda — y el único costo real
+
+Los tres costos que se sospechaban, verificados uno por uno:
+
+| sospecha | verificado |
+|---|---|
+| **el mapeo explícito** | `CAMPO_SECOP` es `Record<DestinoMapeado, CampoSecop>`: las claves son DESTINOS y los valores COLUMNAS, así que **dos destinos pueden apuntar a la misma columna**. Agregar `modalidad_cruda: 'modalidad_de_contratacion'` es una línea, y el `satisfies` la verifica |
+| **el test textual de `secopMapeo.ts`** | **no se rompe ninguno.** Los dos chequeos estructurales trabajan sobre conjuntos: `huerfanos` sale de las columnas sin destino —y esa columna ya tenía uno— y `ambos` sale de las que están traducidas Y justificadas, y `modalidad_de_contratacion` no está en `CAMPOS_NO_MAPEADOS`. El `expect(CAMPOS_SECOP).toHaveLength(59)` cuenta columnas del DATASET, que no cambian |
+| **el tamaño** | una cadena de ~45 caracteres por documento |
+
+Y el valor ya está calculado y se tira: el resolvedor de modalidad devuelve
+`{ modalidad, crudo, imprevista }` y solo se usa el primero. Guardarlo es
+escribir lo que ya se midió.
+
+**El único costo real, y hay que decidirlo:** el campo empieza a viajar **en el
+próximo despliegue del radar**, porque lo escribe la Cloud Function. Y el
+**PASO 2 de la sentada es justamente un despliegue del radar**, que sube lo que
+`main` tenga. Entonces:
+
+- si esto se mergea **antes** de la sentada, el despliegue del paso 2 lo lleva;
+- si la sentada tiene que desplegar **solo `#278`**, esto se mergea **después**.
+
+**No lo decido yo**: es exactamente la puerta de atrás que se pidió no usar. Lo
+que sí vale decir es que no hay deploy de **reglas** involucrado — el radar
+escribe con `firebase-admin`, así que las reglas de Firestore no aplican a esa
+escritura.
+
 ---
 
 ## Cómo se midió
