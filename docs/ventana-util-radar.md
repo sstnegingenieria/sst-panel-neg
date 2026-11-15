@@ -440,11 +440,35 @@ que abra el detalle de todo queda descartado de entrada** — por volumen, por
 cortesía con el portal y porque no hace falta: lo que decide si vale abrir un
 proceso ya está en la lista.
 
-**2 · CONDICIÓN ABIERTA Y BLOQUEANTE: en la captura el usuario tenía sesión
-iniciada.** Está **sin confirmar** si el detalle es visible sin cuenta. No se
-supone en ninguna dirección: ni que sí (el diseño entero dependería de algo no
-verificado) ni que no (se descartaría un bloque viable por una suposición).
-**Hasta que se confirme, el diseño del raspador no se cierra.**
+**2 · La sesión: CONDICIÓN RESUELTA.** Se preguntaba si el detalle es visible
+sin cuenta, porque en la primera captura el usuario estaba logueado.
+
+> **Verificado — observación directa de Giovanny Montes, 14-nov-2026, en
+> ventana de incógnito: el detalle del proceso y su cronograma SE VEN SIN
+> INICIAR SESIÓN.** El raspador no dependería de las credenciales de nadie.
+
+**3 · En su lugar queda una condición nueva, y no es bloqueante.** En incógnito
+el portal pidió **verificación (CAPTCHA) varias veces** — probablemente porque
+sin cookies cada petición parece un visitante nuevo. En **navegador normal una
+sola verificación cubre la sesión**.
+
+Lo que falta es una precisión: **cuántas aperturas de detalle aguanta una
+verificación en navegador normal.** Lo prueba Giovanny. Mientras no esté
+medido, se declara como **supuesto a verificar en la construcción**, nunca como
+medido.
+
+### El criterio de corte — decisión tomada, no se revisa
+
+> **Si el portal pide verificación en CADA proceso también en navegador normal,
+> el raspador se descarta.**
+
+Un sitio que verifica en cada página **está declarando que no quiere recorridos
+automáticos**, y rodearlo sería frágil además de incorrecto. En ese escenario
+el camino es el que ya existe: **conjunto abierto para detectar + apertura
+manual de los que pasan el léxico.**
+
+Esto queda escrito para que no se vuelva a discutir cuando aparezca la
+tentación de rodearlo.
 
 **Y lo que ningún raspador arregla: si los 58 vivos de hoy no están en la
 bandeja, el problema no es la fuente.** Esa es la medición que sigue, y es la
