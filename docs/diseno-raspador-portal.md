@@ -19,6 +19,73 @@ completo, la hora, la categoría UNSPSC del 26,2 % que llega sin código, y los
 | el detalle y su cronograma **se ven sin iniciar sesión** | **verificado** — observación directa de Giovanny Montes, 14-nov-2026, en ventana de incógnito |
 | en **navegador normal una sola verificación cubre la sesión**; en incógnito pide varias | **verificado** — misma observación. Sin cookies, cada petición parece un visitante nuevo |
 | **cuántas aperturas de detalle aguanta una verificación** | **SUPUESTO A VERIFICAR EN LA CONSTRUCCIÓN.** No medido. El diseño de abajo no asume un número: asume que el número existe y que puede ser menor que el presupuesto |
+| **¿algún campo que necesitamos se ve SOLO con sesión?** | **PENDIENTE DE VERIFICACIÓN HUMANA.** No se mide raspando: lo confirma Giovanny comparando **la misma pantalla con sesión y sin sesión**. Si el cronograma logueado se viera distinto o más completo, **la decisión de leer sin sesión cambia** y hay que avisar antes de construir nada |
+
+### DECISIÓN · el raspador lee SIN SESIÓN, aunque la cuenta de NEG sea legítima
+
+La pregunta es buena y va a volver en seis meses, así que queda escrita con su
+argumento. **La cuenta existe, es de NEG y Karen la usa todos los días. Igual el
+raspador no la toca.**
+
+| razón | qué evita |
+|---|---|
+| **privilegio mínimo** | con sesión **la cuenta puede ACTUAR**: manifestar interés, suscribirse, presentar oferta. El peor caso de un defecto pasa de *«trajo un dato mal»* a **«actuó como NEG en un proceso de contratación»**. Es el mismo criterio de la llave de solo lectura del censo |
+| **no hace falta** | cronograma, hora y UNSPSC están **verificados como visibles sin iniciar sesión** (observación directa, 14-nov) |
+| **custodia del secreto** | la credencial tendría que **persistirse en algún lado**, y es un secreto con poder de comprometer a la empresa — no un token de lectura |
+
+Y hay una cuarta, que sale de los términos y es concreta: **las sanciones de
+cuenta del capítulo VII son por fraude de identidad y de ofertas**
+(`docs/terminos-secop-acceso-automatizado.md`). Ese es exactamente el territorio
+al que entraría un defecto que actuara con la sesión abierta. Sin sesión, ese
+capítulo no tiene por dónde alcanzarnos.
+
+#### Lo que esta decisión NO compra — y nadie debería argumentarlo
+
+**Leer sin sesión no nos convierte en un tercero anónimo ni nos saca de los
+términos.** Nuestro propio documento ya lo estableció, citando el PDF de 2021:
+
+> «…vinculan a los Usuarios a cumplirlos y que son aceptados por los mismos
+> **por el simple hecho de crear un usuario y/o cuenta en el SECOP II**.»
+
+Y concluye: *«no somos un tercero anónimo que pasa por un sitio público: somos
+Usuarios vinculados por aceptación expresa».* **El vínculo viene de TENER
+cuenta, no de usarla en la petición.** Así que la decisión de no usar la sesión
+es sobre **capacidad y custodia**, no sobre jurisdicción. Si alguien la defiende
+diciendo «sin sesión los términos no nos aplican», está contradiciendo lo que ya
+medimos.
+
+#### Lo verificado en los términos, y lo que NO encontré
+
+Se revisó si los términos de **cuenta** son distintos de los de navegación:
+
+- **Sí son documentos distintos.** Hay **cuatro**; el que se acepta al crear
+  cuenta es los **T&C dentro de la plataforma, versión 7 del 23-jul-2020** — más
+  viejo que el PDF institucional de 2021 y todavía pidiendo Java y Flash.
+- **NO hay cláusula de cuenta sobre automatización.** Ese documento tiene **cero
+  menciones** del tema; el único párrafo que habla de accesos no humanos está
+  **solo en el PDF de 2021**, que nos vincula igual.
+- **Conclusión honesta: no hay una razón más por ese lado**, y no la invento.
+
+### ⚠ LA CONDICIÓN QUE MANDA SOBRE TODAS LAS TÉCNICAS
+
+Está medida y pendiente desde antes de este diseño, y hay que decirla acá porque
+este documento no la puede saltar:
+
+> **Capítulo XI, Derechos de Autor:** *«Queda estrictamente prohibido la
+> utilización de elementos objeto de propiedad industrial e intelectual con
+> cualquier tipo de finalidad, en especial comercial, así como su distribución,
+> comunicación pública, modificación, alteración, transformación o
+> descompilación, salvo autorización expresa por escrito…»*
+
+Y el veredicto ya escrito sobre esa cláusula: *«El radar es una herramienta
+comercial… No hay forma de leer esto a nuestro favor»*, con una tensión real
+frente a la Ley 1712 de 2014 y la política de datos abiertos que **es pregunta
+de abogado, no técnica**, y sigue **sin responder**.
+
+**Esto aplique o no la sesión.** El bloque R no se aprueba con las condiciones
+técnicas de arriba: se aprueba cuando además esa pregunta tenga respuesta. Lo
+anoto como lo que es —un bloqueo que no es mío— y no lo uso como permiso ni como
+excusa.
 
 ### El criterio de corte, vigente y no revisable
 
@@ -287,6 +354,65 @@ exactamente el fallo silencioso que este documento existe para prevenir.
   reescribe.
 - **No se despliega con la sentada.** La sentada es censo, despliegue y los
   cuatro actos.
+
+---
+
+## ANEXO · «Suscribir» — CANDIDATO A BLOQUE PROPIO, sin diseñar
+
+En las capturas del detalle hay un botón **«Suscribirse»**. Si SECOP II notifica
+cambios a los suscritos, eso es **un canal que no tenemos** y que ataca
+justamente lo que el raspador NO resuelve: la ventana fatal **después** de
+presentar.
+
+**Esto es lo que se sabe hoy, de documentación oficial de Colombia Compra** — no
+de la pantalla ni de pruebas nuestras:
+
+| | |
+|---|---|
+| **no compromete** | *«La suscripción al Proceso de Contratación **no lo obliga a manifestar interés**, pero debe suscribirse para generar cualquier acción como Proveedor en el proceso.»* Es un acto de bajo compromiso y a la vez requisito para actuar |
+| **cómo se hace** | clic en «Suscribirse» junto a «Detalle» → «Suscribirme». Aplica también a procesos invitados o de las **áreas de interés** del proveedor |
+| **adendas: dos protecciones** | aparecen en la sección «Modificaciones» y **el proveedor recibe un correo**; y **SECOP II no permite presentar la oferta hasta hacer clic en «Aplicar modificación»** — una informativa y una dura |
+| **ventana acotada por regla** | el sistema **no permite plazo de adendas a menos de un día hábil antes del cierre**, ni publicar adendas **entre 7:00 p.m. y 7:00 a.m.** |
+| **a dónde llegan** | todas las alertas de la cuenta Proveedor van al «Correo electrónico para notificaciones SECOP», configurable en **«Suscripción a notificaciones»**, donde además se elige **qué usuarios** de la cuenta las reciben y **la frecuencia** |
+
+### El hallazgo lateral, que puede valer tanto como el principal
+
+En esa misma configuración existen **notificaciones de «oportunidades de
+negocio» por ÁREAS DE INTERÉS, con frecuencia configurable**. Eso es un **canal
+de DETECCIÓN por correo, oficial, sin programa de por medio** — algo que este
+frente nunca consideró, porque todo el planteamiento asumió que detectar exigía
+consultar el conjunto abierto o raspar.
+
+### Lo que NO se sabe, y es exactamente lo que habría que preguntar
+
+**Ninguna fuente oficial consultada dice qué eventos notifican a los
+suscritos.** Las adendas sí generan correo; de **cambios de cronograma** y
+**respuestas a observaciones** no hay confirmación. Esa pregunta va a la
+**consulta a la mesa de servicio de Colombia Compra** que ya está redactada y
+pendiente de envío (`docs/consulta-colombia-compra-acceso.md`).
+
+### Por qué sería un bloque aparte, y bueno
+
+- **Cero programa**: un clic de Karen sobre los diez procesos que valen la pena,
+  con la cuenta de NEG, dentro de su rutina. No es un raspador ni depende de él.
+- **No comparte el bloqueo del capítulo XI**: recibir un correo que el propio
+  sistema envía a un proveedor suscrito no es «transformar información con
+  finalidad comercial». Es el flujo normal de la plataforma.
+- **No comparte el criterio de corte**: no hay verificación que esquivar.
+- Y lo que el panel aportaría es **la constancia**, no el canal: quién se
+  suscribió, a qué y cuándo. El correo llega a un buzón, no al panel.
+
+**No lo diseño.** Antes de eso hacen falta dos cosas que no son mías: la
+respuesta de Colombia Compra sobre qué eventos notifican, y saber **a qué buzón
+llegan hoy esas alertas y quién lo lee**.
+
+### Fuentes de este anexo, verificadas el 14-nov-2026
+
+- [Guía de manifestación de interés, CCE](https://www.colombiacompra.gov.co/wp-content/uploads/2024/10/cce-sec-gi-02provpcmanifestarinteres07-09-2020.pdf)
+- [Suscribirse a un Proceso de Contratación](https://operaciones.colombiacompra.gov.co/secop-ii/3247/23699/Suscribirse%20a%20un%20Proceso%20de%20Contrataci%C3%B3n)
+- [Configuración de cuenta para Proveedores · Suscripción a notificaciones](https://operaciones.colombiacompra.gov.co/secop-ii/3247/23694/Suscripci%C3%B3n%20a%20notificaciones)
+- [Presentar ofertas — SECOP II](https://www.colombiacompra.gov.co/base-conocimiento/presentar-ofertas-secop-ii)
+- [Modificaciones y adendas (formación virtual CCE)](https://formacionvirtual.colombiacompra.gov.co/pluginfile.php/9287/mod_folder/content/0/PDF/M%C3%B3dulo%204/Unidad%203/04_Modificaciones_Adendas.pdf)
 
 ---
 
