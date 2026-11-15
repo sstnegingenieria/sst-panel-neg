@@ -93,7 +93,7 @@ Si falta alguno, ese merge no entró y su paso no se puede correr.
 
 ---
 
-# PASO 1 · EL CENSO — 🔑 LLAVE DE LECTURA · **puede detener la sentada**
+# PASO 1 · LA PRUEBA PUNTUAL + EL CENSO — 🔑 LLAVE DE LECTURA · **puede detener la sentada**
 
 Este paso **no cambia nada**: lee y cuenta. Está primero porque lo que cuente
 decide si el resto del día tiene sentido.
@@ -104,9 +104,36 @@ radar — 31 menores cuantías, 23 mínimas, 4 de régimen especial —, publica
 hace una mediana de 4 días. **Lo que no se sabe es cuántos de esos llegaron a
 la bandeja**, porque eso vive en producción.
 
+Un solo comando, y **dos lecturas**: primero una pregunta puntual que decide en
+diez segundos, después el conteo completo.
+
 ```bash
 node scripts/sigp/censo-ventana-radar.mjs --llave <ruta de la llave de LECTURA>
 ```
+
+## 1.a · La pregunta puntual, primero
+
+```bash
+grep -i "DSAJBO-SAMC-008" _datos/censo-ventana-radar.json
+```
+
+`DSAJBO-SAMC-008-2026` es de la Rama Judicial — impermeabilización de la sede
+de la Calle 72, obra, menor cuantía, **$564.337.823**, publicada el 11-nov.
+**Está en el conjunto abierto y el criterio real del radar la admite como
+trabajable** (verificado: aparece entre los 58, cierre 3-dic). Así que la
+pregunta es sola una: **¿está en la colección?**
+
+| lo que devuelva el grep | qué significa | qué se hace |
+|---|---|---|
+| aparece, y su `estado` es `detectada` | la bandeja está sana; lo que se vio era otra cosa | seguir al 1.b |
+| aparece, pero con otro estado o sin bloque `radar` | defecto de **criterio o de reparto** — se sabe exactamente dónde mirar | **PARAR** y avisar con esa línea del JSON |
+| **no aparece** | defecto **entre la fuente y la colección**, y es nuestro: la fila existe en el origen y pasa el léxico | **PARAR.** Nada de desplegar ni de actos |
+
+Un proceso de $564 millones que la fuente publicó, que nuestro propio criterio
+admite y que no llegó a la cola, es más importante que cualquier cosa que
+siguiera en este guion.
+
+## 1.b · El conteo completo
 
 Escribe `_datos/censo-ventana-radar.json` con los campos crudos de cada
 documento de `licitaciones`. **No juzga nada**: el veredicto lo calcula después
