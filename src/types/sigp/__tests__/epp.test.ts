@@ -24,8 +24,15 @@ const formValido = (extra: Partial<ActaFormData> = {}): ActaFormData => ({
 const actaBorrador = (): ActaEpp => construirAltaActa(formValido(), 'v1', ACTOR, AHORA)!
 
 describe('validarActa', () => {
+  // ⚠ LECCIÓN (21-nov-2026): estas dos pruebas llamaban validarActa SIN la
+  // referencia explícita — el default es HOY, y la fecha fija del fixture
+  // (2026-10-19) salió sola de la ventana de 30 días el 19-nov: el test
+  // caducó y pareció un defecto del código. Un test con fecha fija dentro
+  // de una ventana móvil es un control que se apaga solo. Regla: toda
+  // llamada a un validador con ventana temporal lleva la referencia
+  // EXPLÍCITA (o el fixture usa fechas relativas al reloj).
   it('un formulario completo es válido', () => {
-    expect(validarActa(formValido())).toEqual({})
+    expect(validarActa(formValido(), AHORA.toDate())).toEqual({})
   })
   it('sin colaborador, sin elementos y sin fecha reporta cada falta', () => {
     const e = validarActa({ colaborador: null, items: [], fecha: '', firmantes_empresa: [] })
@@ -114,7 +121,7 @@ describe('patchEditarActa', () => {
   })
   it('formDeActa y patchEditarActa son inversos', () => {
     const a = actaBorrador()
-    expect(validarActa(formDeActa(a))).toEqual({})
+    expect(validarActa(formDeActa(a), AHORA.toDate())).toEqual({})
   })
 })
 
