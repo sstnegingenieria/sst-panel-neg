@@ -103,29 +103,38 @@ export const ACCION_MEJORA: ControlDocumentalIso = {
   nombre: 'MATRIZ DE ACCIONES CORRECTIVAS Y PREVENTIVAS',
 }
 
-// ── Corte de avance de obra (07-nov-2026) ──
-// ⚠ CÓDIGO PENDIENTE DE RATIFICACIÓN por Ingrid (GI) + registro en el
-// Listado Maestro — el PDF sale ROTULADO como pendiente mientras tanto
-// (decisión Giovanny 07-nov: arrancar sin esperar el código; lo que NO
-// puede salir es un código que no corresponde — el modelo hecho a mano
-// traía el CM-FT-CT-19, que es el de COTIZACIÓN). Al ratificarse, se
-// actualiza esta constante y el PDF queda con el código real.
+// ── Corte de avance de obra (07-nov-2026 · código adoptado 21-nov-2026) ──
+// El formato del Listado Maestro ES este documento: DO-FT-MMC-24 (mayores y
+// menores cantidades, armado por Giovanny). Adoptamos el CÓDIGO y subimos a
+// v2 — NO su estructura (el propio autor reporta que al cliente le costaba
+// leerlo; el PDF del panel se queda como está en lo esencial). De la v1 se
+// tomaron TRES cosas: lo ejecutado antes en tres columnas fijas (anterior ·
+// este corte · acumulado — no una columna por acta), la DIFERENCIA contra lo
+// contratado con signo como columna, y del encabezado solo lo derivable y
+// cierto (valores inicial/adicionales/total, plazo, interventor).
+// EXCLUIDOS A PROPÓSITO (decisión Giovanny 21-nov): saldo por legalizar,
+// fecha de suspensión, adicionales en plazo numerados y anticipo en % —
+// campos de obra pública clásica que aquí irían vacíos, y un campo vacío en
+// un documento al cliente invita a llenarlo con cualquier cosa. El criterio:
+// el documento responde qué se contrató, cuánto se lleva hecho y cuánto vale
+// este corte — lo que no sirva a esas tres preguntas, sobra.
+// (El nombre sigue siendo el nuestro; si el Listado exige conservar el del
+// formato original, el ajuste es esta línea.)
 export const CORTE_OBRA: ControlDocumentalIso = {
   area: 'GESTIÓN DE PROYECTOS',
-  codigo: 'PENDIENTE DE RATIFICACIÓN SGI',
-  version: '01',
+  codigo: 'DO-FT-MMC-24',
+  version: '02',
   modificado: 'NOV-2026',
   nombre: 'CORTE DE AVANCE DE OBRA',
 }
 
-// CRONOGRAMA DE OBRA (08-nov-2026, C3) — mismo patrón que el corte: el
-// código lo ASIGNA Ingrid (GI) en el Listado Maestro (área DO, proyectos);
-// mientras tanto el PDF sale ROTULADO como pendiente. Giovanny ya pidió los
-// dos códigos juntos (corte + cronograma) el 08-nov.
+// CRONOGRAMA DE OBRA (08-nov-2026, C3 · código adoptado 21-nov-2026): el
+// formato del Listado es el mismo documento — se adopta DO-FT-CR-24 y sube
+// a v2 (el del panel lo mejora; la estructura es la nuestra).
 export const CRONOGRAMA_OBRA: ControlDocumentalIso = {
   area: 'GESTIÓN DE PROYECTOS',
-  codigo: 'PENDIENTE DE RATIFICACIÓN SGI',
-  version: '01',
+  codigo: 'DO-FT-CR-24',
+  version: '02',
   modificado: 'NOV-2026',
   nombre: 'CRONOGRAMA DE OBRA',
 }

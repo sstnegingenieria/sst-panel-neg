@@ -167,6 +167,86 @@ describe('construirCorte — generado del avance, congelado al emitir', () => {
   })
 })
 
+describe('v2 DO-FT-MMC-24 — tres columnas fijas de ejecutado + encabezado de contrato', () => {
+  const conAvance = (i1: number, i2: number, over: Record<string, unknown> = {}) => ({
+    ...proyecto({
+      avance_items: [
+        { clave: 'i1', cantidad: i1, registros: [] },
+        { clave: 'i2', cantidad: i2, registros: [] },
+      ],
+    } as never),
+    ...over,
+  }) as Parameters<typeof construirCorte>[0]['proyecto']
+
+  it('cantidad_anterior POR CLAVE sale del último FACTURABLE — un informativo intermedio no la mueve; sin ítems congelados (legacy), anterior = 0 en corte >1 queda ausente', () => {
+    const previos = [
+      {
+        numero_corte: 1, cd_acum: 4_000_000, cotizacion_version_medida: 3,
+        items: [{ clave: 'i1', cantidad_acum: 40, valor_acum: 4_000_000 }],
+      },
+      {
+        numero_corte: 2, cd_acum: 6_000_000, cotizacion_version_medida: 3, tipo: 'informativo' as const,
+        items: [{ clave: 'i1', cantidad_acum: 60, valor_acum: 6_000_000 }],
+      },
+    ]
+    const r = construirCorte({ proyecto: conAvance(80, 20), cortesPrevios: previos, esquema: 'iva_pleno' })
+    if (!r.ok) throw new Error(r.error)
+    const i1 = r.corte.items.find(i => i.clave === 'i1')!
+    expect(i1.cantidad_anterior).toBe(40)        // del FACTURABLE, no del informativo (60)
+    expect(i1.valor_anterior).toBe(4_000_000)
+    const i2 = r.corte.items.find(i => i.clave === 'i2')!
+    expect(i2.cantidad_anterior).toBe(0)         // facturable previo sin esa clave → 0
+    // Corte 1: sin previos, anterior = 0 explícito
+    const r1 = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: [], esquema: 'iva_pleno' })
+    if (!r1.ok) throw new Error(r1.error)
+    expect(r1.corte.items.find(i => i.clave === 'i1')!.cantidad_anterior).toBe(0)
+    // Legacy: previo facturable SIN items congelados → anterior ausente (el PDF pinta «—», no inventa)
+    const rl = construirCorte({ proyecto: conAvance(80, 20), cortesPrevios: [{ numero_corte: 1, cd_acum: 4_000_000, cotizacion_version_medida: 3 }], esquema: 'iva_pleno' })
+    if (!rl.ok) throw new Error(rl.error)
+    expect(rl.corte.items.find(i => i.clave === 'i1')!.cantidad_anterior).toBeUndefined()
+  })
+
+  it('contrato_resumen: inicial = vigente − Σ deltas de cambios de alcance (signo honesto); total = snapshot.valor_venta', () => {
+    const p = conAvance(40, 0, {
+      cambios_alcance: [
+        { version: 4, delta_venta: 2_000_000 },
+        { version: 5, delta_venta: -500_000 },
+      ],
+    })
+    const r = construirCorte({ proyecto: p, cortesPrevios: [], esquema: 'iva_pleno' })
+    if (!r.ok) throw new Error(r.error)
+    expect(r.corte.contrato_resumen).toMatchObject({
+      valor_inicial: 13_500_000,      // 15M vigente − (2M − 0.5M)
+      valor_adicionales: 1_500_000,
+      valor_total: 15_000_000,
+    })
+    // Sin cambios: inicial == total, adicionales 0
+    const r0 = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: [], esquema: 'iva_pleno' })
+    if (!r0.ok) throw new Error(r0.error)
+    expect(r0.corte.contrato_resumen).toMatchObject({ valor_inicial: 15_000_000, valor_adicionales: 0, valor_total: 15_000_000 })
+  })
+
+  it('plazo pasa del cronograma VIGENTE tal cual; sin cronograma, los campos de plazo quedan ausentes (nada que invite a llenarse)', () => {
+    const crono = { consecutivo: 'CRN-2026-002', plazo_dias: 90, fecha_inicio: '2026-10-01', fecha_fin: '2026-12-29' }
+    const r = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: [], esquema: 'iva_pleno', cronogramaVigente: crono })
+    if (!r.ok) throw new Error(r.error)
+    expect(r.corte.contrato_resumen).toMatchObject({ plazo_dias: 90, fecha_inicio: '2026-10-01', fecha_fin: '2026-12-29', cronograma_consecutivo: 'CRN-2026-002' })
+    const sin = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: [], esquema: 'iva_pleno' })
+    if (!sin.ok) throw new Error(sin.error)
+    expect(sin.corte.contrato_resumen!.plazo_dias).toBeUndefined()
+    expect(sin.corte.contrato_resumen!.cronograma_consecutivo).toBeUndefined()
+  })
+
+  it('interventor se guarda con trim; vacío o solo espacios queda ausente', () => {
+    const r = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: [], esquema: 'iva_pleno', interventor: '  Ing. Marta Ríos  ' })
+    if (!r.ok) throw new Error(r.error)
+    expect(r.corte.contrato_resumen!.interventor).toBe('Ing. Marta Ríos')
+    const v = construirCorte({ proyecto: conAvance(40, 0), cortesPrevios: [], esquema: 'iva_pleno', interventor: '   ' })
+    if (!v.ok) throw new Error(v.error)
+    expect(v.corte.contrato_resumen!.interventor).toBeUndefined()
+  })
+})
+
 describe('aritmética de facturas POR CORTE — facturado vs. falta, a la vista', () => {
   const ts2 = ts
   const facturas = [

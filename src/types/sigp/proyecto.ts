@@ -1592,6 +1592,11 @@ export interface Proyecto {
    *  autor y fecha por registro — se captura cuando ocurre, no al armar el
    *  corte. Lo escriben los GESTORES; el corte lo emite gerencia. */
   avance_items?: import('./corteObra').AvanceItem[]
+  /** CORTE v2 (21-nov, DO-FT-MMC-24): interventor/supervisor del cliente —
+   *  capturado al emitir el PRIMER corte y recordado para los siguientes
+   *  (editable en cada emisión). Es el único dato del encabezado del formato
+   *  que no se deriva de ningún documento del sistema. */
+  interventor?: string
   /** CRONOGRAMA DE OBRA (08-nov, C2): el BORRADOR del plan mientras se
    *  arma — lo editan los gestores en la ficha. Al emitir (C3) el documento
    *  congelado va a la subcolección cronogramas con consecutivo CRN. */
