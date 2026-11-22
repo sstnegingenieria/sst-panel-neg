@@ -113,6 +113,35 @@ export interface ItemCorte {
   pct: number
   valor_acum: number
   estado: EstadoItemAvance
+  /** v2 del formato (DO-FT-MMC-24, 21-nov): lo EJECUTADO EN CORTES
+   *  ANTERIORES — el congelado del último corte FACTURABLE previo, por
+   *  clave. Tres columnas fijas (anterior · este corte · acumulado) en vez
+   *  de una columna por acta: misma información, ancho constante. Este
+   *  corte = acum − anterior (derivado, no se almacena). Opcionales por los
+   *  cortes emitidos antes de la v2 (el PDF cae a corte 1 ⇒ anterior 0). */
+  cantidad_anterior?: number
+  valor_anterior?: number
+}
+
+/** v2 del formato: encabezado de contrato — SOLO lo derivable y cierto.
+ *  Congelado en el corte al emitir (el documento es el hecho).
+ *  - valores: del snapshot vigente y los cambios de alcance del proyecto
+ *    (inicial = vigente − Σ deltas; el CF de cambios REEMPLAZA el snapshot,
+ *    así que snapshot.valor_venta ES el vigente).
+ *  - plazo: del CRONOGRAMA vigente (último CRN emitido); sin cronograma,
+ *    el PDF omite la línea — jamás un campo vacío que invite a llenarse.
+ *  - interventor: capturado al emitir (se recuerda en el proyecto). */
+export interface ContratoResumenCorte {
+  valor_inicial: number
+  /** Σ delta_venta de los cambios de alcance aprobados — signo honesto. */
+  valor_adicionales: number
+  /** El vigente (snapshot.valor_venta al emitir). */
+  valor_total: number
+  plazo_dias?: number
+  fecha_inicio?: string        // 'YYYY-MM-DD' (del cronograma vigente)
+  fecha_fin?: string
+  cronograma_consecutivo?: string
+  interventor?: string
 }
 
 export interface ResumenEconomicoCorte {
@@ -198,6 +227,8 @@ export interface CorteObra {
   emisor?: { nombre: string; area: string; correo?: string; telefono?: string }
   /** Contra qué alcance mide (la versión aprobada vigente al emitir). */
   cotizacion_version_medida?: number
+  /** v2 (DO-FT-MMC-24): encabezado de contrato derivado+capturado al emitir. */
+  contrato_resumen?: ContratoResumenCorte
   /** Si difiere de la del corte anterior: la nota VISIBLE del cambio. */
   nota_version_cambio?: string
   /** Avances de ítems que YA NO están en el alcance vigente (cambio de
@@ -244,8 +275,13 @@ export type ResultadoCorte =
  *  mueve; corregir el avance después de emitir jamás cambia el delta de lo
  *  ya entregado. El número de corte sí es correlativo sobre TODOS. */
 export function construirCorte(args: {
-  proyecto: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot' | 'avance_items' | 'cotizacion_version' | 'cotizacion_consecutivo'>
-  cortesPrevios: (Pick<CorteObra, 'numero_corte' | 'cd_acum' | 'cotizacion_version_medida' | 'tipo'> & { consecutivo?: string })[]
+  proyecto: Pick<Proyecto, 'id' | 'consecutivo' | 'snapshot' | 'avance_items' | 'cotizacion_version' | 'cotizacion_consecutivo' | 'cambios_alcance'>
+  cortesPrevios: (Pick<CorteObra, 'numero_corte' | 'cd_acum' | 'cotizacion_version_medida' | 'tipo'> & { consecutivo?: string; items?: Pick<ItemCorte, 'clave' | 'cantidad_acum' | 'valor_acum'>[] })[]
+  /** v2: el cronograma VIGENTE del proyecto (último CRN emitido) — de aquí
+   *  sale el PLAZO del encabezado; sin cronograma, la línea se omite. */
+  cronogramaVigente?: { consecutivo: string; plazo_dias: number; fecha_inicio: string; fecha_fin: string }
+  /** v2: capturado al emitir (el panel lo recuerda en el proyecto). */
+  interventor?: string
   esquema: EsquemaTributario
   aiu?: ConfigAIU
   /** Default 'facturable'. Informativo: mismo snapshot/resumen, delta
@@ -268,11 +304,19 @@ export function construirCorte(args: {
   // La base de cobro: el último FACTURABLE (ausencia de tipo = facturable,
   // legacy). Los informativos intermedios no mueven esta base.
   const previoFacturable = ordenados.find(c => esCorteFacturable(c))
+  // v2 (DO-FT-MMC-24): lo ejecutado ANTES por clave — el congelado del
+  // último facturable (la misma base del delta global, ítem por ítem).
+  // Tres casos honestos: sin previos → 0 cierto; previo CON items → su
+  // congelado (clave ausente = 0, nada se congeló para ella); previo legacy
+  // SIN items (emitido antes de v2) → AUSENTE — el PDF pinta «—», no inventa.
+  const anteriorConocido = !previoFacturable || previoFacturable.items != null
+  const anteriorPorClave = new Map((previoFacturable?.items ?? []).map(i => [i.clave, i]))
   const items: ItemCorte[] = items_alcance.map(it => {
     const av = avances.find(a => a.clave === it.clave)
     const cantidadAcum = av?.cantidad ?? 0
     const pct = pctItem(it, av)
     const valorAcum = valorEjecutadoItem(it, cantidadAcum)
+    const ant = anteriorPorClave.get(it.clave)
     return {
       clave: it.clave, ...(it.codigo ? { codigo: it.codigo } : {}),
       descripcion: it.descripcion, unidad: it.unidad, grupo: it.grupo,
@@ -280,9 +324,30 @@ export function construirCorte(args: {
       valor_unitario: it.cantidad > 0 ? Math.round(it.valor_total / it.cantidad) : 0,
       valor_contratado: it.valor_total,
       cantidad_acum: cantidadAcum, pct, valor_acum: valorAcum,
+      ...(anteriorConocido ? {
+        cantidad_anterior: ant?.cantidad_acum ?? 0,
+        valor_anterior: ant?.valor_acum ?? 0,
+      } : {}),
       estado: estadoItemAvance(pct),
     }
   })
+  // v2: encabezado de contrato — solo lo derivable y cierto. El CF de
+  // cambios de alcance REEMPLAZA el snapshot ⇒ snapshot.valor_venta es el
+  // VIGENTE; inicial = vigente − Σ deltas (signo honesto).
+  const adicionales = (args.proyecto.cambios_alcance ?? []).reduce((s, c) => s + (c.delta_venta ?? 0), 0)
+  const valorTotal = args.proyecto.snapshot.valor_venta ?? 0
+  const contrato_resumen: ContratoResumenCorte = {
+    valor_inicial: valorTotal - adicionales,
+    valor_adicionales: adicionales,
+    valor_total: valorTotal,
+    ...(args.cronogramaVigente ? {
+      plazo_dias: args.cronogramaVigente.plazo_dias,
+      fecha_inicio: args.cronogramaVigente.fecha_inicio,
+      fecha_fin: args.cronogramaVigente.fecha_fin,
+      cronograma_consecutivo: args.cronogramaVigente.consecutivo,
+    } : {}),
+    ...(args.interventor?.trim() ? { interventor: args.interventor.trim() } : {}),
+  }
   const cd_contratado = items.reduce((s, i) => s + i.valor_contratado, 0)
   const cd_acum = items.reduce((s, i) => s + i.valor_acum, 0)
   const cd_acum_anterior = previoFacturable?.cd_acum ?? 0
@@ -312,6 +377,7 @@ export function construirCorte(args: {
     ok: true,
     corte: {
       numero_corte: (previo?.numero_corte ?? 0) + 1,
+      contrato_resumen,
       tipo,
       proyecto_id: proyecto.id,
       proyecto_consecutivo: proyecto.consecutivo,

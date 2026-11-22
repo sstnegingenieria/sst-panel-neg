@@ -3,8 +3,14 @@
 // por ítem del alcance → contratado vs ejecutado (%, cantidad, valor),
 // agrupado por capítulo/sede, CD global, y el RESUMEN ECONÓMICO del DELTA
 // facturable con AIU (IVA sobre la U) o IVA pleno.
-// ⚠ El cuadro ISO sale con CÓDIGO PENDIENTE DE RATIFICACIÓN (Ingrid/GI) —
-// jamás el CM-FT-CT-19, que es el de cotización (el del modelo a mano).
+// v2 del formato (21-nov): adopta el código del Listado (DO-FT-MMC-24 —
+// mayores y menores cantidades) SIN copiar su estructura. De la v1 se toman
+// tres cosas: lo ejecutado antes en TRES COLUMNAS FIJAS (anterior · este
+// corte · acumulado, no una columna por acta), la DIFERENCIA contra lo
+// contratado con signo, y el encabezado de contrato con solo lo derivable
+// y cierto (valores, plazo del cronograma vigente, interventor capturado).
+// Excluidos a propósito: saldo por legalizar, suspensión, adicionales en
+// plazo y anticipo % — irían vacíos, y un campo vacío invita a llenarse.
 import { PDFDocument, PDFFont, PDFPage, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { partir, cargarAssetsPdf } from './cotizacionPdf'
@@ -78,7 +84,7 @@ export async function generarPdfCorte(
   }
   const asegurar = (alto: number) => { if (y - alto < MARGEN_INF) nuevaPagina() }
 
-  // ── Cuadro ISO (pág. 1) — código ROTULADO pendiente ──
+  // ── Cuadro ISO (pág. 1) — DO-FT-MMC-24 v02 adoptado del Listado Maestro ──
   nuevaPagina(true)
   {
     const hIso = 58
@@ -166,28 +172,70 @@ export async function generarPdfCorte(
       lineas.forEach(l => { page.drawText('(!) ' + l, { x: MARGEN, y, size: 7.5, font: fS, color: AMBAR }); y -= 10 })
       y -= 6
     }
+
+    // ── v2: encabezado de CONTRATO — solo campos presentes (plazo e
+    //    interventor se OMITEN si faltan; nada de celdas vacías) ──
+    if (corte.contrato_resumen) {
+      const cr = corte.contrato_resumen
+      const fISO = (s: string) => s.split('-').reverse().join('/')
+      const campos2: [string, string][] = [
+        ['VALOR INICIAL DEL CONTRATO', fMoneda(cr.valor_inicial)],
+        ['ADICIONALES', (cr.valor_adicionales < 0 ? '− ' : '') + fMoneda(Math.abs(cr.valor_adicionales))],
+        ['VALOR TOTAL VIGENTE', fMoneda(cr.valor_total)],
+      ]
+      if (cr.plazo_dias != null && cr.fecha_inicio && cr.fecha_fin)
+        campos2.push(['PLAZO', `${cr.plazo_dias} días · ${fISO(cr.fecha_inicio)} al ${fISO(cr.fecha_fin)}${cr.cronograma_consecutivo ? ` (${cr.cronograma_consecutivo})` : ''}`])
+      if (cr.interventor) campos2.push(['INTERVENTOR / SUPERVISOR', cr.interventor])
+      const wCol2 = CONTENIDO / 3
+      const filas = Math.ceil(campos2.length / 3)
+      const partidos = campos2.map(([, v]) => partir(v, fR, 8, wCol2 - 16))
+      const hFila2 = (f: number) => 10 + Math.max(...partidos.filter((_, i) => Math.floor(i / 3) === f).map(l => l.length), 1) * 10
+      const alturas = Array.from({ length: filas }, (_, f) => hFila2(f))
+      const hCard2 = alturas.reduce((a, b) => a + b, 0) + 14
+      page.drawRectangle({ x: MARGEN, y: y - hCard2, width: CONTENIDO, height: hCard2, borderColor: BORDE, borderWidth: 1 })
+      campos2.forEach(([k], i) => {
+        const col = i % 3, filaIdx = Math.floor(i / 3)
+        const x = MARGEN + col * wCol2 + 10
+        const yy = y - 12 - alturas.slice(0, filaIdx).reduce((a, b) => a + b, 0)
+        page.drawText(k, { x, y: yy, size: 5.6, font: fS, color: GRIS_MEDIO })
+        partidos[i].forEach((l, j) => page.drawText(l, { x, y: yy - 10 - j * 10, size: 8, font: fR, color: TINTA }))
+      })
+      y -= hCard2 + 10
+    }
   }
 
-  // ── Tabla por ítem: contratado vs ejecutado ──
-  // Columnas: COD · DESCRIPCIÓN · UND · CANT · VR.UNIT · VR.CONTRAT · % · CANT.EJ · VR.EJECUT
-  const wCod = 32, wUnd = 22, wCant = 30, wVu = 50, wVc = 58, wPct = 26, wCej = 32, wVej = 58
-  const xVejDer = ANCHO - MARGEN - 4
-  const xCejDer = xVejDer - wVej - 6
-  const xPctDer = xCejDer - wCej - 6
-  const xVcDer = xPctDer - wPct - 6
-  const xVuDer = xVcDer - wVc - 6
-  const xCantDer = xVuDer - wVu - 6
+  // ── Tabla por ítem (v2 · DO-FT-MMC-24): contratado · ejecutado ANTES ·
+  //    ESTE CORTE · ACUMULADO · DIFERENCIA ± vs contratado · valor acum.
+  //    Tres columnas fijas en vez de una por acta (con diez actas el formato
+  //    original era ilegible); el % va en la línea de estado, bajo la
+  //    descripción — misma información, ancho constante.
+  const wCod = 30, wUnd = 20, wCant = 28, wVu = 40, wVc = 50, wAnt = 30, wEste = 30, wAcum = 30, wDif = 32, wVej = 50
+  const xVejDer = ANCHO - MARGEN - 3
+  const xDifDer = xVejDer - wVej - 5
+  const xAcumDer = xDifDer - wDif - 5
+  const xEsteDer = xAcumDer - wAcum - 5
+  const xAntDer = xEsteDer - wEste - 5
+  const xVcDer = xAntDer - wAnt - 5
+  const xVuDer = xVcDer - wVc - 5
+  const xCantDer = xVuDer - wVu - 5
   const xUnd = xCantDer - wCant - wUnd - 4
   const xDesc = MARGEN + wCod + 4
-  const wDesc = xUnd - xDesc - 6
+  const wDesc = xUnd - xDesc - 5
 
   const cab = () => {
     page.drawRectangle({ x: MARGEN, y: y - 15, width: CONTENIDO, height: 19, color: VERDE })
-    const t = (txt: string, x: number) => page.drawText(txt, { x, y: y - 7.8, size: 5.8, font: fS, color: BLANCO })
-    const tDer = (txt: string, xd: number) => textoDer(txt, xd, y - 7.8, 5.8, fS, BLANCO)
+    const t = (txt: string, x: number) => page.drawText(txt, { x, y: y - 7.8, size: 5.6, font: fS, color: BLANCO })
+    const tDer = (txt: string, xd: number) => textoDer(txt, xd, y - 7.8, 5.6, fS, BLANCO)
+    // Columnas angostas (30pt) con rótulo a DOS líneas — a una, «EJEC. ANT.»
+    // y «ESTE CORTE» desbordan su ancla y se montan entre sí.
+    const tDer2 = (l1: string, l2: string, xd: number) => {
+      textoDer(l1, xd, y - 4.6, 5.4, fS, BLANCO)
+      textoDer(l2, xd, y - 11.4, 5.4, fS, BLANCO)
+    }
     t('COD', MARGEN + 3); t('DESCRIPCIÓN', xDesc); t('UND', xUnd)
-    tDer('CANT', xCantDer); tDer('VR. UNIT', xVuDer); tDer('VR. CONTRATADO', xVcDer)
-    tDer('% AV', xPctDer); tDer('CANT. EJEC', xCejDer); tDer('VR. EJECUTADO', xVejDer)
+    tDer('CANT', xCantDer); tDer('VR. UNIT', xVuDer); tDer('VR. CONTRAT.', xVcDer)
+    tDer2('EJEC.', 'ANTES', xAntDer); tDer2('ESTE', 'CORTE', xEsteDer); tDer('ACUM.', xAcumDer)
+    tDer('DIF. ±', xDifDer); tDer('VR. EJECUT.', xVejDer)
     y -= 24
   }
   cab()
@@ -207,10 +255,11 @@ export async function generarPdfCorte(
     y -= 22
     let fila = 0
     for (const it of items) {
-      // Forma SENA: el ESTADO va como texto bajo la descripción, y el % en
-      // una PASTILLA (no suelto).
+      // El ESTADO y el % van JUNTOS como texto bajo la descripción (v2: el %
+      // dejó de ser columna-pastilla para liberar ancho a las tres columnas
+      // de ejecutado — misma información, un renglón que ya existía).
       const lineas = partir(it.descripcion, fR, 6.8, wDesc)
-      const hFila = (Math.max(1, lineas.length) + 1) * 9 + 8   // +1: línea de estado
+      const hFila = (Math.max(1, lineas.length) + 1) * 9 + 8   // +1: línea de estado+%
       asegurar(hFila + 4)
       if (fila % 2 === 1)
         page.drawRectangle({ x: MARGEN, y: y - hFila + 3, width: CONTENIDO, height: hFila, color: ZEBRA })
@@ -218,21 +267,34 @@ export async function generarPdfCorte(
       if (it.codigo) page.drawText(it.codigo.slice(0, 8), { x: MARGEN + 2, y: yTop, size: 6.2, font: fS, color: GRIS_MEDIO })
       lineas.forEach((l, i) => page.drawText(l, { x: xDesc, y: yTop - i * 9, size: 6.8, font: fR, color: TINTA }))
       const colorEstado = it.estado === 'ejecutado' ? VERDE : it.estado === 'en_ejecucion' ? AMBAR : GRIS_MEDIO
-      page.drawText(ESTADO_LBL[it.estado], { x: xDesc, y: yTop - lineas.length * 9, size: 5.8, font: fS, color: colorEstado })
+      page.drawText(`${ESTADO_LBL[it.estado]} · ${fmtNum(it.pct)}%`, { x: xDesc, y: yTop - lineas.length * 9, size: 5.8, font: fS, color: colorEstado })
       page.drawText(it.unidad || '—', { x: xUnd, y: yTop, size: 6.8, font: fR, color: GRIS })
       textoDer(fmtNum(it.cantidad_contratada), xCantDer, yTop, 6.8, fR, GRIS)
       textoDer(fmtNum(it.valor_unitario), xVuDer, yTop, 6.8, fR, GRIS)
       textoDer(fmtNum(it.valor_contratado), xVcDer, yTop, 6.8, fR, GRIS)
-      // Pastilla del %: fondo suave + texto en el color del estado
-      {
-        const txt = fmtNum(it.pct) + '%'
-        const wTxt = fS.widthOfTextAtSize(txt, 6.4)
-        const wPill = wTxt + 8, hPill = 10
-        const xPill = xPctDer - wPill
-        page.drawRectangle({ x: xPill, y: yTop - 2.5, width: wPill, height: hPill, color: it.estado === 'ejecutado' ? rgb(0.90, 0.96, 0.90) : it.estado === 'en_ejecucion' ? rgb(0.99, 0.95, 0.85) : rgb(0.94, 0.94, 0.95) })
-        page.drawText(txt, { x: xPill + 4, y: yTop, size: 6.4, font: fS, color: colorEstado })
+      // Tres columnas fijas de ejecutado (lo tomado del DO-FT-MMC-24): cuánto
+      // llevaba ANTES de este corte, cuánto aporta ESTE corte y el acumulado.
+      // Cortes legacy (emitidos antes de v2) no traen cantidad_anterior: para
+      // el corte 1 el anterior es 0 por definición; para los demás se pinta
+      // «—» en vez de inventar un número.
+      const ant = it.cantidad_anterior ?? (corte.numero_corte === 1 ? 0 : undefined)
+      if (ant === undefined) {
+        textoDer('—', xAntDer, yTop, 6.8, fR, GRIS_MEDIO)
+        textoDer('—', xEsteDer, yTop, 6.8, fR, GRIS_MEDIO)
+      } else {
+        const este = it.cantidad_acum - ant
+        textoDer(fmtNum(ant), xAntDer, yTop, 6.8, fR, GRIS)
+        textoDer(fmtNum(este), xEsteDer, yTop, 6.8, este > 0 ? fS : fR, este > 0 ? TINTA : GRIS_MEDIO)
       }
-      textoDer(fmtNum(it.cantidad_acum), xCejDer, yTop, 6.8, fR, TINTA)
+      textoDer(fmtNum(it.cantidad_acum), xAcumDer, yTop, 6.8, fR, TINTA)
+      // DIFERENCIA con signo contra lo contratado (lo segundo tomado del
+      // formato): +X en ámbar = se ejecutó MÁS de lo contratado (mayor
+      // cantidad, pide cambio de alcance); negativo gris = falta; 0 neutro.
+      {
+        const dif = it.cantidad_acum - it.cantidad_contratada
+        const txt = dif > 0 ? `+${fmtNum(dif)}` : dif < 0 ? fmtNum(dif) : '0'
+        textoDer(txt, xDifDer, yTop, 6.8, dif > 0 ? fB : fR, dif > 0 ? AMBAR : dif < 0 ? GRIS : GRIS_MEDIO)
+      }
       textoDer(fmtNum(it.valor_acum), xVejDer, yTop, 6.8, fS, TINTA)
       y -= hFila
       fila++

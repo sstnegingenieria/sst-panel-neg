@@ -61,6 +61,11 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
   // emisor (correo del perfil; celular si existe — campo OC1).
   const [contratoRefs, setContratoRefs] = useState<string[]>([])
   const [celularEmisor, setCelularEmisor] = useState<string | undefined>(undefined)
+  // v2 (DO-FT-MMC-24, 21-nov): el PLAZO del encabezado sale del cronograma
+  // VIGENTE (último CRN emitido) y el INTERVENTOR se captura al emitir — el
+  // panel lo recuerda en el proyecto para los cortes siguientes.
+  const [cronoVigente, setCronoVigente] = useState<{ consecutivo: string; plazo_dias: number; fecha_inicio: string; fecha_fin: string } | undefined>(undefined)
+  const [interventor, setInterventor] = useState('')
 
   const items = proyecto.snapshot.items_alcance ?? []
   const enEjecucionOMas = idxRiel(proyecto.estado) >= ESTADOS_PROYECTO.indexOf('en_ejecucion')
@@ -134,11 +139,21 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
     } catch { toast('Error al registrar el avance (verifica tu rol)', 'error') } finally { setAplicando(false) }
   }
 
-  const preview = construirCorte({ proyecto, cortesPrevios: cortes, esquema, aiu, tipo: tipoCorte, observaciones, contratoReferencias: contratoRefs })
+  const preview = construirCorte({ proyecto, cortesPrevios: cortes, esquema, aiu, tipo: tipoCorte, observaciones, contratoReferencias: contratoRefs, cronogramaVigente: cronoVigente, interventor })
 
   const abrirEmitir = async () => {
     setTipoCorte('facturable')
+    setInterventor(proyecto.interventor ?? '')
     setEmitirOpen(true)
+    // Cronograma VIGENTE = el último CRN emitido (best-effort: sin cronograma
+    // el PDF omite la línea de plazo — jamás una celda vacía).
+    try {
+      const cr = await getDocs(query(collection(db, 'proyectos', proyecto.id, 'cronogramas'), orderBy('numero_cronograma', 'asc')))
+      const ultimo = cr.docs[cr.docs.length - 1]?.data() as { consecutivo?: string; plazo_dias?: number; fecha_inicio?: string; fecha_fin?: string } | undefined
+      setCronoVigente(ultimo?.consecutivo && ultimo.plazo_dias != null && ultimo.fecha_inicio && ultimo.fecha_fin
+        ? { consecutivo: ultimo.consecutivo, plazo_dias: ultimo.plazo_dias, fecha_inicio: ultimo.fecha_inicio, fecha_fin: ultimo.fecha_fin }
+        : undefined)
+    } catch { setCronoVigente(undefined) }
     // Contratos del cliente + celular del emisor (best-effort — sin ellos el
     // corte sale con '—' y sin teléfono, no se bloquea nada).
     try {
@@ -195,6 +210,9 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
       })
       await updateDoc(doc(db, 'proyectos', proyecto.id), {
         historial: arrayUnion(entradaHistorialCorte(proyecto.estado, consecutivo, corte.numero_corte, corte.resumen.total, user?.uid ?? '', ahora, user?.nombre, corte.tipo)),
+        // v2: el interventor capturado se RECUERDA en el proyecto — el
+        // siguiente corte lo prellenará (editable en cada emisión).
+        ...(interventor.trim() && interventor.trim() !== proyecto.interventor ? { interventor: interventor.trim() } : {}),
         fecha_actualizacion: ahora,
       })
       toast(corte.tipo === 'informativo'
@@ -476,14 +494,31 @@ export default function AvanceObra({ proyecto, reload, nombres }: Props) {
               )}
             </div>
           )}
+          {/* v2 (DO-FT-MMC-24): encabezado de contrato del PDF — el único dato
+              NO derivable es el interventor; el plazo sale del cronograma. */}
+          <div className="rounded-lg border border-gray-200 px-3 py-2 space-y-1.5 text-xs text-gray-600">
+            <p>
+              Encabezado del PDF: valor inicial, adicionales y valor vigente salen del contrato y sus cambios
+              de alcance; plazo del cronograma vigente{' '}
+              {cronoVigente
+                ? <span className="font-mono text-gray-700">({cronoVigente.consecutivo} · {cronoVigente.plazo_dias} días)</span>
+                : <span className="text-gray-400">(sin cronograma emitido — la línea de plazo se omite)</span>}.
+            </p>
+            <label className="block">
+              Interventor / supervisor del cliente (opcional — sale en el encabezado; el panel lo recuerda para el siguiente corte)
+              <input type="text" value={interventor} onChange={e => setInterventor(e.target.value)}
+                placeholder="Nombre del interventor o supervisor"
+                className="mt-1 w-full text-sm px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300" />
+            </label>
+          </div>
           <label className="block text-xs text-gray-500">
             Observaciones (texto libre — salen en el PDF; la guía sugerida es editable)
             <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)} rows={6}
               className="mt-1 w-full text-sm px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300" />
           </label>
           <p className="text-[11px] text-gray-400">
-            El PDF sale con el código ISO ROTULADO «pendiente de ratificación SGI» hasta que Ingrid lo ratifique
-            — jamás con el de cotización.
+            El PDF sale con el código del Listado Maestro <span className="font-mono">DO-FT-MMC-24 · v02</span>
+            {' '}(formato de mayores y menores cantidades, adoptado el 21-nov).
           </p>
         </div>
       </Modal>

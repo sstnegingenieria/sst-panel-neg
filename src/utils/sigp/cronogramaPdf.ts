@@ -15,7 +15,9 @@
 //    FESTIVO); sábado con rayado diagonal.
 //  - Leyenda + nota de jornada BAJO LA REJILLA (festivos NOMBRADOS y hábiles
 //    efectivos calculados) en TODAS las hojas, como el modelo.
-// ⚠ El cuadro ISO sale con CÓDIGO PENDIENTE DE RATIFICACIÓN (Ingrid/GI).
+// Cuadro ISO: DO-FT-CR-24 v02 — código del Listado Maestro adoptado el
+// 21-nov-2026 (el formato del Listado es este mismo documento; el del panel
+// lo mejora y sube a v2 conservando nuestra estructura).
 import { PDFDocument, PDFFont, PDFPage, rgb, degrees } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { partir, cargarAssetsPdf } from './cotizacionPdf'
@@ -194,7 +196,7 @@ export async function generarPdfCronograma(
       reglaMarca(y0 - 6, 3)
       return y0 - 18
     }
-    // Cuadro ISO (patrón de la casa — código ROTULADO pendiente)
+    // Cuadro ISO (patrón de la casa — DO-FT-CR-24 v02 adoptado del Listado)
     const hIso = 52
     const yIso = ALTO - 30 - hIso
     const c1 = 180, c3 = 160
