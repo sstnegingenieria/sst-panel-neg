@@ -18,6 +18,33 @@ export interface ContactoProveedor {
   correo: string
 }
 
+/**
+ * Traza de la carga masiva de proveedores (nov-2026, maestra contable).
+ * Solo existe en docs nacidos de esa carga — el formulario del panel jamás
+ * lo crea.
+ *
+ * SEMÁNTICA (decisión del coordinador, 25-nov-2026): `origen` e `id_fuente`
+ * son PERMANENTES (de dónde salió el registro). Las MARCAS (`pendiente_rut`,
+ * `rut_sin_verificar`, `por_validar`) son PENDIENTES DE RESOLVER: al
+ * resolverse SE ELIMINAN del doc (deleteField), nunca se dejan en false —
+ * un false no distingue "resuelto" de "nunca se revisó". Presencia =
+ * pendiente; ausencia = resuelto o no aplica.
+ */
+export interface CargaMasivaProveedor {
+  origen: string            // p. ej. 'maestra_proveedores_2026-11'
+  id_fuente: string         // fila de la maestra (PROV-NNNN)
+  /** Cargado sin RUT (`rut_url: ''`). Se quita al subir el RUT (Editar). */
+  pendiente_rut?: true
+  /** RUT adjuntado por coincidencia de NOMBRE (PDF escaneado — el NIT no se
+   *  pudo leer del contenido). Se quita al confirmar o reemplazar el RUT. */
+  rut_sin_verificar?: true
+  /** Duplicado sin resolver en la fuente: motivo legible para Marcela. */
+  por_validar?: string
+  /** El otro lado del par duplicado que NO se cargó — con esto se puede
+   *  reconstruir si se decide que el bueno era el otro. */
+  duplicado_descartado?: { id_fuente: string; nit: string }
+}
+
 /** Documento principal de la colección `proveedores` (doc id = identificación normalizada). */
 export interface Proveedor {
   id: string
@@ -25,12 +52,15 @@ export interface Proveedor {
   tipo_identificacion: 'nit' | 'cc' | 'ce'
   tipo_persona: 'natural' | 'juridica'
   razon_social: string
+  /** URL con token del RUT en Storage. `''` = sin RUT (solo docs de la carga
+   *  masiva, siempre acompañado de `carga_masiva.pendiente_rut`). */
   rut_url: string
   contacto: ContactoProveedor
   estado: 'activo' | 'inactivo'
   creado_por: string
   fecha_creacion: Timestamp
   fecha_actualizacion?: Timestamp
+  carga_masiva?: CargaMasivaProveedor
 }
 
 /** Subcolección privada `proveedores/{id}/privado/datos_bancarios`. */

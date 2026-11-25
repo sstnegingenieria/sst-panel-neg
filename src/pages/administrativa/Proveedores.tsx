@@ -14,7 +14,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import type { ChangeEvent } from 'react'
 import {
-  runTransaction, doc, getDoc, getDocs, collection, updateDoc, Timestamp,
+  runTransaction, doc, getDoc, getDocs, collection, updateDoc, Timestamp, deleteField,
 } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../../firebase/config'
@@ -248,6 +248,7 @@ export default function Proveedores() {
   const [editContactoNombre, setEditContactoNombre] = useState('')
   const [editTelefono, setEditTelefono] = useState('')
   const [editCorreo, setEditCorreo] = useState('')
+  const [editRutFile, setEditRutFile] = useState<File | null>(null)
   const [guardandoEdit, setGuardandoEdit] = useState(false)
 
   const abrirEditar = (p: Proveedor) => {
@@ -257,13 +258,14 @@ export default function Proveedores() {
     setEditContactoNombre(p.contacto.nombre)
     setEditTelefono(p.contacto.telefono)
     setEditCorreo(p.contacto.correo)
+    setEditRutFile(null)
   }
 
   const guardarEdicion = async () => {
     if (!editTarget || !editRazonSocial.trim()) return
     setGuardandoEdit(true)
     try {
-      await updateDoc(doc(db, 'proveedores', editTarget.id), {
+      const patch: Record<string, unknown> = {
         tipo_persona: editTipoPersona,
         razon_social: editRazonSocial.trim(),
         contacto: {
@@ -272,7 +274,19 @@ export default function Proveedores() {
           correo: editCorreo.trim(),
         },
         fecha_actualizacion: Timestamp.now(),
-      })
+      }
+      if (editRutFile) {
+        // Cargar/Reemplazar RUT — misma ruta y patrón del alta (huérfano en
+        // Storage si el update falla = inofensivo, criterio LPU).
+        const rutRef = ref(storage, `proveedores/${editTarget.id}/rut/${crypto.randomUUID()}.${extensionDe(editRutFile)}`)
+        await uploadBytes(rutRef, editRutFile)
+        patch.rut_url = await getDownloadURL(rutRef)
+        // Las marcas de la carga masiva son pendientes-de-resolver: el RUT
+        // llegó, así que SE ELIMINAN (nunca quedan en false).
+        if (editTarget.carga_masiva?.pendiente_rut) patch['carga_masiva.pendiente_rut'] = deleteField()
+        if (editTarget.carga_masiva?.rut_sin_verificar) patch['carga_masiva.rut_sin_verificar'] = deleteField()
+      }
+      await updateDoc(doc(db, 'proveedores', editTarget.id), patch)
       toast('Proveedor actualizado')
       setEditTarget(null)
       await load()
@@ -407,7 +421,15 @@ export default function Proveedores() {
             )}
             {!loading && filtrados.map(p => (
               <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50">
-                <td className="py-3 px-4 font-medium text-gray-800">{p.razon_social}</td>
+                <td className="py-3 px-4 font-medium text-gray-800">
+                  {p.razon_social}
+                  {p.carga_masiva?.por_validar && (
+                    <span title={p.carga_masiva.por_validar}
+                      className="ml-2 inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 cursor-help">
+                      ⚠ por validar
+                    </span>
+                  )}
+                </td>
                 <td className="py-3 px-4 text-gray-700">
                   <span className="text-[11px] uppercase text-gray-400">{TIPO_IDENTIFICACION_LABEL[p.tipo_identificacion]}</span>
                   <span className="block font-mono">{p.identificacion}</span>
@@ -423,8 +445,21 @@ export default function Proveedores() {
                 </td>
                 <td className="py-3 px-4">
                   {p.rut_url ? (
-                    <a href={p.rut_url} target="_blank" rel="noreferrer"
-                      className="text-brand-700 underline underline-offset-2 text-xs font-medium">RUT</a>
+                    <span className="inline-flex items-center gap-1.5">
+                      <a href={p.rut_url} target="_blank" rel="noreferrer"
+                        className="text-brand-700 underline underline-offset-2 text-xs font-medium">RUT</a>
+                      {p.carga_masiva?.rut_sin_verificar && (
+                        <span title="RUT emparejado por NOMBRE en la carga masiva (PDF escaneado — el NIT no se pudo verificar contra el contenido). Confirmarlo o reemplazarlo desde Editar."
+                          className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 cursor-help">
+                          sin verificar
+                        </span>
+                      )}
+                    </span>
+                  ) : p.carga_masiva?.pendiente_rut ? (
+                    <span title="Cargado desde la maestra sin RUT — subirlo desde Editar quita esta marca."
+                      className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 cursor-help">
+                      pendiente
+                    </span>
                   ) : <span className="text-gray-300 text-xs">—</span>}
                 </td>
                 {puedeGestionar && (
@@ -567,6 +602,27 @@ export default function Proveedores() {
             <TextField label="Teléfono" value={editTelefono} onChange={setEditTelefono} />
           </div>
           <TextField label="Correo" value={editCorreo} onChange={setEditCorreo} type="email" />
+
+          {/* RUT — cargar el faltante o reemplazar el vigente */}
+          <div className="border-t border-gray-100 pt-3">
+            <label className="block text-sm">
+              <span className="font-medium text-gray-700">
+                {editTarget?.rut_url ? 'Reemplazar RUT (opcional)' : 'Cargar RUT'}
+              </span>
+              <input type="file" accept=".pdf,image/*" onChange={onArchivo(setEditRutFile)}
+                className="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
+            </label>
+            {editTarget?.carga_masiva?.pendiente_rut && (
+              <p className="text-xs text-amber-700 mt-1">
+                Este proveedor quedó pendiente de RUT en la carga masiva — al subirlo, la marca se quita sola.
+              </p>
+            )}
+            {editTarget?.carga_masiva?.rut_sin_verificar && (
+              <p className="text-xs text-amber-700 mt-1">
+                El RUT actual se emparejó por nombre (sin verificar por NIT) — reemplazarlo quita la marca.
+              </p>
+            )}
+          </div>
         </div>
       </Modal>
 
