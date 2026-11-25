@@ -98,6 +98,7 @@ En PDFs generados (cotizaciones, actas, informes) usar `Plantilla_de_documento.d
 5. **No tocar el SST en producción**. La app Flutter (`neg_sst_app/`) no se modifica bajo ninguna circunstancia. Cualquier cambio a colecciones compartidas (`users`, `formularios`, `obras`, `contratistas`, `notificaciones`) debe ser retrocompatible y probarse primero en Firebase Emulator Suite contra el flujo SST completo.
 6. **Cloud Functions y reglas Firestore — aprobación explícita para producción**. Diseñar, escribir y probar en Firebase Emulator Suite es libre. Deploy a producción requiere OK explícito del usuario en cada caso. No hay excepciones "porque es un cambio menor".
    **Las reglas solo se despliegan con `scripts/deploy-reglas.ps1`. Nunca `firebase deploy` directo.** El script aborta si no estás en `main` == `origin/main`, si prod contiene algo que main nunca tuvo (el caso del incidente del 26-oct), y verifica byte a byte tras desplegar; cada deploy pide el número del PR, lista los commits de reglas mergeados-sin-desplegar, y queda en `docs/bitacora-deploys.md` — la línea la commitea y empuja el propio script, y el arranque aborta si encuentra bitácora sin commitear de un deploy anterior. Pruébalo sin riesgo con `-Simulacro`.
+   ⚠ **AVISO A LOS TRES FRENTES (25-nov-2026, en la cola — no arreglado aún): `deploy-reglas.ps1` cubre SOLO `firestore.rules`.** `storage.rules` se despliega A MANO (`firebase deploy --only storage`), o sea que en ese camino NO corre ninguna de las garantías del script: ni la verificación en el mismo acto, ni el PR declarado, ni la bitácora con la persona — un camino sin candado al lado de uno con candado. Hasta que exista el script equivalente (tarea en cola), todo deploy de `storage.rules` debe replicar la disciplina a mano: pre-verificación prod == main (CRLF/LF normalizado, vía API de reglas), post-verificación byte-idéntica, prueba de denegación anónima, y la línea de bitácora escrita en el PR o en el reporte del deploy (referencia: `acto-deploy-storage-rut.mjs` del deploy del PR #287).
 7. **Autenticación obligatoria**. Ninguna colección tiene reglas `allow read/write: if true`. Todo pasa por `request.auth.uid` y rol.
 8. **PDFs con hash**. Cada PDF generado guarda su hash SHA-256 en el documento correspondiente — evidencia de integridad.
 9. **Consulta, no gestión — patrón para módulos externos**. El módulo de proyectos **consume estados** de otros módulos (SGI, administrativa) pero **no los escribe**. Los dominios externos hoy incluyen: habilitación SST del contratista (escrita por SGI) y ciclo financiero de anticipos, pagos y facturación (escrita por gerencia administrativa). Ver reglas 7.2 y 7.6.
@@ -409,6 +410,31 @@ sst-panel-web/src/
 > de nada sirve que la bitácora capture la sesión si todos usan la misma.
 > Los censos y lecturas de producción no necesitan sesión: usan la llave
 > de LECTURA del modelo de tres llaves.
+
+> **🗝 CADA ACTO TIENE SU CUENTA — Y HAY QUE DECIR CUÁL (regla del
+> 25-nov-2026, escrita tras el fallo 176×403 de la carga de proveedores:
+> la cuenta nominal asumió capacidades que no tiene y el acto murió a
+> mitad de camino, con cero daño gracias a la separación):**
+> - **Despliegues** (reglas, funciones, programador) → la **cuenta NOMINAL**
+>   de quien despliega (sus roles: firebaserules.admin,
+>   cloudfunctions.developer, run.admin, cloudscheduler.admin,
+>   serviceUsageConsumer).
+> - **Escritura de DATOS** (Firestore) → la **LLAVE DE ESCRITURA**, entregada
+>   por acto y retirada al terminar. La llave es solo Datastore: NO toca
+>   Storage (un acto que necesite subir archivos se parte, o la llave recibe
+>   un grant acotado con OK explícito).
+> - **Administración de INFRAESTRUCTURA** (IAM, facturación, configuración
+>   de la base, respaldos) → la **cuenta PROPIETARIA**, que hoy sigue siendo
+>   la compartida.
+>
+> Todo acto declara su cuenta ARRIBA Y EN MAYÚSCULAS, y la verifica al
+> arrancar — **por CAPACIDAD (`projects:testIamPermissions`, sin efectos
+> secundarios), no por dominio**: la propietaria es un Gmail y un guard de
+> dominio corporativo abortaría justo a la cuenta correcta. Falta la
+> capacidad → aborta ANTES de tocar nada. Mientras el proyecto cuelgue de un
+> Gmail compartido, la cuenta que lo puede todo es un correo personal; al
+> crearse la organización, la propiedad pasa a la cuenta de empresa de
+> Giovanny y este reparto se simplifica.
 
 **Cada carril/tarea activa trabaja en su PROPIO `git worktree`** — nunca dos
 sesiones editando el mismo working tree. Origen de la regla: el incidente del
