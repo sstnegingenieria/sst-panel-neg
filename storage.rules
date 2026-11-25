@@ -115,11 +115,20 @@ service firebase.storage {
     // path scoping + tipo de archivo + tamaño.
     // C2.1: este match EXCLUYE certificacion_bancaria (en Storage basta que UN
     // match solape para conceder — el bloque dedicado de abajo es quien la
-    // gobierna). El RUT queda auth-only como estaba.
+    // gobierna).
+    // 25-nov-2026 (previa BLOQUEANTE de la carga masiva de proveedores): el
+    // RUT pasa de auth-only a esInterno(). El RUT de una persona natural trae
+    // cédula, dirección y teléfono particular — auth-only lo dejaba legible
+    // para CUALQUIER autenticado del proyecto (técnicos de la app Flutter y
+    // futuros residentes de cliente, que por claims NO son internos). Flujos
+    // verificados antes del cambio: la app Flutter no referencia esta ruta;
+    // en el panel solo el formulario de Proveedores la usa vía SDK (sube y
+    // hace getDownloadURL como gerencia_administrativa/admin — internos); el
+    // resto consume `rut_url` con ?token=, que no pasa por reglas.
     match /proveedores/{proveedorId}/{tipoDoc}/{fileName} {
-      allow read: if request.auth != null
+      allow read: if esInterno()
                   && tipoDoc != 'certificacion_bancaria';
-      allow write: if request.auth != null
+      allow write: if esInterno()
                    && tipoDoc in ['rut']
                    && request.resource.size < 10 * 1024 * 1024
                    && (request.resource.contentType == 'application/pdf'
