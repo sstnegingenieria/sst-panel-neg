@@ -15,5 +15,5 @@
     "noEmit": true,
     "isolatedModules": true
   },
-  "include": ["src", "build.mjs"]
+  "include": ["src", "actos", "build.mjs"]
 }
