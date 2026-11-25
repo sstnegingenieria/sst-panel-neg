@@ -411,6 +411,31 @@ sst-panel-web/src/
 > Los censos y lecturas de producción no necesitan sesión: usan la llave
 > de LECTURA del modelo de tres llaves.
 
+> **🗝 CADA ACTO TIENE SU CUENTA — Y HAY QUE DECIR CUÁL (regla del
+> 25-nov-2026, escrita tras el fallo 176×403 de la carga de proveedores:
+> la cuenta nominal asumió capacidades que no tiene y el acto murió a
+> mitad de camino, con cero daño gracias a la separación):**
+> - **Despliegues** (reglas, funciones, programador) → la **cuenta NOMINAL**
+>   de quien despliega (sus roles: firebaserules.admin,
+>   cloudfunctions.developer, run.admin, cloudscheduler.admin,
+>   serviceUsageConsumer).
+> - **Escritura de DATOS** (Firestore) → la **LLAVE DE ESCRITURA**, entregada
+>   por acto y retirada al terminar. La llave es solo Datastore: NO toca
+>   Storage (un acto que necesite subir archivos se parte, o la llave recibe
+>   un grant acotado con OK explícito).
+> - **Administración de INFRAESTRUCTURA** (IAM, facturación, configuración
+>   de la base, respaldos) → la **cuenta PROPIETARIA**, que hoy sigue siendo
+>   la compartida.
+>
+> Todo acto declara su cuenta ARRIBA Y EN MAYÚSCULAS, y la verifica al
+> arrancar — **por CAPACIDAD (`projects:testIamPermissions`, sin efectos
+> secundarios), no por dominio**: la propietaria es un Gmail y un guard de
+> dominio corporativo abortaría justo a la cuenta correcta. Falta la
+> capacidad → aborta ANTES de tocar nada. Mientras el proyecto cuelgue de un
+> Gmail compartido, la cuenta que lo puede todo es un correo personal; al
+> crearse la organización, la propiedad pasa a la cuenta de empresa de
+> Giovanny y este reparto se simplifica.
+
 **Cada carril/tarea activa trabaja en su PROPIO `git worktree`** — nunca dos
 sesiones editando el mismo working tree. Origen de la regla: el incidente del
 C3 (PR #65), donde una sesión paralela sobrescribió `firestore.rules` sin
