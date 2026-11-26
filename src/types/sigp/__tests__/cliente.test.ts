@@ -76,3 +76,63 @@ describe('clientePorNit — el NIT identifica, el nombre no bloquea', () => {
     expect(nitSoloDigitos('abc')).toBe('')
   })
 })
+
+// ── 26-nov-2026: tipo de identificación (clientes persona natural) ──────────
+import {
+  tipoIdentificacionDe, validarIdentificacionCliente, clientePorIdentificacion,
+} from '../cliente'
+
+describe('tipoIdentificacionDe — migración perezosa', () => {
+  it('ausente = nit (los clientes previos son personas jurídicas; prod no se toca)', () => {
+    expect(tipoIdentificacionDe(cliente({}))).toBe('nit')
+    expect(tipoIdentificacionDe(cliente({ tipo_identificacion: 'cc' }))).toBe('cc')
+    expect(tipoIdentificacionDe(cliente({ tipo_identificacion: 'nit' }))).toBe('nit')
+  })
+})
+
+describe('validarIdentificacionCliente — el DV solo aplica cuando el tipo es NIT', () => {
+  it('nit: formato + DV DIAN (el DV de 900.975.870 es 1 — NIT real de NEG)', () => {
+    expect(validarIdentificacionCliente('nit', '900.975.870-1').ok).toBe(true)
+    const malDv = validarIdentificacionCliente('nit', '900.975.870-7')
+    expect(malDv.ok).toBe(false)
+    if (!malDv.ok) expect(malDv.error).toContain('el DV es 1')
+    expect(validarIdentificacionCliente('nit', '123456789').ok).toBe(false)   // sin formato
+    expect(validarIdentificacionCliente('nit', '').ok).toBe(false)
+  })
+  it('cc: reglas del normalizador de nómina — 6 a 12 dígitos, sin letras, separadores tolerados', () => {
+    expect(validarIdentificacionCliente('cc', '1234567890').ok).toBe(true)
+    expect(validarIdentificacionCliente('cc', '1.234.567.890').ok).toBe(true)  // puntos tolerados
+    expect(validarIdentificacionCliente('cc', '52 123 456').ok).toBe(true)     // espacios tolerados
+    expect(validarIdentificacionCliente('cc', '12345').ok).toBe(false)         // < 6 dígitos
+    expect(validarIdentificacionCliente('cc', '1234567890123').ok).toBe(false) // > 12 dígitos
+    expect(validarIdentificacionCliente('cc', 'AB123456').ok).toBe(false)      // letras (pasaporte/PPT)
+    expect(validarIdentificacionCliente('cc', '').ok).toBe(false)
+  })
+  it('cc NO pasa por el DV: una cédula que como NIT tendría DV errado es válida', () => {
+    // '900.975.870-7' como NIT falla el DV; los mismos dígitos como cédula
+    // (9009758707, 10 dígitos) son una cédula plausible.
+    expect(validarIdentificacionCliente('cc', '9009758707').ok).toBe(true)
+  })
+})
+
+describe('clientePorIdentificacion — duplicados por dígitos SIN importar el tipo', () => {
+  const existentes = [
+    cliente({ id: 'j', nombre: 'JURÍDICA SAS', nit: '900.975.870-1' }),          // nit implícito
+    cliente({ id: 'n', nombre: 'PERSONA NATURAL', nit: '52.123.456', tipo_identificacion: 'cc' }),
+    cliente({ id: 'inactivo', nombre: 'VIEJA', nit: '52.999.888', tipo_identificacion: 'cc', estado: 'inactivo' }),
+  ]
+  it('cédula repetida = duplicado (mismos dígitos, puntuación distinta)', () => {
+    expect(clientePorIdentificacion('52123456', 'cc', existentes)?.id).toBe('n')
+  })
+  it('cruza tipos: teclear como CÉDULA los dígitos de un NIT guardado también avisa', () => {
+    expect(clientePorIdentificacion('9009758701', 'cc', existentes)?.id).toBe('j')
+  })
+  it('umbral por tipo: no avisa mientras se teclea (cc < 6 dígitos, nit < 10)', () => {
+    expect(clientePorIdentificacion('52123', 'cc', existentes)).toBeNull()
+    expect(clientePorIdentificacion('900.975.87', 'nit', existentes)).toBeNull()
+  })
+  it('excluye al que se edita y encuentra inactivos', () => {
+    expect(clientePorIdentificacion('52123456', 'cc', existentes, 'n')).toBeNull()
+    expect(clientePorIdentificacion('52999888', 'cc', existentes)?.id).toBe('inactivo')
+  })
+})

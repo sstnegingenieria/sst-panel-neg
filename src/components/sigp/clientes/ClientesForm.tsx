@@ -4,13 +4,17 @@ import Modal from '../../shared/Modal'
 import TextField from '../../shared/TextField'
 import SelectField from '../../shared/SelectField'
 import { useFirestore } from '../../../hooks/useFirestore'
-import type { Cliente, Contacto, CondicionesComerciales } from '../../../types/sigp/cliente'
-import { validarDvNit, clientePorNit, nitSoloDigitos } from '../../../types/sigp/cliente'
+import type { Cliente, Contacto, CondicionesComerciales, TipoIdentificacionCliente } from '../../../types/sigp/cliente'
+import {
+  clientePorIdentificacion, nitSoloDigitos, validarIdentificacionCliente,
+  TIPOS_IDENTIFICACION_CLIENTE, TIPO_IDENTIFICACION_CLIENTE_LABEL,
+} from '../../../types/sigp/cliente'
 
 /** Datos que el formulario entrega al guardar (sin id ni sellos de fecha). */
 export interface ClienteFormData {
   nombre: string
   nit: string
+  tipo_identificacion: TipoIdentificacionCliente
   estado: 'activo' | 'inactivo'
   usa_preventivos: boolean
   /** C1.1: vocabulario controlado de contratos (alcance de LPUs). */
@@ -26,7 +30,6 @@ interface ClientesFormProps {
   initial?: Cliente | null
 }
 
-const NIT_RE = /^\d{3}\.\d{3}\.\d{3}-\d$/
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // ── Estado interno (todo string para inputs controlados) ──────────────────────
@@ -40,6 +43,7 @@ interface ContactoRow {
 interface FormState {
   nombre: string
   nit: string
+  tipoIdent: TipoIdentificacionCliente
   estado: 'activo' | 'inactivo'
   usaPreventivos: boolean
   contratos: string[]
@@ -54,7 +58,7 @@ const EMPTY_CONTACTO: ContactoRow = { nombre: '', cargo: '', email: '', telefono
 function toFormState(c: Cliente | null | undefined): FormState {
   if (!c) {
     return {
-      nombre: '', nit: '', estado: 'activo', usaPreventivos: false,
+      nombre: '', nit: '', tipoIdent: 'nit', estado: 'activo', usaPreventivos: false,
       contratos: [], contratoNuevo: '',
       contactos: [{ ...EMPTY_CONTACTO }],
       esquema: 'iva_pleno',
@@ -65,6 +69,7 @@ function toFormState(c: Cliente | null | undefined): FormState {
   return {
     nombre: c.nombre,
     nit: c.nit,
+    tipoIdent: c.tipo_identificacion ?? 'nit', // migración perezosa: ausente = NIT
     estado: c.estado,
     usaPreventivos: c.usa_preventivos ?? false,
     contratos: c.contratos ?? [],
@@ -111,6 +116,7 @@ function toFormData(s: FormState): ClienteFormData {
   return {
     nombre: s.nombre.trim(),
     nit: s.nit.trim(),
+    tipo_identificacion: s.tipoIdent,
     estado: s.estado,
     usa_preventivos: s.usaPreventivos,
     contratos: s.contratos,
@@ -156,13 +162,15 @@ export default function ClientesForm({ isOpen, onClose, onSave, initial }: Clien
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
 
-  // En EDICIÓN con el NIT intacto no se chequea (IHS/Vertis comparten NIT
-  // legítimamente — misma entidad); solo si el NIT se está cambiando.
+  // En EDICIÓN con la identificación intacta no se chequea (IHS/Vertis
+  // comparten NIT legítimamente — misma entidad); solo si se está cambiando.
+  // El chequeo compara SOLO dígitos sin importar el tipo: una cédula repetida
+  // es tan duplicado como un NIT repetido.
   const duplicado = useMemo(() => {
-    const nitOriginal = initial ? nitSoloDigitos(initial.nit) : null
-    if (nitOriginal && nitSoloDigitos(form.nit) === nitOriginal) return null
-    return clientePorNit(form.nit, existentes, initial?.id)
-  }, [form.nit, existentes, initial])
+    const identOriginal = initial ? nitSoloDigitos(initial.nit) : null
+    if (identOriginal && nitSoloDigitos(form.nit) === identOriginal) return null
+    return clientePorIdentificacion(form.nit, form.tipoIdent, existentes, initial?.id)
+  }, [form.nit, form.tipoIdent, existentes, initial])
 
   const set = <K extends keyof FormState>(key: K, val: FormState[K]) => {
     setForm(f => ({ ...f, [key]: val }))
@@ -191,18 +199,15 @@ export default function ClientesForm({ isOpen, onClose, onSave, initial }: Clien
     const e: Errors = {}
     if (!form.nombre.trim() || form.nombre.trim().length < 3)
       e.nombre = 'Mínimo 3 caracteres'
-    if (!form.nit.trim()) e.nit = 'El NIT es requerido'
-    else if (!NIT_RE.test(form.nit.trim())) e.nit = 'Formato: 123.456.789-6'
-    else {
-      // 04-nov (caso IHS/Vertis): el dígito de verificación DIAN se valida
-      // al guardar — un DV errado no entra. (Un relleno DV-válido sí pasa:
-      // el DV atrapa typos, no inventos.)
-      const dv = validarDvNit(form.nit.trim())
-      if (!dv.ok) e.nit = `El dígito de verificación no corresponde${dv.dv !== null ? ` — para esa base el DV es ${dv.dv}` : ''}`
-      // NIT único: si ya existe, NO se crea otro (el aviso bajo el campo
-      // dice cuál es y ofrece abrirlo).
-      else if (duplicado) e.nit = `Ya existe un cliente con este NIT: ${duplicado.nombre}`
-    }
+    // 26-nov: la validación depende del TIPO — el DV DIAN solo aplica a NIT
+    // (04-nov, caso IHS/Vertis: un DV errado no entra; un relleno DV-válido
+    // sí pasa — el DV atrapa typos, no inventos). Cédula: reglas del
+    // normalizador de nómina (6–12 dígitos, sin letras).
+    const ident = validarIdentificacionCliente(form.tipoIdent, form.nit)
+    if (!ident.ok) e.nit = ident.error
+    // Identificación única: si ya existe, NO se crea otro (el aviso bajo el
+    // campo dice cuál es y ofrece abrirlo).
+    else if (duplicado) e.nit = `Ya existe un cliente con esta identificación: ${duplicado.nombre}`
 
     const contactErrs = form.contactos.map(c => {
       const algo = c.nombre.trim() || c.cargo.trim() || c.email.trim() || c.telefono.trim()
@@ -256,20 +261,32 @@ export default function ClientesForm({ isOpen, onClose, onSave, initial }: Clien
           required
         />
 
-        <TextField
-          label="NIT"
-          value={form.nit}
-          onChange={v => set('nit', v)}
-          error={errors.nit}
-          placeholder="900.123.456-8"
-          hint="Formato: 900.123.456-8"
-          required
-        />
+        <div className="grid grid-cols-1 sm:grid-cols-[14rem_1fr] gap-3">
+          <SelectField
+            label="Tipo de identificación"
+            value={form.tipoIdent}
+            onChange={v => set('tipoIdent', v as TipoIdentificacionCliente)}
+            options={TIPOS_IDENTIFICACION_CLIENTE.map(t => ({
+              value: t, label: TIPO_IDENTIFICACION_CLIENTE_LABEL[t],
+            }))}
+          />
+          <TextField
+            label={TIPO_IDENTIFICACION_CLIENTE_LABEL[form.tipoIdent]}
+            value={form.nit}
+            onChange={v => set('nit', v)}
+            error={errors.nit}
+            placeholder={form.tipoIdent === 'nit' ? '900.123.456-8' : '1.234.567.890'}
+            hint={form.tipoIdent === 'nit'
+              ? 'Formato: 900.123.456-8'
+              : 'Solo dígitos (6 a 12); puntos y espacios opcionales'}
+            required
+          />
+        </div>
 
         {duplicado && (
           <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 space-y-1 -mt-2">
             <p>
-              ⚠ Este NIT ya está registrado: <strong>{duplicado.nombre}</strong>
+              ⚠ Esta identificación ya está registrada: <strong>{duplicado.nombre}</strong>
               {duplicado.estado === 'inactivo' && <span className="font-medium"> (inactivo)</span>}.
             </p>
             <p className="text-xs text-amber-800">

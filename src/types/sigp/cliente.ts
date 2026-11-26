@@ -5,6 +5,11 @@
 
 import type { Timestamp } from 'firebase/firestore'
 import type { MapeoImportacion } from './importacion'
+// Normalizador de cédula REUTILIZADO del módulo de nómina de contratistas
+// (26-nov: "ya hay un normalizador de cédula con sus reglas de longitud —
+// no nazcan dos"). contratistasNomina solo importa firebase/firestore: sin
+// ciclo de imports.
+import { normalizarCedula, CEDULA_MIN_DIGITOS } from '../../utils/contratistasNomina'
 
 /** Persona de contacto del cliente. Todos opcionales salvo el nombre. */
 export interface Contacto {
@@ -34,7 +39,17 @@ export interface CondicionesComerciales {
 export interface Cliente {
   id: string                 // id del doc Firestore (no se almacena dentro)
   nombre: string
+  /** Identificación del cliente. Históricamente siempre NIT; desde el
+   *  26-nov-2026 el campo guarda el número del tipo que diga
+   *  `tipo_identificacion` (el nombre `nit` se conserva — renombrarlo
+   *  tocaría snapshots congelados y la app). */
   nit: string
+  /** Tipo de la identificación (26-nov-2026, caso clientes persona natural).
+   *  MIGRACIÓN PEREZOSA: ausente = 'nit' (todos los clientes previos son
+   *  personas jurídicas) — leer SIEMPRE vía `tipoIdentificacionDe()`.
+   *  'ce' (cédula de extranjería) NO se incluyó: sin caso real a la fecha
+   *  (proveedores sí la tiene); agregarla es extender el union + 1 opción. */
+  tipo_identificacion?: 'nit' | 'cc'
   contactos: Contacto[]
   estado: 'activo' | 'inactivo'   // soft-delete, coherente con contratistas SST
   // `usa_tipo_inversion` (Bloque 2, PR #34) se RETIRÓ en la tanda 5 · #3:
@@ -142,6 +157,78 @@ export function clientePorNit(
 ): Pick<Cliente, 'id' | 'nombre' | 'nit' | 'estado'> | null {
   const d = nitSoloDigitos(nit)
   if (d.length < 10) return null
+  const matches = clientes.filter(c => c.id !== excluirId && nitSoloDigitos(c.nit) === d)
+  return matches.find(c => c.estado === 'activo') ?? matches[0] ?? null
+}
+
+// ── Tipo de identificación (26-nov-2026, clientes persona natural) ───────────
+// El caso que lo motivó: el form exigía NIT con DV y una cédula no lo tiene —
+// Giovanny no podía crear clientes persona natural. El DV solo aplica cuando
+// el tipo es NIT; el control de duplicados compara SOLO dígitos sin importar
+// el tipo (una cédula repetida es tan duplicado como un NIT repetido).
+
+export const TIPOS_IDENTIFICACION_CLIENTE = ['nit', 'cc'] as const
+export type TipoIdentificacionCliente = (typeof TIPOS_IDENTIFICACION_CLIENTE)[number]
+export const TIPO_IDENTIFICACION_CLIENTE_LABEL: Record<TipoIdentificacionCliente, string> = {
+  nit: 'NIT',
+  cc: 'Cédula de ciudadanía',
+}
+/** Etiqueta corta para mostrar junto al número (tabla, detalle). */
+export const TIPO_IDENTIFICACION_CLIENTE_CORTA: Record<TipoIdentificacionCliente, string> = {
+  nit: 'NIT',
+  cc: 'C.C.',
+}
+
+/** Fuente de verdad del tipo — AUSENTE = 'nit' (migración perezosa: los
+ *  clientes previos al 26-nov son personas jurídicas; no se toca prod). */
+export const tipoIdentificacionDe = (
+  c: Pick<Cliente, 'tipo_identificacion'>,
+): TipoIdentificacionCliente => c.tipo_identificacion ?? 'nit'
+
+/** Formato que exige el form para NIT (base con puntos + guion + DV). */
+export const NIT_FORMATO_RE = /^\d{3}\.\d{3}\.\d{3}-\d$/
+
+/** Validación PURA de la identificación según su tipo.
+ *  - nit: formato NNN.NNN.NNN-D + dígito de verificación DIAN.
+ *  - cc: reglas del normalizador de NÓMINA (solo dígitos con separadores
+ *    tolerados, 6–12 dígitos) — una sola implementación, no dos. */
+export function validarIdentificacionCliente(
+  tipo: TipoIdentificacionCliente,
+  valor: string,
+): { ok: true } | { ok: false; error: string } {
+  const v = valor.trim()
+  if (tipo === 'nit') {
+    if (!v) return { ok: false, error: 'El NIT es requerido' }
+    if (!NIT_FORMATO_RE.test(v)) return { ok: false, error: 'Formato: 123.456.789-6' }
+    const dv = validarDvNit(v)
+    if (!dv.ok) {
+      return {
+        ok: false,
+        error: `El dígito de verificación no corresponde${dv.dv !== null ? ` — para esa base el DV es ${dv.dv}` : ''}`,
+      }
+    }
+    return { ok: true }
+  }
+  if (!v) return { ok: false, error: 'La cédula es requerida' }
+  if (normalizarCedula(v) === null) {
+    return { ok: false, error: 'Cédula inválida: solo dígitos (6 a 12), puntos y espacios opcionales' }
+  }
+  return { ok: true }
+}
+
+/** Duplicado por dígitos SIN importar el tipo: una cédula repetida es tan
+ *  duplicado como un NIT repetido, y un NIT guardado choca con una cédula de
+ *  los mismos dígitos. Umbral por tipo para no avisar mientras se teclea:
+ *  nit = 10 dígitos (base 9 + DV), cc = CEDULA_MIN_DIGITOS. */
+export function clientePorIdentificacion(
+  valor: string,
+  tipo: TipoIdentificacionCliente,
+  clientes: Pick<Cliente, 'id' | 'nombre' | 'nit' | 'estado'>[],
+  excluirId?: string,
+): Pick<Cliente, 'id' | 'nombre' | 'nit' | 'estado'> | null {
+  const d = nitSoloDigitos(valor)
+  const min = tipo === 'nit' ? 10 : CEDULA_MIN_DIGITOS
+  if (d.length < min) return null
   const matches = clientes.filter(c => c.id !== excluirId && nitSoloDigitos(c.nit) === d)
   return matches.find(c => c.estado === 'activo') ?? matches[0] ?? null
 }

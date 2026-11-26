@@ -156,7 +156,7 @@ export default function ClientesSigp() {
           <input
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            placeholder="Buscar por nombre o NIT…"
+            placeholder="Buscar por nombre o identificación…"
             className="w-56 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
           />
         </div>

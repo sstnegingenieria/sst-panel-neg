@@ -17,6 +17,7 @@ import { toast } from '../../components/shared/Toast'
 import { useAuth } from '../../contexts/AuthContext'
 import { puedeGestionarClientesUI, puedeGestionarLpusUI } from '../../types/sigp/permisos'
 import type { Cliente } from '../../types/sigp/cliente'
+import { tipoIdentificacionDe, TIPO_IDENTIFICACION_CLIENTE_CORTA } from '../../types/sigp/cliente'
 
 type Pestana = 'info' | 'lpu'
 
@@ -106,7 +107,7 @@ export default function ClienteDetalleSigp() {
         <div>
           <h1 className="text-2xl font-bold text-gray-800">{c.nombre}</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            NIT {c.nit}
+            {TIPO_IDENTIFICACION_CLIENTE_CORTA[tipoIdentificacionDe(c)]} {c.nit}
             <span className={`ml-2 inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${
               c.estado === 'activo' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'
             }`}>
