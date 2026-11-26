@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { Cliente } from '../../../types/sigp/cliente'
+import { tipoIdentificacionDe, TIPO_IDENTIFICACION_CLIENTE_CORTA } from '../../../types/sigp/cliente'
 
 interface ClientesTableProps {
   clientes: Cliente[]
@@ -44,7 +45,7 @@ export default function ClientesTable({
         <thead>
           <tr className="border-b border-gray-200 text-left">
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Cliente</th>
-            <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">NIT</th>
+            <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Identificación</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Impuestos</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Contactos</th>
             <th className="py-3 px-4 font-semibold text-gray-500 uppercase text-xs tracking-wide">Estado</th>
@@ -87,7 +88,9 @@ export default function ClientesTable({
                     </div>
                   </td>
                   <td className="py-3 px-4">
-                    <span className="text-gray-600 font-mono text-xs">{c.nit || '—'}</span>
+                    <span className="text-gray-600 font-mono text-xs">
+                      {c.nit ? `${TIPO_IDENTIFICACION_CLIENTE_CORTA[tipoIdentificacionDe(c)]} ${c.nit}` : '—'}
+                    </span>
                   </td>
                   <td className="py-3 px-4">
                     {/* Guard: un doc sin condiciones_comerciales no debe dejar la
